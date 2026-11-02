@@ -1,0 +1,80 @@
+name: Printer Lab (self-hosted Windows)
+
+# Real printers cannot exist on GitHub-hosted runners. This workflow
+# runs on the company's own Windows machine once it is registered as a
+# self-hosted runner with the label "native-print-lab" (see docs/ci.md).
+# It discovers the attached printers, reads their status sensors, and —
+# only when you tick the box — sends real test prints.
+on:
+  workflow_dispatch:
+    inputs:
+      thermal_printer:
+        description: "Thermal (ESC/POS) printer name, exactly as in Windows (optional)"
+        required: false
+        type: string
+      label_printer:
+        description: "Label (ZPL) printer name, exactly as in Windows (optional)"
+        required: false
+        type: string
+      office_printer:
+        description: "Office printer name for status/forms checks (optional)"
+        required: false
+        type: string
+      run_test_prints:
+        description: "Send REAL test prints to the thermal/label printers"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  lab:
+    name: Printer lab - discovery, sensors, optional test prints
+    runs-on: [self-hosted, windows, native-print-lab]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build the probe and tools
+        run: |
+          cd crates/print-win && cargo build --release --bin npwin_probe && cd ../..
+          cargo build --release -p print-tools
+      - name: Discovery + default printer + forms
+        shell: powershell
+        run: |
+          $probe = "crates/print-win/target/release/npwin_probe.exe"
+          & $probe list | Tee-Object -FilePath lab-results.txt
+          $default = (Get-CimInstance Win32_Printer | Where-Object { $_.Default } | Select-Object -First 1).Name
+          if ($default) {
+            "--- forms of default printer: $default ---" | Tee-Object -FilePath lab-results.txt -Append
+            & $probe forms "$default" | Tee-Object -FilePath lab-results.txt -Append
+          }
+      - name: Status sensors for the named printers
+        shell: powershell
+        run: |
+          $probe = "crates/print-win/target/release/npwin_probe.exe"
+          foreach ($name in @("${{ inputs.thermal_printer }}", "${{ inputs.label_printer }}", "${{ inputs.office_printer }}")) {
+            if ($name) {
+              "--- status: $name ---" | Tee-Object -FilePath lab-results.txt -Append
+              & $probe status "$name" | Tee-Object -FilePath lab-results.txt -Append
+              & $probe forms "$name" | Tee-Object -FilePath lab-results.txt -Append
+            }
+          }
+      - name: REAL test print - thermal calibration page
+        if: ${{ inputs.run_test_prints && inputs.thermal_printer != '' }}
+        shell: powershell
+        run: |
+          $probe = "crates/print-win/target/release/npwin_probe.exe"
+          & $probe escpos-test "${{ inputs.thermal_printer }}" | Tee-Object -FilePath lab-results.txt -Append
+      - name: REAL test print - ZPL label
+        if: ${{ inputs.run_test_prints && inputs.label_printer != '' }}
+        shell: powershell
+        run: |
+          $probe = "crates/print-win/target/release/npwin_probe.exe"
+          Set-Content -Path zpl-test.txt -Encoding ascii -Value "^XA`n^FO40,40^ADN,36,20^FDNative Print Lab Test^FS`n^FO40,90^ADN,24,12^FDIf you can read this, RAW ZPL works.^FS`n^XZ"
+          & $probe raw "${{ inputs.label_printer }}" zpl-test.txt | Tee-Object -FilePath lab-results.txt -Append
+      - name: Upload lab results (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: printer-lab-results
+          path: lab-results.txt

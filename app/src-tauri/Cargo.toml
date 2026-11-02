@@ -1,0 +1,25 @@
+[package]
+name = "odoo-native-print-app"
+version = "0.3.0"
+edition = "2021"
+rust-version = "1.75"
+
+# Standalone workspace: this crate builds only on Windows (WebView2).
+[workspace]
+
+[lib]
+name = "odoo_native_print_app"
+crate-type = ["rlib"]
+
+# The Tauri version floor is a security requirement, not a preference:
+# CVE-2026-42184 origin confusion is fixed in 2.11.1 (ADR-0002).
+[dependencies]
+tauri = { version = ">=2.11.1", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+print-core = { path = "../../crates/print-core" }
+print-raw = { path = "../../crates/print-raw" }
+print-render = { path = "../../crates/print-render" }
+
+[build-dependencies]
+tauri-build = { version = ">=2.6" }

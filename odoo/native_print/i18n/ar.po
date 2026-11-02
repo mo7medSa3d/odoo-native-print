@@ -1,0 +1,33 @@
+# Arabic translation for Native Print (initial set).
+# UI strings also come from field labels in views; this file covers the
+# addon's own menu and action names. Extend with Odoo's export tooling:
+# Settings > Translations > Export Translation (module: native_print).
+msgid ""
+msgstr ""
+"Project-Id-Version: Odoo Server 19.0\n"
+"Language: ar\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+#: model:ir.ui.menu,name:native_print.menu_native_print_root
+msgid "Native Print"
+msgstr "الطباعة المحلية"
+
+#: model:ir.ui.menu,name:native_print.menu_profiles
+msgid "Profiles"
+msgstr "ملفات الطابعات"
+
+#: model:ir.ui.menu,name:native_print.menu_rules
+msgid "Rules"
+msgstr "قواعد التوجيه"
+
+#: model:ir.ui.menu,name:native_print.menu_jobs
+msgid "Jobs"
+msgstr "مهام الطباعة"
+
+#: model:ir.actions.act_window,name:native_print.action_profiles
+msgid "Print Profiles"
+msgstr "ملفات الطباعة"
+
+#: model:ir.actions.act_window,name:native_print.action_jobs
+msgid "Print Jobs"
+msgstr "مهام الطباعة"

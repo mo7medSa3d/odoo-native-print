@@ -1,0 +1,15 @@
+[package]
+name = "print-tools"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "native-print-tools"
+path = "src/main.rs"
+
+[dependencies]
+print-core = { path = "../print-core" }
+print-raw = { path = "../print-raw" }
+print-render = { path = "../print-render" }

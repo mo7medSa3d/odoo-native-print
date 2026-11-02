@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_profile_list" model="ir.ui.view">
+        <field name="name">native.print.profile.list</field>
+        <field name="model">native.print.profile</field>
+        <field name="arch" type="xml"><list><field name="name"/><field name="printer_pattern"/><field name="mode"/><field name="paper"/><field name="company_id"/></list></field>
+    </record>
+    <record id="view_profile_form" model="ir.ui.view">
+        <field name="name">native.print.profile.form</field>
+        <field name="model">native.print.profile</field>
+        <field name="arch" type="xml"><form><sheet><group>
+            <field name="name"/><field name="printer_pattern"/><field name="mode"/>
+            <field name="paper"/><field name="copies"/><field name="tray"/>
+            <field name="duplex"/><field name="color"/><field name="scale_policy"/>
+            <field name="recovery_mode"/><field name="company_id"/>
+        </group></sheet></form></field>
+    </record>
+    <record id="action_profiles" model="ir.actions.act_window">
+        <field name="name">Print Profiles</field>
+        <field name="res_model">native.print.profile</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <record id="view_rule_list" model="ir.ui.view">
+        <field name="name">native.print.rule.list</field>
+        <field name="model">native.print.rule</field>
+        <field name="arch" type="xml"><list><field name="name"/><field name="report_id"/><field name="report_name"/><field name="profile_id"/><field name="priority"/><field name="company_id"/></list></field>
+    </record>
+    <record id="view_rule_form" model="ir.ui.view">
+        <field name="name">native.print.rule.form</field>
+        <field name="model">native.print.rule</field>
+        <field name="arch" type="xml"><form><sheet><group>
+            <field name="name"/><field name="report_id"/><field name="report_name"/>
+            <field name="group_id"/>
+            <field name="profile_id"/><field name="priority"/><field name="active"/>
+            <field name="company_id"/>
+        </group></sheet></form></field>
+    </record>
+    <record id="action_rules" model="ir.actions.act_window">
+        <field name="name">Print Rules</field>
+        <field name="res_model">native.print.rule</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <record id="view_job_list" model="ir.ui.view">
+        <field name="name">native.print.job.list</field>
+        <field name="model">native.print.job</field>
+        <field name="arch" type="xml"><list><field name="name"/><field name="state"/><field name="error_code"/><field name="report_id"/><field name="profile_id"/><field name="pages"/><field name="user_id"/><field name="create_date"/></list></field>
+    </record>
+    <record id="view_job_form" model="ir.ui.view">
+        <field name="name">native.print.job.form</field>
+        <field name="model">native.print.job</field>
+        <field name="arch" type="xml"><form><sheet><group>
+            <field name="name"/><field name="state"/><field name="error_code"/>
+            <field name="report_id"/><field name="profile_id"/><field name="pages"/>
+            <field name="byte_size"/><field name="device"/><field name="user_id"/>
+            <field name="company_id"/>
+        </group></sheet></form></field>
+    </record>
+    <record id="view_job_search" model="ir.ui.view">
+        <field name="name">native.print.job.search</field>
+        <field name="model">native.print.job</field>
+        <field name="arch" type="xml"><search>
+            <field name="name"/><field name="report_id"/><field name="device"/>
+            <filter name="f_failed" string="Failed" domain="[('state', '=', 'failed')]"/>
+            <filter name="f_dead" string="Dead letter" domain="[('state', '=', 'dead_letter')]"/>
+            <filter name="f_done" string="Done" domain="[('state', '=', 'done')]"/>
+            <group expand="0" string="Group by">
+                <filter name="g_state" string="State" context="{'group_by': 'state'}"/>
+                <filter name="g_report" string="Report" context="{'group_by': 'report_id'}"/>
+            </group>
+        </search></field>
+    </record>
+    <record id="action_jobs" model="ir.actions.act_window">
+        <field name="name">Print Jobs</field>
+        <field name="res_model">native.print.job</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_job_search"/>
+        <field name="domain">[('company_id', '=', company_id)]</field>
+    </record>
+
+    <menuitem id="menu_native_print_root" name="Native Print"/>
+    <menuitem id="menu_profiles" name="Profiles" parent="menu_native_print_root" action="action_profiles"/>
+    <menuitem id="menu_rules" name="Rules" parent="menu_native_print_root" action="action_rules"/>
+    <menuitem id="menu_jobs" name="Jobs" parent="menu_native_print_root" action="action_jobs"/>
+</odoo>

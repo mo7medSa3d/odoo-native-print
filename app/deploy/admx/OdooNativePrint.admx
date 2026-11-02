@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<policyDefinitions xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   revision="1.0" schemaVersion="1.0"
+                   xmlns="http://schemas.microsoft.com/GroupPolicy/2006/07/PolicyDefinitions">
+  <policyNamespaces>
+    <target prefix="odooNativePrint" namespace="Company.Policies.OdooNativePrint"/>
+  </policyNamespaces>
+  <resources minRequiredRevision="1.0"/>
+  <categories>
+    <category name="ONP_Category" displayName="$(string.ONP_Category)"/>
+  </categories>
+  <policies>
+    <policy name="OdooOrigin" class="Machine" displayName="$(string.OdooOrigin)"
+            explainText="$(string.OdooOrigin_Explain)" key="Software\Policies\OdooNativePrint"
+            valueName="OdooOrigin" presentation="$(presentation.OdooOrigin)">
+      <parentCategory ref="ONP_Category"/>
+      <supportedOn ref="windows:SUPPORTED_Windows_10_0"/>
+      <elements>
+        <text id="OdooOriginValue" valueName="OdooOrigin" required="true"/>
+      </elements>
+    </policy>
+    <policy name="DisableOriginChange" class="Machine" displayName="$(string.DisableOriginChange)"
+            explainText="$(string.DisableOriginChange_Explain)" key="Software\Policies\OdooNativePrint"
+            valueName="DisableOriginChange">
+      <parentCategory ref="ONP_Category"/>
+      <supportedOn ref="windows:SUPPORTED_Windows_10_0"/>
+      <enabledValue><decimal value="1"/></enabledValue>
+      <disabledValue><decimal value="0"/></disabledValue>
+    </policy>
+  </policies>
+</policyDefinitions>

@@ -1,0 +1,7 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_profile_user,native.print.profile user,model_native_print_profile,group_native_print_user,1,0,0,0
+access_profile_manager,native.print.profile manager,model_native_print_profile,group_native_print_manager,1,1,1,1
+access_rule_user,native.print.rule user,model_native_print_rule,group_native_print_user,1,0,0,0
+access_rule_manager,native.print.rule manager,model_native_print_rule,group_native_print_manager,1,1,1,1
+access_job_user,native.print.job user,model_native_print_job,group_native_print_user,1,0,1,0
+access_job_manager,native.print.job manager,model_native_print_job,group_native_print_manager,1,1,1,1

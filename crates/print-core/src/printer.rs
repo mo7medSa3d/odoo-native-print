@@ -1,0 +1,210 @@
+use crate::paper::Form;
+use serde::{Deserialize, Serialize};
+
+/// Printer status decoded from Win32 PRINTER_STATUS_* flags
+/// (winspool.h). Values are the documented Microsoft constants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrinterStatus {
+    Ready,
+    Offline,
+    PaperOut,
+    PaperJam,
+    DoorOpen,
+    NoToner,
+    Paused,
+    Printing,
+    Error,
+    Unknown,
+}
+
+/// Toner low (0x20000) is a warning, not a state: a printer can be
+/// Ready with low toner. Exposed separately so UIs can badge it.
+pub fn has_toner_low(flags: u32) -> bool {
+    flags & 0x0002_0000 != 0
+}
+
+/// True when a human must act before this printer can print.
+pub fn needs_intervention(s: PrinterStatus) -> bool {
+    matches!(
+        s,
+        PrinterStatus::Offline
+            | PrinterStatus::PaperOut
+            | PrinterStatus::PaperJam
+            | PrinterStatus::DoorOpen
+            | PrinterStatus::NoToner
+            | PrinterStatus::Paused
+            | PrinterStatus::Error
+    )
+}
+
+pub fn decode_printer_status(flags: u32) -> PrinterStatus {
+    const PAUSED: u32 = 0x0000_0001;
+    const ERROR: u32 = 0x0000_0002;
+    const PAPER_JAM: u32 = 0x0000_0008;
+    const PAPER_OUT: u32 = 0x0000_0010;
+    const OFFLINE: u32 = 0x0000_0080;
+    const PRINTING: u32 = 0x0000_0400;
+    const PROCESSING: u32 = 0x0000_4000;
+    const NO_TONER: u32 = 0x0004_0000;
+    const DOOR_OPEN: u32 = 0x0040_0000;
+    // Priority: what the user must fix first, then activity states.
+    if flags & DOOR_OPEN != 0 {
+        PrinterStatus::DoorOpen
+    } else if flags & PAPER_JAM != 0 {
+        PrinterStatus::PaperJam
+    } else if flags & PAPER_OUT != 0 {
+        PrinterStatus::PaperOut
+    } else if flags & NO_TONER != 0 {
+        PrinterStatus::NoToner
+    } else if flags & OFFLINE != 0 {
+        PrinterStatus::Offline
+    } else if flags & PAUSED != 0 {
+        PrinterStatus::Paused
+    } else if flags & ERROR != 0 {
+        PrinterStatus::Error
+    } else if flags & (PRINTING | PROCESSING) != 0 {
+        PrinterStatus::Printing
+    } else if flags == 0 {
+        PrinterStatus::Ready
+    } else {
+        PrinterStatus::Unknown
+    }
+}
+
+fn is_ipv4(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('.').collect();
+    parts.len() == 4
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrinterKind {
+    Local,
+    Shared,  // UNC \\server\printer
+    Network, // IPP / TCP / WSD port
+    Virtual, // PDF / XPS writers
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrinterCapabilities {
+    pub forms: Vec<Form>,
+    pub resolutions_dpi: Vec<u32>,
+    pub duplex: bool,
+    pub color: bool,
+    pub bins: Vec<String>,
+    pub max_copies: u16,
+    pub custom_size_supported: bool,
+    pub min_custom_mm: Option<(f64, f64)>,
+    pub max_custom_mm: Option<(f64, f64)>,
+}
+
+impl PrinterCapabilities {
+    /// Can this printer physically take a custom size of `size`?
+    pub fn custom_size_ok(&self, size: crate::PageSize) -> bool {
+        if !self.custom_size_supported {
+            return false;
+        }
+        if let Some((w, h)) = self.min_custom_mm {
+            if size.width_mm < w || size.height_mm < h {
+                return false;
+            }
+        }
+        if let Some((w, h)) = self.max_custom_mm {
+            if size.width_mm > w || size.height_mm > h {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrinterInfo {
+    pub name: String,
+    pub driver: String,
+    pub port: String,
+    pub kind: PrinterKind,
+    pub status: PrinterStatus,
+    pub is_default: bool,
+}
+
+impl PrinterInfo {
+    pub fn classify(name: &str, port: &str) -> PrinterKind {
+        let p = port.to_ascii_uppercase();
+        let n = name.to_ascii_lowercase();
+        if n.contains("print to pdf") || n.contains("xps") || p.starts_with("PORTPROMPT") {
+            PrinterKind::Virtual
+        } else if name.starts_with("\\\\") {
+            PrinterKind::Shared
+        } else if p.contains("IP_")
+            || p.contains("IPP")
+            || p.contains("WSD")
+            || p.contains(':')
+            || is_ipv4(&p)
+        {
+            PrinterKind::Network
+        } else {
+            PrinterKind::Local
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn status_priority() {
+        assert_eq!(decode_printer_status(0), PrinterStatus::Ready);
+        assert_eq!(decode_printer_status(0x80), PrinterStatus::Offline);
+        assert_eq!(decode_printer_status(0x10), PrinterStatus::PaperOut);
+        // Door open wins over paper out when both bits are set.
+        assert_eq!(
+            decode_printer_status(0x0040_0000 | 0x10),
+            PrinterStatus::DoorOpen
+        );
+        assert_eq!(decode_printer_status(0x8), PrinterStatus::PaperJam);
+        assert_eq!(decode_printer_status(0x0004_0000), PrinterStatus::NoToner);
+        assert_eq!(decode_printer_status(0x400), PrinterStatus::Printing);
+        assert!(has_toner_low(0x0002_0000));
+        assert!(!has_toner_low(0));
+        assert!(needs_intervention(PrinterStatus::PaperJam));
+        assert!(!needs_intervention(PrinterStatus::Printing));
+    }
+    #[test]
+    fn classify_kinds() {
+        assert_eq!(
+            PrinterInfo::classify("Microsoft Print to PDF", "PORTPROMPT:"),
+            PrinterKind::Virtual
+        );
+        assert_eq!(
+            PrinterInfo::classify("\\\\SERVER\\HP", "TS001"),
+            PrinterKind::Shared
+        );
+        assert_eq!(
+            PrinterInfo::classify("HP", "192.168.1.50"),
+            PrinterKind::Network
+        );
+        assert_eq!(PrinterInfo::classify("HP", "USB001"), PrinterKind::Local);
+    }
+    #[test]
+    fn custom_bounds() {
+        let caps = PrinterCapabilities {
+            forms: vec![],
+            resolutions_dpi: vec![300],
+            duplex: false,
+            color: false,
+            bins: vec![],
+            max_copies: 1,
+            custom_size_supported: true,
+            min_custom_mm: Some((20.0, 20.0)),
+            max_custom_mm: Some((210.0, 297.0)),
+        };
+        assert!(caps.custom_size_ok(crate::PageSize::label_100x150()));
+        assert!(!caps.custom_size_ok(crate::PageSize::new(300.0, 300.0)));
+        assert!(!caps.custom_size_ok(crate::PageSize::new(10.0, 100.0)));
+    }
+}

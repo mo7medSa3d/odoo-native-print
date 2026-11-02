@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "security": {
+      "csp": null,
+      "devCsp": null,
+      "freezePrototype": true
+    },
+    "windows": [
+      {
+        "height": 800,
+        "label": "main",
+        "title": "Odoo Native Print",
+        "url": "about:blank",
+        "width": 1280
+      }
+    ],
+    "withGlobalTauri": false
+  },
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "bundle": {
+    "active": true,
+    "category": "Business",
+    "targets": [
+      "msi",
+      "nsis"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "silent": true,
+        "type": "offlineInstaller"
+      }
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ]
+  },
+  "identifier": "com.company.odoo-native-print",
+  "productName": "Odoo Native Print",
+  "version": "0.3.0"
+}

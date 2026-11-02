@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-print-pdf"
+description = "Allow the configured Odoo origin to submit a PDF print job."
+commands.allow = ["print_pdf", "print_text", "print_image"]
+
+[[permission]]
+identifier = "allow-print-status"
+description = "Allow the configured Odoo origin to query a job it submitted."
+commands.allow = ["print_status"]

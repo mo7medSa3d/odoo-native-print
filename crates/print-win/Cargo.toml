@@ -1,0 +1,14 @@
+[package]
+name = "print-win"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+
+# Standalone workspace: Windows-only crate (winspool/GDI FFI).
+[workspace]
+
+[dependencies]
+print-core = { path = "../print-core" }
+print-raw = { path = "../print-raw" }
+print-render = { path = "../print-render" }
+thiserror = "2"
