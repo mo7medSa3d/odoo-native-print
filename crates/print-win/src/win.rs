@@ -208,7 +208,7 @@ fn resolve_printer_bin_id(printer_wide: &[u16], tray_spec: &str) -> Option<i16> 
         let name = String::from_utf16_lossy(&block[..end])
             .trim()
             .to_ascii_lowercase();
-        if !name.is_empty() && (name == target || name.contains(&target)) {
+        if !name.is_empty() && name.contains(&target) {
             return Some(bin_ids[i] as i16);
         }
     }
@@ -257,6 +257,7 @@ fn build_printer_devmode(
             if got < 0 {
                 None
             } else {
+                #[allow(clippy::cast_ptr_alignment)]
                 let dm = &mut *(buf.as_mut_ptr() as *mut DevModePrefixW);
                 // Orientation
                 dm.dm_orientation = if page_size.is_landscape() {

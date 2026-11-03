@@ -221,6 +221,7 @@ impl Pdfium {
             (self.api.load_mem_document)(owned.as_ptr(), owned.len() as c_int, std::ptr::null())
         };
         if doc.is_null() {
+            #[allow(clippy::unnecessary_cast)]
             let code = unsafe { (self.api.get_last_error)() } as u32;
             return Err(PdfiumError::InvalidDocument {
                 code,
