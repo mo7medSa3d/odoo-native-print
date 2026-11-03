@@ -32,7 +32,7 @@ jobs:
     runs-on: [self-hosted, windows, native-print-lab]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Build the probe and tools
         run: |
@@ -74,7 +74,7 @@ jobs:
           & $probe raw "${{ inputs.label_printer }}" zpl-test.txt | Tee-Object -FilePath lab-results.txt -Append
       - name: Upload lab results (always)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: printer-lab-results
           path: lab-results.txt
