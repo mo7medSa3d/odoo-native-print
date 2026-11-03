@@ -3,6 +3,10 @@
 Versioned. Breaking changes bump the major version on both sides.
 
 ## Bridge (injected by the Tauri shell into the main window)
+Origin policy (ADR-0002 as amended): the configured origin must match
+exactly. HTTPS is accepted for any host; HTTP is accepted only when
+the host is a private, loopback, or link-local IP (LAN installs reached
+by IP, e.g. http://192.168.1.20:8069).
 
 ### Core Print Commands (Odoo Addon -> Native App)
 

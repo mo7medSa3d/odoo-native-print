@@ -3,7 +3,42 @@
 Last updated: 2026-11-03 (Africa/Cairo)
 Owner spec: Master Build Prompt — Odoo Native Print Client (Windows, then Android, then iOS)
 
-## Status: v1.0.0 Production Release Ready — Complete End-to-End Pipeline, Worker Execution, GPO Support, Protocol Hardening & Enterprise UI/UX
+## Status: v1.1.1 — Yaseir design system + HTTP origins on private IPs + picker-first UX
+
+
+### v1.1.0 (2026-11-03): Yaseir identity + LAN HTTP origins
+- Control Center rebuilt on the Yaseir design system (ui.yaseir.site
+  guide v2.1): Thmanyah Sans bundled locally (dist/fonts, 5 weights,
+  @font-face), primary blue #0953DE / brand #0059FF, ink #101219,
+  pill buttons (44px), 12px fields, 16-20px cards, 3px focus rings,
+  guide type/weight scale, app icons regenerated in the primary blue.
+  Copy cut to short SaaS wording in both languages (e.g. settings are
+  now simply "Odoo connection" / "الاتصال بـ Odoo"); the product is
+  titled Print Gateway / بوابة الطباعة, the family name in the guide.
+- Origins (ADR-0002 amendment, owner decision): Odoo may now be
+  reached by IP over HTTP - HTTPS for any host, HTTP only for private,
+  loopback, or link-local IP literals; hostnames and public IPs still
+  require HTTPS. Enforced identically in Rust
+  (print-core::security::origin_is_allowed, new unit tests), the app
+  config validator, the capability URL patterns, and the Control
+  Center's own client-side check.
+
+
+### v1.1.1 (2026-11-03): stronger UX + new icon
+- New app icon: bold printer + check on the Yaseir blue tile (all
+  Windows sizes + ICO regenerated), matched by the Control Center
+  header mark.
+- No typing where a choice exists: the calibration target is now a
+  picker fed by discovered printers (with derived tcp:// options and
+  a custom-URI fallback), default printer preselected; printer cards
+  keep their one-click test buttons.
+- Form errors are live: the Odoo address field validates while
+  typing - the inline error appears instantly and clears the moment
+  the address is valid; toasts already auto-dismiss.
+- Verified end to end in a real DOM (jsdom over HTTP, 18/18 checks):
+  picker contents, tab switching, live validation, save flow; plus
+  18/18 node parity cases for the JS origin rule vs the Rust rule,
+  and the full Rust suite green again on this tree.
 
 ### Production Completion Summary (2026-11-03)
 

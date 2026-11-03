@@ -35,7 +35,7 @@ pub fn validate_origin(origin: &str) -> Result<String, String> {
     let origin = origin.trim().trim_end_matches('/').to_string();
     if !print_core::security::origin_is_allowed(&origin, &origin) {
         return Err(format!(
-            "configured Odoo origin is not a valid HTTPS origin: {origin}"
+            "configured Odoo origin is not a valid origin (HTTPS, or HTTP to a private IP): {origin}"
         ));
     }
     if cfg!(not(debug_assertions)) && (origin.contains(".invalid") || origin.contains("example.")) {
@@ -163,7 +163,7 @@ pub fn load_origin(config_dir: &Path) -> Result<String, String> {
         }
     }
     Err(format!(
-        "no Odoo origin configured: expected {} with {{\"odoo_origin\": \"https://...\"}}",
+        "no Odoo origin configured: expected {} with {{\"odoo_origin\": \"https://...\"}} or an http:// private-IP origin",
         file.display()
     ))
 }
@@ -220,6 +220,10 @@ mod tests {
         assert!(validate_origin("https://odoo.company.local:8069").is_ok());
         assert!(validate_origin("https://odoo.company.local:8069/").is_ok());
         assert!(validate_origin("http://odoo.company.local").is_err());
+        // LAN by IP is allowed over HTTP (ADR-0002 amendment).
+        assert!(validate_origin("http://192.168.1.20:8069").is_ok());
+        assert!(validate_origin("http://192.168.1.20:8069/").is_ok());
+        assert!(validate_origin("http://8.8.8.8:8069").is_err());
         assert!(validate_origin("not a url").is_err());
     }
 

@@ -2,6 +2,7 @@
 
 ## Install (per machine, enterprise)
 1. Deploy the MSI silently: `msiexec /i OdooNativePrint.msi /qn ODOO_ORIGIN=https://odoo.company.local:8069`
+   On a LAN without TLS, an HTTP origin on a private IP is also accepted, e.g. `ODOO_ORIGIN=http://192.168.1.20:8069` (ADR-0002 amendment). Hostnames and public IPs still require HTTPS.
    (the installer writes config.json with odoo_origin; or set the GPO policy).
 2. WebView2: the installers bundle NO WebView2 installer
    (`webviewInstallMode: skip` since RC5). The app uses the machine's

@@ -5,54 +5,62 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Odoo Native Print — Control Center</title>
 <style>
+  /* Thmanyah Sans - the Yaseir family typeface (files in dist/fonts/). */
+  @font-face { font-family: "Thmanyah Sans"; src: url("fonts/thmanyahsans-Light.otf") format("opentype"); font-weight: 300; font-style: normal; font-display: swap; }
+  @font-face { font-family: "Thmanyah Sans"; src: url("fonts/thmanyahsans-Regular.otf") format("opentype"); font-weight: 400; font-style: normal; font-display: swap; }
+  @font-face { font-family: "Thmanyah Sans"; src: url("fonts/thmanyahsans-Medium.otf") format("opentype"); font-weight: 500; font-style: normal; font-display: swap; }
+  @font-face { font-family: "Thmanyah Sans"; src: url("fonts/thmanyahsans-Bold.otf") format("opentype"); font-weight: 700; font-style: normal; font-display: swap; }
+  @font-face { font-family: "Thmanyah Sans"; src: url("fonts/thmanyahsans-Black.otf") format("opentype"); font-weight: 900; font-style: normal; font-display: swap; }
+
   :root {
-    --bg-app: #f4f6fa;
+    /* Yaseir design tokens - ui.yaseir.site guide v2.1 */
+    --bg-app: #f6f8fc;
     --bg-surface: #ffffff;
-    --bg-subtle: #eef2f8;
-    --bg-hover: #e6ebf4;
-    --text-primary: #111827;
-    --text-secondary: #4b5563;
-    --text-muted: #6b7280;
-    --border-color: #dde3ee;
-    --brand-plum: #714b67;
-    --brand-plum-dark: #5a3a52;
-    --brand-indigo: #4f46e5;
-    --brand-teal: #0d9488;
-    --status-ok-bg: #dcfce7;
-    --status-ok-fg: #15803d;
-    --status-warn-bg: #fef3c7;
-    --status-warn-fg: #b45309;
-    --status-err-bg: #fee2e2;
-    --status-err-fg: #b91c1c;
-    --status-info-bg: #dbeafe;
-    --status-info-fg: #1d4ed8;
-    --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06);
-    --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.08);
-    --radius-md: 10px;
-    --radius-lg: 14px;
+    --bg-subtle: #eef3fb;
+    --bg-hover: #e1eaf7;
+    --text-primary: #101219;
+    --text-secondary: #3e4653;
+    --text-muted: #68707e;
+    --border-color: #d8e0ee;
+    --brand-plum: #0953de;
+    --brand-plum-dark: #0743b5;
+    --brand-indigo: #0059ff;
+    --brand-teal: #00a9d7;
+    --status-ok-bg: #e2f4e8;
+    --status-ok-fg: #177245;
+    --status-warn-bg: #fff2cc;
+    --status-warn-fg: #8a6100;
+    --status-err-bg: #fbe7e2;
+    --status-err-fg: #b3261e;
+    --status-info-bg: #e2ecfd;
+    --status-info-fg: #0953de;
+    --shadow-sm: 0 1px 3px rgba(9, 35, 90, 0.06);
+    --shadow-md: 0 4px 14px rgba(9, 35, 90, 0.1);
+    --radius-md: 12px;
+    --radius-lg: 20px;
   }
 
   [data-theme="dark"] {
-    --bg-app: #0f172a;
-    --bg-surface: #1e293b;
-    --bg-subtle: #0f172a;
-    --bg-hover: #334155;
-    --text-primary: #f8fafc;
-    --text-secondary: #cbd5e1;
-    --text-muted: #94a3b8;
-    --border-color: #334155;
-    --brand-plum: #9d6b8f;
-    --brand-plum-dark: #b684a8;
-    --brand-indigo: #6366f1;
-    --brand-teal: #14b8a6;
-    --status-ok-bg: rgba(21, 128, 61, 0.25);
+    --bg-app: #0b0e14;
+    --bg-surface: #141926;
+    --bg-subtle: #1b2233;
+    --bg-hover: #242e47;
+    --text-primary: #f5f7fa;
+    --text-secondary: #c3cad6;
+    --text-muted: #8a93a5;
+    --border-color: #26314a;
+    --brand-plum: #5b93ff;
+    --brand-plum-dark: #7fa8ff;
+    --brand-indigo: #4d8dff;
+    --brand-teal: #00c7fc;
+    --status-ok-bg: rgba(23, 114, 69, 0.28);
     --status-ok-fg: #4ade80;
-    --status-warn-bg: rgba(180, 83, 9, 0.25);
+    --status-warn-bg: rgba(138, 97, 0, 0.3);
     --status-warn-fg: #fbbf24;
-    --status-err-bg: rgba(185, 28, 28, 0.25);
+    --status-err-bg: rgba(179, 38, 30, 0.3);
     --status-err-fg: #f87171;
-    --status-info-bg: rgba(29, 78, 216, 0.25);
-    --status-info-fg: #60a5fa;
+    --status-info-bg: rgba(9, 83, 222, 0.32);
+    --status-info-fg: #93b8ff;
   }
 
   * {
@@ -62,18 +70,18 @@
   }
 
   body {
-    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans Arabic", Tahoma, sans-serif;
+    font-family: "Thmanyah Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, Tahoma, sans-serif;
     background: var(--bg-app);
     color: var(--text-primary);
     min-height: 100vh;
     display: flex;
     flex-direction: column;
-    line-height: 1.5;
+    line-height: 1.7;
   }
 
   /* Top Navigation Bar */
   .topbar {
-    background: linear-gradient(135deg, #5a3a52 0%, #714b67 55%, #3b2d54 100%);
+    background: linear-gradient(135deg, #0059ff 0%, #0953de 58%, #0743b5 100%);
     color: #ffffff;
     padding: 0.85rem 1.5rem;
     display: flex;
@@ -95,7 +103,7 @@
   .brand-logo {
     width: 42px;
     height: 42px;
-    border-radius: 10px;
+    border-radius: 12px;
     background: rgba(255, 255, 255, 0.14);
     border: 1px solid rgba(255, 255, 255, 0.24);
     display: flex;
@@ -120,7 +128,7 @@
 
   .version-pill {
     font-size: 0.7rem;
-    font-weight: 600;
+    font-weight: 500;
     background: rgba(255, 255, 255, 0.2);
     padding: 0.12rem 0.5rem;
     border-radius: 999px;
@@ -138,10 +146,11 @@
     align-items: center;
     justify-content: center;
     gap: 0.45rem;
-    padding: 0.5rem 0.95rem;
-    border-radius: 8px;
+    padding: 0.55rem 1.5rem;
+    min-height: 44px;
+    border-radius: 999px;
     font-size: 0.85rem;
-    font-weight: 600;
+    font-weight: 500;
     cursor: pointer;
     border: 1px solid transparent;
     transition: all 0.15s ease;
@@ -164,13 +173,13 @@
   }
 
   .btn-Launch {
-    background: #10b981;
-    color: #ffffff;
-    border-color: #059669;
-    box-shadow: 0 2px 6px rgba(16, 185, 129, 0.35);
+    background: #ffffff;
+    color: #0953de;
+    border-color: #ffffff;
+    box-shadow: 0 2px 6px rgba(4, 30, 90, 0.25);
   }
   .btn-Launch:hover:not(:disabled) {
-    background: #059669;
+    background: #eaf1fe;
   }
 
   .btn-primary {
@@ -200,9 +209,10 @@
   }
 
   .btn-sm {
-    padding: 0.32rem 0.65rem;
+    padding: 0.3rem 0.9rem;
+    min-height: 36px;
     font-size: 0.78rem;
-    border-radius: 6px;
+    border-radius: 999px;
   }
 
   /* Navigation Tabs */
@@ -222,7 +232,7 @@
     color: var(--text-secondary);
     padding: 0.85rem 1.1rem;
     font-size: 0.9rem;
-    font-weight: 600;
+    font-weight: 500;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
@@ -302,7 +312,7 @@
   .kpi-icon {
     width: 44px;
     height: 44px;
-    border-radius: 10px;
+    border-radius: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -312,12 +322,12 @@
   .kpi-label {
     font-size: 0.82rem;
     color: var(--text-secondary);
-    font-weight: 600;
+    font-weight: 500;
   }
 
   .kpi-value {
     font-size: 1.65rem;
-    font-weight: 800;
+    font-weight: 700;
     color: var(--text-primary);
     margin: 0.15rem 0;
     line-height: 1.2;
@@ -348,8 +358,8 @@
   }
 
   .card-title {
-    font-size: 1rem;
-    font-weight: 700;
+    font-size: 1.05rem;
+    font-weight: 500;
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -404,7 +414,7 @@
   th {
     background: var(--bg-subtle);
     color: var(--text-secondary);
-    font-weight: 700;
+    font-weight: 500;
     font-size: 0.78rem;
     text-transform: uppercase;
     letter-spacing: 0.02em;
@@ -458,7 +468,7 @@
   .printer-type-icon {
     width: 42px;
     height: 42px;
-    border-radius: 10px;
+    border-radius: 12px;
     background: var(--bg-subtle);
     color: var(--brand-plum);
     display: flex;
@@ -479,7 +489,7 @@
     gap: 0.5rem;
     background: var(--bg-subtle);
     padding: 0.65rem 0.8rem;
-    border-radius: 8px;
+    border-radius: 12px;
     font-size: 0.78rem;
   }
 
@@ -511,7 +521,7 @@
 
   .form-label {
     font-size: 0.84rem;
-    font-weight: 700;
+    font-weight: 500;
     color: var(--text-primary);
   }
 
@@ -521,8 +531,9 @@
   }
 
   .input, .select {
-    padding: 0.6rem 0.85rem;
-    border-radius: 8px;
+    padding: 0.6rem 1rem;
+    min-height: 44px;
+    border-radius: 12px;
     border: 1px solid var(--border-color);
     background: var(--bg-surface);
     color: var(--text-primary);
@@ -533,7 +544,7 @@
 
   .input:focus, .select:focus {
     border-color: var(--brand-plum);
-    box-shadow: 0 0 0 3px rgba(113, 75, 103, 0.18);
+    box-shadow: 0 0 0 3px rgba(9, 83, 222, 0.18);
   }
 
   .filter-pills {
@@ -546,7 +557,7 @@
     padding: 0.3rem 0.75rem;
     border-radius: 999px;
     font-size: 0.78rem;
-    font-weight: 600;
+    font-weight: 500;
     border: 1px solid var(--border-color);
     background: var(--bg-subtle);
     color: var(--text-secondary);
@@ -564,7 +575,7 @@
     background: #0f172a;
     color: #e2e8f0;
     padding: 1rem;
-    border-radius: 10px;
+    border-radius: 16px;
     font-family: "Cascadia Code", "Consolas", monospace;
     font-size: 0.8rem;
     max-height: 360px;
@@ -591,13 +602,30 @@
     border: 1px solid var(--border-color);
     border-inline-start: 4px solid var(--brand-plum);
     padding: 0.8rem 1rem;
-    border-radius: 10px;
+    border-radius: 16px;
     box-shadow: var(--shadow-md);
     font-size: 0.84rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
+  }
+
+  .input.invalid {
+    border-color: var(--status-err-fg);
+    box-shadow: 0 0 0 3px rgba(179, 38, 30, 0.15);
+  }
+
+  .form-error {
+    color: var(--status-err-fg);
+    font-size: 0.78rem;
+    font-weight: 500;
+  }
+
+  .btn:focus-visible, .input:focus-visible, .select:focus-visible,
+  .nav-tab:focus-visible, .filter-pill:focus-visible {
+    outline: 3px solid rgba(9, 83, 222, 0.45);
+    outline-offset: 3px;
   }
 
   .hidden {
@@ -620,19 +648,20 @@
   <header class="topbar">
     <div class="brand">
       <div class="brand-logo" aria-hidden="true">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="6 9 6 2 18 2 18 9"></polyline>
-          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
-          <rect x="6" y="14" width="12" height="8"></rect>
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M8 3h8v5H8z" fill="#ffffff" opacity="0.92"/>
+          <path d="M4 8h16a1.5 1.5 0 0 1 1.5 1.5V16a1.5 1.5 0 0 1-1.5 1.5h-2.2V21H6.2v-3.5H4A1.5 1.5 0 0 1 2.5 16V9.5A1.5 1.5 0 0 1 4 8z" fill="#ffffff"/>
+          <path d="M8.6 15.6l2 2 3.8-4" stroke="#0953de" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="18.4" cy="10.6" r="1.1" fill="#00c7fc"/>
         </svg>
       </div>
       <div>
         <div class="brand-title">
-          <span data-i18n="app_title">مركز التحكم — الطباعة المحلية لأودو</span>
-          <span class="version-pill" id="appVersionBadge">v1.0.0</span>
+          <span data-i18n="app_title">بوابة الطباعة</span>
+          <span class="version-pill" id="appVersionBadge">v1.1.1</span>
         </div>
         <div class="brand-subtitle" data-i18n="app_subtitle">
-          Odoo Native Print Client • مباشر بدون خادم وسيط (Zero-Gateway) • GDI / PDFium / ESC-POS / ZPL / IPP
+          طباعة محلية من Odoo — بدون خادم وسيط
         </div>
       </div>
     </div>
@@ -719,7 +748,7 @@
           <div>
             <div class="kpi-label" data-i18n="kpi_active_jobs">المهام النشطة / بالانتظار</div>
             <div class="kpi-value" id="kpiActiveCount">0</div>
-            <div class="kpi-meta" data-i18n="kpi_active_sub">SQLite WAL • طابور مستدام</div>
+            <div class="kpi-meta" data-i18n="kpi_active_sub">يُحفظ تلقائيًا</div>
           </div>
           <div class="kpi-icon" style="background:var(--status-warn-bg);color:var(--status-warn-fg);">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
@@ -754,7 +783,7 @@
         <div class="card-header">
           <div class="card-title">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
-            <span data-i18n="queue_title">طابور مهام الطباعة المحلي (SQLite WAL Queue)</span>
+            <span data-i18n="queue_title">طابور الطباعة</span>
           </div>
           <div style="display:flex;align-items:center;gap:0.65rem;flex-wrap:wrap;">
             <div class="filter-pills">
@@ -797,14 +826,15 @@
         <div class="card-header">
           <div class="card-title">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-            <span data-i18n="direct_test_title">اختبار طباعة مباشر ومعايرة فورية (طابعة نظام أو عنوان شبكة TCP 9100 / IPP)</span>
+            <span data-i18n="direct_test_title">اختبار ومعايرة الطابعة</span>
           </div>
         </div>
         <div class="card-body">
           <div class="form-grid" style="align-items:end;">
             <div class="form-group">
-              <label class="form-label" data-i18n="lbl_target_printer">اسم الطابعة أو العنوان (Windows / tcp://IP:9100 / ipp://IP:631/ipp/print)</label>
-              <input type="text" id="customPrinterInput" class="input" placeholder="Microsoft Print to PDF  أو  tcp://192.168.1.200:9100" />
+              <label class="form-label" data-i18n="lbl_target_printer">اختر الطابعة</label>
+              <select id="customPrinterSelect" class="select" onchange="onTestPrinterChange()"></select>
+              <input type="text" id="customPrinterUri" class="input mono hidden" dir="ltr" placeholder="tcp://192.168.1.200:9100" style="margin-top:0.5rem;" />
             </div>
             <div class="form-group">
               <label class="form-label" data-i18n="lbl_test_type">نوع صفحة المعايرة والاختبار</label>
@@ -835,28 +865,29 @@
         <div class="card-header">
           <div class="card-title">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-            <span data-i18n="settings_title">إعدادات خادم Odoo وسياسة الأمان (ADR-0002 & ADR-0004)</span>
+            <span data-i18n="settings_title">الاتصال بـ Odoo</span>
           </div>
           <span class="badge badge-info" id="policyStatusBadge">Local Config</span>
         </div>
         <div class="card-body">
           <div class="form-grid">
             <div class="form-group">
-              <label class="form-label" data-i18n="lbl_odoo_origin">الرابط الأساسي لخادم أودو (HTTPS Exact Origin)</label>
-              <input type="url" id="inputOdooOrigin" class="input mono" dir="ltr" placeholder="https://odoo.company.local:8069" />
+              <label class="form-label" data-i18n="lbl_odoo_origin">رابط Odoo</label>
+              <input type="url" id="inputOdooOrigin" class="input mono" dir="ltr" placeholder="http://192.168.1.20:8069" />
               <div class="form-help" data-i18n="help_odoo_origin">
-                يجب أن يبدأ بـ https:// بدون مسارات فرعية. يرفض التطبيق أي اتصال أو أمر طباعة من أي نطاق آخر (حماية ضد CVE-2026-42184).
+                الرابط كما يظهر في المتصفح. HTTPS لأي عنوان، أو HTTP لعنوان IP داخل شبكتك — مثل http://192.168.1.20:8069
               </div>
+              <div class="form-error hidden" id="originError"></div>
             </div>
 
             <div class="form-group">
-              <label class="form-label" data-i18n="lbl_recovery_mode">سياسة الاسترجاع بعد الإغلاق المفاجئ (ADR-0004 Crash Recovery)</label>
+              <label class="form-label" data-i18n="lbl_recovery_mode">عند توقف مفاجئ</label>
               <select id="inputAutoReprint" class="select">
                 <option value="false">آمن (افتراضي): عدم إعادة طباعة المهام الغامضة تلقائياً (RECOVERY_AMBIGUOUS)</option>
                 <option value="true">إعادة الطباعة التلقائية للمهام قيد التنفيذ عند بدء التشغيل</option>
               </select>
               <div class="form-help" data-i18n="help_recovery_mode">
-                المهام التي لم تصل لمرحلة Spooling يُعاد جدولتها دائماً، أما المهام التي أُرسلت للطابعة فتتبع هذا الخيار لمنع تكرار الفواتير.
+                المهام التي لم تُرسل للطابعة تُستأنف دائمًا. المهام المُرسلة يحددها هذا الخيار.
               </div>
             </div>
           </div>
@@ -867,17 +898,17 @@
               <span data-i18n="btn_save_origin">حفظ الإعدادات</span>
             </button>
             <button class="btn btn-Launch" onclick="openOdooApp()">
-              <span data-i18n="btn_save_and_launch">الاتصال وفتح Odoo الآن</span>
+              <span data-i18n="btn_save_and_launch">حفظ وفتح Odoo</span>
             </button>
           </div>
 
           <div style="margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--border-color);display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem;">
             <div>
-              <div class="form-label" data-i18n="lbl_config_file">مسار ملف الإعدادات (config.json)</div>
+              <div class="form-label" data-i18n="lbl_config_file">ملف الإعدادات</div>
               <div class="mono" style="color:var(--text-secondary);margin-top:0.25rem;word-break:break-all;" id="txtConfigPath">—</div>
             </div>
             <div>
-              <div class="form-label" data-i18n="lbl_pdfium_engine">محرك تصيير PDF المدمج (PDFium Chromium/8125)</div>
+              <div class="form-label" data-i18n="lbl_pdfium_engine">محرك PDF</div>
               <div class="mono" style="color:var(--text-secondary);margin-top:0.25rem;word-break:break-all;" id="txtPdfiumPath">—</div>
             </div>
             <div>
@@ -926,8 +957,8 @@
 <script>
   const I18N = {
     ar: {
-      app_title: "مركز التحكم — الطباعة المحلية لأودو",
-      app_subtitle: "Odoo Native Print Client • مباشر بدون خادم وسيط (Zero-Gateway) • GDI / PDFium / ESC-POS / ZPL / IPP",
+      app_title: "بوابة الطباعة",
+      app_subtitle: "طباعة محلية من Odoo — بدون خادم وسيط",
       btn_open_odoo: "فتح نظام Odoo",
       btn_refresh: "تحديث",
       btn_theme: "المظهر",
@@ -938,10 +969,10 @@
       btn_configure_now: "ضبط الرابط الآن",
       kpi_printers: "الطابعات المكتشفة",
       kpi_active_jobs: "المهام النشطة / بالانتظار",
-      kpi_active_sub: "SQLite WAL • طابور مستدام",
+      kpi_active_sub: "يُحفظ تلقائيًا",
       kpi_done_jobs: "مهام مكتملة بنجاح",
       kpi_failed_jobs: "تحتاج لتدخل (Failed / Dead Letter)",
-      queue_title: "طابور مهام الطباعة المحلي (SQLite WAL Queue)",
+      queue_title: "طابور الطباعة",
       filter_all: "الكل",
       filter_active: "نشطة",
       filter_attention: "فاشلة / Dead Letter",
@@ -956,31 +987,31 @@
       col_error: "رمز الخطأ",
       col_actions: "إجراءات",
       no_jobs: "لا توجد مهام مطابقة في الطابور حالياً.",
-      direct_test_title: "اختبار طباعة مباشر ومعايرة فورية (طابعة نظام أو عنوان شبكة TCP 9100 / IPP)",
-      lbl_target_printer: "اسم الطابعة أو العنوان (Windows / tcp://IP:9100 / ipp://IP:631/ipp/print)",
+      direct_test_title: "اختبار ومعايرة الطابعة",
+      lbl_target_printer: "اختر الطابعة",
       lbl_test_type: "نوع صفحة المعايرة والاختبار",
       btn_send_test: "إرسال صفحة المعايرة للطابعة",
-      settings_title: "إعدادات خادم Odoo وسياسة الأمان (ADR-0002 & ADR-0004)",
-      lbl_odoo_origin: "الرابط الأساسي لخادم أودو (HTTPS Exact Origin)",
-      help_odoo_origin: "يجب أن يبدأ بـ https:// بدون مسارات فرعية. يرفض التطبيق أي اتصال أو أمر طباعة من أي نطاق آخر (حماية ضد CVE-2026-42184).",
-      lbl_recovery_mode: "سياسة الاسترجاع بعد الإغلاق المفاجئ (ADR-0004 Crash Recovery)",
-      help_recovery_mode: "المهام التي لم تصل لمرحلة Spooling يُعاد جدولتها دائماً، أما المهام التي أُرسلت للطابعة فتتبع هذا الخيار لمنع تكرار الفواتير.",
+      settings_title: "الاتصال بـ Odoo",
+      lbl_odoo_origin: "رابط Odoo",
+      help_odoo_origin: "الرابط كما يظهر في المتصفح. HTTPS لأي عنوان، أو HTTP لعنوان IP داخل شبكتك — مثل http://192.168.1.20:8069",
+      lbl_recovery_mode: "عند توقف مفاجئ",
+      help_recovery_mode: "المهام التي لم تُرسل للطابعة تُستأنف دائمًا. المهام المُرسلة يحددها هذا الخيار.",
       btn_save_origin: "حفظ الإعدادات",
-      btn_save_and_launch: "الاتصال وفتح Odoo الآن",
-      lbl_config_file: "مسار ملف الإعدادات (config.json)",
-      lbl_pdfium_engine: "محرك تصيير PDF المدمج (PDFium Chromium/8125)",
+      btn_save_and_launch: "حفظ وفتح Odoo",
+      lbl_config_file: "ملف الإعدادات",
+      lbl_pdfium_engine: "محرك PDF",
       lbl_shortcut: "اختصار لوحة المفاتيح السريع",
       help_shortcut: "للتبديل الفوري بين شاشة Odoo ومركز التحكم",
       diag_title: "حزمة التشخيص الآمنة (Redacted Diagnostics Bundle)",
       btn_generate_diag: "توليد الحزمة",
       btn_copy_diag: "نسخ JSON",
       btn_download_diag: "تنزيل ملف JSON",
-      diag_desc: "تحتوي هذه الحزمة على إصدار التطبيق وإحصائيات الحالات وآخر 200 مهمة طباعة بدون أي بيانات سرية أو محتوى مستندات أو رموز جلسات.",
+      diag_desc: "إصدار التطبيق وآخر 200 مهمة — بدون بيانات سرية.",
     },
     en: {
-      app_title: "Odoo Native Print — Control Center",
-      app_subtitle: "Zero-Gateway Native Print Client • GDI / PDFium / ESC-POS / ZPL / TSPL / IPP",
-      btn_open_odoo: "Open Odoo ERP",
+      app_title: "Print Gateway — Odoo",
+      app_subtitle: "Local printing for Odoo. No gateway.",
+      btn_open_odoo: "Open Odoo",
       btn_refresh: "Refresh",
       btn_theme: "Theme",
       tab_dashboard: "Dashboard & Print Queue",
@@ -990,10 +1021,10 @@
       btn_configure_now: "Configure Now",
       kpi_printers: "Discovered Printers",
       kpi_active_jobs: "Active / Queued Jobs",
-      kpi_active_sub: "SQLite WAL • Durable Queue",
+      kpi_active_sub: "Saved automatically",
       kpi_done_jobs: "Completed Jobs",
       kpi_failed_jobs: "Needs Attention (Failed / Dead Letter)",
-      queue_title: "Local Durable Print Queue (SQLite WAL)",
+      queue_title: "Print queue",
       filter_all: "All",
       filter_active: "Active",
       filter_attention: "Failed / Dead Letter",
@@ -1008,26 +1039,26 @@
       col_error: "Error Code",
       col_actions: "Actions",
       no_jobs: "No matching print jobs in the queue.",
-      direct_test_title: "Direct Hardware Calibration & Test Print (System Printer or TCP 9100 / IPP URI)",
-      lbl_target_printer: "Printer Name or URI (Windows / tcp://IP:9100 / ipp://IP:631/ipp/print)",
+      direct_test_title: "Printer test & calibration",
+      lbl_target_printer: "Choose a printer",
       lbl_test_type: "Calibration Test Page Type",
       btn_send_test: "Send Calibration Page",
-      settings_title: "Odoo Origin & Security Policy (ADR-0002 & ADR-0004)",
-      lbl_odoo_origin: "Company Odoo Server Origin (HTTPS Exact Origin)",
-      help_odoo_origin: "Must be an exact https:// origin with no path. Navigation and IPC outside this origin are blocked in Rust.",
-      lbl_recovery_mode: "Crash Recovery Policy (ADR-0004)",
-      help_recovery_mode: "Jobs interrupted before spooling always re-queue; jobs already in printing follow this setting to prevent duplicate prints.",
+      settings_title: "Odoo connection",
+      lbl_odoo_origin: "Odoo address",
+      help_odoo_origin: "The address exactly as in the browser. HTTPS for any address, or HTTP for a private IP on your network, e.g. http://192.168.1.20:8069.",
+      lbl_recovery_mode: "After a sudden stop",
+      help_recovery_mode: "Jobs not yet sent to the printer always resume. Jobs already sent follow this choice.",
       btn_save_origin: "Save Settings",
-      btn_save_and_launch: "Connect & Launch Odoo Now",
-      lbl_config_file: "Configuration File Path (config.json)",
-      lbl_pdfium_engine: "Bundled PDFium Renderer (Chromium/8125)",
+      btn_save_and_launch: "Save & open Odoo",
+      lbl_config_file: "Config file",
+      lbl_pdfium_engine: "PDF engine",
       lbl_shortcut: "Quick Keyboard Shortcut",
       help_shortcut: "Toggle between Odoo ERP and this Control Center anytime",
       diag_title: "One-Click Redacted Diagnostics Bundle",
       btn_generate_diag: "Generate Bundle",
       btn_copy_diag: "Copy JSON",
       btn_download_diag: "Download JSON",
-      diag_desc: "Includes app version, queue state counts, and the last 200 job summaries with all document bytes and user credentials redacted by construction.",
+      diag_desc: "App version and the last 200 jobs. No secrets, no document content.",
     }
   };
 
@@ -1036,7 +1067,7 @@
   let overviewState = null;
 
   const FALLBACK_DEMO = {
-    appVersion: "1.0.0",
+    appVersion: "1.1.1",
     os: "windows",
     odooOrigin: "https://erp.company.local:8069",
     lockedByPolicy: false,
@@ -1178,7 +1209,7 @@
   }
 
   function renderOverview(data) {
-    document.getElementById("appVersionBadge").textContent = `v${data.appVersion || "1.0.0"}`;
+    document.getElementById("appVersionBadge").textContent = `v${data.appVersion || "1.1.1"}`;
     const printers = data.printers || [];
     document.getElementById("kpiPrintersCount").textContent = String(printers.length);
     document.getElementById("kpiDefaultPrinter").textContent = data.defaultPrinter
@@ -1223,10 +1254,7 @@
     document.getElementById("txtConfigPath").textContent = data.configPath || "—";
     document.getElementById("txtPdfiumPath").textContent = data.pdfiumDetail || "—";
 
-    const customPrinterInput = document.getElementById("customPrinterInput");
-    if (!customPrinterInput.value && data.defaultPrinter) {
-      customPrinterInput.value = data.defaultPrinter;
-    }
+    populatePrinterSelect(printers, data.defaultPrinter);
 
     renderJobsTable(data.recentJobs || []);
     renderPrintersGrid(printers);
@@ -1348,11 +1376,48 @@
     }
   }
 
+  function populatePrinterSelect(printers, defaultPrinter) {
+    const sel = document.getElementById("customPrinterSelect");
+    if (!sel) return;
+    const previous = sel.value;
+    const options = [];
+    for (const p of printers) {
+      options.push({ value: p.name, label: p.name });
+      const ip = String(p.port || "").match(/(\d{1,3}(?:\.\d{1,3}){3})/);
+      if (ip) {
+        options.push({
+          value: `tcp://${ip[1]}:9100`,
+          label: currentLang === "ar" ? `${p.name} — شبكة مباشرة` : `${p.name} — direct network`,
+        });
+      }
+    }
+    options.push({ value: "__uri__", label: currentLang === "ar" ? "عنوان مخصص (URI)…" : "Custom address (URI)…" });
+    sel.innerHTML = options
+      .map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`)
+      .join("");
+    const wanted = [previous, defaultPrinter].find((v) => v && options.some((o) => o.value === v));
+    if (wanted) sel.value = wanted;
+    onTestPrinterChange();
+  }
+
+  function onTestPrinterChange() {
+    const sel = document.getElementById("customPrinterSelect");
+    const uri = document.getElementById("customPrinterUri");
+    if (sel && uri) uri.classList.toggle("hidden", sel.value !== "__uri__");
+  }
+
+  function selectedTestPrinter() {
+    const sel = document.getElementById("customPrinterSelect");
+    if (!sel) return "";
+    if (sel.value === "__uri__") return document.getElementById("customPrinterUri").value.trim();
+    return sel.value || "";
+  }
+
   async function triggerCustomTestPrint() {
-    const printer = document.getElementById("customPrinterInput").value.trim();
+    const printer = selectedTestPrinter();
     const kind = document.getElementById("customTestKind").value;
     if (!printer) {
-      showToast(currentLang === "ar" ? "يرجى إدخال اسم الطابعة أو عنوان الشبكة أولاً" : "Please enter a printer name or URI first", true);
+      showToast(currentLang === "ar" ? "اختر طابعة أولاً" : "Choose a printer first", true);
       return;
     }
     await runPrinterTest(printer, kind);
@@ -1426,11 +1491,61 @@
     }
   }
 
+  // Mirrors print-core::security::origin_is_allowed (ADR-0002 amendment):
+  // HTTPS anywhere; HTTP only to a private / loopback / link-local IP.
+  function isPrivateIp(host) {
+    const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (v4) {
+      const a = +v4[1], b = +v4[2];
+      if ([+v4[1], +v4[2], +v4[3], +v4[4]].some((o) => o > 255)) return false;
+      return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && b === 168) || (a === 169 && b === 254);
+    }
+    const h = host.toLowerCase();
+    if (h === "::1" || h === "[::1]") return true;
+    const first = parseInt(h.replace(/^\[|\]$/g, "").split(":")[0], 16);
+    if (Number.isNaN(first)) return false;
+    return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
+  }
+
+  function isAllowedOrigin(value) {
+    let u;
+    try { u = new URL(value); } catch { return false; }
+    if (u.username || u.password) return false;
+    if (u.pathname !== "/" && u.pathname !== "") return false;
+    if (u.protocol === "https:") return u.hostname.length > 0;
+    if (u.protocol === "http:") return isPrivateIp(u.hostname);
+    return false;
+  }
+
+  // Live field validation: the error appears while typing and clears
+  // the moment the address becomes valid (no stale messages).
+  function validateOriginField() {
+    const input = document.getElementById("inputOdooOrigin");
+    const err = document.getElementById("originError");
+    if (!input || !err) return true;
+    const v = input.value.trim();
+    const ok = v === "" || isAllowedOrigin(v);
+    input.classList.toggle("invalid", !ok);
+    if (ok) {
+      err.textContent = "";
+      err.classList.add("hidden");
+    } else {
+      err.textContent = currentLang === "ar"
+        ? "رابط غير صالح — HTTPS، أو HTTP مع IP داخلي"
+        : "Invalid address — HTTPS, or HTTP with a private IP";
+      err.classList.remove("hidden");
+    }
+    return ok;
+  }
+
   async function saveOriginSettings() {
     const origin = document.getElementById("inputOdooOrigin").value.trim();
     const autoReprint = document.getElementById("inputAutoReprint").value === "true";
-    if (!origin.startsWith("https://")) {
-      showToast(currentLang === "ar" ? "يجب أن يبدأ رابط Odoo بـ https://" : "Odoo origin must start with https://", true);
+    if (!isAllowedOrigin(origin)) {
+      validateOriginField();
+      document.getElementById("inputOdooOrigin").focus();
+      showToast(currentLang === "ar" ? "رابط غير صالح — HTTPS، أو HTTP مع IP داخلي" : "Invalid address — HTTPS, or HTTP with a private IP", true);
       return;
     }
     const b = bridge();
@@ -1474,7 +1589,7 @@
       }
     } else {
       out.textContent = JSON.stringify({
-        app_version: overviewState ? overviewState.appVersion : "1.0.0",
+        app_version: overviewState ? overviewState.appVersion : "1.1.1",
         core_version: "0.1.0",
         os: overviewState ? overviewState.os : "windows",
         state_counts: overviewState ? overviewState.stateCounts : [],
@@ -1503,6 +1618,7 @@
     URL.revokeObjectURL(a.href);
   }
 
+  document.getElementById("inputOdooOrigin").addEventListener("input", validateOriginField);
   refreshAll();
   setInterval(refreshAll, 3000);
 </script>
