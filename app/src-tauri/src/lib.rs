@@ -151,7 +151,9 @@ pub fn run() {
                 .title("Odoo Native Print")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(960.0, 640.0)
-                .initialization_script(BRIDGE_JS.replace("__APP_VERSION__", env!("CARGO_PKG_VERSION")))
+                .initialization_script(
+                    BRIDGE_JS.replace("__APP_VERSION__", env!("CARGO_PKG_VERSION")),
+                )
                 .on_navigation(move |u| {
                     if u.as_str() == "about:blank" || is_local_app_url(u) {
                         return true;
