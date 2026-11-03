@@ -13,10 +13,10 @@ on:
 jobs:
   addon-tests:
     name: Odoo 19 - install addon + run its tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Pick an Odoo image (19.0 preferred)
         run: |
           for tag in 19.0 19 latest; do
@@ -67,7 +67,7 @@ jobs:
           echo "Addon install + tests finished."
       - name: Upload the Odoo log (always)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: odoo-test-log
           path: odoo-test.log
