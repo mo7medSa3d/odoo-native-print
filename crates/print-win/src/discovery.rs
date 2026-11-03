@@ -9,9 +9,7 @@
 //! compiler, not a hand-computed offset, does the layout on Windows.
 
 use print_core::paper::Form;
-#[cfg(test)]
-use print_core::printer::PrinterKind;
-use print_core::printer::{decode_printer_status, PrinterInfo};
+use print_core::printer::{decode_printer_status, PrinterInfo, PrinterKind};
 use print_core::PageSize;
 
 /// A raw level-2 record as read from Windows, before conversion.
@@ -57,7 +55,13 @@ impl From<&RawPrinterInfo2> for PrinterInfo {
 /// Is this a printer a user would expect to see (filters out the
 /// pseudo-printers some drivers register with no port)?
 pub fn is_usable(raw: &RawPrinterInfo2) -> bool {
-    !raw.printer_name.is_empty() && !raw.port_name.is_empty()
+    // A UNC queue (\\\\server\\printer) is a printer shared by another
+    // workstation/server, not a device attached to this workstation.
+    // Keep directly installed network printers (TCP/IP, WSD, IPP ports):
+    // their local queue name is ordinary text and their port is network-backed.
+    !raw.printer_name.is_empty()
+        && !raw.port_name.is_empty()
+        && PrinterInfo::classify(&raw.printer_name, &raw.port_name) != PrinterKind::Shared
 }
 
 /// Convert a driver-reported paper name and size (mm) into a `Form`,
@@ -130,6 +134,19 @@ mod tests {
         r.port_name = String::new();
         assert!(!is_usable(&r));
     }
+    #[test]
+    fn excludes_remote_unc_shared_queues_but_keeps_local_network_queues() {
+        let mut remote = raw(0, 0);
+        remote.printer_name = r"\\print-server\receipt".into();
+        remote.port_name = "Ne03:".into();
+        assert!(!is_usable(&remote));
+
+        let mut network = raw(0, 0);
+        network.printer_name = "Warehouse Receipt Printer".into();
+        network.port_name = "IP_192.168.10.25".into();
+        assert!(is_usable(&network));
+    }
+
     #[test]
     fn classify_sheet_and_roll_forms() {
         let a4 = classify_form("A4", 210.0, 297.0);
