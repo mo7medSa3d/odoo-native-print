@@ -217,7 +217,7 @@ pub fn print_pdf(
             .map_err(|_| "queue_poisoned".to_string())?;
         // Duplicate submissions (same idempotency key) return the
         // original job untouched: never overwrite its payload/options.
-        let id = match queue.enqueue_new(&job).map_err(|e| e.to_string())? {
+        match queue.enqueue_new(&job).map_err(|e| e.to_string())? {
             Some(new_id) => {
                 queue
                     .store_payload(&new_id, "pdf", &req.bytes)
@@ -231,7 +231,7 @@ pub fn print_pdf(
                 .job_id_for_key(&job.idempotency_key)
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| "queue_inconsistent".to_string())?,
-        };
+        }
     };
     state.notify_worker();
     Ok(id)
@@ -306,7 +306,7 @@ pub fn print_text(
             .map_err(|_| "queue_poisoned".to_string())?;
         // Duplicate submissions (same idempotency key) return the
         // original job untouched: never overwrite its payload/options.
-        let id = match queue.enqueue_new(&job).map_err(|e| e.to_string())? {
+        match queue.enqueue_new(&job).map_err(|e| e.to_string())? {
             Some(new_id) => {
                 queue
                     .store_payload(&new_id, "escpos", &bytes)
@@ -320,7 +320,7 @@ pub fn print_text(
                 .job_id_for_key(&job.idempotency_key)
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| "queue_inconsistent".to_string())?,
-        };
+        }
     };
     state.notify_worker();
     Ok(id)
@@ -389,7 +389,7 @@ pub fn print_image(
             .map_err(|_| "queue_poisoned".to_string())?;
         // Duplicate submissions (same idempotency key) return the
         // original job untouched: never overwrite its payload/options.
-        let id = match queue.enqueue_new(&job).map_err(|e| e.to_string())? {
+        match queue.enqueue_new(&job).map_err(|e| e.to_string())? {
             Some(new_id) => {
                 queue
                     .store_payload(&new_id, "image-png", &req.bytes)
@@ -403,7 +403,7 @@ pub fn print_image(
                 .job_id_for_key(&job.idempotency_key)
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| "queue_inconsistent".to_string())?,
-        };
+        }
     };
     state.notify_worker();
     Ok(id)
@@ -1348,7 +1348,7 @@ impl PrintBackend for NativePrintBackend {
                     .map_err(|e| BackendError::ambiguous("GDI_PRINT_ERROR", &e.to_string()))?;
                 Ok(())
             }
-            ("pdf" | "image-png", _) => Err(BackendError::fatal(
+            ("pdf", _) => Err(BackendError::fatal(
                 "UNKNOWN_MODE",
                 &format!("unsupported print mode {:?} for this document", opts.mode),
             )),
@@ -1359,7 +1359,7 @@ impl PrintBackend for NativePrintBackend {
                     .map_err(|e| BackendError::ambiguous("GDI_PRINT_ERROR", &e.to_string()))?;
                 Ok(())
             }
-            ("image-png", _) => {
+            ("image-png", "escpos" | "zpl" | "tspl" | "epl") => {
                 let raw_bytes = Self::png_to_raw_stream(
                     &data,
                     &opts.mode,
@@ -1372,6 +1372,10 @@ impl PrintBackend for NativePrintBackend {
                     .map_err(|e| BackendError::ambiguous("SPOOLER_RAW_ERROR", &e.to_string()))?;
                 Ok(())
             }
+            ("image-png", _) => Err(BackendError::fatal(
+                "UNKNOWN_MODE",
+                &format!("unsupported print mode {:?} for this image", opts.mode),
+            )),
             _ => {
                 for _ in 0..opts.copies.max(1) {
                     print_win::print_raw(&target_name, title, &data).map_err(|e| {
