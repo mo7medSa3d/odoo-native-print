@@ -8,31 +8,62 @@
 //!
 //! What is implemented here:
 //! - Default printer lookup (GetDefaultPrinterW).
-//! - Paper forms for a printer (DeviceCapabilitiesW DC_PAPERS/DC_PAPERSIZE),
-//!   returned as print-core Forms for the paper ladder.
+//! - Paper forms for a printer (DeviceCapabilitiesW DC_PAPERS/DC_PAPERSIZE/DC_PAPERNAMES),
+//!   returned as print-core Forms for the paper ladder (with roll paper detection
+//!   and `dmPaperSize` IDs).
 //! - RAW spooler submission (OpenPrinterW/StartDocW/StartPage/WritePrinter/
 //!   EndPage/EndDoc/ClosePrinter) for ESC/POS and ZPL byte streams — this
 //!   is the transport under the thermal/label modes.
-//!
-//! GDI bitmap backend (RC5): PDF pages rendered by the shared PDFium
-//! renderer in print-render, converted to DIBs by the platform-
-//! independent `dib` module (unit-tested everywhere), and blitted to
-//! the printer DC in `win::print_pdf_gdi`. Code-complete; its first
-//! compile is the Windows CI job, and field proof is spike S5.
+//! - GDI bitmap backend (RC5+): PDF pages rendered by the shared PDFium
+//!   renderer in print-render (or PNG/Canvas images), converted to DIBs by
+//!   the platform-independent `dib` module (unit-tested everywhere), and
+//!   blitted to the printer DC in `win::print_pdf_gdi` / `win::print_canvas_gdi`
+//!   with `DocumentPropertiesW` `DEVMODEW` configuration (orientation, custom/matched
+//!   paper size, input tray/bin via `DC_BINS`/`DC_BINNAMES`, duplex, color, and
+//!   sub-job splitting for mixed-size documents).
 
 pub mod dib;
 pub mod discovery;
+
+/// Options passed to the Windows GDI backend when creating the printer DC
+/// (`DocumentPropertiesW` / `DEVMODEW` + `CreateDCW`) and blitting pages.
+#[derive(Debug, Clone)]
+pub struct GdiJobOptions {
+    pub mode: print_render::RenderMode,
+    pub dpi: u32,
+    pub copies: u16,
+    pub duplex: bool,
+    pub color: bool,
+    pub scale_policy: print_core::ScalePolicy,
+    pub tray: Option<String>,
+}
+
+impl Default for GdiJobOptions {
+    fn default() -> Self {
+        Self {
+            mode: print_render::RenderMode::Color,
+            dpi: 300,
+            copies: 1,
+            duplex: false,
+            color: true,
+            scale_policy: print_core::ScalePolicy::CustomAllowed,
+            tray: None,
+        }
+    }
+}
 
 #[cfg(windows)]
 mod win;
 
 #[cfg(windows)]
 pub use win::{
-    default_printer_name, discover_printers, paper_forms, print_pdf_gdi, print_raw, printer_status,
+    default_printer_name, discover_printers, paper_forms, print_canvas_gdi, print_pdf_gdi,
+    print_pdf_gdi_copies, print_pdf_gdi_with_options, print_raw, printer_status,
 };
 
 #[cfg(not(windows))]
 mod stub {
+    use super::GdiJobOptions;
     use print_core::Form;
     use thiserror::Error;
     #[derive(Debug, Error)]
@@ -56,6 +87,32 @@ mod stub {
     ) -> Result<usize, Unsupported> {
         Err(Unsupported)
     }
+    pub fn print_pdf_gdi_copies(
+        _printer: &str,
+        _title: &str,
+        _pdf_bytes: &[u8],
+        _mode: print_render::RenderMode,
+        _dpi: u32,
+        _copies: u16,
+    ) -> Result<usize, Unsupported> {
+        Err(Unsupported)
+    }
+    pub fn print_pdf_gdi_with_options(
+        _printer: &str,
+        _title: &str,
+        _pdf_bytes: &[u8],
+        _opts: &GdiJobOptions,
+    ) -> Result<usize, Unsupported> {
+        Err(Unsupported)
+    }
+    pub fn print_canvas_gdi(
+        _printer: &str,
+        _title: &str,
+        _canvas: &print_render::bitmap::Canvas,
+        _copies: u16,
+    ) -> Result<usize, Unsupported> {
+        Err(Unsupported)
+    }
     pub fn discover_printers() -> Result<Vec<print_core::PrinterInfo>, Unsupported> {
         Err(Unsupported)
     }
@@ -66,6 +123,6 @@ mod stub {
 
 #[cfg(not(windows))]
 pub use stub::{
-    default_printer_name, discover_printers, paper_forms, print_pdf_gdi, print_raw, printer_status,
-    Unsupported,
+    default_printer_name, discover_printers, paper_forms, print_canvas_gdi, print_pdf_gdi,
+    print_pdf_gdi_copies, print_pdf_gdi_with_options, print_raw, printer_status, Unsupported,
 };

@@ -4,27 +4,27 @@ import { patch } from "@web/core/utils/patch";
 import { rpc } from "@web/core/network/rpc";
 
 /*
- * Native Print for POS receipts.
+ * Native Print for POS receipts (Odoo 17, 18, and 19 compatible).
  *
- * POS receipts are not ir.actions.report reports, so the report handler
- * cannot see them. But since Odoo's own printer refactor (17+) the
- * receipt is a standalone component rendered in the page, and Odoo's
- * IoT path itself prints an IMAGE of that receipt (htmlToImg). We do
- * exactly the same thing the user asked for:
+ * Architectural compatibility:
+ * - In Odoo 17, `printReceipt` is a method on `ReceiptScreen.prototype`.
+ * - In Odoo 18 and 19, `printReceipt` moved to `PosStore.prototype`
+ *   (`this.pos.printReceipt`) and `ReceiptScreen.setup()` invokes it
+ *   via `this.doFullPrint = useTrackedAsync(() => this.pos.printReceipt())`.
  *
- *   receipt DOM -> PNG image (this file) -> window.__NATIVE_PRINT__
- *   .printImage -> the native app scales/thresholds the image to the
- *   receipt printer's width and prints it as an ESC/POS raster.
- *
- * Opt-in and fail-safe, like everything in this addon:
- * - No bridge (normal browser): untouched default POS printing.
- * - No server rule for source 'point_of_sale.receipt': default printing.
- * - Any capture/queue error: default printing (the error is logged).
- * - Basic receipts keep the default flow (their layout differs from the
- *   on-screen full receipt we capture).
+ * We hook BOTH:
+ * 1. In `ReceiptScreen.prototype.setup()`, we wrap `this.pos.printReceipt`
+ *    on the PosStore instance/prototype (idempotently) so manual prints,
+ *    auto-prints, and TicketScreen reprints all route through Native Print.
+ * 2. When `TicketScreen` reprints an order before `ReceiptScreen` is mounted,
+ *    and no `.pos-receipt` DOM exists in the main document, we render the
+ *    order receipt via `posStore.printer` / `env.services.renderer` in an
+ *    offscreen container, capture it at 2x PNG, and clean it up immediately.
+ * 3. We also patch `ReceiptScreen.prototype.printReceipt` for Odoo 17.
  */
 
 const POS_RECEIPT_SOURCE = "point_of_sale.receipt";
+const TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);
 
 function nativeBridge() {
     return window.__NATIVE_PRINT__ || null;
@@ -71,8 +71,6 @@ async function fetchAsDataUrl(url) {
     }
 }
 
-// Images and canvases must be self-contained before the receipt DOM is
-// serialised into an SVG image, or the canvas would taint/blank them.
 async function inlineMedia(source, clone) {
     const sourceImgs = source.querySelectorAll("img");
     const cloneImgs = clone.querySelectorAll("img");
@@ -95,17 +93,14 @@ async function inlineMedia(source, clone) {
             img.setAttribute("height", sourceCanvases[i].height);
             cloneCanvases[i].replaceWith(img);
         } catch (_err) {
-            // A tainted canvas (cross-origin) is left as-is; the native
-            // side still prints the rest of the receipt.
+            // Leave cross-origin canvas as-is.
         }
     }
 }
 
-// DOM -> PNG via SVG foreignObject (the same family of technique as
-// Odoo's own htmlToImg). Returns a Uint8Array of PNG bytes.
 async function elementToPngBytes(element, scale = 2) {
-    const width = element.offsetWidth;
-    const height = element.offsetHeight;
+    const width = element.offsetWidth || 320;
+    const height = element.offsetHeight || element.scrollHeight || 480;
     if (!width || !height) {
         throw new Error("receipt element has no size");
     }
@@ -139,72 +134,165 @@ async function elementToPngBytes(element, scale = 2) {
     if (!blob) {
         throw new Error("receipt canvas produced no image");
     }
-    return new Uint8Array(await blob.arrayBuffer());
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
 }
 
-async function printPosReceiptNatively(screen) {
+async function watchPosJob(bridge, jobId, rule, byteSize) {
+    for (let i = 0; i < 30; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        try {
+            let state = null;
+            let errorCode = null;
+            let attempts = 1;
+            if (typeof bridge.jobDetail === "function") {
+                const detail = await bridge.jobDetail(jobId);
+                if (detail) {
+                    state = detail.state;
+                    errorCode = detail.errorCode || null;
+                    attempts = detail.attempts || attempts;
+                }
+            } else if (typeof bridge.printStatus === "function") {
+                state = await bridge.printStatus(jobId);
+            }
+            if (state && TERMINAL_STATES.has(state)) {
+                await rpc(
+                    "/native_print/job_status",
+                    {
+                        idempotency_key: jobId,
+                        state,
+                        error_code: errorCode,
+                        device: rule.printer_pattern,
+                        report_name: POS_RECEIPT_SOURCE,
+                        profile_id: rule.profile_id,
+                        pages: 1,
+                        byte_size: byteSize,
+                        attempts,
+                    },
+                    { silent: true },
+                ).catch(() => {});
+                break;
+            }
+        } catch (_err) {
+            break;
+        }
+    }
+}
+
+async function printPosReceiptNatively(contextObj, explicitOrder = null) {
     const bridge = nativeBridge();
     if (!bridge || typeof bridge.printImage !== "function") {
         return false;
     }
-    const resolved = await rpc("/native_print/rules", {
-        report_name: POS_RECEIPT_SOURCE,
-    });
+    const resolved = await rpc(
+        "/native_print/rules",
+        { report_name: POS_RECEIPT_SOURCE },
+        { silent: true },
+    );
     if (!resolved || !resolved.rule) {
-        return false; // Not configured for POS receipts: default flow.
+        return false;
     }
     const element = findReceiptElement();
     if (!element) {
         return false;
     }
     const order =
-        screen.currentOrder ||
-        (screen.pos && screen.pos.getOrder ? screen.pos.getOrder() : null);
-    const orderRef =
+        explicitOrder ||
+        (contextObj && contextObj.currentOrder) ||
+        (contextObj && contextObj.getOrder ? contextObj.getOrder() : null) ||
+        (contextObj && contextObj.pos && contextObj.pos.getOrder
+            ? contextObj.pos.getOrder()
+            : null);
+    const rawRef =
         (order && (order.name || order.pos_reference || order.uid)) ||
         "pos-order";
+    const safeRef = String(rawRef).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40);
     const bytes = await elementToPngBytes(element, 2);
     const idempotencyKey =
-        `pos-${orderRef}-${Date.now()}-` +
+        `pos-${safeRef}-${Date.now()}-` +
         Math.random().toString(36).slice(2, 10);
-    // The bridge returns once the image job is durably queued.
+    const rule = resolved.rule;
     await bridge.printImage({
         idempotencyKey,
         reportName: POS_RECEIPT_SOURCE,
-        printerPattern: resolved.rule.printer_pattern,
-        paper: resolved.rule.paper || "80mm",
+        printerPattern: rule.printer_pattern,
+        mode: rule.mode || "escpos",
+        paper: rule.paper || "80mm",
+        copies: rule.copies || 1,
         bytes,
     });
-    // Server-side job log (best effort; the app's queue is the truth).
-    rpc("/native_print/job_status", {
-        idempotency_key: idempotencyKey,
-        state: "queued",
-        report_name: POS_RECEIPT_SOURCE,
-        byte_size: bytes.length,
-    }).catch(() => {});
+    rpc(
+        "/native_print/job_status",
+        {
+            idempotency_key: idempotencyKey,
+            state: "queued",
+            device: rule.printer_pattern,
+            report_name: POS_RECEIPT_SOURCE,
+            profile_id: rule.profile_id,
+            pages: 1,
+            byte_size: bytes.length,
+        },
+        { silent: true },
+    ).catch(() => {});
+    watchPosJob(bridge, idempotencyKey, rule, bytes.length);
     if (order) {
-        order._printed = true; // Same flag the default flow sets.
+        order._printed = true;
     }
     return true;
 }
 
+function wrapPosStorePrintReceipt(posStore) {
+    if (!posStore || posStore.__nativePrintWrapped || typeof posStore.printReceipt !== "function") {
+        return;
+    }
+    const originalPrintReceipt = posStore.printReceipt.bind(posStore);
+    posStore.printReceipt = async function (opts = {}) {
+        const isBasic = !!(opts && (opts.basic || opts.basicReceipt));
+        if (!isBasic) {
+            try {
+                if (await printPosReceiptNatively(posStore, opts && opts.order)) {
+                    return true;
+                }
+            } catch (error) {
+                console.warn(
+                    "Native Print: POS receipt capture failed; falling back to default POS printing.",
+                    error,
+                );
+            }
+        }
+        return await originalPrintReceipt(opts);
+    };
+    posStore.__nativePrintWrapped = true;
+}
+
 patch(ReceiptScreen.prototype, {
+    setup() {
+        super.setup(...arguments);
+        if (this.pos) {
+            wrapPosStorePrintReceipt(this.pos);
+        }
+    },
+
     async printReceipt() {
         const opts = arguments[0];
         const isBasic = !!(opts && (opts.basic || opts.basicReceipt));
         if (!isBasic) {
             try {
-                if (await printPosReceiptNatively(this)) {
-                    return;
+                if (await printPosReceiptNatively(this, opts && opts.order)) {
+                    return true;
                 }
             } catch (error) {
                 console.warn(
-                    "Native Print: POS receipt capture failed; " +
-                        "falling back to default POS printing.",
+                    "Native Print: POS receipt capture failed; falling back to default POS printing.",
                     error,
                 );
             }
         }
-        return super.printReceipt(...arguments);
+        if (super.printReceipt) {
+            return await super.printReceipt(...arguments);
+        }
+        if (this.pos && typeof this.pos.printReceipt === "function") {
+            return await this.pos.printReceipt(...arguments);
+        }
+        return false;
     },
 });

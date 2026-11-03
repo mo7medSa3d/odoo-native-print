@@ -1,4 +1,4 @@
-use crate::queue::Queue;
+use crate::queue::{Job, Queue, QueueError};
 use crate::state::JobState;
 use serde::Serialize;
 
@@ -26,6 +26,21 @@ pub struct JobSummary {
     pub error_code: Option<String>,
 }
 
+impl From<&Job> for JobSummary {
+    fn from(j: &Job) -> Self {
+        Self {
+            id: j.id.clone(),
+            printer: j.printer.clone(),
+            report: j.report.clone(),
+            pages: j.pages,
+            bytes: j.bytes,
+            state: j.state.as_str().to_string(),
+            attempts: j.attempts,
+            error_code: j.error_code.clone(),
+        }
+    }
+}
+
 const ALL_STATES: [JobState; 8] = [
     JobState::Queued,
     JobState::Rendering,
@@ -41,7 +56,7 @@ const ALL_STATES: [JobState; 8] = [
 pub fn build_bundle(
     queue: &Queue,
     recent: &[JobSummary],
-) -> Result<DiagnosticsBundle, crate::QueueError> {
+) -> Result<DiagnosticsBundle, QueueError> {
     let mut counts = Vec::new();
     for s in ALL_STATES {
         counts.push((s.as_str().to_string(), queue.count_by_state(s)?));
@@ -53,6 +68,13 @@ pub fn build_bundle(
         state_counts: counts,
         recent_jobs: recent.iter().take(200).cloned().collect(),
     })
+}
+
+/// Build the diagnostics bundle directly from the queue's recent jobs.
+pub fn build_bundle_from_queue(queue: &Queue) -> Result<DiagnosticsBundle, QueueError> {
+    let jobs = queue.list_recent(200)?;
+    let summaries: Vec<JobSummary> = jobs.iter().map(JobSummary::from).collect();
+    build_bundle(queue, &summaries)
 }
 
 pub fn bundle_to_json(b: &DiagnosticsBundle) -> String {
@@ -79,17 +101,8 @@ mod tests {
             error_code: None,
         })
         .unwrap();
-        let recent = vec![JobSummary {
-            id: "1".into(),
-            printer: "p1".into(),
-            report: Some("sale.order".into()),
-            pages: 2,
-            bytes: 99,
-            state: "queued".into(),
-            attempts: 0,
-            error_code: None,
-        }];
-        let b = build_bundle(&q, &recent).unwrap();
+        let b = build_bundle_from_queue(&q).unwrap();
+        assert_eq!(b.recent_jobs.len(), 1);
         let json = bundle_to_json(&b);
         assert!(json.contains("\"queued\""));
         // The bundle schema has no field for document content or secrets.

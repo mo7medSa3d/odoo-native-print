@@ -1,6 +1,6 @@
 [package]
 name = "odoo-native-print-app"
-version = "0.5.0"
+version = "1.0.0"
 edition = "2021"
 publish = false
 rust-version = "1.75"
@@ -19,8 +19,10 @@ tauri = { version = ">=2.11.1", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 print-core = { path = "../../crates/print-core" }
+print-ipp = { path = "../../crates/print-ipp" }
 print-raw = { path = "../../crates/print-raw" }
 print-render = { path = "../../crates/print-render" }
+print-win = { path = "../../crates/print-win" }
 
 [build-dependencies]
 tauri-build = { version = ">=2.6" }

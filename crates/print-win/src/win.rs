@@ -1,9 +1,11 @@
-//! Win32 FFI for winspool.drv. Only simple, stable buffer APIs are used.
+//! Win32 FFI for winspool.drv and gdi32.dll. Only simple, stable buffer APIs are used.
 //! All wide strings are NUL-terminated UTF-16; every handle opened here is
 //! closed on every path out of its function.
 
-use print_core::paper::Form;
+use crate::GdiJobOptions;
+use print_core::paper::{match_paper, Form, MatchKind, ScalePolicy};
 use print_core::PageSize;
+use print_render::split_subjobs;
 use std::ffi::c_void;
 use std::os::windows::ffi::OsStrExt;
 
@@ -22,6 +24,14 @@ extern "system" {
     fn GetDefaultPrinterW(name: *mut u16, size: *mut u32) -> Bool;
     fn OpenPrinterW(name: *const u16, handle: *mut Handle, defaults: *mut c_void) -> Bool;
     fn ClosePrinter(handle: Handle) -> Bool;
+    fn DocumentPropertiesW(
+        hwnd: Handle,
+        printer: Handle,
+        device_name: *const u16,
+        devmode_output: *mut u8,
+        devmode_input: *const u8,
+        mode: u32,
+    ) -> i32;
     fn DeviceCapabilitiesW(
         device: *const u16,
         port: *const u16,
@@ -38,6 +48,57 @@ extern "system" {
 
 const DC_PAPERS: u16 = 2;
 const DC_PAPERSIZE: u16 = 3;
+const DC_BINS: u16 = 6;
+const DC_BINNAMES: u16 = 12;
+const DC_PAPERNAMES: u16 = 16;
+
+// DocumentPropertiesW flags & DEVMODEW constants (wingdi.h / winspool.h).
+const DM_OUT_BUFFER: u32 = 2;
+const DM_IN_BUFFER: u32 = 8;
+
+const DM_ORIENTATION: u32 = 0x0000_0001;
+const DM_PAPERSIZE: u32 = 0x0000_0002;
+const DM_PAPERLENGTH: u32 = 0x0000_0004;
+const DM_PAPERWIDTH: u32 = 0x0000_0008;
+const DM_DEFAULTSOURCE: u32 = 0x0000_0200;
+const DM_COLOR: u32 = 0x0000_0800;
+const DM_DUPLEX: u32 = 0x0000_1000;
+const DM_FORMNAME: u32 = 0x0001_0000;
+
+const DMORIENT_PORTRAIT: i16 = 1;
+const DMORIENT_LANDSCAPE: i16 = 2;
+const DMPAPER_USER: i16 = 256;
+const DMCOLOR_MONOCHROME: i16 = 1;
+const DMCOLOR_COLOR: i16 = 2;
+const DMDUP_SIMPLEX: i16 = 1;
+const DMDUP_VERTICAL: i16 = 2;
+
+/// Public prefix of Win32 `DEVMODEW` (wingdi.h) up through `dmFormName` (168 bytes).
+/// Driver-private bytes follow `dmSize` in the buffer allocated from
+/// `DocumentPropertiesW(..., 0)`.
+#[repr(C)]
+struct DevModePrefixW {
+    dm_device_name: [u16; 32],
+    dm_spec_version: u16,
+    dm_driver_version: u16,
+    dm_size: u16,
+    dm_driver_extra: u16,
+    dm_fields: u32,
+    dm_orientation: i16,
+    dm_paper_size: i16,
+    dm_paper_length: i16,
+    dm_paper_width: i16,
+    dm_scale: i16,
+    dm_copies: i16,
+    dm_default_source: i16,
+    dm_print_quality: i16,
+    dm_color: i16,
+    dm_duplex: i16,
+    dm_y_resolution: i16,
+    dm_tt_option: i16,
+    dm_collate: i16,
+    dm_form_name: [u16; 32],
+}
 
 // --- GDI (gdi32) for the PDF bitmap backend ---------------------------
 
@@ -86,19 +147,201 @@ extern "system" {
 
 const HORZRES: i32 = 8;
 const VERTRES: i32 = 10;
+const LOGPIXELSX: i32 = 88;
+const LOGPIXELSY: i32 = 90;
 const DIB_RGB_COLORS: u32 = 0;
 const SRCCOPY: u32 = 0x00CC_0020;
 const GDI_ERROR: i32 = -1;
 
+/// Resolve a human-readable tray/bin name (e.g. "Tray 1", "Auto") or numeric ID
+/// to a driver bin code (`dmDefaultSource`) via `DeviceCapabilitiesW(DC_BINS / DC_BINNAMES)`.
+fn resolve_printer_bin_id(printer_wide: &[u16], tray_spec: &str) -> Option<i16> {
+    let trimmed = tray_spec.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(num) = trimmed.parse::<i16>() {
+        return Some(num);
+    }
+    let count = unsafe {
+        DeviceCapabilitiesW(
+            printer_wide.as_ptr(),
+            std::ptr::null(),
+            DC_BINS,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        )
+    };
+    if count <= 0 {
+        return None;
+    }
+    let n = count as usize;
+    let mut bin_ids = vec![0u16; n];
+    let got_ids = unsafe {
+        DeviceCapabilitiesW(
+            printer_wide.as_ptr(),
+            std::ptr::null(),
+            DC_BINS,
+            bin_ids.as_mut_ptr() as *mut c_void,
+            std::ptr::null(),
+        )
+    };
+    // DC_BINNAMES: each entry is a 24-WCHAR block (Microsoft Learn).
+    let mut bin_names = vec![0u16; n * 24];
+    let got_names = unsafe {
+        DeviceCapabilitiesW(
+            printer_wide.as_ptr(),
+            std::ptr::null(),
+            DC_BINNAMES,
+            bin_names.as_mut_ptr() as *mut c_void,
+            std::ptr::null(),
+        )
+    };
+    if got_ids <= 0 || got_names <= 0 {
+        return None;
+    }
+    let count_ok = (got_ids as usize).min(got_names as usize).min(n);
+    let target = trimmed.to_ascii_lowercase();
+    for i in 0..count_ok {
+        let block = &bin_names[i * 24..(i + 1) * 24];
+        let end = block.iter().position(|&c| c == 0).unwrap_or(24);
+        let name = String::from_utf16_lossy(&block[..end])
+            .trim()
+            .to_ascii_lowercase();
+        if !name.is_empty() && (name == target || name.contains(&target)) {
+            return Some(bin_ids[i] as i16);
+        }
+    }
+    None
+}
+
+/// Build a validated `DEVMODEW` buffer for `printer` configured for `page_size`,
+/// `matched_form`, `duplex`, `color`, and optional `tray` using the 3-step
+/// Microsoft Learn `DocumentPropertiesW` pattern. Returns `None` if the driver
+/// does not expose a modifiable `DEVMODEW` (caller falls back to default `CreateDCW`).
+fn build_printer_devmode(
+    printer: &str,
+    page_size: PageSize,
+    matched_form: Option<(&Form, MatchKind)>,
+    duplex: bool,
+    color: bool,
+    tray: Option<&str>,
+) -> Option<Vec<u8>> {
+    let name = wide(printer);
+    let mut handle: Handle = std::ptr::null_mut();
+    let ok = unsafe { OpenPrinterW(name.as_ptr(), &mut handle, std::ptr::null_mut()) };
+    if ok == 0 || handle.is_null() {
+        return None;
+    }
+    let result = unsafe {
+        let needed = DocumentPropertiesW(
+            std::ptr::null_mut(),
+            handle,
+            name.as_ptr(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            0,
+        );
+        if needed < std::mem::size_of::<DevModePrefixW>() as i32 {
+            None
+        } else {
+            let mut buf = vec![0u8; needed as usize];
+            let got = DocumentPropertiesW(
+                std::ptr::null_mut(),
+                handle,
+                name.as_ptr(),
+                buf.as_mut_ptr(),
+                std::ptr::null(),
+                DM_OUT_BUFFER,
+            );
+            if got < 0 {
+                None
+            } else {
+                let dm = &mut *(buf.as_mut_ptr() as *mut DevModePrefixW);
+                // Orientation
+                dm.dm_orientation = if page_size.is_landscape() {
+                    DMORIENT_LANDSCAPE
+                } else {
+                    DMORIENT_PORTRAIT
+                };
+                dm.dm_fields |= DM_ORIENTATION;
+
+                // Paper size / form selection (sets both dmPaperSize from DC_PAPERS
+                // when known and dmFormName for Named Forms).
+                let unrotated_w = page_size.width_mm.min(page_size.height_mm);
+                let unrotated_h = page_size.width_mm.max(page_size.height_mm);
+                match matched_form {
+                    Some((
+                        form,
+                        MatchKind::Exact
+                        | MatchKind::NearestLargerCentered
+                        | MatchKind::NearestLargerFit,
+                    )) if !form.name.is_empty() && form.name != "Custom" => {
+                        if let Some(pid) = form.paper_id {
+                            dm.dm_paper_size = pid as i16;
+                            dm.dm_fields |= DM_PAPERSIZE;
+                        }
+                        dm.dm_form_name = [0u16; 32];
+                        for (idx, ch) in form.name.encode_utf16().take(31).enumerate() {
+                            dm.dm_form_name[idx] = ch;
+                        }
+                        dm.dm_fields |= DM_FORMNAME;
+                    }
+                    _ => {
+                        dm.dm_paper_size = DMPAPER_USER;
+                        dm.dm_paper_width =
+                            (unrotated_w * 10.0).round().clamp(100.0, 32000.0) as i16;
+                        dm.dm_paper_length =
+                            (unrotated_h * 10.0).round().clamp(100.0, 32000.0) as i16;
+                        dm.dm_fields |= DM_PAPERSIZE | DM_PAPERWIDTH | DM_PAPERLENGTH;
+                    }
+                }
+
+                // Input tray / bin selection
+                if let Some(t) = tray {
+                    if let Some(bin_id) = resolve_printer_bin_id(&name, t) {
+                        dm.dm_default_source = bin_id;
+                        dm.dm_fields |= DM_DEFAULTSOURCE;
+                    }
+                }
+
+                // Duplex & Color
+                dm.dm_duplex = if duplex {
+                    DMDUP_VERTICAL
+                } else {
+                    DMDUP_SIMPLEX
+                };
+                dm.dm_fields |= DM_DUPLEX;
+                dm.dm_color = if color {
+                    DMCOLOR_COLOR
+                } else {
+                    DMCOLOR_MONOCHROME
+                };
+                dm.dm_fields |= DM_COLOR;
+
+                let merged = DocumentPropertiesW(
+                    std::ptr::null_mut(),
+                    handle,
+                    name.as_ptr(),
+                    buf.as_mut_ptr(),
+                    buf.as_ptr(),
+                    DM_IN_BUFFER | DM_OUT_BUFFER,
+                );
+                if merged < 0 {
+                    None
+                } else {
+                    Some(buf)
+                }
+            }
+        }
+    };
+    unsafe { ClosePrinter(handle) };
+    result
+}
+
 /// Print a PDF through GDI: each page is rendered to a bitmap by the
 /// shared PDFium renderer (print-render) and blitted to the printer
 /// device context. Returns the number of pages sent.
-///
-/// The printer's own selected form/paper governs the physical page;
-/// the rendered bitmap (planned from the PDF's page size) is fitted
-/// into the DC's printable resolution preserving aspect — the same
-/// "never silently print at a wrong size" ladder has already matched
-/// the profile's form to this printer before a job reaches here.
 pub fn print_pdf_gdi(
     printer: &str,
     title: &str,
@@ -106,12 +349,125 @@ pub fn print_pdf_gdi(
     mode: print_render::RenderMode,
     dpi: u32,
 ) -> Result<usize, String> {
+    print_pdf_gdi_copies(printer, title, pdf_bytes, mode, dpi, 1)
+}
+
+/// Print a PDF through GDI with an explicit copy count (`1..=99`).
+pub fn print_pdf_gdi_copies(
+    printer: &str,
+    title: &str,
+    pdf_bytes: &[u8],
+    mode: print_render::RenderMode,
+    dpi: u32,
+    copies: u16,
+) -> Result<usize, String> {
+    let opts = GdiJobOptions {
+        mode,
+        dpi,
+        copies: copies.max(1),
+        duplex: false,
+        color: mode == print_render::RenderMode::Color,
+        scale_policy: ScalePolicy::CustomAllowed,
+        tray: None,
+    };
+    print_pdf_gdi_with_options(printer, title, pdf_bytes, &opts)
+}
+
+/// Print a PDF through GDI with full `GdiJobOptions`:
+/// - Splits mixed-size PDFs into consecutive sub-jobs (`split_subjobs`)
+/// - Matches paper per sub-job (`match_paper`)
+/// - Configures `DEVMODEW` (orientation, paper size/form, tray/bin, duplex, color) via `DocumentPropertiesW`
+/// - Honours `MatchKind::NearestLargerCentered` (100% scale centred) vs `Fit`/`Exact`.
+pub fn print_pdf_gdi_with_options(
+    printer: &str,
+    title: &str,
+    pdf_bytes: &[u8],
+    opts: &GdiJobOptions,
+) -> Result<usize, String> {
     let pdfium = print_render::Pdfium::load().map_err(|e| e.to_string())?;
     let doc = pdfium.load_document(pdf_bytes).map_err(|e| e.to_string())?;
     let pages = doc.page_count();
     if pages == 0 {
         return Err("PDF has no pages".to_string());
     }
+    let mut page_sizes = Vec::with_capacity(pages);
+    for i in 0..pages {
+        page_sizes.push(doc.page_size_mm(i).map_err(|e| e.to_string())?);
+    }
+    let subjobs = split_subjobs(&page_sizes);
+    let forms = paper_forms(printer).unwrap_or_default();
+    let name = wide(printer);
+    let mut total_sent = 0usize;
+
+    for _copy in 0..opts.copies.max(1) {
+        for sub in &subjobs {
+            let matched = if !forms.is_empty() {
+                Some(
+                    match_paper(sub.size, &forms, opts.scale_policy)
+                        .map_err(|e| e.to_string())?,
+                )
+            } else {
+                None
+            };
+            let match_ref = matched.as_ref().map(|m| (&m.form, m.kind));
+            let match_kind = matched.as_ref().map(|m| m.kind).unwrap_or(MatchKind::Exact);
+            let devmode = build_printer_devmode(
+                printer,
+                sub.size,
+                match_ref,
+                opts.duplex,
+                opts.color,
+                opts.tray.as_deref(),
+            );
+            let init_ptr = devmode
+                .as_ref()
+                .map(|b| b.as_ptr() as *const c_void)
+                .unwrap_or(std::ptr::null());
+            let dc = unsafe {
+                CreateDCW(
+                    std::ptr::null(),
+                    name.as_ptr(),
+                    std::ptr::null(),
+                    init_ptr,
+                )
+            };
+            if dc.is_null() {
+                return Err(format!("CreateDC for {printer:?}: {}", last_error()));
+            }
+            let sub_result = print_subjob_gdi(
+                dc,
+                &doc,
+                title,
+                sub.start_page,
+                sub.page_count,
+                sub.size,
+                match_kind,
+                opts.mode,
+                opts.dpi,
+            );
+            unsafe { DeleteDC(dc) };
+            total_sent += sub_result?;
+        }
+    }
+    Ok(total_sent)
+}
+
+/// Print a decoded grayscale `Canvas` image (e.g. a PNG receipt routed
+/// to an office GDI profile) via GDI `StretchDIBits`.
+pub fn print_canvas_gdi(
+    printer: &str,
+    title: &str,
+    canvas: &print_render::bitmap::Canvas,
+    copies: u16,
+) -> Result<usize, String> {
+    let page = print_render::RenderedPage {
+        width_px: canvas.width,
+        height_px: canvas.height,
+        mode: print_render::RenderMode::Grayscale,
+        dpi: 203,
+        pixels: canvas.px.clone(),
+    };
+    let dib = crate::dib::build_dib(&page);
     let name = wide(printer);
     let dc = unsafe {
         CreateDCW(
@@ -124,15 +480,52 @@ pub fn print_pdf_gdi(
     if dc.is_null() {
         return Err(format!("CreateDC for {printer:?}: {}", last_error()));
     }
-    let result = print_pdf_gdi_inner(dc, &doc, title, mode, dpi);
+    let doc_name = wide(title);
+    let info = DocInfoW {
+        size: std::mem::size_of::<DocInfoW>() as i32,
+        doc_name: doc_name.as_ptr(),
+        output: std::ptr::null(),
+        datatype: std::ptr::null(),
+        fw_type: 0,
+    };
+    let started = unsafe { StartDocW(dc, &info) };
+    if started <= 0 {
+        let err = last_error();
+        unsafe { DeleteDC(dc) };
+        return Err(format!("StartDoc: {err}"));
+    }
+    let mut sent = 0usize;
+    let mut failure: Option<String> = None;
+    for _ in 0..copies.max(1) {
+        match blit_dib_page(dc, &dib, None, MatchKind::Exact) {
+            Ok(()) => sent += 1,
+            Err(e) => {
+                failure = Some(e);
+                break;
+            }
+        }
+    }
+    if failure.is_some() {
+        unsafe { AbortDoc(dc) };
+    } else {
+        unsafe { EndDoc(dc) };
+    }
     unsafe { DeleteDC(dc) };
-    result
+    match failure {
+        Some(e) => Err(e),
+        None => Ok(sent),
+    }
 }
 
-fn print_pdf_gdi_inner(
+#[allow(clippy::too_many_arguments)]
+fn print_subjob_gdi(
     dc: Hdc,
     doc: &print_render::PdfDocument,
     title: &str,
+    start_page: usize,
+    page_count: usize,
+    page_size: PageSize,
+    match_kind: MatchKind,
     mode: print_render::RenderMode,
     dpi: u32,
 ) -> Result<usize, String> {
@@ -150,8 +543,8 @@ fn print_pdf_gdi_inner(
     }
     let mut sent = 0usize;
     let mut failure: Option<String> = None;
-    for i in 0..doc.page_count() {
-        match print_one_page(dc, doc, i, mode, dpi) {
+    for i in start_page..(start_page + page_count) {
+        match print_one_page(dc, doc, i, page_size, match_kind, mode, dpi) {
             Ok(()) => sent += 1,
             Err(e) => {
                 failure = Some(format!("page {}: {e}", i + 1));
@@ -174,6 +567,8 @@ fn print_one_page(
     dc: Hdc,
     doc: &print_render::PdfDocument,
     index: usize,
+    page_size: PageSize,
+    match_kind: MatchKind,
     mode: print_render::RenderMode,
     dpi: u32,
 ) -> Result<(), String> {
@@ -181,12 +576,34 @@ fn print_one_page(
         .render_page(index, mode, dpi)
         .map_err(|e| e.to_string())?;
     let dib = crate::dib::build_dib(&page);
+    blit_dib_page(dc, &dib, Some(page_size), match_kind)
+}
+
+fn blit_dib_page(
+    dc: Hdc,
+    dib: &crate::dib::DibImage,
+    page_size: Option<PageSize>,
+    match_kind: MatchKind,
+) -> Result<(), String> {
     let area_w = unsafe { GetDeviceCaps(dc, HORZRES) };
     let area_h = unsafe { GetDeviceCaps(dc, VERTRES) };
     if area_w <= 0 || area_h <= 0 {
         return Err(format!("GetDeviceCaps: {}", last_error()));
     }
-    let (x, y, w, h) = crate::dib::fit_to_page(dib.width, dib.height, area_w as u32, area_h as u32);
+    let (x, y, w, h) = match (match_kind, page_size) {
+        (MatchKind::NearestLargerCentered, Some(ps)) => {
+            let dpi_x = unsafe { GetDeviceCaps(dc, LOGPIXELSX) }.max(72) as f64;
+            let dpi_y = unsafe { GetDeviceCaps(dc, LOGPIXELSY) }.max(72) as f64;
+            let target_w = ((ps.width_mm / 25.4) * dpi_x).round().max(1.0) as u32;
+            let target_h = ((ps.height_mm / 25.4) * dpi_y).round().max(1.0) as u32;
+            let w = target_w.min(area_w as u32);
+            let h = target_h.min(area_h as u32);
+            let x = ((area_w as u32).saturating_sub(w) / 2) as i32;
+            let y = ((area_h as u32).saturating_sub(h) / 2) as i32;
+            (x, y, w, h)
+        }
+        _ => crate::dib::fit_to_page(dib.width, dib.height, area_w as u32, area_h as u32),
+    };
     if unsafe { StartPage(dc) } <= 0 {
         return Err(format!("StartPage: {}", last_error()));
     }
@@ -403,8 +820,9 @@ pub fn default_printer_name() -> Result<String, String> {
         .to_string())
 }
 
-/// Paper forms for a printer, via DeviceCapabilities. Sizes come back in
-/// tenths of a millimetre (POINT structs) and are converted to mm here.
+/// Paper forms for a printer, via DeviceCapabilities (DC_PAPERS,
+/// DC_PAPERSIZE, and DC_PAPERNAMES). Sizes come back in tenths of a
+/// millimetre (POINT structs), IDs in WORDs, and names in 64-WCHAR blocks.
 pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
     let name = wide(printer);
     let count = unsafe {
@@ -420,6 +838,16 @@ pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
         return Err(last_error());
     }
     let n = count as usize;
+    let mut paper_ids = vec![0u16; n];
+    let got_ids = unsafe {
+        DeviceCapabilitiesW(
+            name.as_ptr(),
+            std::ptr::null(),
+            DC_PAPERS,
+            paper_ids.as_mut_ptr() as *mut c_void,
+            std::ptr::null(),
+        )
+    };
     let mut sizes = vec![0i32; n * 2]; // POINT is two LONGs (i32)
     let got = unsafe {
         DeviceCapabilitiesW(
@@ -433,17 +861,35 @@ pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
     if got <= 0 {
         return Err(last_error());
     }
-    // Names are synthesised from sizes here; DC_PAPERNAMES name resolution
-    // joins in the discovery work. Sizes are what the ladder consumes.
-    let mut forms = Vec::with_capacity(n);
-    for i in 0..n {
+    let valid_count = (got as usize).min(n);
+    // Query DC_PAPERNAMES (16): each entry is a 64-WCHAR block.
+    let mut name_blocks = vec![0u16; n * 64];
+    let got_names = unsafe {
+        DeviceCapabilitiesW(
+            name.as_ptr(),
+            std::ptr::null(),
+            DC_PAPERNAMES,
+            name_blocks.as_mut_ptr() as *mut c_void,
+            std::ptr::null(),
+        )
+    };
+    let mut forms = Vec::with_capacity(valid_count);
+    for i in 0..valid_count {
         let w_mm = sizes[i * 2] as f64 / 10.0;
         let h_mm = sizes[i * 2 + 1] as f64 / 10.0;
         if w_mm > 0.0 && h_mm > 0.0 {
-            forms.push(Form::sheet(
-                &format!("{w_mm:.0}x{h_mm:.0}mm"),
-                PageSize::new(w_mm, h_mm),
-            ));
+            let raw_name = if got_names > 0 && i < (got_names as usize) {
+                let block = &name_blocks[i * 64..(i + 1) * 64];
+                let end = block.iter().position(|&c| c == 0).unwrap_or(64);
+                String::from_utf16_lossy(&block[..end])
+            } else {
+                String::new()
+            };
+            let mut form = crate::discovery::classify_form(&raw_name, w_mm, h_mm);
+            if got_ids > 0 && i < (got_ids as usize) && paper_ids[i] > 0 {
+                form.paper_id = Some(paper_ids[i]);
+            }
+            forms.push(form);
         }
     }
     Ok(forms)

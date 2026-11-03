@@ -12,6 +12,9 @@ pub struct Form {
     /// width fits, regardless of height. `size.height_mm` is then nominal.
     #[serde(default)]
     pub roll: bool,
+    /// Optional Win32 `dmPaperSize` ID returned by `DeviceCapabilitiesW(DC_PAPERS)`.
+    #[serde(default)]
+    pub paper_id: Option<u16>,
 }
 
 impl Form {
@@ -20,6 +23,7 @@ impl Form {
             name: name.to_string(),
             size,
             roll: false,
+            paper_id: None,
         }
     }
     pub fn roll(name: &str, width_mm: f64) -> Self {
@@ -27,7 +31,12 @@ impl Form {
             name: name.to_string(),
             size: PageSize::new(width_mm, 0.0),
             roll: true,
+            paper_id: None,
         }
+    }
+    pub fn with_id(mut self, id: u16) -> Self {
+        self.paper_id = Some(id);
+        self
     }
 }
 
@@ -107,6 +116,7 @@ pub fn match_paper(
                 name: f.name.clone(),
                 size: page,
                 roll: true,
+                paper_id: f.paper_id,
             },
         });
     }
@@ -118,6 +128,7 @@ pub fn match_paper(
                 name: "Custom".to_string(),
                 size: page,
                 roll: false,
+                paper_id: None,
             },
         });
     }
@@ -172,9 +183,9 @@ mod tests {
     use super::*;
     fn forms() -> Vec<Form> {
         vec![
-            Form::sheet("A4", PageSize::a4()),
-            Form::sheet("A5", PageSize::a5()),
-            Form::sheet("Letter", PageSize::new(215.9, 279.4)),
+            Form::sheet("A4", PageSize::a4()).with_id(9),
+            Form::sheet("A5", PageSize::a5()).with_id(11),
+            Form::sheet("Letter", PageSize::new(215.9, 279.4)).with_id(1),
         ]
     }
     #[test]
@@ -182,6 +193,7 @@ mod tests {
         let m = match_paper(PageSize::a4(), &forms(), ScalePolicy::Strict).unwrap();
         assert_eq!(m.kind, MatchKind::Exact);
         assert_eq!(m.form.name, "A4");
+        assert_eq!(m.form.paper_id, Some(9));
     }
     #[test]
     fn exact_rotated_a4() {
@@ -190,7 +202,6 @@ mod tests {
     }
     #[test]
     fn strict_rejects_label_size() {
-        // 100x150 label on an A4/A5/Letter printer must FAIL, not print wrong.
         assert!(match_paper(PageSize::label_100x150(), &forms(), ScalePolicy::Strict).is_err());
     }
     #[test]
@@ -206,9 +217,6 @@ mod tests {
     }
     #[test]
     fn nearest_larger_never_smaller() {
-        // A size between A5 and A4: nearest larger by area is Letter
-        // (215.9x279.4 = 60,321 mm2) ahead of A4 (62,370 mm2). Both fit;
-        // the ladder must pick the smallest sufficient form.
         let m = match_paper(
             PageSize::new(160.0, 220.0),
             &forms(),
@@ -216,22 +224,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!(m.form.name, "Letter");
-        // A4 page with only A5 available must fail, never shrink silently.
         let small = vec![Form::sheet("A5", PageSize::a5())];
         assert!(match_paper(PageSize::a4(), &small, ScalePolicy::NearestLargerFit).is_err());
     }
     #[test]
     fn roll_matches_any_height_same_width() {
         let forms = vec![Form::roll("80mm Roll", 80.0)];
-        // A short receipt and a very long receipt both fit the same roll.
         for h in [90.0, 400.0, 2_000.0] {
             let m = match_paper(PageSize::new(80.0, h), &forms, ScalePolicy::Strict).unwrap();
             assert_eq!(m.kind, MatchKind::Roll);
             assert_eq!(m.form.size.height_mm, h);
         }
-        // A wider page must NOT be squeezed onto the roll.
         assert!(match_paper(PageSize::a5(), &forms, ScalePolicy::Strict).is_err());
-        // 58mm roll does not take 80mm receipts.
         let narrow = vec![Form::roll("58mm Roll", 58.0)];
         assert!(match_paper(PageSize::new(80.0, 100.0), &narrow, ScalePolicy::Strict).is_err());
     }

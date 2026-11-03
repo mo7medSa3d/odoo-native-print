@@ -95,6 +95,17 @@ type FnBitmapDestroy = unsafe extern "C" fn(FpdfBitmap);
 const FORMAT_GRAY: c_int = 1;
 const FORMAT_BGRA: c_int = 4;
 
+/// FPDF_RenderPageBitmap flags (fpdfview.h):
+/// - `FPDF_ANNOT` (0x01): render PDF annotations (stamps, form widgets).
+/// - `FPDF_PRINTING` (0x800): render specifically for printing (disables LCD subpixel smoothing).
+/// - `FPDF_RENDER_NO_SMOOTHTEXT` (0x1000) / `NO_SMOOTHIMAGE` (0x2000) / `NO_SMOOTHPATH` (0x4000):
+///   disable anti-aliasing for 1-bit threshold thermal/barcode rendering so barcode bars stay crisp.
+const FPDF_ANNOT: c_int = 0x0001;
+const FPDF_PRINTING: c_int = 0x0800;
+const FPDF_RENDER_NO_SMOOTHTEXT: c_int = 0x1000;
+const FPDF_RENDER_NO_SMOOTHIMAGE: c_int = 0x2000;
+const FPDF_RENDER_NO_SMOOTHPATH: c_int = 0x4000;
+
 struct Api {
     init_library: FnInitLibrary,
     destroy_library: FnDestroyLibrary,
@@ -130,10 +141,14 @@ fn init_refcount() -> &'static Mutex<usize> {
 /// A loaded PDFium library. Cheap to clone (Arc inside documents);
 /// the underlying library is initialised on first load and destroyed
 /// when the last instance drops.
+///
+/// Field declaration order matters in Rust: `api` is dropped before `_lib`,
+/// and `Drop` runs before either field is dropped, so `destroy_library` is
+/// always called while `_lib` is still mapped in memory.
 pub struct Pdfium {
-    _lib: libloading::Library,
     api: Api,
     loaded_from: PathBuf,
+    _lib: libloading::Library,
 }
 
 impl Pdfium {
@@ -165,9 +180,9 @@ impl Pdfium {
                         *count += 1;
                     }
                     return Ok(Arc::new(Self {
-                        _lib: lib,
                         api,
                         loaded_from: cand.clone(),
+                        _lib: lib,
                     }));
                 }
                 Err(e) => {
@@ -196,13 +211,9 @@ impl Pdfium {
         &self.loaded_from
     }
 
-    /// Open a PDF held in memory. The bytes are copied into the
-    /// document handle (PDFium copies what it needs at load time in
-    /// the pinned build's `FPDF_LoadMemDocument` contract: the caller
-    /// must keep `bytes` alive only for this call — we pass a buffer
-    /// we own until the call returns; PDFium documents that the data
+    /// Open a PDF held in memory. PDFium documents that the data buffer
     /// must remain valid while the document is open, so this wrapper
-    /// retains an owned copy inside [`PdfDocument`]).
+    /// retains an owned copy inside [`PdfDocument`].
     pub fn load_document(self: &Arc<Self>, bytes: &[u8]) -> Result<PdfDocument, PdfiumError> {
         let owned = bytes.to_vec();
         let _guard = call_lock().lock().expect("pdfium lock poisoned");
@@ -416,6 +427,16 @@ impl PdfDocument {
             RenderMode::Color => FORMAT_BGRA,
             _ => FORMAT_GRAY,
         };
+        let render_flags = match mode {
+            RenderMode::Threshold => {
+                FPDF_ANNOT
+                    | FPDF_PRINTING
+                    | FPDF_RENDER_NO_SMOOTHTEXT
+                    | FPDF_RENDER_NO_SMOOTHIMAGE
+                    | FPDF_RENDER_NO_SMOOTHPATH
+            }
+            _ => FPDF_ANNOT | FPDF_PRINTING,
+        };
         let bitmap = unsafe {
             (api.bitmap_create_ex)(w as c_int, h as c_int, format, std::ptr::null_mut(), 0)
         };
@@ -426,7 +447,16 @@ impl PdfDocument {
             // White background (BGRA 0xFFFFFFFF) so transparent page
             // areas print as paper, not black.
             (api.bitmap_fill_rect)(bitmap, 0, 0, w as c_int, h as c_int, 0xFFFF_FFFF);
-            (api.render_page_bitmap)(bitmap, page, 0, 0, w as c_int, h as c_int, 0, 0);
+            (api.render_page_bitmap)(
+                bitmap,
+                page,
+                0,
+                0,
+                w as c_int,
+                h as c_int,
+                0,
+                render_flags,
+            );
             let bw = (api.bitmap_get_width)(bitmap) as u32;
             let bh = (api.bitmap_get_height)(bitmap) as u32;
             let stride = (api.bitmap_get_stride)(bitmap) as usize;

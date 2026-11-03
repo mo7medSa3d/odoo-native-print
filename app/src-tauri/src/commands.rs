@@ -1,17 +1,147 @@
-//! Tauri commands callable from the configured Odoo origin.
+//! Tauri commands callable from the configured Odoo origin and the local
+//! Control Center (`index.html`).
 //! Every command validates the calling webview's origin in Rust first
-//! (ADR-0002): Tauri app commands are not permission-gated by default,
-//! and origin classification has been wrong before (CVE-2026-42184).
+//! (ADR-0002): Tauri app commands are registered in `AppManifest::commands`
+//! (`build.rs`) and also checked explicitly in Rust so origin confusion
+//! (CVE-2026-42184) can never bypass security.
 
+use crate::config;
+use print_core::diagnostics::{build_bundle_from_queue, bundle_to_json, JobSummary};
+use print_core::paper::{match_paper, Form, ScalePolicy};
+use print_core::printer::{needs_intervention, PrinterInfo, PrinterStatus};
+use print_core::routing::resolve_printer;
 use print_core::security::{origin_is_allowed, validate_job_input};
-use print_core::{Job, JobState, Queue};
-use serde::Deserialize;
-use std::sync::Mutex;
+use print_core::worker::Outcome;
+use print_core::{
+    BackendError, Job, JobOptions, JobState, PrintBackend, Queue, Worker, WorkerConfig,
+};
+use print_raw::MonoBitmap;
+use print_render::RenderMode;
+use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::time::Duration;
 use tauri::State;
 
 pub struct AppState {
-    pub queue: Mutex<Queue>,
-    pub configured_origin: String,
+    pub queue: Arc<Mutex<Queue>>,
+    pub db_path: String,
+    pub configured_origin: RwLock<Option<String>>,
+    pub config_dir: PathBuf,
+    pub locked_by_policy: bool,
+    pub auto_reprint: RwLock<bool>,
+    pub worker_wake: Arc<(Mutex<bool>, Condvar)>,
+}
+
+impl AppState {
+    pub fn notify_worker(&self) {
+        let (lock, cvar) = &*self.worker_wake;
+        if let Ok(mut pending) = lock.lock() {
+            *pending = true;
+            cvar.notify_all();
+        }
+    }
+}
+
+/// Custom deserializer that accepts:
+/// 1. Standard JSON number array `[37, 80, 68, 70, ...]`
+/// 2. Base64 string `"JVBERi0..."`
+/// 3. JavaScript `Uint8Array` serialized as an object `{"0": 37, "1": 80, ...}`
+fn deserialize_bytes<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum BytePayload {
+        Seq(Vec<u8>),
+        Str(String),
+        Map(BTreeMap<usize, u8>),
+    }
+
+    match BytePayload::deserialize(deserializer)? {
+        BytePayload::Seq(v) => Ok(v),
+        BytePayload::Str(s) => decode_base64(&s).map_err(serde::de::Error::custom),
+        BytePayload::Map(m) => Ok(m.into_values().collect()),
+    }
+}
+
+fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
+    let clean: Vec<u8> = input
+        .bytes()
+        .filter(|b| !b.is_ascii_whitespace())
+        .collect();
+    if clean.is_empty() {
+        return Ok(Vec::new());
+    }
+    let val = |b: u8| -> Result<u8, String> {
+        match b {
+            b'A'..=b'Z' => Ok(b - b'A'),
+            b'a'..=b'z' => Ok(b - b'a' + 26),
+            b'0'..=b'9' => Ok(b - b'0' + 52),
+            b'+' | b'-' => Ok(62),
+            b'/' | b'_' => Ok(63),
+            _ => Err(format!("invalid base64 byte: {b}")),
+        }
+    };
+    let mut out = Vec::with_capacity(clean.len() * 3 / 4);
+    for chunk in clean.chunks(4) {
+        let a = val(chunk[0])?;
+        let b = if chunk.len() > 1 && chunk[1] != b'=' {
+            val(chunk[1])?
+        } else {
+            0
+        };
+        out.push((a << 2) | (b >> 4));
+        if chunk.len() > 2 && chunk[2] != b'=' {
+            let c = val(chunk[2])?;
+            out.push((b << 4) | (c >> 2));
+            if chunk.len() > 3 && chunk[3] != b'=' {
+                let d = val(chunk[3])?;
+                out.push((c << 6) | d);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Exact check for Tauri's internal bundled asset origin (`tauri://localhost`
+/// or `http(s)://tauri.localhost`). Uses full host equality so CVE-2026-42184
+/// first-label tricks (`http://tauri.evil.com`) never match.
+pub fn is_local_app_url(url: &tauri::Url) -> bool {
+    match url.scheme() {
+        "tauri" => url.host_str() == Some("localhost"),
+        "http" | "https" => url.host_str() == Some("tauri.localhost"),
+        _ => false,
+    }
+}
+
+fn check_origin(webview: &tauri::Webview, state: &AppState) -> Result<(), String> {
+    let url = webview.url().map_err(|e| e.to_string())?;
+    if is_local_app_url(&url) {
+        return Ok(());
+    }
+    let origin = url.origin().ascii_serialization();
+    let guard = state
+        .configured_origin
+        .read()
+        .map_err(|_| "config_lock_poisoned".to_string())?;
+    if let Some(configured) = guard.as_deref() {
+        if origin_is_allowed(configured, &origin) {
+            return Ok(());
+        }
+    }
+    Err("forbidden_origin".to_string())
+}
+
+fn check_local_only(webview: &tauri::Webview) -> Result<(), String> {
+    let url = webview.url().map_err(|e| e.to_string())?;
+    if is_local_app_url(&url) {
+        Ok(())
+    } else {
+        Err("local_control_center_only".to_string())
+    }
 }
 
 /// The payload the Odoo addon's handler sends (API contract v1).
@@ -23,33 +153,23 @@ pub struct PrintPdfRequest {
     pub report_name: String,
     pub printer_pattern: String,
     pub mode: String,
-    // Contract fields (API v1): accepted and type-checked at the
-    // door, currently informational — the server resolves rules and
-    // paper/scale from the profile; the client routes by
-    // printer_pattern + mode. Kept so the wire contract stays
-    // complete and forward-compatible.
-    #[allow(dead_code)]
     pub paper: Option<String>,
     pub copies: u16,
-    #[allow(dead_code)]
     pub scale_policy: Option<String>,
+    #[serde(default)]
+    pub duplex: bool,
+    #[serde(default = "default_true")]
+    pub color: bool,
+    #[serde(default)]
+    pub tray: Option<String>,
     #[allow(dead_code)]
     pub url: String,
-    // NOTE (spike S4): bytes currently arrive through Tauri's standard
-    // invoke serialisation. The raw-body transfer (<2s for 50 MB,
-    // bounded memory) is the Windows-phase optimisation tracked in
-    // docs/spikes/S1-S8.md; the 50 MiB cap below applies either way.
+    #[serde(deserialize_with = "deserialize_bytes")]
     pub bytes: Vec<u8>,
 }
 
-fn check_origin(webview: &tauri::Webview, configured: &str) -> Result<(), String> {
-    let url = webview.url().map_err(|e| e.to_string())?;
-    let origin = url.origin().ascii_serialization();
-    if origin_is_allowed(configured, &origin) {
-        Ok(())
-    } else {
-        Err("forbidden_origin".to_string())
-    }
+fn default_true() -> bool {
+    true
 }
 
 #[tauri::command]
@@ -58,14 +178,16 @@ pub fn print_pdf(
     state: State<'_, AppState>,
     req: PrintPdfRequest,
 ) -> Result<String, String> {
-    check_origin(&webview, &state.configured_origin)?;
-    // Inspect the document before queueing it: a non-PDF, an encrypted
-    // PDF, or a limit violation is rejected here, never at the printer.
+    check_origin(&webview, &state)?;
     let info = print_render::parse_pdf_info(&req.bytes).map_err(|e| e.to_string())?;
     let pages = info.pages.len() as u32;
-    let first = info.pages.first().ok_or("empty_document")?;
-    validate_job_input(req.bytes.len(), pages, req.copies, first.size)
-        .map_err(|e| format!("{e:?}"))?;
+    if pages == 0 {
+        return Err("empty_document".to_string());
+    }
+    for p in &info.pages {
+        validate_job_input(req.bytes.len(), pages, req.copies, p.size)
+            .map_err(|e| format!("{e:?}"))?;
+    }
     let job = Job {
         id: req.idempotency_key.clone(),
         idempotency_key: req.idempotency_key.clone(),
@@ -73,23 +195,34 @@ pub fn print_pdf(
         report: Some(req.report_name.clone()),
         pages,
         bytes: req.bytes.len() as u64,
-        // Receipt-style modes jump the queue; office documents are normal.
         priority: if req.mode == "escpos" { 10 } else { 0 },
         state: JobState::Queued,
         attempts: 0,
         error_code: None,
     };
-    let mut queue = state
-        .queue
-        .lock()
-        .map_err(|_| "queue_poisoned".to_string())?;
-    let id = queue.enqueue(&job).map_err(|e| e.to_string())?;
-    // The document bytes are stored with the job so the worker can print
-    // after any restart. On a deduplicated submission the payload of the
-    // original job is kept (identical key = identical document contract).
-    queue
-        .store_payload(&id, "pdf", &req.bytes)
-        .map_err(|e| e.to_string())?;
+    let opts = JobOptions {
+        mode: req.mode.clone(),
+        paper: req.paper.clone(),
+        copies: req.copies.max(1),
+        scale_policy: req.scale_policy.clone(),
+        duplex: req.duplex,
+        color: req.color,
+        cut: true,
+        tray: req.tray.clone(),
+    };
+    let id = {
+        let mut queue = state
+            .queue
+            .lock()
+            .map_err(|_| "queue_poisoned".to_string())?;
+        let id = queue.enqueue(&job).map_err(|e| e.to_string())?;
+        queue
+            .store_payload(&id, "pdf", &req.bytes)
+            .map_err(|e| e.to_string())?;
+        queue.store_options(&id, &opts).map_err(|e| e.to_string())?;
+        id
+    };
+    state.notify_worker();
     Ok(id)
 }
 
@@ -99,25 +232,30 @@ pub struct PrintTextRequest {
     pub idempotency_key: String,
     pub report_name: String,
     pub printer_pattern: String,
-    /// Plain text of a qweb-text report (kitchen tickets). Arabic text is
-    /// NOT sent through this path (ESC/POS text mode cannot shape RTL);
-    /// Arabic receipts use the PDF/raster path by design.
     pub text: String,
     pub cut: bool,
+    #[serde(default)]
+    pub copies: Option<u16>,
 }
 
-/// qweb-text path: encode the text as an ESC/POS stream here (text lines,
-/// feed, cut) and queue it as a raw job with receipt priority.
 #[tauri::command]
 pub fn print_text(
     webview: tauri::Webview,
     state: State<'_, AppState>,
     req: PrintTextRequest,
 ) -> Result<String, String> {
-    check_origin(&webview, &state.configured_origin)?;
+    check_origin(&webview, &state)?;
     if req.text.is_empty() || req.text.len() > 1_048_576 {
         return Err("bad_text_size".to_string());
     }
+    let copies = req.copies.unwrap_or(1);
+    validate_job_input(
+        req.text.len(),
+        1,
+        copies,
+        print_core::PageSize::roll_80(200.0),
+    )
+    .map_err(|e| format!("{e:?}"))?;
     let mut stream = print_raw::EscPos::new();
     for line in req.text.lines() {
         stream = stream.text_line(line);
@@ -139,14 +277,29 @@ pub fn print_text(
         attempts: 0,
         error_code: None,
     };
-    let mut queue = state
-        .queue
-        .lock()
-        .map_err(|_| "queue_poisoned".to_string())?;
-    let id = queue.enqueue(&job).map_err(|e| e.to_string())?;
-    queue
-        .store_payload(&id, "escpos", &bytes)
-        .map_err(|e| e.to_string())?;
+    let opts = JobOptions {
+        mode: "escpos".to_string(),
+        paper: Some("80mm".to_string()),
+        copies: copies.max(1),
+        scale_policy: None,
+        duplex: false,
+        color: false,
+        cut: req.cut,
+        tray: None,
+    };
+    let id = {
+        let mut queue = state
+            .queue
+            .lock()
+            .map_err(|_| "queue_poisoned".to_string())?;
+        let id = queue.enqueue(&job).map_err(|e| e.to_string())?;
+        queue
+            .store_payload(&id, "escpos", &bytes)
+            .map_err(|e| e.to_string())?;
+        queue.store_options(&id, &opts).map_err(|e| e.to_string())?;
+        id
+    };
+    state.notify_worker();
     Ok(id)
 }
 
@@ -154,33 +307,33 @@ pub fn print_text(
 #[serde(rename_all = "camelCase")]
 pub struct PrintImageRequest {
     pub idempotency_key: String,
-    /// Source name, e.g. "point_of_sale.receipt".
     pub report_name: String,
     pub printer_pattern: String,
-    /// Receipt paper from the server profile: "80mm" (default) or "58mm".
-    /// Contract field: the backend applies the profile's paper at
-    /// print time (receipt_png_to_escpos); accepted here so the wire
-    /// contract stays complete.
-    #[allow(dead_code)]
     pub paper: Option<String>,
-    /// PNG bytes captured by the POS extension (receipt as an image).
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub copies: Option<u16>,
+    #[serde(deserialize_with = "deserialize_bytes")]
     pub bytes: Vec<u8>,
 }
 
-/// POS receipt / image path: the addon sends the receipt as a PNG image;
-/// we validate it by fully decoding it here (bad images are rejected at
-/// the door, never at the printer), then queue it durably. At print
-/// time the backend converts it with print_render::receipt_png_to_escpos
-/// (scale to the paper width, threshold, ESC/POS raster) for thermal
-/// profiles, or prints the bitmap via GDI for office profiles.
 #[tauri::command]
 pub fn print_image(
     webview: tauri::Webview,
     state: State<'_, AppState>,
     req: PrintImageRequest,
 ) -> Result<String, String> {
-    check_origin(&webview, &state.configured_origin)?;
+    check_origin(&webview, &state)?;
     let _img = print_render::decode_png(&req.bytes).map_err(|e| e.to_string())?;
+    let copies = req.copies.unwrap_or(1);
+    validate_job_input(
+        req.bytes.len(),
+        1,
+        copies,
+        print_core::PageSize::roll_80(200.0),
+    )
+    .map_err(|e| format!("{e:?}"))?;
     let job = Job {
         id: req.idempotency_key.clone(),
         idempotency_key: req.idempotency_key.clone(),
@@ -188,20 +341,34 @@ pub fn print_image(
         report: Some(req.report_name.clone()),
         pages: 1,
         bytes: req.bytes.len() as u64,
-        // Receipts jump the queue, like ESC/POS report jobs.
         priority: 10,
         state: JobState::Queued,
         attempts: 0,
         error_code: None,
     };
-    let mut queue = state
-        .queue
-        .lock()
-        .map_err(|_| "queue_poisoned".to_string())?;
-    let id = queue.enqueue(&job).map_err(|e| e.to_string())?;
-    queue
-        .store_payload(&id, "image-png", &req.bytes)
-        .map_err(|e| e.to_string())?;
+    let opts = JobOptions {
+        mode: req.mode.unwrap_or_else(|| "escpos".to_string()),
+        paper: Some(req.paper.unwrap_or_else(|| "80mm".to_string())),
+        copies: copies.max(1),
+        scale_policy: Some("custom_allowed".to_string()),
+        duplex: false,
+        color: false,
+        cut: true,
+        tray: None,
+    };
+    let id = {
+        let mut queue = state
+            .queue
+            .lock()
+            .map_err(|_| "queue_poisoned".to_string())?;
+        let id = queue.enqueue(&job).map_err(|e| e.to_string())?;
+        queue
+            .store_payload(&id, "image-png", &req.bytes)
+            .map_err(|e| e.to_string())?;
+        queue.store_options(&id, &opts).map_err(|e| e.to_string())?;
+        id
+    };
+    state.notify_worker();
     Ok(id)
 }
 
@@ -211,11 +378,834 @@ pub fn print_status(
     state: State<'_, AppState>,
     job_id: String,
 ) -> Result<String, String> {
-    check_origin(&webview, &state.configured_origin)?;
+    check_origin(&webview, &state)?;
     let queue = state
         .queue
         .lock()
         .map_err(|_| "queue_poisoned".to_string())?;
     let job = queue.get(&job_id).map_err(|e| e.to_string())?;
     Ok(job.state.as_str().to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobDetailResponse {
+    pub id: String,
+    pub state: String,
+    pub error_code: Option<String>,
+    pub printer: String,
+    pub report: Option<String>,
+    pub pages: u32,
+    pub bytes: u64,
+    pub attempts: u32,
+}
+
+#[tauri::command]
+pub fn job_detail(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    job_id: String,
+) -> Result<JobDetailResponse, String> {
+    check_origin(&webview, &state)?;
+    let queue = state
+        .queue
+        .lock()
+        .map_err(|_| "queue_poisoned".to_string())?;
+    let job = queue.get(&job_id).map_err(|e| e.to_string())?;
+    Ok(JobDetailResponse {
+        id: job.id,
+        state: job.state.as_str().to_string(),
+        error_code: job.error_code,
+        printer: job.printer,
+        report: job.report,
+        pages: job.pages,
+        bytes: job.bytes,
+        attempts: job.attempts,
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppOverviewResponse {
+    pub app_version: String,
+    pub os: String,
+    pub odoo_origin: Option<String>,
+    pub locked_by_policy: bool,
+    pub auto_reprint: bool,
+    pub config_path: String,
+    pub pdfium_ready: bool,
+    pub pdfium_detail: String,
+    pub printers: Vec<PrinterInfo>,
+    pub default_printer: Option<String>,
+    pub state_counts: Vec<(String, u64)>,
+    pub recent_jobs: Vec<JobSummary>,
+}
+
+#[tauri::command]
+pub fn app_overview(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<AppOverviewResponse, String> {
+    check_origin(&webview, &state)?;
+    let (pdfium_ready, pdfium_detail) = match print_render::Pdfium::load() {
+        Ok(p) => (true, p.loaded_from().display().to_string()),
+        Err(e) => (false, e.to_string()),
+    };
+    let printers = print_win::discover_printers().unwrap_or_default();
+    let default_printer = print_win::default_printer_name().ok();
+    let origin = state
+        .configured_origin
+        .read()
+        .map_err(|_| "config_lock_poisoned".to_string())?
+        .clone();
+    let auto_reprint = *state
+        .auto_reprint
+        .read()
+        .map_err(|_| "config_lock_poisoned".to_string())?;
+    let bundle = {
+        let queue = state
+            .queue
+            .lock()
+            .map_err(|_| "queue_poisoned".to_string())?;
+        build_bundle_from_queue(&queue).map_err(|e| e.to_string())?
+    };
+    Ok(AppOverviewResponse {
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        os: std::env::consts::OS.to_string(),
+        odoo_origin: origin,
+        locked_by_policy: state.locked_by_policy,
+        auto_reprint,
+        config_path: state.config_dir.join("config.json").display().to_string(),
+        pdfium_ready,
+        pdfium_detail,
+        printers,
+        default_printer,
+        state_counts: bundle.state_counts,
+        recent_jobs: bundle.recent_jobs,
+    })
+}
+
+#[tauri::command]
+pub fn list_printers(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<Vec<PrinterInfo>, String> {
+    check_origin(&webview, &state)?;
+    Ok(print_win::discover_printers().unwrap_or_default())
+}
+
+#[tauri::command]
+pub fn printer_forms(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    printer: String,
+) -> Result<Vec<Form>, String> {
+    check_origin(&webview, &state)?;
+    print_win::paper_forms(&printer).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn run_test_print(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    printer: String,
+    kind: String,
+    paper: Option<String>,
+) -> Result<String, String> {
+    check_origin(&webview, &state)?;
+    if printer.trim().is_empty() {
+        return Err("printer_required".to_string());
+    }
+    let key = format!(
+        "cal-{}-{}",
+        kind.replace(|c: char| !c.is_ascii_alphanumeric(), "-"),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(1)
+    );
+    let (payload_kind, payload_bytes, opts, prio) = match kind.as_str() {
+        "thermal-80mm" | "thermal-58mm" | "escpos" => {
+            let is_58 = kind == "thermal-58mm"
+                || paper
+                    .as_deref()
+                    .map(|p| print_render::receipt_dots_for_paper(p) == 384)
+                    .unwrap_or(false);
+            let bm = if is_58 {
+                print_render::calibration::calibration_thermal_58mm()
+            } else {
+                print_render::calibration::calibration_thermal_80mm()
+            };
+            let stream = print_raw::EscPos::new()
+                .raster(&bm)
+                .feed_lines(4)
+                .cut_partial();
+            let default_paper = if is_58 { "58mm" } else { "80mm" };
+            (
+                "escpos",
+                stream.bytes().to_vec(),
+                JobOptions {
+                    mode: "escpos".to_string(),
+                    paper: Some(paper.unwrap_or_else(|| default_paper.to_string())),
+                    copies: 1,
+                    scale_policy: Some("custom_allowed".to_string()),
+                    duplex: false,
+                    color: false,
+                    cut: true,
+                    tray: None,
+                },
+                10,
+            )
+        }
+        "zpl-label" | "zpl" => {
+            let bm = print_render::calibration::calibration_thermal_80mm();
+            let zpl = print_raw::zpl_label_with_options(&bm, 0, 0, 1);
+            (
+                "zpl",
+                zpl.into_bytes(),
+                JobOptions {
+                    mode: "zpl".to_string(),
+                    paper: Some(paper.unwrap_or_else(|| "100x150mm".to_string())),
+                    copies: 1,
+                    scale_policy: Some("custom_allowed".to_string()),
+                    duplex: false,
+                    color: false,
+                    cut: false,
+                    tray: None,
+                },
+                5,
+            )
+        }
+        "tspl-label" | "tspl" => {
+            let bm = print_render::calibration::calibration_thermal_80mm();
+            let tspl = print_raw::tspl::TsplLabel::new(100, 150, 3)
+                .bitmap(0, 0, &bm)
+                .text(40, 20, "Odoo Native Print TSPL Calibration")
+                .print(1, 1);
+            (
+                "tspl",
+                tspl,
+                JobOptions {
+                    mode: "tspl".to_string(),
+                    paper: Some(paper.unwrap_or_else(|| "100x150mm".to_string())),
+                    copies: 1,
+                    scale_policy: Some("custom_allowed".to_string()),
+                    duplex: false,
+                    color: false,
+                    cut: false,
+                    tray: None,
+                },
+                5,
+            )
+        }
+        _ => {
+            let pdf = print_render::calibration::calibration_pdf();
+            (
+                "pdf",
+                pdf,
+                JobOptions {
+                    mode: "gdi".to_string(),
+                    paper: Some(paper.unwrap_or_else(|| "A4".to_string())),
+                    copies: 1,
+                    scale_policy: Some("custom_allowed".to_string()),
+                    duplex: false,
+                    color: false,
+                    cut: false,
+                    tray: None,
+                },
+                0,
+            )
+        }
+    };
+    let job = Job {
+        id: key.clone(),
+        idempotency_key: key,
+        printer: printer.trim().to_string(),
+        report: Some(format!("calibration.{kind}")),
+        pages: 1,
+        bytes: payload_bytes.len() as u64,
+        priority: prio,
+        state: JobState::Queued,
+        attempts: 0,
+        error_code: None,
+    };
+    let id = {
+        let mut queue = state
+            .queue
+            .lock()
+            .map_err(|_| "queue_poisoned".to_string())?;
+        let id = queue.enqueue(&job).map_err(|e| e.to_string())?;
+        queue
+            .store_payload(&id, payload_kind, &payload_bytes)
+            .map_err(|e| e.to_string())?;
+        queue.store_options(&id, &opts).map_err(|e| e.to_string())?;
+        id
+    };
+    state.notify_worker();
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn retry_job_cmd(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    job_id: String,
+) -> Result<(), String> {
+    check_origin(&webview, &state)?;
+    {
+        let mut queue = state
+            .queue
+            .lock()
+            .map_err(|_| "queue_poisoned".to_string())?;
+        queue.retry_job(&job_id).map_err(|e| e.to_string())?;
+    }
+    state.notify_worker();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cancel_job_cmd(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    job_id: String,
+) -> Result<(), String> {
+    check_origin(&webview, &state)?;
+    let mut queue = state
+        .queue
+        .lock()
+        .map_err(|_| "queue_poisoned".to_string())?;
+    queue.cancel_job(&job_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn clear_finished_cmd(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<u64, String> {
+    check_origin(&webview, &state)?;
+    let mut queue = state
+        .queue
+        .lock()
+        .map_err(|_| "queue_poisoned".to_string())?;
+    queue.clear_finished().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn export_diagnostics(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    check_origin(&webview, &state)?;
+    let queue = state
+        .queue
+        .lock()
+        .map_err(|_| "queue_poisoned".to_string())?;
+    let bundle = build_bundle_from_queue(&queue).map_err(|e| e.to_string())?;
+    Ok(bundle_to_json(&bundle))
+}
+
+#[tauri::command]
+pub fn save_origin_cmd(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    origin: String,
+    auto_reprint: Option<bool>,
+) -> Result<String, String> {
+    check_local_only(&webview)?;
+    if state.locked_by_policy {
+        return Err("locked_by_policy".to_string());
+    }
+    let current_auto = *state
+        .auto_reprint
+        .read()
+        .map_err(|_| "config_lock_poisoned".to_string())?;
+    let next_auto = auto_reprint.unwrap_or(current_auto);
+    let validated = config::save_origin(&state.config_dir, &origin, next_auto)?;
+    {
+        let mut guard = state
+            .configured_origin
+            .write()
+            .map_err(|_| "config_lock_poisoned".to_string())?;
+        *guard = Some(validated.clone());
+    }
+    {
+        let mut auto_guard = state
+            .auto_reprint
+            .write()
+            .map_err(|_| "config_lock_poisoned".to_string())?;
+        *auto_guard = next_auto;
+    }
+    Ok(validated)
+}
+
+#[tauri::command]
+pub fn open_control_center(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    check_origin(&webview, &state)?;
+    let local_url: tauri::Url = if cfg!(windows) {
+        "http://tauri.localhost/index.html"
+            .parse()
+            .map_err(|_| "bad_local_url".to_string())?
+    } else {
+        "tauri://localhost/index.html"
+            .parse()
+            .map_err(|_| "bad_local_url".to_string())?
+    };
+    webview.navigate(local_url).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn open_odoo_origin(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    check_origin(&webview, &state)?;
+    let origin = state
+        .configured_origin
+        .read()
+        .map_err(|_| "config_lock_poisoned".to_string())?
+        .clone()
+        .ok_or_else(|| "no_origin_configured".to_string())?;
+    let url: tauri::Url = origin.parse().map_err(|_| "bad_origin_url".to_string())?;
+    webview.navigate(url).map_err(|e| e.to_string())
+}
+
+// --- Background Print Worker & Hardware Dispatch ----------------------
+
+struct NativePrintBackend {
+    db_path: String,
+}
+
+impl NativePrintBackend {
+    fn status_code(s: PrinterStatus) -> &'static str {
+        match s {
+            PrinterStatus::Offline => "PRINTER_OFFLINE",
+            PrinterStatus::PaperOut => "PAPER_OUT",
+            PrinterStatus::PaperJam => "PAPER_JAM",
+            PrinterStatus::DoorOpen => "DOOR_OPEN",
+            PrinterStatus::NoToner => "NO_TONER",
+            PrinterStatus::Paused => "PRINTER_PAUSED",
+            PrinterStatus::Error => "PRINTER_ERROR",
+            _ => "PRINTER_BUSY",
+        }
+    }
+
+    fn parse_scale_policy(s: Option<&str>) -> ScalePolicy {
+        match s.unwrap_or("custom_allowed") {
+            "strict" => ScalePolicy::Strict,
+            "nearest_larger_centered" => ScalePolicy::NearestLargerCentered,
+            "nearest_larger_fit" => ScalePolicy::NearestLargerFit,
+            _ => ScalePolicy::CustomAllowed,
+        }
+    }
+
+    fn parse_host_port(
+        spec: &str,
+        default_port: u16,
+    ) -> Result<(String, u16, String), BackendError> {
+        let rest = spec
+            .strip_prefix("tcp://")
+            .or_else(|| spec.strip_prefix("raw://"))
+            .or_else(|| spec.strip_prefix("ipp://"))
+            .or_else(|| spec.strip_prefix("http://"))
+            .unwrap_or(spec);
+        let (host_port, path) = match rest.split_once('/') {
+            Some((hp, p)) => (hp, format!("/{p}")),
+            None => (rest, "/ipp/print".to_string()),
+        };
+        let (host, port) = if let Some(after_open) = host_port.strip_prefix('[') {
+            let (ipv6, after_close) = after_open.split_once(']').ok_or_else(|| {
+                BackendError::fatal("BAD_PRINTER_ADDRESS", "unclosed IPv6 bracket")
+            })?;
+            let port = if after_close.is_empty() {
+                default_port
+            } else if let Some(p) = after_close.strip_prefix(':') {
+                p.parse::<u16>().map_err(|_| {
+                    BackendError::fatal("BAD_PRINTER_ADDRESS", "invalid port in printer address")
+                })?
+            } else {
+                return Err(BackendError::fatal(
+                    "BAD_PRINTER_ADDRESS",
+                    "invalid IPv6 host:port",
+                ));
+            };
+            (ipv6.to_string(), port)
+        } else {
+            match host_port.rsplit_once(':') {
+                Some((h, p)) => {
+                    let parsed = p.parse::<u16>().map_err(|_| {
+                        BackendError::fatal(
+                            "BAD_PRINTER_ADDRESS",
+                            "invalid port in printer address",
+                        )
+                    })?;
+                    (h.to_string(), parsed)
+                }
+                None => (host_port.to_string(), default_port),
+            }
+        };
+        if host.is_empty() {
+            return Err(BackendError::fatal(
+                "BAD_PRINTER_ADDRESS",
+                "empty printer host",
+            ));
+        }
+        Ok((host, port, path))
+    }
+
+    fn pdf_to_raw_stream(
+        pdf_bytes: &[u8],
+        mode: &str,
+        paper: &str,
+        copies: u16,
+        cut: bool,
+    ) -> Result<Vec<u8>, BackendError> {
+        let pdfium = print_render::Pdfium::load()
+            .map_err(|e| BackendError::fatal("PDFIUM_LOAD_ERROR", &e.to_string()))?;
+        let doc = pdfium
+            .load_document(pdf_bytes)
+            .map_err(|e| BackendError::fatal("PDF_INVALID", &e.to_string()))?;
+        let count = doc.page_count();
+        if count == 0 {
+            return Err(BackendError::fatal("EMPTY_DOCUMENT", "PDF has 0 pages"));
+        }
+        match mode {
+            "escpos" => {
+                let target_w = print_render::receipt_dots_for_paper(paper);
+                let mut stream = print_raw::EscPos::new();
+                for _ in 0..copies.max(1) {
+                    for i in 0..count {
+                        let page = doc
+                            .render_page(i, RenderMode::Grayscale, 203)
+                            .map_err(|e| BackendError::fatal("RENDER_FAILED", &e.to_string()))?;
+                        let canvas = print_render::bitmap::Canvas {
+                            width: page.width_px,
+                            height: page.height_px,
+                            px: page.pixels,
+                        };
+                        let scaled = print_render::scale_to_width(&canvas, target_w);
+                        let mono = scaled.to_mono(print_render::image::RECEIPT_THRESHOLD);
+                        stream = stream.raster(&mono).feed_lines(4);
+                        if cut {
+                            stream = stream.cut_partial();
+                        }
+                    }
+                }
+                Ok(stream.bytes().to_vec())
+            }
+            "zpl" => {
+                let mut out = String::new();
+                for i in 0..count {
+                    let page = doc
+                        .render_page(i, RenderMode::Threshold, 203)
+                        .map_err(|e| BackendError::fatal("RENDER_FAILED", &e.to_string()))?;
+                    let w_aligned = page.width_px.div_ceil(8) * 8;
+                    let bm = MonoBitmap::from_packed(w_aligned, page.height_px, page.pixels)
+                        .map_err(|e| BackendError::fatal("BITMAP_PACK_ERROR", &e.to_string()))?;
+                    out.push_str(&print_raw::zpl_label_with_options(&bm, 0, 0, copies));
+                }
+                Ok(out.into_bytes())
+            }
+            "tspl" => {
+                let mut out = Vec::new();
+                for i in 0..count {
+                    let page = doc
+                        .render_page(i, RenderMode::Threshold, 203)
+                        .map_err(|e| BackendError::fatal("RENDER_FAILED", &e.to_string()))?;
+                    let w_aligned = page.width_px.div_ceil(8) * 8;
+                    let bm = MonoBitmap::from_packed(w_aligned, page.height_px, page.pixels)
+                        .map_err(|e| BackendError::fatal("BITMAP_PACK_ERROR", &e.to_string()))?;
+                    let w_mm = ((page.width_px as f64) * 25.4 / (page.dpi.max(1) as f64))
+                        .round()
+                        .max(20.0) as u32;
+                    let h_mm = ((page.height_px as f64) * 25.4 / (page.dpi.max(1) as f64))
+                        .round()
+                        .max(20.0) as u32;
+                    let tspl = print_raw::tspl::TsplLabel::new(w_mm, h_mm, 3)
+                        .bitmap(0, 0, &bm)
+                        .print(1, copies.max(1) as u32);
+                    out.extend_from_slice(&tspl);
+                }
+                Ok(out)
+            }
+            "epl" => {
+                let mut out = Vec::new();
+                for i in 0..count {
+                    let page = doc
+                        .render_page(i, RenderMode::Threshold, 203)
+                        .map_err(|e| BackendError::fatal("RENDER_FAILED", &e.to_string()))?;
+                    let w_aligned = page.width_px.div_ceil(8) * 8;
+                    let bm = MonoBitmap::from_packed(w_aligned, page.height_px, page.pixels)
+                        .map_err(|e| BackendError::fatal("BITMAP_PACK_ERROR", &e.to_string()))?;
+                    out.extend_from_slice(&print_raw::epl::epl_label_copies(&bm, copies));
+                }
+                Ok(out)
+            }
+            _ => Ok(pdf_bytes.to_vec()),
+        }
+    }
+
+    fn png_to_raw_stream(
+        png_bytes: &[u8],
+        mode: &str,
+        paper: &str,
+        copies: u16,
+    ) -> Result<Vec<u8>, BackendError> {
+        match mode {
+            "zpl" => {
+                let canvas = print_render::decode_png(png_bytes)
+                    .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
+                let mono = canvas.to_mono(print_render::image::RECEIPT_THRESHOLD);
+                Ok(print_raw::zpl_label_with_options(&mono, 0, 0, copies).into_bytes())
+            }
+            "tspl" => {
+                let canvas = print_render::decode_png(png_bytes)
+                    .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
+                let mono = canvas.to_mono(print_render::image::RECEIPT_THRESHOLD);
+                let w_mm = ((mono.width_dots as f64) * 25.4 / 203.0).round().max(20.0) as u32;
+                let h_mm = ((mono.height_dots as f64) * 25.4 / 203.0).round().max(20.0) as u32;
+                Ok(print_raw::tspl::TsplLabel::new(w_mm, h_mm, 3)
+                    .bitmap(0, 0, &mono)
+                    .print(1, copies.max(1) as u32))
+            }
+            "epl" => {
+                let canvas = print_render::decode_png(png_bytes)
+                    .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
+                let mono = canvas.to_mono(print_render::image::RECEIPT_THRESHOLD);
+                Ok(print_raw::epl::epl_label_copies(&mono, copies))
+            }
+            _ => {
+                let single = print_render::receipt_png_to_escpos(png_bytes, paper)
+                    .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
+                let mut out = Vec::with_capacity(single.len() * copies.max(1) as usize);
+                for _ in 0..copies.max(1) {
+                    out.extend_from_slice(&single);
+                }
+                Ok(out)
+            }
+        }
+    }
+}
+
+impl PrintBackend for NativePrintBackend {
+    fn print(&mut self, job: &Job) -> Result<(), BackendError> {
+        let q = Queue::open(&self.db_path)
+            .map_err(|e| BackendError::retryable("QUEUE_DB_ERROR", &e.to_string()))?;
+        let (kind, data) = q
+            .payload(&job.id)
+            .map_err(|e| BackendError::retryable("QUEUE_DB_ERROR", &e.to_string()))?
+            .ok_or_else(|| BackendError::fatal("MISSING_PAYLOAD", "job payload not found"))?;
+        let opts = q.options(&job.id).unwrap_or_default();
+        let paper = opts.paper.as_deref().unwrap_or("A4");
+        let title = job.report.as_deref().unwrap_or("Odoo Native Print Job");
+
+        // 1. Direct TCP 9100 transport (tcp://host:port or raw://host:port)
+        if job.printer.starts_with("tcp://") || job.printer.starts_with("raw://") {
+            let (host, port, _) = Self::parse_host_port(&job.printer, 9100)?;
+            let raw_bytes = match kind.as_str() {
+                "pdf" => {
+                    Self::pdf_to_raw_stream(&data, &opts.mode, paper, opts.copies, opts.cut)?
+                }
+                "image-png" => Self::png_to_raw_stream(&data, &opts.mode, paper, opts.copies)?,
+                _ => {
+                    let mut v = Vec::with_capacity(data.len() * opts.copies.max(1) as usize);
+                    for _ in 0..opts.copies.max(1) {
+                        v.extend_from_slice(&data);
+                    }
+                    v
+                }
+            };
+            print_raw::tcp9100::send_raw(
+                &host,
+                port,
+                &raw_bytes,
+                Duration::from_secs(5),
+                Duration::from_secs(20),
+            )
+            .map_err(|e| BackendError::retryable("TCP9100_ERROR", &e.to_string()))?;
+            return Ok(());
+        }
+
+        // 2. Direct IPP transport (ipp://host:port/path or mode == "ipp")
+        if job.printer.starts_with("ipp://") || opts.mode == "ipp" {
+            let (host, port, path) = Self::parse_host_port(&job.printer, 631)?;
+            let mut client = print_ipp::IppClient::new(&host, port);
+            client.path = path.clone();
+            client.printer_uri = format!("ipp://{host}:{port}{path}");
+            let caps = client
+                .get_printer_attributes()
+                .map_err(|e| BackendError::retryable("IPP_ATTRIBUTES_ERROR", &e.to_string()))?;
+            if caps.is_stopped() {
+                return Err(BackendError::retryable(
+                    "PRINTER_STOPPED",
+                    "IPP printer reported stopped state",
+                ));
+            }
+            let fmt = caps
+                .choose_format()
+                .map_err(|e| BackendError::fatal("IPP_FORMAT_UNSUPPORTED", &e.to_string()))?;
+            client
+                .print_job(&data, fmt, title, opts.copies.max(1))
+                .map_err(|e| BackendError::retryable("IPP_PRINT_ERROR", &e.to_string()))?;
+            return Ok(());
+        }
+
+        // 3. Windows Spooler / Local / Shared / Virtual printer
+        let discovered = print_win::discover_printers().map_err(|e| {
+            BackendError::retryable("SPOOLER_UNAVAILABLE", &format!("discover_printers: {e}"))
+        })?;
+        let target_name = if let Some(matched) = resolve_printer(&job.printer, &discovered) {
+            if needs_intervention(matched.status) {
+                return Err(BackendError::retryable(
+                    Self::status_code(matched.status),
+                    &format!("printer {:?} status is {:?}", matched.name, matched.status),
+                ));
+            }
+            matched.name.clone()
+        } else if !discovered.is_empty() {
+            return Err(BackendError::fatal(
+                "PRINTER_NOT_FOUND",
+                &format!("no installed printer matches pattern {:?}", job.printer),
+            ));
+        } else {
+            job.printer.clone()
+        };
+
+        if let Ok(live_status) = print_win::printer_status(&target_name) {
+            if needs_intervention(live_status) {
+                return Err(BackendError::retryable(
+                    Self::status_code(live_status),
+                    &format!("printer {target_name:?} status is {live_status:?}"),
+                ));
+            }
+        }
+
+        match (kind.as_str(), opts.mode.as_str()) {
+            ("pdf", "escpos" | "zpl" | "tspl" | "epl") => {
+                let raw_bytes =
+                    Self::pdf_to_raw_stream(&data, &opts.mode, paper, opts.copies, opts.cut)?;
+                print_win::print_raw(&target_name, title, &raw_bytes)
+                    .map_err(|e| BackendError::retryable("SPOOLER_RAW_ERROR", &e.to_string()))?;
+                Ok(())
+            }
+            ("pdf", _) => {
+                let policy = Self::parse_scale_policy(opts.scale_policy.as_deref());
+                // Verify paper ladder when driver forms are available.
+                if let Ok(forms) = print_win::paper_forms(&target_name) {
+                    if !forms.is_empty() {
+                        if let Ok(info) = print_render::parse_pdf_info(&data) {
+                            for p in &info.pages {
+                                match_paper(p.size, &forms, policy).map_err(|e| {
+                                    BackendError::fatal("PAPER_MISMATCH", &e.to_string())
+                                })?;
+                            }
+                        }
+                    }
+                }
+                let render_mode = if opts.color {
+                    RenderMode::Color
+                } else {
+                    RenderMode::Grayscale
+                };
+                let gdi_opts = print_win::GdiJobOptions {
+                    mode: render_mode,
+                    dpi: 300,
+                    copies: opts.copies.max(1),
+                    duplex: opts.duplex,
+                    color: opts.color,
+                    scale_policy: policy,
+                    tray: opts.tray.clone(),
+                };
+                print_win::print_pdf_gdi_with_options(&target_name, title, &data, &gdi_opts)
+                    .map_err(|e| BackendError::retryable("GDI_PRINT_ERROR", &e.to_string()))?;
+                Ok(())
+            }
+            ("image-png", "gdi") => {
+                let canvas = print_render::decode_png(&data)
+                    .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
+                print_win::print_canvas_gdi(&target_name, title, &canvas, opts.copies.max(1))
+                    .map_err(|e| BackendError::retryable("GDI_PRINT_ERROR", &e.to_string()))?;
+                Ok(())
+            }
+            ("image-png", _) => {
+                let raw_bytes = Self::png_to_raw_stream(&data, &opts.mode, paper, opts.copies)?;
+                print_win::print_raw(&target_name, title, &raw_bytes)
+                    .map_err(|e| BackendError::retryable("SPOOLER_RAW_ERROR", &e.to_string()))?;
+                Ok(())
+            }
+            _ => {
+                for _ in 0..opts.copies.max(1) {
+                    print_win::print_raw(&target_name, title, &data).map_err(|e| {
+                        BackendError::retryable("SPOOLER_RAW_ERROR", &e.to_string())
+                    })?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Spawn the background worker thread that drains queued jobs across all
+/// printer patterns using `print_core::Worker`.
+pub fn spawn_worker_loop(db_path: String, wake: Arc<(Mutex<bool>, Condvar)>) {
+    std::thread::spawn(move || {
+        let mut entropy: u64 = 0x5EED_2026;
+        loop {
+            let mut did_work = false;
+            if let Ok(mut worker_queue) = Queue::open(&db_path) {
+                let printers = worker_queue.queued_printers().unwrap_or_default();
+                for printer in printers {
+                    entropy = entropy.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    let mut worker = Worker {
+                        queue: &mut worker_queue,
+                        backend: NativePrintBackend {
+                            db_path: db_path.clone(),
+                        },
+                        cfg: WorkerConfig::default(),
+                        sleep: |ms| std::thread::sleep(Duration::from_millis(ms)),
+                        entropy,
+                    };
+                    if let Ok(outcome) = worker.run_once(&printer) {
+                        if outcome != Outcome::Idle {
+                            did_work = true;
+                        }
+                    }
+                }
+            }
+            if !did_work {
+                let (lock, cvar) = &*wake;
+                if let Ok(mut pending) = lock.lock() {
+                    if !*pending {
+                        let _ = cvar.wait_timeout(pending, Duration::from_secs(2));
+                    } else {
+                        *pending = false;
+                    }
+                } else {
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn base64_and_host_port_parsing() {
+        let decoded = decode_base64("JVBERi0xLjQ=").unwrap();
+        assert_eq!(decoded, b"%PDF-1.4");
+        let (h, p, path) =
+            NativePrintBackend::parse_host_port("tcp://192.168.1.200:9100", 9100).unwrap();
+        assert_eq!(h, "192.168.1.200");
+        assert_eq!(p, 9100);
+        assert_eq!(path, "/ipp/print");
+        let (h6, p6, path6) =
+            NativePrintBackend::parse_host_port("ipp://[::1]:631/ipp/print", 631).unwrap();
+        assert_eq!(h6, "::1");
+        assert_eq!(p6, 631);
+        assert_eq!(path6, "/ipp/print");
+    }
 }

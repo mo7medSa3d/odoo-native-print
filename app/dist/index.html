@@ -1,24 +1,1510 @@
 <!doctype html>
-<html lang="en">
+<html lang="ar" dir="rtl" data-theme="light">
 <head>
 <meta charset="utf-8" />
-<title>Odoo Native Print</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Odoo Native Print — Control Center</title>
 <style>
-  body { font-family: "Segoe UI", system-ui, sans-serif; margin: 3rem; color: #1f2430; }
-  h1 { font-size: 1.25rem; }
-  p { max-width: 42rem; line-height: 1.5; }
-  code { background: #eef1f6; padding: 0.1rem 0.35rem; border-radius: 4px; }
+  :root {
+    --bg-app: #f4f6fa;
+    --bg-surface: #ffffff;
+    --bg-subtle: #eef2f8;
+    --bg-hover: #e6ebf4;
+    --text-primary: #111827;
+    --text-secondary: #4b5563;
+    --text-muted: #6b7280;
+    --border-color: #dde3ee;
+    --brand-plum: #714b67;
+    --brand-plum-dark: #5a3a52;
+    --brand-indigo: #4f46e5;
+    --brand-teal: #0d9488;
+    --status-ok-bg: #dcfce7;
+    --status-ok-fg: #15803d;
+    --status-warn-bg: #fef3c7;
+    --status-warn-fg: #b45309;
+    --status-err-bg: #fee2e2;
+    --status-err-fg: #b91c1c;
+    --status-info-bg: #dbeafe;
+    --status-info-fg: #1d4ed8;
+    --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06);
+    --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.08);
+    --radius-md: 10px;
+    --radius-lg: 14px;
+  }
+
+  [data-theme="dark"] {
+    --bg-app: #0f172a;
+    --bg-surface: #1e293b;
+    --bg-subtle: #0f172a;
+    --bg-hover: #334155;
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
+    --border-color: #334155;
+    --brand-plum: #9d6b8f;
+    --brand-plum-dark: #b684a8;
+    --brand-indigo: #6366f1;
+    --brand-teal: #14b8a6;
+    --status-ok-bg: rgba(21, 128, 61, 0.25);
+    --status-ok-fg: #4ade80;
+    --status-warn-bg: rgba(180, 83, 9, 0.25);
+    --status-warn-fg: #fbbf24;
+    --status-err-bg: rgba(185, 28, 28, 0.25);
+    --status-err-fg: #f87171;
+    --status-info-bg: rgba(29, 78, 216, 0.25);
+    --status-info-fg: #60a5fa;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans Arabic", Tahoma, sans-serif;
+    background: var(--bg-app);
+    color: var(--text-primary);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    line-height: 1.5;
+  }
+
+  /* Top Navigation Bar */
+  .topbar {
+    background: linear-gradient(135deg, #5a3a52 0%, #714b67 55%, #3b2d54 100%);
+    color: #ffffff;
+    padding: 0.85rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+  }
+
+  .brand-logo {
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .brand-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .brand-subtitle {
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.82);
+  }
+
+  .version-pill {
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.2);
+    padding: 0.12rem 0.5rem;
+    border-radius: 999px;
+  }
+
+  .topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    padding: 0.5rem 0.95rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+    font-family: inherit;
+    text-decoration: none;
+  }
+
+  .btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .btn-glass {
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.25);
+  }
+  .btn-glass:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.24);
+  }
+
+  .btn-Launch {
+    background: #10b981;
+    color: #ffffff;
+    border-color: #059669;
+    box-shadow: 0 2px 6px rgba(16, 185, 129, 0.35);
+  }
+  .btn-Launch:hover:not(:disabled) {
+    background: #059669;
+  }
+
+  .btn-primary {
+    background: var(--brand-plum);
+    color: #ffffff;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--brand-plum-dark);
+  }
+
+  .btn-secondary {
+    background: var(--bg-subtle);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--bg-hover);
+  }
+
+  .btn-danger {
+    background: var(--status-err-bg);
+    color: var(--status-err-fg);
+    border-color: rgba(185, 28, 28, 0.2);
+  }
+  .btn-danger:hover:not(:disabled) {
+    filter: brightness(0.95);
+  }
+
+  .btn-sm {
+    padding: 0.32rem 0.65rem;
+    font-size: 0.78rem;
+    border-radius: 6px;
+  }
+
+  /* Navigation Tabs */
+  .nav-tabs {
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-color);
+    padding: 0 1.5rem;
+    display: flex;
+    gap: 0.35rem;
+    overflow-x: auto;
+  }
+
+  .nav-tab {
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    color: var(--text-secondary);
+    padding: 0.85rem 1.1rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: inherit;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .nav-tab:hover {
+    color: var(--text-primary);
+  }
+
+  .nav-tab.active {
+    color: var(--brand-plum);
+    border-bottom-color: var(--brand-plum);
+  }
+
+  /* Main Container */
+  .main-container {
+    max-width: 1360px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 1.5rem;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  /* Banner Alert */
+  .alert-banner {
+    padding: 0.9rem 1.15rem;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    font-size: 0.88rem;
+    border: 1px solid transparent;
+  }
+  .alert-warn {
+    background: var(--status-warn-bg);
+    color: var(--status-warn-fg);
+    border-color: rgba(180, 83, 9, 0.3);
+  }
+  .alert-info {
+    background: var(--status-info-bg);
+    color: var(--status-info-fg);
+    border-color: rgba(29, 78, 216, 0.25);
+  }
+  .alert-ok {
+    background: var(--status-ok-bg);
+    color: var(--status-ok-fg);
+    border-color: rgba(21, 128, 61, 0.25);
+  }
+
+  /* KPI Grid */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 1rem;
+  }
+
+  .kpi-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 1.15rem 1.25rem;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.9rem;
+  }
+
+  .kpi-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .kpi-label {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+
+  .kpi-value {
+    font-size: 1.65rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    margin: 0.15rem 0;
+    line-height: 1.2;
+  }
+
+  .kpi-meta {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+  }
+
+  /* Cards & Panels */
+  .card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+
+  .card-header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .card-title {
+    font-size: 1rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .card-body {
+    padding: 1.25rem;
+  }
+
+  /* Badges */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .badge-ok { background: var(--status-ok-bg); color: var(--status-ok-fg); }
+  .badge-warn { background: var(--status-warn-bg); color: var(--status-warn-fg); }
+  .badge-err { background: var(--status-err-bg); color: var(--status-err-fg); }
+  .badge-info { background: var(--status-info-bg); color: var(--status-info-fg); }
+  .badge-neutral { background: var(--bg-subtle); color: var(--text-secondary); }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  /* Tables */
+  .table-wrap {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.86rem;
+  }
+
+  th, td {
+    padding: 0.75rem 1rem;
+    text-align: start;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  th {
+    background: var(--bg-subtle);
+    color: var(--text-secondary);
+    font-weight: 700;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  tr:hover td {
+    background: var(--bg-subtle);
+  }
+
+  .mono {
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 0.8rem;
+  }
+
+  /* Printer Cards Grid */
+  .printer-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 1.1rem;
+  }
+
+  .printer-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 1.15rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+
+  .printer-card:hover {
+    box-shadow: var(--shadow-md);
+  }
+
+  .printer-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .printer-identity {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .printer-type-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    background: var(--bg-subtle);
+    color: var(--brand-plum);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .printer-name {
+    font-weight: 700;
+    font-size: 0.96rem;
+    word-break: break-word;
+  }
+
+  .printer-meta-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    background: var(--bg-subtle);
+    padding: 0.65rem 0.8rem;
+    border-radius: 8px;
+    font-size: 0.78rem;
+  }
+
+  .printer-meta-item span {
+    color: var(--text-muted);
+    display: block;
+    font-size: 0.7rem;
+  }
+
+  .printer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: auto;
+  }
+
+  /* Forms & Inputs */
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.1rem;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .form-label {
+    font-size: 0.84rem;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .form-help {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+  }
+
+  .input, .select {
+    padding: 0.6rem 0.85rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    font-family: inherit;
+    outline: none;
+  }
+
+  .input:focus, .select:focus {
+    border-color: var(--brand-plum);
+    box-shadow: 0 0 0 3px rgba(113, 75, 103, 0.18);
+  }
+
+  .filter-pills {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+
+  .filter-pill {
+    padding: 0.3rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    border: 1px solid var(--border-color);
+    background: var(--bg-subtle);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .filter-pill.active {
+    background: var(--brand-plum);
+    color: #ffffff;
+    border-color: var(--brand-plum);
+  }
+
+  .code-box {
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 1rem;
+    border-radius: 10px;
+    font-family: "Cascadia Code", "Consolas", monospace;
+    font-size: 0.8rem;
+    max-height: 360px;
+    overflow: auto;
+    white-space: pre-wrap;
+    direction: ltr;
+    text-align: left;
+  }
+
+  .toast-container {
+    position: fixed;
+    bottom: 1.25rem;
+    inset-inline-end: 1.25rem;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    max-width: 380px;
+  }
+
+  .toast {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-inline-start: 4px solid var(--brand-plum);
+    padding: 0.8rem 1rem;
+    border-radius: 10px;
+    box-shadow: var(--shadow-md);
+    font-size: 0.84rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .hidden {
+    display: none !important;
+  }
+
+  .footer-bar {
+    padding: 0.9rem 1.5rem;
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-surface);
+  }
 </style>
 </head>
 <body>
-  <h1>Odoo Native Print</h1>
-  <p>
-    This window normally loads your company's Odoo directly. If you can
-    read this page, the app could not read its configuration. Ask your
-    administrator to set the Odoo origin in
-    <code>config.json</code> in the app's configuration directory
-    (field <code>odoo_origin</code>, an exact HTTPS origin), then restart
-    the app. See the runbooks in the project documentation.
-  </p>
+
+  <!-- Top Navigation Header -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-logo" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 6 2 18 2 18 9"></polyline>
+          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+          <rect x="6" y="14" width="12" height="8"></rect>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-title">
+          <span data-i18n="app_title">مركز التحكم — الطباعة المحلية لأودو</span>
+          <span class="version-pill" id="appVersionBadge">v1.0.0</span>
+        </div>
+        <div class="brand-subtitle" data-i18n="app_subtitle">
+          Odoo Native Print Client • مباشر بدون خادم وسيط (Zero-Gateway) • GDI / PDFium / ESC-POS / ZPL / IPP
+        </div>
+      </div>
+    </div>
+
+    <div class="topbar-actions">
+      <button class="btn btn-Launch" id="btnOpenOdoo" onclick="openOdooApp()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+          <polyline points="15 3 21 3 21 9"></polyline>
+          <line x1="10" y1="14" x2="21" y2="3"></line>
+        </svg>
+        <span data-i18n="btn_open_odoo">فتح نظام Odoo</span>
+      </button>
+
+      <button class="btn btn-glass" onclick="refreshAll()" title="Refresh">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"></polyline>
+          <polyline points="1 20 1 14 7 14"></polyline>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+        </svg>
+        <span data-i18n="btn_refresh">تحديث</span>
+      </button>
+
+      <button class="btn btn-glass" onclick="toggleTheme()" id="btnTheme">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+        <span data-i18n="btn_theme">المظهر</span>
+      </button>
+
+      <button class="btn btn-glass" onclick="toggleLang()" id="btnLang">
+        <span>English</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <nav class="nav-tabs" role="tablist">
+    <button class="nav-tab active" data-tab="dashboard" onclick="switchTab('dashboard')">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+      <span data-i18n="tab_dashboard">لوحة المراقبة وطابور الطباعة</span>
+    </button>
+    <button class="nav-tab" data-tab="printers" onclick="switchTab('printers')">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+      <span data-i18n="tab_printers">الطابعات ومعمل المعايرة</span>
+    </button>
+    <button class="nav-tab" data-tab="settings" onclick="switchTab('settings')">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      <span data-i18n="tab_settings">إعدادات اتصال Odoo والأمان</span>
+    </button>
+    <button class="nav-tab" data-tab="diagnostics" onclick="switchTab('diagnostics')">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+      <span data-i18n="tab_diagnostics">حزمة التشخيص والدعم الفني</span>
+    </button>
+  </nav>
+
+  <!-- Main Content Area -->
+  <main class="main-container">
+
+    <!-- Status Alert Banner -->
+    <div id="originAlertBanner" class="alert-banner alert-warn hidden">
+      <div style="display:flex;align-items:center;gap:0.65rem;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+        <span id="originAlertText">لم يتم ضبط رابط خادم Odoo (HTTPS) بعد. يرجى ضبط الرابط من تبويب الإعدادات لبدء التشغيل المباشر.</span>
+      </div>
+      <button class="btn btn-sm btn-primary" onclick="switchTab('settings')" data-i18n="btn_configure_now">ضبط الرابط الآن</button>
+    </div>
+
+    <!-- TAB 1: DASHBOARD & QUEUE -->
+    <section id="tab-dashboard" class="tab-pane">
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div>
+            <div class="kpi-label" data-i18n="kpi_printers">الطابعات المكتشفة</div>
+            <div class="kpi-value" id="kpiPrintersCount">0</div>
+            <div class="kpi-meta" id="kpiDefaultPrinter">—</div>
+          </div>
+          <div class="kpi-icon" style="background:var(--status-info-bg);color:var(--status-info-fg);">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div>
+            <div class="kpi-label" data-i18n="kpi_active_jobs">المهام النشطة / بالانتظار</div>
+            <div class="kpi-value" id="kpiActiveCount">0</div>
+            <div class="kpi-meta" data-i18n="kpi_active_sub">SQLite WAL • طابور مستدام</div>
+          </div>
+          <div class="kpi-icon" style="background:var(--status-warn-bg);color:var(--status-warn-fg);">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div>
+            <div class="kpi-label" data-i18n="kpi_done_jobs">مهام مكتملة بنجاح</div>
+            <div class="kpi-value" id="kpiDoneCount">0</div>
+            <div class="kpi-meta" id="kpiPdfiumStatus">PDFium: —</div>
+          </div>
+          <div class="kpi-icon" style="background:var(--status-ok-bg);color:var(--status-ok-fg);">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div>
+            <div class="kpi-label" data-i18n="kpi_failed_jobs">تحتاج لتدخل (Failed / Dead Letter)</div>
+            <div class="kpi-value" id="kpiFailedCount">0</div>
+            <div class="kpi-meta" id="kpiOriginMeta">—</div>
+          </div>
+          <div class="kpi-icon" style="background:var(--status-err-bg);color:var(--status-err-fg);">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- Queue Table Card -->
+      <div class="card" style="margin-top:1.25rem;">
+        <div class="card-header">
+          <div class="card-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+            <span data-i18n="queue_title">طابور مهام الطباعة المحلي (SQLite WAL Queue)</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:0.65rem;flex-wrap:wrap;">
+            <div class="filter-pills">
+              <button class="filter-pill active" data-filter="all" onclick="setJobFilter('all')" data-i18n="filter_all">الكل</button>
+              <button class="filter-pill" data-filter="active" onclick="setJobFilter('active')" data-i18n="filter_active">نشطة</button>
+              <button class="filter-pill" data-filter="attention" onclick="setJobFilter('attention')" data-i18n="filter_attention">فاشلة / Dead Letter</button>
+              <button class="filter-pill" data-filter="done" onclick="setJobFilter('done')" data-i18n="filter_done">مكتملة</button>
+            </div>
+            <button class="btn btn-sm btn-secondary" onclick="clearFinishedJobs()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              <span data-i18n="btn_clear_done">مسح المكتملة</span>
+            </button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-i18n="col_id">معرّف المهمة (Idempotency Key)</th>
+                <th data-i18n="col_report">التقرير / المصدر</th>
+                <th data-i18n="col_printer">الطابعة المستهدفة</th>
+                <th data-i18n="col_pages">الصفحات / الحجم</th>
+                <th data-i18n="col_state">الحالة</th>
+                <th data-i18n="col_attempts">المحاولات</th>
+                <th data-i18n="col_error">رمز الخطأ</th>
+                <th data-i18n="col_actions">إجراءات</th>
+              </tr>
+            </thead>
+            <tbody id="jobsTableBody">
+              <tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-muted);" data-i18n="no_jobs">لا توجد مهام في الطابور حالياً.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: PRINTERS & CALIBRATION LAB -->
+    <section id="tab-printers" class="tab-pane hidden">
+      <div class="card" style="margin-bottom:1.25rem;">
+        <div class="card-header">
+          <div class="card-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            <span data-i18n="direct_test_title">اختبار طباعة مباشر ومعايرة فورية (طابعة نظام أو عنوان شبكة TCP 9100 / IPP)</span>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="form-grid" style="align-items:end;">
+            <div class="form-group">
+              <label class="form-label" data-i18n="lbl_target_printer">اسم الطابعة أو العنوان (Windows / tcp://IP:9100 / ipp://IP:631/ipp/print)</label>
+              <input type="text" id="customPrinterInput" class="input" placeholder="Microsoft Print to PDF  أو  tcp://192.168.1.200:9100" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" data-i18n="lbl_test_type">نوع صفحة المعايرة والاختبار</label>
+              <select id="customTestKind" class="select">
+                <option value="pdf-a4">A4 Calibration PDF (GDI + PDFium • مساطر + مربع 100×100مم + باركود)</option>
+                <option value="thermal-80mm">Thermal 80mm Receipt Calibration (ESC/POS Raster • 576 dots)</option>
+                <option value="thermal-58mm">Thermal 58mm Receipt Calibration (ESC/POS Raster • 384 dots)</option>
+                <option value="zpl-label">Label 100×150mm ZPL II Calibration (^XA^FO0,0^GFA...^FS^XZ)</option>
+                <option value="tspl-label">Label 100×150mm TSPL Calibration (SIZE / GAP / BITMAP / PRINT)</option>
+              </select>
+            </div>
+            <div>
+              <button class="btn btn-primary" onclick="triggerCustomTestPrint()" style="width:100%;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                <span data-i18n="btn_send_test">إرسال صفحة المعايرة للطابعة</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="printer-grid" id="printersGrid"></div>
+    </section>
+
+    <!-- TAB 3: SETTINGS & SECURITY -->
+    <section id="tab-settings" class="tab-pane hidden">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            <span data-i18n="settings_title">إعدادات خادم Odoo وسياسة الأمان (ADR-0002 & ADR-0004)</span>
+          </div>
+          <span class="badge badge-info" id="policyStatusBadge">Local Config</span>
+        </div>
+        <div class="card-body">
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label" data-i18n="lbl_odoo_origin">الرابط الأساسي لخادم أودو (HTTPS Exact Origin)</label>
+              <input type="url" id="inputOdooOrigin" class="input mono" dir="ltr" placeholder="https://odoo.company.local:8069" />
+              <div class="form-help" data-i18n="help_odoo_origin">
+                يجب أن يبدأ بـ https:// بدون مسارات فرعية. يرفض التطبيق أي اتصال أو أمر طباعة من أي نطاق آخر (حماية ضد CVE-2026-42184).
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" data-i18n="lbl_recovery_mode">سياسة الاسترجاع بعد الإغلاق المفاجئ (ADR-0004 Crash Recovery)</label>
+              <select id="inputAutoReprint" class="select">
+                <option value="false">آمن (افتراضي): عدم إعادة طباعة المهام الغامضة تلقائياً (RECOVERY_AMBIGUOUS)</option>
+                <option value="true">إعادة الطباعة التلقائية للمهام قيد التنفيذ عند بدء التشغيل</option>
+              </select>
+              <div class="form-help" data-i18n="help_recovery_mode">
+                المهام التي لم تصل لمرحلة Spooling يُعاد جدولتها دائماً، أما المهام التي أُرسلت للطابعة فتتبع هذا الخيار لمنع تكرار الفواتير.
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top:1.25rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+            <button class="btn btn-primary" id="btnSaveOrigin" onclick="saveOriginSettings()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+              <span data-i18n="btn_save_origin">حفظ الإعدادات</span>
+            </button>
+            <button class="btn btn-Launch" onclick="openOdooApp()">
+              <span data-i18n="btn_save_and_launch">الاتصال وفتح Odoo الآن</span>
+            </button>
+          </div>
+
+          <div style="margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--border-color);display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem;">
+            <div>
+              <div class="form-label" data-i18n="lbl_config_file">مسار ملف الإعدادات (config.json)</div>
+              <div class="mono" style="color:var(--text-secondary);margin-top:0.25rem;word-break:break-all;" id="txtConfigPath">—</div>
+            </div>
+            <div>
+              <div class="form-label" data-i18n="lbl_pdfium_engine">محرك تصيير PDF المدمج (PDFium Chromium/8125)</div>
+              <div class="mono" style="color:var(--text-secondary);margin-top:0.25rem;word-break:break-all;" id="txtPdfiumPath">—</div>
+            </div>
+            <div>
+              <div class="form-label" data-i18n="lbl_shortcut">اختصار لوحة المفاتيح السريع</div>
+              <div style="color:var(--text-secondary);margin-top:0.25rem;">
+                <code class="mono" style="background:var(--bg-subtle);padding:0.15rem 0.45rem;border-radius:5px;">Ctrl + Shift + P</code>
+                <span data-i18n="help_shortcut">للتبديل الفوري بين شاشة Odoo ومركز التحكم</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: DIAGNOSTICS & SUPPORT -->
+    <section id="tab-diagnostics" class="tab-pane hidden">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            <span data-i18n="diag_title">حزمة التشخيص الآمنة (Redacted Diagnostics Bundle)</span>
+          </div>
+          <div style="display:flex;gap:0.5rem;">
+            <button class="btn btn-sm btn-secondary" onclick="loadDiagnosticsBundle()" data-i18n="btn_generate_diag">توليد الحزمة</button>
+            <button class="btn btn-sm btn-secondary" onclick="copyDiagnosticsBundle()" data-i18n="btn_copy_diag">نسخ JSON</button>
+            <button class="btn btn-sm btn-primary" onclick="downloadDiagnosticsBundle()" data-i18n="btn_download_diag">تنزيل ملف JSON</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.85rem;" data-i18n="diag_desc">
+            تحتوي هذه الحزمة على إصدار التطبيق وإحصائيات الحالات وآخر 200 مهمة طباعة بدون أي بيانات سرية أو محتوى مستندات أو رموز جلسات (آمنة تماماً لإرفاقها في تذاكر الدعم الفني).
+          </p>
+          <pre class="code-box" id="diagnosticsOutput">{ "status": "Click Generate Bundle to inspect live diagnostics..." }</pre>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer-bar">
+    Odoo Native Print Client • Tauri v2 + PDFium + Win32 Spooler/GDI + ESC/POS + ZPL/TSPL + IPP • Shortcut: <strong class="mono">Ctrl+Shift+P</strong>
+  </footer>
+
+  <div class="toast-container" id="toastContainer"></div>
+
+<script>
+  const I18N = {
+    ar: {
+      app_title: "مركز التحكم — الطباعة المحلية لأودو",
+      app_subtitle: "Odoo Native Print Client • مباشر بدون خادم وسيط (Zero-Gateway) • GDI / PDFium / ESC-POS / ZPL / IPP",
+      btn_open_odoo: "فتح نظام Odoo",
+      btn_refresh: "تحديث",
+      btn_theme: "المظهر",
+      tab_dashboard: "لوحة المراقبة وطابور الطباعة",
+      tab_printers: "الطابعات ومعمل المعايرة",
+      tab_settings: "إعدادات اتصال Odoo والأمان",
+      tab_diagnostics: "حزمة التشخيص والدعم الفني",
+      btn_configure_now: "ضبط الرابط الآن",
+      kpi_printers: "الطابعات المكتشفة",
+      kpi_active_jobs: "المهام النشطة / بالانتظار",
+      kpi_active_sub: "SQLite WAL • طابور مستدام",
+      kpi_done_jobs: "مهام مكتملة بنجاح",
+      kpi_failed_jobs: "تحتاج لتدخل (Failed / Dead Letter)",
+      queue_title: "طابور مهام الطباعة المحلي (SQLite WAL Queue)",
+      filter_all: "الكل",
+      filter_active: "نشطة",
+      filter_attention: "فاشلة / Dead Letter",
+      filter_done: "مكتملة",
+      btn_clear_done: "مسح المكتملة",
+      col_id: "معرّف المهمة (Idempotency Key)",
+      col_report: "التقرير / المصدر",
+      col_printer: "الطابعة المستهدفة",
+      col_pages: "الصفحات / الحجم",
+      col_state: "الحالة",
+      col_attempts: "المحاولات",
+      col_error: "رمز الخطأ",
+      col_actions: "إجراءات",
+      no_jobs: "لا توجد مهام مطابقة في الطابور حالياً.",
+      direct_test_title: "اختبار طباعة مباشر ومعايرة فورية (طابعة نظام أو عنوان شبكة TCP 9100 / IPP)",
+      lbl_target_printer: "اسم الطابعة أو العنوان (Windows / tcp://IP:9100 / ipp://IP:631/ipp/print)",
+      lbl_test_type: "نوع صفحة المعايرة والاختبار",
+      btn_send_test: "إرسال صفحة المعايرة للطابعة",
+      settings_title: "إعدادات خادم Odoo وسياسة الأمان (ADR-0002 & ADR-0004)",
+      lbl_odoo_origin: "الرابط الأساسي لخادم أودو (HTTPS Exact Origin)",
+      help_odoo_origin: "يجب أن يبدأ بـ https:// بدون مسارات فرعية. يرفض التطبيق أي اتصال أو أمر طباعة من أي نطاق آخر (حماية ضد CVE-2026-42184).",
+      lbl_recovery_mode: "سياسة الاسترجاع بعد الإغلاق المفاجئ (ADR-0004 Crash Recovery)",
+      help_recovery_mode: "المهام التي لم تصل لمرحلة Spooling يُعاد جدولتها دائماً، أما المهام التي أُرسلت للطابعة فتتبع هذا الخيار لمنع تكرار الفواتير.",
+      btn_save_origin: "حفظ الإعدادات",
+      btn_save_and_launch: "الاتصال وفتح Odoo الآن",
+      lbl_config_file: "مسار ملف الإعدادات (config.json)",
+      lbl_pdfium_engine: "محرك تصيير PDF المدمج (PDFium Chromium/8125)",
+      lbl_shortcut: "اختصار لوحة المفاتيح السريع",
+      help_shortcut: "للتبديل الفوري بين شاشة Odoo ومركز التحكم",
+      diag_title: "حزمة التشخيص الآمنة (Redacted Diagnostics Bundle)",
+      btn_generate_diag: "توليد الحزمة",
+      btn_copy_diag: "نسخ JSON",
+      btn_download_diag: "تنزيل ملف JSON",
+      diag_desc: "تحتوي هذه الحزمة على إصدار التطبيق وإحصائيات الحالات وآخر 200 مهمة طباعة بدون أي بيانات سرية أو محتوى مستندات أو رموز جلسات.",
+    },
+    en: {
+      app_title: "Odoo Native Print — Control Center",
+      app_subtitle: "Zero-Gateway Native Print Client • GDI / PDFium / ESC-POS / ZPL / TSPL / IPP",
+      btn_open_odoo: "Open Odoo ERP",
+      btn_refresh: "Refresh",
+      btn_theme: "Theme",
+      tab_dashboard: "Dashboard & Print Queue",
+      tab_printers: "Printers & Calibration Lab",
+      tab_settings: "Odoo Connection & Security",
+      tab_diagnostics: "Diagnostics & Support Bundle",
+      btn_configure_now: "Configure Now",
+      kpi_printers: "Discovered Printers",
+      kpi_active_jobs: "Active / Queued Jobs",
+      kpi_active_sub: "SQLite WAL • Durable Queue",
+      kpi_done_jobs: "Completed Jobs",
+      kpi_failed_jobs: "Needs Attention (Failed / Dead Letter)",
+      queue_title: "Local Durable Print Queue (SQLite WAL)",
+      filter_all: "All",
+      filter_active: "Active",
+      filter_attention: "Failed / Dead Letter",
+      filter_done: "Completed",
+      btn_clear_done: "Clear Completed",
+      col_id: "Job ID (Idempotency Key)",
+      col_report: "Report / Source",
+      col_printer: "Target Printer",
+      col_pages: "Pages / Size",
+      col_state: "State",
+      col_attempts: "Attempts",
+      col_error: "Error Code",
+      col_actions: "Actions",
+      no_jobs: "No matching print jobs in the queue.",
+      direct_test_title: "Direct Hardware Calibration & Test Print (System Printer or TCP 9100 / IPP URI)",
+      lbl_target_printer: "Printer Name or URI (Windows / tcp://IP:9100 / ipp://IP:631/ipp/print)",
+      lbl_test_type: "Calibration Test Page Type",
+      btn_send_test: "Send Calibration Page",
+      settings_title: "Odoo Origin & Security Policy (ADR-0002 & ADR-0004)",
+      lbl_odoo_origin: "Company Odoo Server Origin (HTTPS Exact Origin)",
+      help_odoo_origin: "Must be an exact https:// origin with no path. Navigation and IPC outside this origin are blocked in Rust.",
+      lbl_recovery_mode: "Crash Recovery Policy (ADR-0004)",
+      help_recovery_mode: "Jobs interrupted before spooling always re-queue; jobs already in printing follow this setting to prevent duplicate prints.",
+      btn_save_origin: "Save Settings",
+      btn_save_and_launch: "Connect & Launch Odoo Now",
+      lbl_config_file: "Configuration File Path (config.json)",
+      lbl_pdfium_engine: "Bundled PDFium Renderer (Chromium/8125)",
+      lbl_shortcut: "Quick Keyboard Shortcut",
+      help_shortcut: "Toggle between Odoo ERP and this Control Center anytime",
+      diag_title: "One-Click Redacted Diagnostics Bundle",
+      btn_generate_diag: "Generate Bundle",
+      btn_copy_diag: "Copy JSON",
+      btn_download_diag: "Download JSON",
+      diag_desc: "Includes app version, queue state counts, and the last 200 job summaries with all document bytes and user credentials redacted by construction.",
+    }
+  };
+
+  let currentLang = "ar";
+  let currentFilter = "all";
+  let overviewState = null;
+
+  const FALLBACK_DEMO = {
+    appVersion: "1.0.0",
+    os: "windows",
+    odooOrigin: "https://erp.company.local:8069",
+    lockedByPolicy: false,
+    autoReprint: false,
+    configPath: "C:\\Users\\Operator\\AppData\\Roaming\\com.company.odoo-native-print\\config.json",
+    pdfiumReady: true,
+    pdfiumDetail: "C:\\Program Files\\Odoo Native Print\\resources\\pdfium.dll (158.0.8125.0)",
+    defaultPrinter: "HP LaserJet Pro MFP M428fdw",
+    printers: [
+      { name: "HP LaserJet Pro MFP M428fdw", driver: "HP Universal Printing PCL 6", port: "IP_192.168.1.40", kind: "network", status: "ready", is_default: true },
+      { name: "EPSON TM-T88VII Receipt", driver: "EPSON Advanced Printer Driver 6", port: "USB001", kind: "local", status: "ready", is_default: false },
+      { name: "Zebra ZD421-203dpi ZPL", driver: "ZDesigner ZD421-203dpi ZPL", port: "USB002", kind: "local", status: "ready", is_default: false },
+      { name: "Microsoft Print to PDF", driver: "Microsoft Print To PDF", port: "PORTPROMPT:", kind: "virtual", status: "ready", is_default: false }
+    ],
+    stateCounts: [["queued", 0], ["rendering", 0], ["spooling", 0], ["printing", 0], ["done", 18], ["failed", 1], ["canceled", 0], ["dead_letter", 0]],
+    recentJobs: [
+      { id: "pos-Order-00412-1730598120", printer: "EPSON TM-T88VII Receipt", report: "point_of_sale.receipt", pages: 1, bytes: 42810, state: "done", attempts: 1, error_code: null },
+      { id: "odoo-sale.report_saleorder-1730598095", printer: "HP LaserJet Pro MFP M428fdw", report: "sale.report_saleorder", pages: 2, bytes: 98412, state: "done", attempts: 1, error_code: null },
+      { id: "odoo-stock.report_picking-1730597900", printer: "Zebra ZD421-203dpi ZPL", report: "stock.report_picking", pages: 1, bytes: 19320, state: "failed", attempts: 2, error_code: "PAPER_OUT" }
+    ]
+  };
+
+  function bridge() {
+    return window.__NATIVE_PRINT__ || null;
+  }
+
+  function showToast(msg, isError = false) {
+    const container = document.getElementById("toastContainer");
+    const el = document.createElement("div");
+    el.className = "toast";
+    if (isError) el.style.borderInlineStartColor = "#dc2626";
+    el.innerHTML = `<span>${escapeHtml(msg)}</span>`;
+    container.appendChild(el);
+    setTimeout(() => el.remove(), 4200);
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function escapeJsStr(s) {
+    return escapeHtml(
+      String(s == null ? "" : s)
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'")
+        .replace(/\r/g, "\\r")
+        .replace(/\n/g, "\\n")
+    );
+  }
+
+  function formatBytes(b) {
+    const n = Number(b) || 0;
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  function stateBadgeHtml(state) {
+    const s = String(state || "unknown").toLowerCase();
+    if (s === "done") return `<span class="badge badge-ok"><span class="dot"></span>Done</span>`;
+    if (["queued", "rendering", "spooling", "printing"].includes(s)) {
+      return `<span class="badge badge-info"><span class="dot"></span>${escapeHtml(s.toUpperCase())}</span>`;
+    }
+    if (s === "failed" || s === "dead_letter") {
+      return `<span class="badge badge-err"><span class="dot"></span>${escapeHtml(s.toUpperCase())}</span>`;
+    }
+    return `<span class="badge badge-neutral">${escapeHtml(s)}</span>`;
+  }
+
+  function printerStatusBadge(status) {
+    const s = String(status || "unknown").toLowerCase();
+    if (s === "ready" || s === "printing") {
+      return `<span class="badge badge-ok"><span class="dot"></span>${escapeHtml(s.toUpperCase())}</span>`;
+    }
+    if (["offline", "paper_out", "paper_jam", "door_open", "no_toner", "error"].includes(s)) {
+      return `<span class="badge badge-err"><span class="dot"></span>${escapeHtml(s.replace("_", " ").toUpperCase())}</span>`;
+    }
+    return `<span class="badge badge-warn"><span class="dot"></span>${escapeHtml(s.toUpperCase())}</span>`;
+  }
+
+  function switchTab(tabId) {
+    document.querySelectorAll(".tab-pane").forEach((el) => el.classList.add("hidden"));
+    const target = document.getElementById(`tab-${tabId}`);
+    if (target) target.classList.remove("hidden");
+    document.querySelectorAll(".nav-tab").forEach((btn) => {
+      btn.classList.toggle("active", btn.getAttribute("data-tab") === tabId);
+    });
+    if (tabId === "diagnostics") {
+      loadDiagnosticsBundle();
+    }
+  }
+
+  function toggleTheme() {
+    const html = document.documentElement;
+    const next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    html.setAttribute("data-theme", next);
+  }
+
+  function toggleLang() {
+    currentLang = currentLang === "ar" ? "en" : "ar";
+    const html = document.documentElement;
+    html.setAttribute("lang", currentLang);
+    html.setAttribute("dir", currentLang === "ar" ? "rtl" : "ltr");
+    document.getElementById("btnLang").innerHTML = `<span>${currentLang === "ar" ? "English" : "العربية"}</span>`;
+    const dict = I18N[currentLang];
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+      const k = el.getAttribute("data-i18n");
+      if (dict[k]) el.textContent = dict[k];
+    });
+    if (overviewState) renderOverview(overviewState);
+  }
+
+  function setJobFilter(f) {
+    currentFilter = f;
+    document.querySelectorAll(".filter-pill").forEach((b) => {
+      b.classList.toggle("active", b.getAttribute("data-filter") === f);
+    });
+    if (overviewState) renderJobsTable(overviewState.recentJobs || []);
+  }
+
+  async function refreshAll() {
+    const b = bridge();
+    if (b && typeof b.appOverview === "function") {
+      try {
+        overviewState = await b.appOverview();
+      } catch (e) {
+        showToast(String(e), true);
+        overviewState = FALLBACK_DEMO;
+      }
+    } else {
+      overviewState = FALLBACK_DEMO;
+    }
+    renderOverview(overviewState);
+  }
+
+  function renderOverview(data) {
+    document.getElementById("appVersionBadge").textContent = `v${data.appVersion || "1.0.0"}`;
+    const printers = data.printers || [];
+    document.getElementById("kpiPrintersCount").textContent = String(printers.length);
+    document.getElementById("kpiDefaultPrinter").textContent = data.defaultPrinter
+      ? (currentLang === "ar" ? `الافتراضية: ${data.defaultPrinter}` : `Default: ${data.defaultPrinter}`)
+      : (currentLang === "ar" ? "لا توجد طابعة افتراضية" : "No default printer");
+
+    const counts = Object.fromEntries(data.stateCounts || []);
+    const active = (counts.queued || 0) + (counts.rendering || 0) + (counts.spooling || 0) + (counts.printing || 0);
+    const done = counts.done || 0;
+    const attention = (counts.failed || 0) + (counts.dead_letter || 0);
+
+    document.getElementById("kpiActiveCount").textContent = String(active);
+    document.getElementById("kpiDoneCount").textContent = String(done);
+    document.getElementById("kpiFailedCount").textContent = String(attention);
+    document.getElementById("kpiPdfiumStatus").textContent = data.pdfiumReady
+      ? "PDFium: Ready (Chromium/8125)"
+      : "PDFium: Not Loaded";
+
+    const alertBanner = document.getElementById("originAlertBanner");
+    if (!data.odooOrigin) {
+      alertBanner.classList.remove("hidden");
+      document.getElementById("kpiOriginMeta").textContent = currentLang === "ar" ? "الأصل: غير مضبوط" : "Origin: Not configured";
+      document.getElementById("btnOpenOdoo").disabled = true;
+    } else {
+      alertBanner.classList.add("hidden");
+      document.getElementById("kpiOriginMeta").textContent = data.odooOrigin;
+      document.getElementById("btnOpenOdoo").disabled = false;
+    }
+
+    // Populate settings inputs
+    const originInput = document.getElementById("inputOdooOrigin");
+    if (document.activeElement !== originInput) {
+      originInput.value = data.odooOrigin || "";
+    }
+    originInput.disabled = !!data.lockedByPolicy;
+    document.getElementById("inputAutoReprint").value = data.autoReprint ? "true" : "false";
+    document.getElementById("inputAutoReprint").disabled = !!data.lockedByPolicy;
+    document.getElementById("btnSaveOrigin").disabled = !!data.lockedByPolicy;
+    document.getElementById("policyStatusBadge").textContent = data.lockedByPolicy
+      ? (currentLang === "ar" ? "مقفل بسياسة GPO" : "Locked by Windows GPO")
+      : (currentLang === "ar" ? "قابل للتعديل محلياً" : "Editable (config.json)");
+    document.getElementById("txtConfigPath").textContent = data.configPath || "—";
+    document.getElementById("txtPdfiumPath").textContent = data.pdfiumDetail || "—";
+
+    const customPrinterInput = document.getElementById("customPrinterInput");
+    if (!customPrinterInput.value && data.defaultPrinter) {
+      customPrinterInput.value = data.defaultPrinter;
+    }
+
+    renderJobsTable(data.recentJobs || []);
+    renderPrintersGrid(printers);
+  }
+
+  function renderJobsTable(jobs) {
+    const tbody = document.getElementById("jobsTableBody");
+    const filtered = jobs.filter((j) => {
+      const s = String(j.state || "").toLowerCase();
+      if (currentFilter === "active") return ["queued", "rendering", "spooling", "printing"].includes(s);
+      if (currentFilter === "attention") return ["failed", "dead_letter"].includes(s);
+      if (currentFilter === "done") return s === "done";
+      return true;
+    });
+
+    if (!filtered.length) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-muted);">${escapeHtml(I18N[currentLang].no_jobs)}</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map((j) => {
+      const s = String(j.state || "").toLowerCase();
+      const canRetry = s === "failed" || s === "dead_letter";
+      const canCancel = s === "queued" || s === "rendering" || s === "spooling";
+      return `
+        <tr>
+          <td class="mono">${escapeHtml(j.id)}</td>
+          <td><strong>${escapeHtml(j.report || "—")}</strong></td>
+          <td>${escapeHtml(j.printer)}</td>
+          <td>${Number(j.pages) || 1}p • <span class="mono">${formatBytes(j.bytes)}</span></td>
+          <td>${stateBadgeHtml(j.state)}</td>
+          <td>${Number(j.attempts) || 0}</td>
+          <td class="mono" style="color:var(--status-err-fg);">${escapeHtml(j.error_code || "—")}</td>
+          <td>
+            <div style="display:flex;gap:0.35rem;">
+              ${canRetry ? `<button class="btn btn-sm btn-primary" onclick="retryJob('${escapeJsStr(j.id)}')">${currentLang === "ar" ? "إعادة محاولة" : "Retry"}</button>` : ""}
+              ${canCancel ? `<button class="btn btn-sm btn-danger" onclick="cancelJob('${escapeJsStr(j.id)}')">${currentLang === "ar" ? "إلغاء" : "Cancel"}</button>` : ""}
+              ${!canRetry && !canCancel ? `<span style="color:var(--text-muted);font-size:0.75rem;">—</span>` : ""}
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("");
+  }
+
+  function renderPrintersGrid(printers) {
+    const grid = document.getElementById("printersGrid");
+    if (!printers.length) {
+      grid.innerHTML = `
+        <div class="card" style="grid-column:1/-1;padding:2rem;text-align:center;color:var(--text-muted);">
+          ${currentLang === "ar"
+            ? "لم يتم العثور على طابعات مثبتة في Windows Spooler على هذا الجهاز حالياً. يمكنك استخدام مربع الاختبار المباشر أعلاه للطباعة عبر TCP 9100 أو IPP."
+            : "No Windows Spooler printers discovered on this host. Use the Direct Calibration box above to test TCP 9100 or IPP printers."}
+        </div>`;
+      return;
+    }
+
+    grid.innerHTML = printers.map((p, idx) => `
+      <div class="printer-card">
+        <div class="printer-card-top">
+          <div class="printer-identity">
+            <div class="printer-type-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+            </div>
+            <div>
+              <div class="printer-name">${escapeHtml(p.name)}</div>
+              <div style="display:flex;gap:0.35rem;margin-top:0.25rem;flex-wrap:wrap;">
+                <span class="badge badge-neutral">${escapeHtml(String(p.kind || "local").toUpperCase())}</span>
+                ${p.is_default ? `<span class="badge badge-info">${currentLang === "ar" ? "افتراضية" : "DEFAULT"}</span>` : ""}
+              </div>
+            </div>
+          </div>
+          ${printerStatusBadge(p.status)}
+        </div>
+
+        <div class="printer-meta-list">
+          <div class="printer-meta-item">
+            <span>${currentLang === "ar" ? "المنفذ (Port)" : "Port"}</span>
+            <strong class="mono">${escapeHtml(p.port || "—")}</strong>
+          </div>
+          <div class="printer-meta-item">
+            <span>${currentLang === "ar" ? "التعريف (Driver)" : "Driver"}</span>
+            <strong>${escapeHtml(p.driver || "—")}</strong>
+          </div>
+        </div>
+
+        <div id="forms-box-${idx}" class="hidden" style="font-size:0.76rem;background:var(--bg-subtle);padding:0.6rem;border-radius:8px;max-height:110px;overflow:auto;"></div>
+
+        <div class="printer-actions">
+          <button class="btn btn-sm btn-primary" onclick="runPrinterTest('${escapeJsStr(p.name)}', 'pdf-a4')">
+            A4 PDF (GDI)
+          </button>
+          <button class="btn btn-sm btn-secondary" onclick="runPrinterTest('${escapeJsStr(p.name)}', 'thermal-80mm')">
+            80mm ESC/POS
+          </button>
+          <button class="btn btn-sm btn-secondary" onclick="runPrinterTest('${escapeJsStr(p.name)}', 'zpl-label')">
+            ZPL Label
+          </button>
+          <button class="btn btn-sm btn-secondary" onclick="inspectForms('${escapeJsStr(p.name)}', ${idx})">
+            ${currentLang === "ar" ? "مقاسات الورق" : "Paper Forms"}
+          </button>
+        </div>
+      </div>
+    `).join("");
+  }
+
+  async function runPrinterTest(printerName, kind) {
+    const b = bridge();
+    if (!b || typeof b.runTestPrint !== "function") {
+      showToast(currentLang === "ar" ? `وضع المعاينة: تم إرسال اختبار (${kind}) إلى ${printerName}` : `Preview: Sent ${kind} test to ${printerName}`);
+      return;
+    }
+    try {
+      const id = await b.runTestPrint(printerName, kind, null);
+      showToast(currentLang === "ar" ? `تمت جدولة اختبار الطباعة (${id})` : `Queued test print (${id})`);
+      await refreshAll();
+    } catch (e) {
+      showToast(String(e), true);
+    }
+  }
+
+  async function triggerCustomTestPrint() {
+    const printer = document.getElementById("customPrinterInput").value.trim();
+    const kind = document.getElementById("customTestKind").value;
+    if (!printer) {
+      showToast(currentLang === "ar" ? "يرجى إدخال اسم الطابعة أو عنوان الشبكة أولاً" : "Please enter a printer name or URI first", true);
+      return;
+    }
+    await runPrinterTest(printer, kind);
+  }
+
+  async function inspectForms(printerName, idx) {
+    const box = document.getElementById(`forms-box-${idx}`);
+    if (!box) return;
+    box.classList.remove("hidden");
+    const b = bridge();
+    if (!b || typeof b.printerForms !== "function") {
+      box.innerHTML = `<div class="mono">A4 (210×297mm, sheet) • A5 (148×210mm, sheet) • 80mm Roll (80×3276mm, roll)</div>`;
+      return;
+    }
+    try {
+      const forms = await b.printerForms(printerName);
+      if (!forms || !forms.length) {
+        box.textContent = currentLang === "ar" ? "لا توجد نماذج ورق مسجلة من التعريف." : "No forms reported by driver.";
+        return;
+      }
+      box.innerHTML = forms.map((f) =>
+        `<span class="badge ${f.roll ? "badge-info" : "badge-neutral"}" style="margin:2px;">${escapeHtml(f.name)} (${Math.round(f.size.width_mm)}×${Math.round(f.size.height_mm)}mm${f.roll ? " • ROLL" : ""})</span>`
+      ).join(" ");
+    } catch (e) {
+      box.textContent = String(e);
+    }
+  }
+
+  async function retryJob(id) {
+    const b = bridge();
+    if (!b || typeof b.retryJob !== "function") {
+      showToast(`Preview: Retried ${id}`);
+      return;
+    }
+    try {
+      await b.retryJob(id);
+      showToast(currentLang === "ar" ? `تمت إعادة جدولة المهمة ${id}` : `Re-queued job ${id}`);
+      await refreshAll();
+    } catch (e) {
+      showToast(String(e), true);
+    }
+  }
+
+  async function cancelJob(id) {
+    const b = bridge();
+    if (!b || typeof b.cancelJob !== "function") {
+      showToast(`Preview: Canceled ${id}`);
+      return;
+    }
+    try {
+      await b.cancelJob(id);
+      showToast(currentLang === "ar" ? `تم إلغاء المهمة ${id}` : `Canceled job ${id}`);
+      await refreshAll();
+    } catch (e) {
+      showToast(String(e), true);
+    }
+  }
+
+  async function clearFinishedJobs() {
+    const b = bridge();
+    if (!b || typeof b.clearFinished !== "function") {
+      showToast("Preview: Cleared finished jobs");
+      return;
+    }
+    try {
+      const n = await b.clearFinished();
+      showToast(currentLang === "ar" ? `تم مسح ${n} مهمة مكتملة` : `Cleared ${n} finished job(s)`);
+      await refreshAll();
+    } catch (e) {
+      showToast(String(e), true);
+    }
+  }
+
+  async function saveOriginSettings() {
+    const origin = document.getElementById("inputOdooOrigin").value.trim();
+    const autoReprint = document.getElementById("inputAutoReprint").value === "true";
+    if (!origin.startsWith("https://")) {
+      showToast(currentLang === "ar" ? "يجب أن يبدأ رابط Odoo بـ https://" : "Odoo origin must start with https://", true);
+      return;
+    }
+    const b = bridge();
+    if (!b || typeof b.saveOrigin !== "function") {
+      overviewState.odooOrigin = origin.replace(/\/+$/, "");
+      overviewState.autoReprint = autoReprint;
+      renderOverview(overviewState);
+      showToast(currentLang === "ar" ? "تم حفظ الإعدادات بنجاح" : "Configuration saved");
+      return;
+    }
+    try {
+      const saved = await b.saveOrigin(origin, autoReprint);
+      showToast(currentLang === "ar" ? `تم حفظ الرابط: ${saved}` : `Saved origin: ${saved}`);
+      await refreshAll();
+    } catch (e) {
+      showToast(String(e), true);
+    }
+  }
+
+  async function openOdooApp() {
+    const b = bridge();
+    if (b && typeof b.openOdooOrigin === "function") {
+      try {
+        await b.openOdooOrigin();
+      } catch (e) {
+        showToast(String(e), true);
+      }
+    } else if (overviewState && overviewState.odooOrigin) {
+      showToast(`Preview: Would navigate webview to ${overviewState.odooOrigin}`);
+    }
+  }
+
+  async function loadDiagnosticsBundle() {
+    const out = document.getElementById("diagnosticsOutput");
+    const b = bridge();
+    if (b && typeof b.exportDiagnostics === "function") {
+      try {
+        out.textContent = await b.exportDiagnostics();
+      } catch (e) {
+        out.textContent = JSON.stringify({ error: String(e) }, null, 2);
+      }
+    } else {
+      out.textContent = JSON.stringify({
+        app_version: overviewState ? overviewState.appVersion : "1.0.0",
+        core_version: "0.1.0",
+        os: overviewState ? overviewState.os : "windows",
+        state_counts: overviewState ? overviewState.stateCounts : [],
+        recent_jobs: overviewState ? overviewState.recentJobs : []
+      }, null, 2);
+    }
+  }
+
+  async function copyDiagnosticsBundle() {
+    const text = document.getElementById("diagnosticsOutput").textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(currentLang === "ar" ? "تم نسخ حزمة التشخيص للحافظة" : "Copied diagnostics JSON to clipboard");
+    } catch (_e) {
+      showToast("Clipboard copy failed", true);
+    }
+  }
+
+  function downloadDiagnosticsBundle() {
+    const text = document.getElementById("diagnosticsOutput").textContent;
+    const blob = new Blob([text], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `odoo-native-print-diagnostics-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  refreshAll();
+  setInterval(refreshAll, 3000);
+</script>
 </body>
 </html>

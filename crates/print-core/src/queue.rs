@@ -36,6 +36,37 @@ pub struct Job {
     pub error_code: Option<String>,
 }
 
+/// Execution options stored alongside a queued job so the background
+/// worker knows the profile's mode, paper, copies, scale policy, and
+/// colour settings even after an app restart.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JobOptions {
+    pub mode: String,
+    pub paper: Option<String>,
+    pub copies: u16,
+    pub scale_policy: Option<String>,
+    pub duplex: bool,
+    pub color: bool,
+    pub cut: bool,
+    #[serde(default)]
+    pub tray: Option<String>,
+}
+
+impl Default for JobOptions {
+    fn default() -> Self {
+        Self {
+            mode: "gdi".to_string(),
+            paper: None,
+            copies: 1,
+            scale_policy: Some("custom_allowed".to_string()),
+            duplex: false,
+            color: true,
+            cut: true,
+            tray: None,
+        }
+    }
+}
+
 /// Durable queue in SQLite, WAL mode (spec section 5).
 /// One serial worker per printer is enforced by `claim_next` selecting a
 /// single queued job per printer; ordering is priority, then insertion.
@@ -53,6 +84,7 @@ impl Queue {
         Self::init(Connection::open_in_memory()?)
     }
     fn init(conn: Connection) -> Result<Self, QueueError> {
+        conn.busy_timeout(std::time::Duration::from_millis(5000))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.execute_batch(
@@ -68,7 +100,10 @@ impl Queue {
              CREATE TABLE IF NOT EXISTS payloads(
                job_id TEXT PRIMARY KEY,
                kind TEXT NOT NULL,
-               data BLOB NOT NULL);",
+               data BLOB NOT NULL);
+             CREATE TABLE IF NOT EXISTS job_options(
+               job_id TEXT PRIMARY KEY,
+               options_json TEXT NOT NULL);",
         )?;
         Ok(Self {
             conn,
@@ -92,8 +127,66 @@ impl Queue {
     /// Cancel a job that has not started printing. Jobs already printing
     /// cannot be cancelled here (only the spooler can stop those); the
     /// state machine rejects it, which is the honest behaviour.
+    /// Payload bytes are purged on cancellation so canceled jobs do not leak disk space.
     pub fn cancel_job(&mut self, id: &str) -> Result<(), QueueError> {
-        self.set_state(id, JobState::Canceled, Some("CANCELED_BY_USER"))
+        self.set_state(id, JobState::Canceled, Some("CANCELED_BY_USER"))?;
+        self.purge_payload(id)?;
+        Ok(())
+    }
+
+    /// Retry a failed or dead-letter job, resetting its attempt counter so
+    /// the worker gives it a fresh retry cycle.
+    pub fn retry_job(&mut self, id: &str) -> Result<(), QueueError> {
+        self.set_state(id, JobState::Queued, None)?;
+        self.conn.execute(
+            "UPDATE jobs SET attempts=0, error_code=NULL WHERE id=?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    /// Remove completed and canceled jobs (and their payloads/options).
+    pub fn clear_finished(&mut self) -> Result<u64, QueueError> {
+        self.conn.execute(
+            "DELETE FROM payloads WHERE job_id IN (SELECT id FROM jobs WHERE state IN ('done','canceled'))",
+            [],
+        )?;
+        self.conn.execute(
+            "DELETE FROM job_options WHERE job_id IN (SELECT id FROM jobs WHERE state IN ('done','canceled'))",
+            [],
+        )?;
+        let removed = self.conn.execute(
+            "DELETE FROM jobs WHERE state IN ('done','canceled') AND 1=1",
+            [],
+        )? as u64;
+        Ok(removed)
+    }
+
+    /// Distinct printer patterns that currently have queued jobs, ordered by
+    /// highest priority and earliest arrival.
+    pub fn queued_printers(&self) -> Result<Vec<String>, QueueError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT printer FROM jobs WHERE state='queued' GROUP BY printer ORDER BY MAX(priority) DESC, MIN(seq) ASC",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// List the most recent jobs (newest first) up to `limit`.
+    pub fn list_recent(&self, limit: usize) -> Result<Vec<Job>, QueueError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id,idempotency_key,printer,report,pages,bytes,priority,state,attempts,error_code FROM jobs ORDER BY seq DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], row_to_job)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     /// Enqueue, deduplicated by idempotency key: re-submitting the same key
@@ -129,7 +222,7 @@ impl Queue {
 
     /// Store a job's document payload (the queue row holds metadata; the
     /// bytes live here so the worker can print after any restart).
-    /// kind: "pdf" | "escpos" | "zpl" | "tspl" | "image".
+    /// kind: "pdf" | "escpos" | "zpl" | "tspl" | "image-png".
     pub fn store_payload(
         &mut self,
         job_id: &str,
@@ -151,6 +244,31 @@ impl Queue {
         match rows.next()? {
             Some(r) => Ok(Some((r.get(0)?, r.get(1)?))),
             None => Ok(None),
+        }
+    }
+
+    /// Store execution options for a job.
+    pub fn store_options(&mut self, job_id: &str, opts: &JobOptions) -> Result<(), QueueError> {
+        let json = serde_json::to_string(opts).unwrap_or_else(|_| "{}".to_string());
+        self.conn.execute(
+            "INSERT OR REPLACE INTO job_options(job_id, options_json) VALUES(?1,?2)",
+            params![job_id, json],
+        )?;
+        Ok(())
+    }
+
+    /// Read execution options for a job (falls back to `JobOptions::default()`).
+    pub fn options(&self, job_id: &str) -> Result<JobOptions, QueueError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT options_json FROM job_options WHERE job_id=?1")?;
+        let mut rows = stmt.query(params![job_id])?;
+        match rows.next()? {
+            Some(r) => {
+                let raw: String = r.get(0)?;
+                Ok(serde_json::from_str(&raw).unwrap_or_default())
+            }
+            None => Ok(JobOptions::default()),
         }
     }
 
@@ -188,7 +306,7 @@ impl Queue {
 
     /// Atomically claim the next queued job for a printer (queued -> rendering).
     /// The UPDATE ... WHERE state='queued' guard makes double-claim impossible
-    /// for a single connection; the worker model is one claimer per printer.
+    /// even across concurrent connections.
     pub fn claim_next(&mut self, printer: &str) -> Result<Option<Job>, QueueError> {
         let candidate: Option<String> = {
             let mut stmt = self.conn.prepare(
@@ -200,13 +318,14 @@ impl Queue {
             }
         };
         let Some(id) = candidate else { return Ok(None) };
-        self.set_state(&id, JobState::Rendering, None)?;
-        let mut job = self.get(&id)?;
-        job.attempts += 1;
-        self.conn.execute(
-            "UPDATE jobs SET attempts=?1 WHERE id=?2",
-            params![job.attempts, id],
+        let updated = self.conn.execute(
+            "UPDATE jobs SET state='rendering', error_code=NULL, attempts=attempts+1 WHERE id=?1 AND state='queued'",
+            params![id],
         )?;
+        if updated == 0 {
+            return Ok(None);
+        }
+        let job = self.get(&id)?;
         Ok(Some(job))
     }
 
@@ -291,6 +410,7 @@ mod tests {
         let first = q.claim_next("p1").unwrap().unwrap();
         assert_eq!(first.id, "receipt");
         assert_eq!(first.state, JobState::Rendering);
+        assert_eq!(first.attempts, 1);
         // different printer is independent
         assert!(q.claim_next("other").unwrap().is_none());
     }
@@ -324,16 +444,45 @@ mod tests {
         assert_eq!(b2.error_code.as_deref(), Some("RECOVERY_AMBIGUOUS"));
     }
     #[test]
-    fn payload_round_trip_and_purge() {
+    fn payload_and_options_round_trip_and_purge() {
         let mut q = Queue::in_memory().unwrap();
         q.enqueue(&job("1", "k-1", "p1", 0)).unwrap();
         assert!(q.payload("1").unwrap().is_none());
         q.store_payload("1", "pdf", b"%PDF-data").unwrap();
+        q.store_options(
+            "1",
+            &JobOptions {
+                mode: "escpos".into(),
+                paper: Some("80mm".into()),
+                copies: 2,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let (kind, data) = q.payload("1").unwrap().unwrap();
         assert_eq!(kind, "pdf");
         assert_eq!(data, b"%PDF-data");
+        let opts = q.options("1").unwrap();
+        assert_eq!(opts.mode, "escpos");
+        assert_eq!(opts.copies, 2);
         q.purge_payload("1").unwrap();
         assert!(q.payload("1").unwrap().is_none());
+    }
+    #[test]
+    fn list_retry_and_clear_finished() {
+        let mut q = Queue::in_memory().unwrap();
+        q.enqueue(&job("1", "k-1", "p1", 0)).unwrap();
+        q.enqueue(&job("2", "k-2", "p2", 10)).unwrap();
+        q.store_payload("2", "pdf", b"%PDF-cancel").unwrap();
+        assert_eq!(q.queued_printers().unwrap(), vec!["p2", "p1"]);
+        assert_eq!(q.list_recent(10).unwrap().len(), 2);
+        q.set_state("1", JobState::Failed, Some("ERR")).unwrap();
+        q.retry_job("1").unwrap();
+        assert_eq!(q.get("1").unwrap().state, JobState::Queued);
+        q.cancel_job("2").unwrap();
+        assert!(q.payload("2").unwrap().is_none());
+        assert_eq!(q.clear_finished().unwrap(), 1);
+        assert_eq!(q.list_recent(10).unwrap().len(), 1);
     }
     #[test]
     fn backpressure_and_cancel() {

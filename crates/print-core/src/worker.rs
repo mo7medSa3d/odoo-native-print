@@ -103,6 +103,7 @@ impl<'a, B: PrintBackend, S: FnMut(u64)> Worker<'a, B, S> {
         match self.backend.print(&job) {
             Ok(()) => {
                 self.queue.set_state(&job.id, JobState::Done, None)?;
+                self.queue.purge_payload(&job.id)?;
                 Ok(Outcome::Done(job.id))
             }
             Err(e) if e.retryable && job.attempts < self.cfg.max_attempts => {
@@ -178,6 +179,7 @@ mod tests {
     fn success_path() {
         let mut q = Queue::in_memory().unwrap();
         q.enqueue(&job("1")).unwrap();
+        q.store_payload("1", "pdf", b"%PDF-1.4").unwrap();
         let mut w = Worker {
             queue: &mut q,
             backend: ScriptedBackend {
@@ -191,6 +193,7 @@ mod tests {
         drop(w);
         assert_eq!(q.count_by_state(JobState::Done).unwrap(), 1);
         assert_eq!(q.count_by_state(JobState::Queued).unwrap(), 0);
+        assert!(q.payload("1").unwrap().is_none());
     }
     #[test]
     fn retry_then_dead_letter() {

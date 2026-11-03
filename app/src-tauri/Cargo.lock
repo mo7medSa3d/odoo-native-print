@@ -2140,8 +2140,10 @@ name = "odoo-native-print-app"
 version = "0.5.0"
 dependencies = [
  "print-core",
+ "print-ipp",
  "print-raw",
  "print-render",
+ "print-win",
  "serde",
  "serde_json",
  "tauri",
@@ -2365,6 +2367,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "print-ipp"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "print-raw"
 version = "0.1.0"
 dependencies = [
@@ -2379,6 +2388,16 @@ dependencies = [
  "png 0.17.16",
  "print-core",
  "print-raw",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "print-win"
+version = "0.1.0"
+dependencies = [
+ "print-core",
+ "print-raw",
+ "print-render",
  "thiserror 2.0.21",
 ]
 

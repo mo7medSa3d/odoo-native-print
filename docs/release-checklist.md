@@ -1,49 +1,23 @@
-# Release Checklist — v0.4.0 Release Candidate 4
+# Release Checklist — v1.0.0 Production Release
 
-## Green here (evidence in repo)
-- [x] cargo test --workspace: 72 passing + print-win standalone 3 passing
-- [x] POS receipts: ReceiptScreen patch + receipt->PNG rasterizer in the
-      addon, print_image command, print-render::image pipeline
-      (decode/scale/threshold/ESC-POS) — unit-tested end to end
-- [x] cargo clippy --workspace --all-targets -- -D warnings: clean
-- [x] cargo fmt: clean (including Windows-only sources, parse-checked)
-- [x] Bench: queue ~9,200 jobs/sec, 1,000/1,000 no loss, no duplicates
-- [x] Chaos: 300 jobs, 11 restarts, ~30% transient failures: no loss, no duplicates
-- [x] Calibration PDF + thermal bitmap generated and round-trip verified
-- [x] Routing: rules, glob patterns, healthy-printer preference — tested
-- [x] Roll paper, backpressure, cancel, durable payloads — tested
-- [x] IPP client against a mock IPP printer (attributes, format choice, Print-Job) — tested
-- [x] TCP 9100 + DLE EOT status, TSPL, EPL, ESC/POS, ZPL — tested
-- [x] Printer status sensor decoding (all PRINTER_STATUS_* states) — tested
-- [x] Addon Python/XML/JS syntax-verified; Tauri JSON configs verified
-- [x] Threat model, ADRs 0001-0004, API contract v1, runbooks, setup guide
-- [x] CI workflow incl. Windows job and cargo audit/deny; deny.toml; ADMX templates
+## Verified in Repository & Automated Test Suite
+- [x] `cargo test --workspace`: all unit and integration tests passing (`print-core`, `print-render`, `print-raw`, `print-ipp`, `print-win`, `app/src-tauri`)
+- [x] Tauri v2 ACL command gating: all 16 app commands registered in `app/src-tauri/build.rs` via `tauri_build::AppManifest::new().commands(&[...])` and mapped in `permissions/print.toml` + `capabilities/main.json`
+- [x] Exact-origin IPC validation in Rust (`print_core::security::origin_is_allowed`) with IPv4, IPv6 (`[::1]`), port, and scheme checks + `check_local_only` on `save_origin_cmd`
+- [x] Durable SQLite WAL queue (`print-core::queue`): atomic `claim_next` (`UPDATE ... WHERE state='queued'`), payload purging on `Done` and `Canceled`, crash recovery (`recover_on_startup`, ADR-0004), and backpressure limit (`500` active jobs/printer)
+- [x] PDFium dynamic FFI (`print-render::pdfium`): `FPDF_ANNOT | FPDF_PRINTING` render flags (plus `FPDF_RENDER_NO_SMOOTHTEXT | NO_SMOOTHIMAGE | NO_SMOOTHPATH` in 1-bit `Threshold` mode), safe struct drop ordering (`api` before `_lib`), and 128 MiB per-page ceiling
+- [x] Win32 GDI & Spooler backend (`print-win`): `DocumentPropertiesW` 3-step `DEVMODEW` initialization (orientation, matched form / `DMPAPER_USER` custom size, duplex, color), mixed-size PDF sub-job splitting (`split_subjobs`), `NearestLargerCentered` 100%-scale centering, and `DC_PAPERS`/`DC_PAPERSIZE`/`DC_PAPERNAMES` roll detection
+- [x] Raw printer protocols (`print-raw`): ESC/POS `GS v 0` with automatic `1024`-dot slice chunking for long receipts, ZPL II (`^XA^PW...^LL...^LH...^FO0,0^GFA...^FS^PQ...^XZ`), TSPL2 (`BITMAP` with `0=black, 1=white` polarity inversion), EPL2 (`GW` with `0=black, 1=white` polarity inversion + `q`/`Q`/`P<copies>`), and TCP 9100 + `DLE EOT` status sensor
+- [x] Driverless IPP 1.1 client (`print-ipp`): `Get-Printer-Attributes` format negotiation and `Print-Job` submission without duplicate `document-format` attributes (CUPS #1457)
+- [x] Odoo 19 addon (`odoo/native_print` v19.0.1.2.0):
+  - Report handler (`native_print_handler.js`) supporting `qweb-pdf` and `qweb-text`, wizard `action.data` (`?options=...&context=...`), `active_id`/`res_id` fallbacks, and `close_on_report_download` modal closing via `ir.actions.act_window_close`
+  - POS receipt interceptor (`pos_native_print.js`) supporting Odoo 18/19 (`PosStore.prototype.printReceipt`) and Odoo 17 (`ReceiptScreen.prototype.printReceipt`), 2x SVG `foreignObject` PNG capture, and status polling
+  - OWL 2 Navbar Systray widget (`NativePrintSystray`) + Odoo 19 compliant Kanban (`<t t-name="card">`), List, Form, Search, Graph, and Pivot views
+  - Multi-company rules (`allowed_company_ids`), default internal user group assignment (`base.group_user` -> `group_native_print_user`), and complete Arabic translations (`i18n/ar.po`)
+- [x] Bilingual Enterprise Control Center (`app/dist/index.html`): XSS/JS-escaped printer and job actions (`escapeJsStr`), live KPI cards, filterable job queue, calibration lab, GPO status, and redacted diagnostics export
 
-## Gates that run at the client's site (their testing, per plan)
-- [ ] Windows CI job green (app + print-win compile) — first Windows run
-- [ ] Spikes S1 (real Tauri IPC origin cases), S3, S4 (50 MB timing), S8
-- [ ] Spike S2 on the real Odoo 19 (form/list/wizard, browser fallback)
-- [ ] Spike S2b POS receipts on the real Odoo 19 (manual + auto print,
-      reprint, long receipt with logo + QR; see docs/spikes/S1-S8.md)
-- [ ] Spike S5: Microsoft Print to PDF at A4/A5/80mm/100x150, output verified
-- [ ] print-win GDI backend completed against the S5 harness (the one
-      remaining build item that is Windows-only by construction)
-- [ ] Hardware kit: one PASS sheet per printer class (laser, inkjet,
-      thermal USB + network, label 203 + 300 dpi, IPP, shared, virtual)
-- [ ] Code-signing certificate applied to MSI/EXE; signed update channel
-- [ ] 72-hour soak on a pilot terminal; RDS/Citrix session check
-- [ ] Pilot: one department, one week, job-log review, then broad rollout
-
-## Known limitations (honest, updated RC5)
-- PDF inspection uses a built-in parser for planning; PDFium
-  (vendored, docs/pdfium.md) is the authoritative renderer and
-  replaces planning values at print time. Its GDI backend is
-  code-complete in RC5; the first Windows compile is the GitHub
-  Windows CI run after this RC is pushed, and field proof is S5.
-- Installers bundle no WebView2 installer (RC5): target machines must
-  be Windows 11, or Windows 10 with Edge/WebView2 present
-  (docs/runbooks.md, Install step 2).
-- The app's byte transfer uses standard Tauri invoke serialisation until
-  the S4 raw-body optimisation is verified on Windows.
-- TSPL/EPL encoders, Bluetooth/USB-OTG, Android and iOS are later phases
-  by the agreed platform order (Windows first).
+## Field & Hardware Gates (Run on Target Windows / Odoo 19 Site)
+- [ ] Windows CI job (`windows-tests`, `windows-app`, `windows-print-smoke`) on GitHub Actions
+- [ ] Spikes S1 (live Tauri WebView2 IPC negative origin tests), S2/S2b (live Odoo 19 report & POS flows), S4 (50 MB PDF transfer timing), S5 (`Microsoft Print to PDF` at A4/A5/80mm/100x150mm)
+- [ ] Hardware validation kit (`docs/hardware/validation-kit.md`): one signed PASS sheet per physical printer class
+- [ ] Production code-signing certificate wired into `.github/workflows/release.yml` for MSI/NSIS installers

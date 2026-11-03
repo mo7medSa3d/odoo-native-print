@@ -1,8 +1,14 @@
 use crate::mono::MonoBitmap;
 
 /// TSPL (TSC label printers) program builder. Structure of a label job:
-/// SIZE, GAP, CLS, BITMAP commands, PRINT. Bitmap data is binary,
-/// row-major, 1 = black, matching MonoBitmap's packing.
+/// SIZE, GAP, CLS, BITMAP commands, PRINT.
+///
+/// TSPL2 BITMAP command specification (TSC TSPL/TSPL2 Programming Manual):
+/// `BITMAP X,Y,width,height,mode,bitmap data`
+/// In TSPL2 mode 0 (OVERWRITE), bit `0` prints a black dot and bit `1` leaves
+/// paper white (the opposite of ESC/POS and ZPL, where `1` = black dot).
+/// Since `MonoBitmap` stores `1 = black dot`, we bitwise-invert (`!b`) each byte
+/// when writing the TSPL `BITMAP` payload.
 pub struct TsplLabel {
     buf: Vec<u8>,
 }
@@ -16,7 +22,7 @@ impl TsplLabel {
         buf.extend_from_slice(b"CLS\r\n");
         Self { buf }
     }
-    /// BITMAP x,y,width(bytes per row),height(mode 0 = overwrite),data
+    /// BITMAP x,y,width(bytes per row),height,mode(0 = overwrite),<inverted data>
     pub fn bitmap(mut self, x: u32, y: u32, bm: &MonoBitmap) -> Self {
         self.buf.extend_from_slice(
             format!(
@@ -26,7 +32,9 @@ impl TsplLabel {
             )
             .as_bytes(),
         );
-        self.buf.extend_from_slice(&bm.data);
+        for &b in &bm.data {
+            self.buf.push(!b);
+        }
         self.buf.extend_from_slice(b"\r\n");
         self
     }
@@ -54,7 +62,7 @@ mod tests {
         let head = String::from_utf8_lossy(&out[..out.len() - 14]).to_string();
         assert!(head.starts_with("SIZE 100 mm,150 mm\r\nGAP 3 mm,0 mm\r\nCLS\r\nBITMAP 0,0,2,2,0,"));
         assert!(out.ends_with(b"PRINT 1,2\r\n"));
-        // Binary bitmap bytes are present verbatim after the BITMAP header.
-        assert!(out.windows(4).any(|w| w == [0xFF, 0x00, 0x00, 0xFF]));
+        // TSPL 0=black / 1=white: inverted from MonoBitmap's 1=black ([0xFF, 0x00, 0x00, 0xFF] -> [0x00, 0xFF, 0xFF, 0x00]).
+        assert!(out.windows(4).any(|w| w == [0x00, 0xFF, 0xFF, 0x00]));
     }
 }

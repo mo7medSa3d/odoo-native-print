@@ -1,8 +1,9 @@
 {
     "name": "Native Print",
-    "version": "19.0.1.1.0",
-    "category": "Tools",
-    "summary": "Print Odoo reports on local printers from the Native Print app",
+    "version": "19.0.1.2.0",
+    "category": "Productivity",
+    "summary": "Zero-gateway local printing for Odoo reports, labels, and POS receipts",
+    "author": "Odoo Native Print Team",
     "depends": ["web"],
     "data": [
         "security/native_print_groups.xml",
@@ -12,7 +13,10 @@
     ],
     "assets": {
         "web.assets_backend": [
+            "native_print/static/src/scss/native_print.scss",
             "native_print/static/src/js/native_print_handler.js",
+            "native_print/static/src/js/native_print_systray.js",
+            "native_print/static/src/xml/native_print_systray.xml",
         ],
         # The POS bundle only exists when point_of_sale is installed and
         # only loads inside the POS app, so the POS extension needs no
@@ -21,6 +25,8 @@
             "native_print/static/src/js/pos_native_print.js",
         ],
     },
+    "images": ["static/description/icon.png"],
     "installable": True,
+    "application": True,
     "license": "LGPL-3",
 }

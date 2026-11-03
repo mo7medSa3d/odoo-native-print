@@ -1,33 +1,203 @@
-# Arabic translation for Native Print (initial set).
-# UI strings also come from field labels in views; this file covers the
-# addon's own menu and action names. Extend with Odoo's export tooling:
-# Settings > Translations > Export Translation (module: native_print).
+# Arabic translation for Native Print (complete set for Odoo 19).
 msgid ""
 msgstr ""
 "Project-Id-Version: Odoo Server 19.0\n"
 "Language: ar\n"
+"MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
 
+#. module: native_print
 #: model:ir.ui.menu,name:native_print.menu_native_print_root
 msgid "Native Print"
 msgstr "الطباعة المحلية"
 
+#. module: native_print
 #: model:ir.ui.menu,name:native_print.menu_profiles
 msgid "Profiles"
 msgstr "ملفات الطابعات"
 
+#. module: native_print
 #: model:ir.ui.menu,name:native_print.menu_rules
 msgid "Rules"
 msgstr "قواعد التوجيه"
 
+#. module: native_print
 #: model:ir.ui.menu,name:native_print.menu_jobs
 msgid "Jobs"
-msgstr "مهام الطباعة"
+msgstr "سجل مهام الطباعة"
 
+#. module: native_print
 #: model:ir.actions.act_window,name:native_print.action_profiles
 msgid "Print Profiles"
-msgstr "ملفات الطباعة"
+msgstr "ملفات تعريف الطابعات"
 
+#. module: native_print
+#: model:ir.actions.act_window,name:native_print.action_rules
+msgid "Print Rules"
+msgstr "قواعد توجيه الطباعة"
+
+#. module: native_print
 #: model:ir.actions.act_window,name:native_print.action_jobs
 msgid "Print Jobs"
 msgstr "مهام الطباعة"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_profile__name
+msgid "Profile Name"
+msgstr "اسم ملف الطابعة"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_profile__printer_pattern
+msgid "Printer Name / Pattern"
+msgstr "اسم الطابعة / النمط"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_profile__mode
+msgid "Print Mode"
+msgstr "وضع الطباعة"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_profile__paper
+msgid "Paper Format"
+msgstr "مقاس الورق"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_profile__copies
+msgid "Default Copies"
+msgstr "عدد النسخ الافتراضي"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_profile__tray
+msgid "Paper Tray / Bin"
+msgstr "درج الورق"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_profile__duplex
+msgid "Duplex (Two-Sided)"
+msgstr "طباعة على الوجهين (Duplex)"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_profile__color
+msgid "Color Printing"
+msgstr "طباعة ملونة"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_profile__scale_policy
+msgid "Paper Scale Policy"
+msgstr "سياسة مطابقة مقاس الورق"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_profile__recovery_mode
+msgid "Crash Recovery Policy"
+msgstr "سياسة الاسترجاع بعد التوقف"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_profile__notes
+msgid "Hardware Quirks & Notes"
+msgstr "ملاحظات الطابعة والإزاحة"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_rule__name
+msgid "Rule Name"
+msgstr "اسم القاعدة"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_rule__report_id
+msgid "Odoo Report"
+msgstr "تقرير أودو"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_rule__report_name
+msgid "Source name (non-report)"
+msgstr "اسم المصدر (لغير التقارير مثل إيصال POS)"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_rule__group_id
+msgid "Restricted to Group"
+msgstr "مقيد بمجموعة صلاحيات"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_rule__profile_id
+msgid "Printer Profile"
+msgstr "ملف الطابعة"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_rule__priority
+msgid "Priority"
+msgstr "الأولوية"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__name
+msgid "Idempotency key"
+msgstr "مفتاح عدم التكرار (Idempotency Key)"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__state
+msgid "State"
+msgstr "الحالة"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__error_code
+msgid "Error Code"
+msgstr "رمز الخطأ"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__device
+msgid "Printer / Device"
+msgstr "الطابعة / الجهاز"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__pages
+msgid "Pages"
+msgstr "عدد الصفحات"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__byte_size
+msgid "Bytes"
+msgstr "الحجم (بايت)"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__attempts
+msgid "Attempts"
+msgstr "المحاولات"
+
+#. module: native_print
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__queued
+msgid "Queued"
+msgstr "في الطابور"
+
+#. module: native_print
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__rendering
+msgid "Rendering"
+msgstr "جاري التصيير"
+
+#. module: native_print
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__spooling
+msgid "Spooling"
+msgstr "جاري الإرسال للـ Spooler"
+
+#. module: native_print
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__printing
+msgid "Printing"
+msgstr "جاري الطباعة"
+
+#. module: native_print
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__done
+msgid "Done"
+msgstr "مكتملة"
+
+#. module: native_print
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__failed
+msgid "Failed"
+msgstr "فشلت"
+
+#. module: native_print
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__canceled
+msgid "Canceled"
+msgstr "ملغاة"
+
+#. module: native_print
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__dead_letter
+msgid "Dead letter"
+msgstr "تحتاج لتدخل (Dead Letter)"

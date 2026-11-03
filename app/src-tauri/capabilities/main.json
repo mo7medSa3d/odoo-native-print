@@ -1,1 +1,19 @@
-{"$schema":"../gen/schemas/desktop-schema.json","description":"Print commands only, only from the configured Odoo origin. The origin below is a placeholder replaced at install/config time with the company's exact HTTPS origin. No fs, shell, http, or opener permissions are granted anywhere in this app.","identifier":"main-odoo-origin","permissions":["allow-print-pdf","allow-print-status"],"remote":{"urls":["https://odoo.example.invalid"]},"windows":["main"]}
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "description": "Print and diagnostics commands only. Remote access is restricted to HTTPS origins at the ACL layer and strictly locked to the exact configured Odoo origin in Rust on every command call (ADR-0002). No fs, shell, http, or opener permissions are granted anywhere in this app.",
+  "identifier": "main-odoo-origin",
+  "local": true,
+  "permissions": [
+    "allow-print-pdf",
+    "allow-print-status"
+  ],
+  "remote": {
+    "urls": [
+      "https://*/*",
+      "https://*:*/*"
+    ]
+  },
+  "windows": [
+    "main"
+  ]
+}

@@ -6,15 +6,7 @@
       "devCsp": null,
       "freezePrototype": true
     },
-    "windows": [
-      {
-        "height": 800,
-        "label": "main",
-        "title": "Odoo Native Print",
-        "url": "about:blank",
-        "width": 1280
-      }
-    ],
+    "windows": [],
     "withGlobalTauri": false
   },
   "build": {
@@ -28,7 +20,8 @@
       "nsis"
     ],
     "resources": {
-      "resources/pdfium.dll": "pdfium.dll"
+      "resources/pdfium.dll": "pdfium.dll",
+      "resources/pdfium-LICENSE.txt": "pdfium-LICENSE.txt"
     },
     "windows": {
       "webviewInstallMode": {
@@ -45,5 +38,5 @@
   },
   "identifier": "com.company.odoo-native-print",
   "productName": "Odoo Native Print",
-  "version": "0.5.0"
+  "version": "1.0.0"
 }

@@ -71,6 +71,6 @@ on the company's own Windows machine:
 ## Versions
 - The app version lives in `app/package.json`,
   `app/src-tauri/tauri.conf.json`, and `app/src-tauri/Cargo.toml`
-  (all 0.3.0); bump them together with the addon version in
+  (all 1.0.0); bump them together with the addon version in
   `odoo/native_print/__manifest__.py` when cutting a release.
 - Rust is `stable` in CI; the codebase needs >= 1.75.

@@ -12,4 +12,4 @@ pub mod zpl;
 
 pub use escpos::EscPos;
 pub use mono::{MonoBitmap, MonoError};
-pub use zpl::zpl_graphic_field;
+pub use zpl::{zpl_graphic_field, zpl_label, zpl_label_with_options};

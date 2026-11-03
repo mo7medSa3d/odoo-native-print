@@ -1,0 +1,19 @@
+.o_native_print_systray {
+    .o_native_print_dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+    }
+    .o_native_print_dot_online {
+        background-color: #10b981;
+        box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+    }
+    .o_native_print_dot_browser {
+        background-color: #94a3b8;
+    }
+    .o_native_print_dropdown {
+        min-width: 280px;
+        z-index: 1055;
+    }
+}

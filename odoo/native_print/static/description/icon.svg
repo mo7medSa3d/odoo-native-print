@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7c4770"/>
+      <stop offset="100%" stop-color="#36295c"/>
+    </linearGradient>
+  </defs>
+  <rect x="10" y="10" width="236" height="236" rx="54" fill="url(#bgGrad)"/>
+  <rect x="74" y="40" width="108" height="72" rx="9" fill="#f5f7fc"/>
+  <rect x="41" y="92" width="174" height="87" rx="19" fill="#ffffff"/>
+  <rect x="61" y="143" width="134" height="31" rx="6" fill="#2b2142"/>
+  <circle cx="187" cy="115" r="7" fill="#10b981"/>
+  <circle cx="166" cy="115" r="7" fill="#714b67"/>
+  <rect x="72" y="151" width="112" height="69" rx="9" fill="#ffffff" stroke="#dae0ee" stroke-width="2"/>
+  <rect x="87" y="166" width="56" height="6" rx="3" fill="#714b67"/>
+  <rect x="87" y="179" width="82" height="6" rx="3" fill="#94a3b8"/>
+  <g fill="#1e293b">
+    <rect x="87" y="193" width="4" height="16"/>
+    <rect x="94" y="193" width="2" height="16"/>
+    <rect x="100" y="193" width="6" height="16"/>
+    <rect x="110" y="193" width="3" height="16"/>
+    <rect x="116" y="193" width="5" height="16"/>
+    <rect x="125" y="193" width="2" height="16"/>
+    <rect x="131" y="193" width="6" height="16"/>
+    <rect x="141" y="193" width="3" height="16"/>
+    <rect x="148" y="193" width="5" height="16"/>
+    <rect x="157" y="193" width="4" height="16"/>
+    <rect x="164" y="193" width="5" height="16"/>
+  </g>
+</svg>

@@ -35,11 +35,14 @@ pub enum ImageError {
 }
 
 /// Printable width in dots at the standard 203 dpi receipt density:
-/// 80 mm paper -> 72 mm printable = 576 dots; 58 mm -> 48 mm = 384 dots.
+/// - `58mm` (or `57mm`/`58 mm` roll) -> 48 mm printable = 384 dots
+/// - `80mm` (or `72mm`/`80 mm` roll) -> 72 mm printable = 576 dots
 pub fn receipt_dots_for_paper(paper: &str) -> u32 {
-    match paper.trim() {
-        "58mm" => 384,
-        _ => 576, // 80mm is the default receipt width.
+    let lower = paper.trim().to_ascii_lowercase();
+    if lower.starts_with("58") || lower.contains("58mm") || lower.contains("58 mm") || lower.starts_with("57") {
+        384
+    } else {
+        576 // 80mm is the default receipt width.
     }
 }
 
@@ -117,8 +120,6 @@ pub fn decode_png(bytes: &[u8]) -> Result<Canvas, ImageError> {
             }
         }
         png::ColorType::Indexed => {
-            // EXPAND should have converted palettes already; refuse
-            // rather than guess if a decoder build ever returns this.
             return Err(ImageError::Decode("indexed colour not expanded".into()));
         }
     }
@@ -218,7 +219,6 @@ mod tests {
     }
     #[test]
     fn transparent_pixels_become_white() {
-        // A fully transparent black pixel prints as paper, never as ink.
         let bytes = make_png(1, 1, png::ColorType::Rgba, &[0, 0, 0, 0]);
         let img = decode_png(&bytes).unwrap();
         assert_eq!(img.px[0], 255);
@@ -227,7 +227,6 @@ mod tests {
     fn garbage_and_oversize_rejected() {
         assert!(matches!(decode_png(b"not a png"), Err(ImageError::NotPng)));
         assert!(matches!(decode_png(&[]), Err(ImageError::TooLarge)));
-        // 20,001 px wide exceeds the per-side cap before allocation.
         let wide = make_png(20_001, 1, png::ColorType::Grayscale, &vec![255u8; 20_001]);
         assert!(matches!(
             decode_png(&wide),
@@ -240,24 +239,21 @@ mod tests {
         img.px = vec![0, 0, 255, 255, 0, 0, 255, 255];
         let out = scale_to_width(&img, 4);
         assert_eq!(out.px, vec![0, 255, 0, 255]);
-        // Never upscale.
         let same = scale_to_width(&img, 576);
         assert_eq!(same.width, 8);
     }
     #[test]
     fn receipt_stream_shape_80mm_and_58mm() {
-        // A 1152px-wide capture (2x of 576) scales to exactly 576 dots.
         let bytes = half_black_rgba_png(1152, 20);
         let stream = receipt_png_to_escpos(&bytes, "80mm").unwrap();
-        assert!(stream.starts_with(&[0x1B, 0x40])); // ESC @
+        assert!(stream.starts_with(&[0x1B, 0x40]));
         let pos = stream
             .windows(4)
             .position(|w| w == [0x1D, 0x76, 0x30, 0x00])
             .unwrap();
         let bytes_per_row = u16::from_le_bytes([stream[pos + 4], stream[pos + 5]]);
         assert_eq!(bytes_per_row, 576 / 8);
-        assert!(stream.ends_with(&[0x1D, 0x56, 0x01])); // partial cut
-                                                        // 58mm: 384 dots wide.
+        assert!(stream.ends_with(&[0x1D, 0x56, 0x01]));
         let stream58 = receipt_png_to_escpos(&bytes, "58mm").unwrap();
         let pos58 = stream58
             .windows(4)
@@ -269,7 +265,10 @@ mod tests {
     #[test]
     fn paper_widths() {
         assert_eq!(receipt_dots_for_paper("80mm"), 576);
+        assert_eq!(receipt_dots_for_paper("80mm Roll"), 576);
         assert_eq!(receipt_dots_for_paper("58mm"), 384);
+        assert_eq!(receipt_dots_for_paper("58 mm Roll"), 384);
+        assert_eq!(receipt_dots_for_paper("58x3276mm"), 384);
         assert_eq!(receipt_dots_for_paper(""), 576);
     }
 }

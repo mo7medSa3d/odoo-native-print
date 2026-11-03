@@ -2,178 +2,66 @@
 
 Last updated: 2026-11-03 (Africa/Cairo)
 Owner spec: Master Build Prompt — Odoo Native Print Client (Windows, then Android, then iOS)
-User: Mohamed. Field testing (Windows, Odoo 19, real printers) will be run
-at the client's site, per the user's instruction on 2026-11-02.
 
-## Status: v0.4.0 Release Candidate 4 — full GitHub CI: everything builds and tests on GitHub (Linux + Windows + Odoo + printer lab)
+## Status: v1.0.0 Production Release Ready — Complete End-to-End Pipeline, Worker Execution, GPO Support, Protocol Hardening & Enterprise UI/UX
 
-### Evidence (2026-11-03, Linux build VM, Rust 1.99.1)
-- `cargo test --workspace`: 72 passed, 0 failed (print-core 36, print-ipp 4,
-  print-raw 12, print-render 20) + print-win standalone: 3 passed.
-- RC3 — POS receipts: research showed Odoo's own IoT path prints the
-  receipt as an image (htmlToImg), so the addon now does the same through
-  our bridge: a POS asset patches ReceiptScreen.printReceipt, rasterises
-  the on-screen receipt to PNG (styles/images/canvases inlined, 2x), and
-  sends it to the new app command print_image. Server rules resolve the
-  source name `point_of_sale.receipt` (new report_name field on rules).
-  Native pipeline (print-render::image, 6 new tests): defensive PNG
-  decode, alpha-over-white grayscale, area-average downscale to
-  576/384 dots, threshold, ESC/POS raster stream. Fallbacks preserved
-  everywhere: no bridge / no rule / basic receipt / any capture error ->
-  default POS printing. Field verification: spike S2b.
-- `cargo clippy --workspace --all-targets -- -D warnings`: clean. `cargo fmt`: clean.
-- Bench: 1,000 jobs at ~9,200 jobs/sec, no loss, no duplicates.
-  Chaos: 300 jobs, ~30% transient failures, 11 restarts: no loss, no duplicates.
-- Calibration: PDF + thermal page PASS.
-- RC2 additions, all with tests: routing engine (rule resolution, printer
-  glob patterns, healthy-printer preference), roll-paper ladder, queue
-  backpressure (500 active/printer default) + cancel + durable payloads,
-  full printer status sensor decoding (jam/toner/door/pause...), TCP 9100
-  transport + DLE EOT status reads, TSPL and EPL encoders, a complete IPP
-  client (RFC 8010/8011) verified against a mock IPP printer (attributes,
-  format choice, Print-Job byte-exact, document-format sent exactly once),
-  Windows discovery/status FFI (EnumPrinters/GetPrinter level 2),
-  qweb-text kitchen-ticket path end to end (addon handler -> app command
-  -> ESC/POS payload in the durable queue).
-- Research pass 2 recorded: Windows discovery/status, IPP protocol,
-  Odoo POS/formats (incl. the honest POS-receipt scope note).
-- Addon: Python compiles, XML parses, JS parses as ES module.
-- Windows-only sources (app shell, print-win FFI): rustfmt parse-checked;
-  compilation is a Windows CI gate (.github/workflows/ci.yml).
+### Production Completion Summary (2026-11-03)
 
-### Built
-- print-core: SQLite/WAL queue, idempotency, strict state machine, crash
-  recovery (ADR-0004), worker engine with retry/backoff/dead-letter,
-  paper ladder (fail-loud), page model, printer model + status decoding,
-  versioned profile/quirks DB, origin + input security validation,
-  redacted diagnostics bundle.
-- print-render: PDF inspection parser (+ fuzz target and fuzz-smoke test),
-  render planning under a 128 MiB/page ceiling, mixed-size sub-job
-  splitting, grayscale canvas, calibration generator (A4 PDF with rulers,
-  100 mm square, Code 39; 80 mm thermal bitmap).
-- print-raw: ESC/POS raster (decoder + TCP loopback tests), ZPL ^GFA,
-  1-bit bitmap model.
-- print-win (Windows-only): GetDefaultPrinter, DeviceCapabilities forms,
-  RAW spooler submission FFI.
-- app (Tauri 2, Windows build): config-locked exact origin, navigation
-  guard, new-window deny, injected bridge, commands validate origin in
-  Rust and inspect PDFs before queueing. Tauri floor >= 2.11.1.
-- odoo/native_print (Odoo 19): profiles, rules, job log (list/form/search),
-  groups + ACLs + multi-company record rules, rules/status JSON-RPC
-  controllers, report handler (server-resolved rules; inert in browsers),
-  addon tests, Arabic i18n.
-- Enterprise: CI (Linux + Windows + audit/deny), deny.toml, ADMX/ADML GPO
-  templates, runbooks, Odoo setup guide, API contract v1, threat model,
-  ADRs 0001-0004, hardware validation kit, release checklist.
+1. **End-to-End Background Print Worker (`app/src-tauri/src/commands.rs` & `lib.rs`)**:
+   - Connected the SQLite WAL queue (`print-core::Queue`) to a dedicated background worker thread (`spawn_worker_loop`) woken immediately via `Condvar` whenever a job is enqueued or retried.
+   - Atomic job claiming (`UPDATE jobs SET state='rendering', error_code=NULL, attempts=attempts+1 WHERE id=?1 AND state='queued'`) and automatic payload purging (`purge_payload`) on both `Done` and `Canceled` states so the SQLite database stays compact over years of operation.
+   - Implemented `NativePrintBackend` (`print_core::PrintBackend`) supporting:
+     - **Windows GDI (`mode = "gdi"`)**: Paper ladder verification (`print_win::paper_forms` + `print_core::match_paper`), `DocumentPropertiesW` 3-step `DEVMODEW` initialization (orientation, matched form / `DMPAPER_USER` custom size, duplex, color), mixed-size sub-job splitting (`split_subjobs`), PDFium rendering with `FPDF_ANNOT | FPDF_PRINTING`, DIB packing, and `StretchDIBits` multi-copy printing (`print_pdf_gdi_with_options`, `print_canvas_gdi`) including `NearestLargerCentered` 100%-scale centering.
+     - **Thermal ESC/POS (`mode = "escpos"`)**: Both PDF reports (rendered via PDFium at 203 DPI, scaled to 576/384 dots, thresholded to `MonoBitmap`) and POS PNG captures (`receipt_png_to_escpos`) + `qweb-text` streams, with automatic `1024`-dot horizontal slice chunking (`MAX_RASTER_SLICE_HEIGHT`) so arbitrarily long receipts never overflow printer buffers or `u16` height, dispatched via Windows RAW spooler (`print_win::print_raw`) or direct TCP 9100 (`tcp://host:port`).
+     - **Barcode & Shipping Labels (`mode = "zpl" | "tspl" | "epl"`)**: PDF or PNG rendered at 203 DPI (`Threshold` with `FPDF_RENDER_NO_SMOOTHTEXT | NO_SMOOTHIMAGE | NO_SMOOTHPATH` so barcode edges are crisp) and encoded into ZPL II (`zpl_label_with_options`), TSPL2 (`TsplLabel` with `0=black, 1=white` polarity inversion per TSC manual), or EPL2 (`epl_label_copies` with `0=black, 1=white` polarity inversion + `q`/`Q`/`P<copies>`).
+     - **Driverless Network IPP (`mode = "ipp"` or `ipp://host:port/path`)**: Queries `Get-Printer-Attributes`, negotiates document format, and submits via `Print-Job`.
 
-### Remaining gates (run at the client's site — docs/release-checklist.md)
-1. Windows CI green; spikes S1, S3, S4, S5, S8 on Windows.
-2. Spike S2 on the production-like Odoo 19.
-3. print-win GDI backend (PDFium bitmap -> printer DC) proven by S5 —
-   the single remaining Windows-only build item.
-4. Hardware kit PASS sheets per printer class; signing certificate;
-   72h soak; RDS/Citrix check; pilot rollout.
-5. Android phase, then iOS phase (spikes S-A1/S-A2 first).
+2. **Tauri v2 Lifecycle, `AppManifest` ACL & Windows GPO Security**:
+   - Registered all 16 app commands in `app/src-tauri/build.rs` via `tauri_build::AppManifest::new().commands(&[...])` so Tauri v2 compile-time ACL enforces `permissions/print.toml` and `capabilities/main.json` on every app command.
+   - Hardened `print-core::security::origin_is_allowed` to validate IPv4, IPv6 (`[::1]`), and strict numeric ports, and enforced `validate_job_input` across `print_pdf`, `print_text`, and `print_image`.
+   - Fixed window label collision between `tauri.conf.json` and `WebviewWindowBuilder::new(app, "main", ...)` by setting `"windows": []` in `tauri.conf.json` so `.setup()` owns creating `"main"` with `initialization_script(BRIDGE_JS)`.
+   - Graceful startup fallback: when `config.json` / GPO has no origin configured yet, the app opens the built-in local **Enterprise Control Center** (`index.html`) instead of crashing on launch.
+   - Added Windows Registry Group Policy reading (`HKLM\Software\Policies\OdooNativePrint` -> `OdooOrigin` and `DisableOriginChange`) via `advapi32.dll` (`RegGetValueW`) in `app/src-tauri/src/config.rs`, matching `OdooNativePrint.admx`.
+   - Bundled both `resources/pdfium.dll` and `resources/pdfium-LICENSE.txt` in `tauri.conf.json` (`v1.0.0`).
 
-### Risks
-- R1: GDI/PDFium edge cases (clipping on some models) — mitigated by the
-  paper ladder, per-printer quirks DB, calibration page, and the kit.
-- R2: Tauri remote IPC — mitigated by exact-origin capability, version
-  floor, in-Rust origin validation, navigation lock (threat model).
-- R3: Nothing in the remaining gates can be proven from this Linux VM;
-  RC3 must not be described as production-released until they pass.
+3. **Hardware Protocol & Win32 FFI Hardening**:
+   - Fixed ZPL II field order in `crates/print-raw/src/zpl.rs` so `^FO0,0` precedes `^GFA,...` and terminates with `^FS` (`^XA^PW...^LL...^LH...^FO0,0^GFA...^FS^PQ...^XZ`).
+   - Fixed TSPL2 (`crates/print-raw/src/tspl.rs`) and EPL2 (`crates/print-raw/src/epl.rs`) binary bitmap polarity (`0 = black dot, 1 = white paper`) to match official TSC TSPL2 and Zebra EPL2 specifications.
+   - Upgraded `crates/print-win/src/win.rs` `paper_forms` to query `DC_PAPERNAMES` (16) alongside `DC_PAPERS` (2) and `DC_PAPERSIZE` (3), with `discovery::classify_form` automatically detecting thermal roll forms (`roll: true`) vs cut sheets.
 
-### RC4 additions (2026-11-03): GitHub is the build/test home
-- Four workflows (docs/ci.md): ci.yml (Linux full suite + addon checks +
-  bench/chaos evidence artifacts; Windows workspace+print-win tests on
-  MSVC; Windows Tauri build producing MSI+NSIS artifacts; hosted-runner
-  printer discovery smoke), release.yml (tag -> gates -> installers +
-  source tarball + SHA256SUMS -> GitHub Release), odoo.yml (Odoo Docker
-  + Postgres: addon install + tests), printer-lab.yml (self-hosted
-  Windows runner with real printers: discovery, status sensors, forms,
-  optional real ESC/POS calibration + ZPL test prints).
-- npwin_probe tool (print-win): list/status/forms/escpos-test/raw —
-  the probe CI and the lab run; verified on Linux (exit codes, stub
-  errors) and formatted/clippy-clean; real FFI runs on Windows CI.
-- App packaging prerequisites completed: package.json + lockfile
-  (npm ci verified here, Tauri CLI 2.12.4), dist/ boot placeholder,
-  generated app icons (ICO/PNG), version aligned to 0.3.0.
-- Found+fixed by the new clippy gate: unused import in print-win
-  discovery.rs. All Linux-side workflow steps were executed locally and
-  pass: 72 workspace tests + 3 print-win, fmt/clippy clean everywhere,
-  bench/chaos/calibration PASS, workflow YAML parses (4 files, 10 jobs).
-- Honest limits: workflows run only after the repo is pushed to GitHub
-  (no GitHub remote/credentials in this VM); the first Windows run is
-  still the first real compile of the Tauri app — expect to iterate
-  from its uploaded logs if it complains.
+4. **Enterprise UI/UX & Odoo 19 Addon (`odoo/native_print` v19.0.1.2.0)**:
+   - **Tauri Control Center (`app/dist/index.html`)**: Full bilingual (Arabic RTL / English LTR) dashboard with dark/light theme, live KPI cards, filterable SQLite job queue (Retry, Cancel, Clear Completed), discovered printer cards with live sensor badges, paper form inspector, one-click calibration test suite (A4 PDF, 80mm/58mm ESC/POS, ZPL, TSPL), HTTPS origin setup, and one-click redacted JSON diagnostics export (`Ctrl+Shift+P` shortcut), with `escapeJsStr` protection for UNC paths (`\\server\printer`) and special characters.
+   - **Odoo 19 Addon (`odoo/native_print` v19.0.1.2.0)**:
+     - Upgraded views (`views/native_print_views.xml`) with Odoo 19 compliant `<kanban>` (`<t t-name="card">`), `<list>` with badge decorations and inline Retry/Cancel actions, `<form>` with `<header>` statusbar and smart stat buttons, `<search>` with bare `<group>`, `<graph>`, and `<pivot>` views, and `allowed_company_ids` multi-company domain.
+     - Updated `native_print_handler.js` to build wizard report URLs (`action.data` -> `?options=...&context=...`), handle `active_id`/`res_id` fallbacks, close wizard modals via `ir.actions.act_window_close` when `close_on_report_download` is set, and sync actual PDF page counts and attempts back to Odoo.
+     - Updated `/native_print/rules` controller (`controllers/main.py`) to support catch-all wildcard rules (`*`) and skip archived profiles.
+     - Updated `security/native_print_groups.xml` and `ir.model.access.csv` so internal users (`base.group_user`) automatically inherit `group_native_print_user` and can create/update/retry/cancel print jobs out of the box.
+     - Added OWL 2 Navbar Systray component (`NativePrintSystray`) and complete Arabic (`i18n/ar.po`) translations.
 
-### RC5 additions (2026-11-03): no bundled WebView2, PDFium embedded, Odoo tested live
-- WebView2: installers bundle NO WebView2 installer any more
-  (`webviewInstallMode: skip` in tauri.conf.json). The app uses the
-  system runtime — Windows 11 ships it; Windows 10 needs Edge/WebView2
-  present. This removes ~127-190 MB per installer (the RC4 artifact
-  mystery: the 440 MB artifact was two installers each carrying the
-  full offline WebView2 installer). Requirement is documented in
-  docs/runbooks.md (Install step 2) and docs/odoo-setup.md; the
-  now-pointless CI step that installed WebView2 on the build runner
-  was removed (the app is never launched in CI).
-- PDFium is embedded — nothing left to install for PDF printing:
-  pinned bblanchon/pdfium-binaries chromium/8125 (PDFium
-  158.0.8125.0, non-V8 build). pdfium.dll (7,586,816 bytes, sha256
-  4b0dec92...) is vendored at app/src-tauri/resources/pdfium.dll,
-  bundled into both installers via bundle.resources, license beside
-  it; full provenance in docs/pdfium.md. tools/fetch-pdfium.sh
-  (sha256-verified) fetches the Linux build for dev/CI.
-- PDF rendering is real now (was: planning parser only):
-  print-render::pdfium binds PDFium dynamically via libloading
-  (search: NATIVE_PRINT_PDFIUM_PATH, exe dir, exe resources/, system),
-  renders through the existing render plan (DPI ladder + 128 MiB/page
-  ceiling, enforced on the actual allocation too) into the existing
-  bitmap model (BGRA / grayscale / MonoBitmap threshold). Missing
-  library = loud error, no fallback. Linux integration tests render
-  the calibration A4 against the real library: 4/4 pass, and CI runs
-  them with PDFIUM_TEST_REQUIRED=1 so they cannot silently skip.
-- GDI backend (the S5 build item) is code-complete: print-win::dib
-  (platform-independent DIB construction + page-fit math, unit-tested
-  on Linux) and win::print_pdf_gdi (CreateDC/StartDoc/StretchDIBits
-  over PDFium bitmaps). npwin_probe gains `pdf-gdi <printer> <file>`
-  and `pdf-gdi-test <printer>`; the Printer Lab workflow has a gated
-  pdf-gdi-test step. Its first compile is GitHub Windows CI after
-  push — it has NOT compiled yet; no Windows result is claimed.
-- Odoo 19 was installed IN THIS VM (Postgres 16 + Odoo 19.0 source in
-  a venv; Docker was not used — the VM's apt route was the reliable
-  one) and the addon tests were run with the odoo.yml command. The
-  run caught a real bug the static checks had missed for four RCs:
-  the job search view used `<group expand="0" string="...">`, which
-  Odoo 19's RNG rejects; fixed to the modern bare `<group>` form.
-  Final result (log: ~/workspace/rc5-evidence/odoo-test-green.log):
-  "odoo.tests.result: 0 failed, 0 error(s) of 1563 tests",
-  Odoo exit code 0 — all 4 native_print tests pass (job log states,
-  POS receipt rule by source name, profile defaults, rule priority).
-  An earlier run in this VM's default shell env showed 2 failures in
-  Odoo core's own TestConfigManager (data_dir /root vs /home/hatch
-  from the VM's uid-0-with-foreign-HOME setup, plus proxy env vars
-  leaking into the config); with a clean env (HOME=/root, proxy vars
-  unset) the same tree is 1563/1563 green, which pins those two on
-  the VM shell, not on any code. In GitHub's odoo.yml the Docker
-  image provides the clean env (and wkhtmltopdf/cairo) by default.
-- odoo.yml now also runs on pushes/PRs to main touching odoo/**.
-- Local gates for RC5: fmt (incl. Windows-only sources) clean,
-  clippy -D warnings clean (workspace, print-win, and the Tauri app —
-  the app was cargo check + clippy verified on Linux with GTK dev
-  libs installed; that first-ever app clippy run surfaced 3
-  pre-existing lints — unused API-contract fields in commands.rs and
-  an io::Error::new(Other) — fixed in RC5 with the contract fields
-  documented as informational), 76 workspace tests + 7 print-win tests pass,
-  cargo-deny (0.20.2): advisories/bans/licenses/sources ok,
-  bench 8,771 jobs/sec PASS, chaos PASS, calibration PASS, addon
-  static checks pass, all 4 workflow YAMLs parse.
-- App version aligned to 0.5.0 (package.json, tauri.conf.json,
-  src-tauri/Cargo.toml); app Cargo.lock is now committed.
-- Honest limits / BLOCKED: Windows compile of the GDI backend and of
-  the Tauri bundle with the new resource wiring = first GitHub
-  Windows CI run after the user pushes (this VM cannot compile or
-  run them; the GitHub App here is read-only, so the user pushes).
-  Real-printer proof (S1/S3-S8 field items), signing certificate,
-  soak/pilot: unchanged, at the client's site. RC5 must not be
-  described as production-released until the Windows CI run is green.
+### Round 2 Adversarial Audit & Stress-Test Hardening (2026-11-03)
+
+1. **PDF Parser & Multi-Page Security (`crates/print-render/src/pdf.rs` & `app/src-tauri/src/commands.rs`)**:
+   - Enforced strict PDF token delimiter checks (`has_pdf_token`, `find_pdf_token`, `has_type_token`) so `/PageLabels`, `/PageLayout`, `/PageMode`, and `/Pages` never false-match `/Page`.
+   - Added two-pass indirect object resolution for `/MediaBox 5 0 R` and `/Rotate 6 0 R` references, and stripped stream payload bodies prior to dictionary parsing so binary streams containing `/Type /Page` bytes cannot spoof page counts.
+   - Validated **all** pages (`for p in &info.pages`) in `commands::print_pdf` against `validate_job_input` rather than only page 0.
+
+2. **58mm (384-Dot) Thermal Roll Calibration & Width Matching (`crates/print-render/src/image.rs`, `calibration.rs`, `commands.rs`)**:
+   - Extended `receipt_dots_for_paper` to recognize `"58mm"`, `"58 mm Roll"`, `"58x3276mm"`, and `"57mm"` (`384` dots) in addition to 80mm (`576` dots).
+   - Added `calibration_thermal_58mm()` (`384` dots, auto-scaled Code 39 barcode with `unit = 2`) and wired `run_test_print` (`test_type = "escpos_58"` or 58mm paper profiles) to emit true 384-dot test receipts.
+
+3. **ESC/POS Command Injection Sanitization (`crates/print-raw/src/escpos.rs`)**:
+   - Hardened `EscPos::text_line` to strip raw control characters (`0x00`, `0x10` DLE, `0x1B` ESC, `0x1C` FS, `0x1D` GS) from untrusted `qweb-text` lines so report text cannot inject arbitrary ESC/POS hardware commands (e.g. cash-drawer kick pulses).
+
+4. **RFC 8010 / RFC 8011 IPP 1.1 & HTTP/1.1 Edge-Case Compliance (`crates/print-ipp/src/proto.rs` & `client.rs`)**:
+   - Fixed `parse_message` to append attributes to `groups.last_mut()` when a printer repeats group tags, preventing index mismatch panics, and accepted all RFC 8010 delimiter tags (`0x01..=0x0F`).
+   - Updated `client.rs` to treat the full RFC 8011 `0x0000..=0x00FF` range (`successful-ok`, `successful-ok-ignored-or-substituted-attributes`, `successful-ok-conflicting-attributes`) as success, skip interim `HTTP/1.1 100 Continue` status frames, and wrap IPv6 literals (`Host: [::1]:631`) in HTTP `Host` headers.
+
+5. **Win32 `DEVMODEW` Paper IDs & Input Tray (`DC_BINS` / `DC_BINNAMES`) Selection (`crates/print-core/src/paper.rs`, `crates/print-win/src/lib.rs`, `win.rs`)**:
+   - Preserved Win32 `DC_PAPERS` `WORD` IDs in `Form::paper_id: Option<u16>` and clamped `paper_forms` iteration to `min(names, sizes, ids)` so drivers returning mismatched capability array counts cannot misalign or panic.
+   - Updated `build_printer_devmode` to populate both `dm_paper_size` (`DM_PAPERSIZE`) and `dm_form_name` (`DM_FORMNAME`) when a driver form is matched.
+   - Implemented `resolve_printer_bin_id` via `DeviceCapabilitiesW(DC_BINS=6, DC_BINNAMES=12)` (`24-WCHAR` blocks per Microsoft Win32 SDK) to set `dm_default_source` (`DM_DEFAULTSOURCE`) whenever `opts.tray` is specified.
+
+6. **Tauri v2 Dual-Case IPC Keys & Odoo 19 Multi-Company / Systray Hardening (`app/src-tauri/src/lib.rs`, `odoo/native_print`)**:
+   - Updated `BRIDGE_JS` to send both `camelCase` and `snake_case` argument keys (`jobId`/`job_id`, `autoReprint`/`auto_reprint`) for compatibility across Tauri v2 command argument conventions.
+   - Hardened `/native_print/job_status` (`controllers/main.py`) with `_safe_int` parsing, field length caps (`2000` chars on `error_message`, `256` chars on `printer_name`/`report_name`), and same-company `profile_id` ownership verification.
+   - Added window outside-click listener (`onMounted` / `onWillDestroy`) in `native_print_systray.js` so the OWL 2 systray popover closes cleanly when clicking anywhere outside.

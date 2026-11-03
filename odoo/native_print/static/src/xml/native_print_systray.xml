@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<templates xml:space="preserve">
+    <t t-name="native_print.SystrayItem">
+        <div class="o_mail_systray_item dropdown o_native_print_systray" t-att-class="{'show': state.isOpen}">
+            <button type="button"
+                    class="dropdown-toggle o-no-caret btn d-flex align-items-center px-2"
+                    title="Native Print Status &amp; Control"
+                    t-on-click.stop="toggleMenu">
+                <i class="fa fa-print fa-lg" role="img" aria-label="Native Print"/>
+                <span t-if="state.failedJobs &gt; 0"
+                      class="badge rounded-pill text-bg-danger ms-1"
+                      t-esc="state.failedJobs"/>
+                <span t-elif="state.bridgeActive"
+                      class="o_native_print_dot o_native_print_dot_online ms-1"
+                      title="Native Print Bridge Connected"/>
+                <span t-else=""
+                      class="o_native_print_dot o_native_print_dot_browser ms-1"
+                      title="Browser Fallback Mode"/>
+            </button>
+
+            <div t-if="state.isOpen"
+                 class="dropdown-menu dropdown-menu-end show p-3 shadow o_native_print_dropdown"
+                 t-on-click.stop="">
+                <div class="d-flex justify-content-between align-items-center pb-2 mb-2 border-bottom">
+                    <div class="fw-bold d-flex align-items-center gap-2">
+                        <i class="fa fa-print text-primary" title="Printer"/>
+                        <span>Native Print</span>
+                    </div>
+                    <span t-if="state.bridgeActive" class="badge text-bg-success">
+                        <i class="fa fa-check-circle me-1" title="Connected"/>App Active
+                    </span>
+                    <span t-else="" class="badge text-bg-secondary">
+                        <i class="fa fa-globe me-1" title="Browser"/>Browser Mode
+                    </span>
+                </div>
+
+                <div class="small text-muted mb-2" t-if="state.bridgeActive">
+                    <div>
+                        <strong>Local Printers: </strong>
+                        <t t-esc="state.printersCount"/>
+                    </div>
+                    <div t-if="state.defaultPrinter" class="text-truncate">
+                        <strong>Default: </strong>
+                        <span class="font-monospace" t-esc="state.defaultPrinter"/>
+                    </div>
+                </div>
+                <div class="small text-muted mb-2" t-else="">
+                    Standard browser session: reports download normally unless opened inside the Native Print app.
+                </div>
+
+                <div class="row g-2 text-center mb-3">
+                    <div class="col-4">
+                        <div class="p-2 rounded bg-light border">
+                            <div class="fw-bold fs-6" t-esc="state.activeJobs"/>
+                            <div class="text-muted" style="font-size:0.7rem;">Active</div>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="p-2 rounded bg-light border">
+                            <div class="fw-bold fs-6 text-success" t-esc="state.doneJobs"/>
+                            <div class="text-muted" style="font-size:0.7rem;">Done</div>
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="p-2 rounded bg-light border">
+                            <div class="fw-bold fs-6 text-danger" t-esc="state.failedJobs"/>
+                            <div class="text-muted" style="font-size:0.7rem;">Failed</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-grid gap-1">
+                    <button type="button" class="btn btn-sm btn-primary text-start" t-on-click="openJobs">
+                        <i class="fa fa-list-ul me-2" title="Jobs"/>Print Jobs Log
+                    </button>
+                    <button type="button" class="btn btn-sm btn-light border text-start" t-on-click="openProfiles">
+                        <i class="fa fa-print me-2" title="Profiles"/>Printer Profiles (<t t-esc="state.profilesCount"/>)
+                    </button>
+                    <button type="button" class="btn btn-sm btn-light border text-start" t-on-click="openRules">
+                        <i class="fa fa-random me-2" title="Rules"/>Routing Rules (<t t-esc="state.rulesCount"/>)
+                    </button>
+                    <button t-if="state.bridgeActive" type="button" class="btn btn-sm btn-outline-primary text-start mt-1" t-on-click="runQuickTestPrint">
+                        <i class="fa fa-check-square-o me-2" title="Test"/>Send A4 Calibration Page
+                    </button>
+                    <button t-if="state.bridgeActive" type="button" class="btn btn-sm btn-outline-secondary text-start" t-on-click="openControlCenter">
+                        <i class="fa fa-sliders me-2" title="Control Center"/>Open Native Control Center
+                    </button>
+                </div>
+            </div>
+        </div>
+    </t>
+</templates>

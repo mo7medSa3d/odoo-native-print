@@ -22,22 +22,41 @@ fn parse_origin(s: &str) -> Option<(String, String, u16)> {
     if rest.is_empty() || rest.contains(['/', '?', '#', '@', '\\']) {
         return None;
     }
-    let (host, port) = match rest.rsplit_once(':') {
-        Some((h, p)) if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) => {
-            (h, p.parse::<u16>().ok()?)
-        }
-        _ => (
-            rest,
-            if scheme == "https" {
-                443
-            } else if scheme == "http" {
-                80
-            } else {
-                return None;
-            },
-        ),
+    let default_port = if scheme.eq_ignore_ascii_case("https") {
+        443
+    } else if scheme.eq_ignore_ascii_case("http") {
+        80
+    } else {
+        return None;
     };
-    if host.is_empty() || host.contains(char::is_whitespace) {
+    let (host, port) = if let Some(after_open) = rest.strip_prefix('[') {
+        let (ipv6, after_close) = after_open.split_once(']')?;
+        if ipv6.is_empty() {
+            return None;
+        }
+        let port = if after_close.is_empty() {
+            default_port
+        } else if let Some(p) = after_close.strip_prefix(':') {
+            if p.is_empty() || !p.chars().all(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            p.parse::<u16>().ok()?
+        } else {
+            return None;
+        };
+        (format!("[{ipv6}]"), port)
+    } else {
+        match rest.rsplit_once(':') {
+            Some((h, p)) => {
+                if h.is_empty() || p.is_empty() || !p.chars().all(|c| c.is_ascii_digit()) {
+                    return None;
+                }
+                (h.to_string(), p.parse::<u16>().ok()?)
+            }
+            None => (rest.to_string(), default_port),
+        }
+    };
+    if host.is_empty() || host.contains(char::is_whitespace) || port == 0 {
         return None;
     }
     Some((scheme.to_ascii_lowercase(), host.to_ascii_lowercase(), port))
@@ -76,7 +95,9 @@ pub fn validate_job_input(
     if copies == 0 || copies > MAX_COPIES {
         return Err(LimitError::TooManyCopies);
     }
-    if page.width_mm <= 0.0
+    if !page.width_mm.is_finite()
+        || !page.height_mm.is_finite()
+        || page.width_mm <= 0.0
         || page.height_mm <= 0.0
         || page.width_mm > MAX_DIMENSION_MM
         || page.height_mm > MAX_DIMENSION_MM
@@ -111,6 +132,7 @@ mod tests {
     fn http_and_port_and_userinfo_fail() {
         assert!(!origin_is_allowed(CFG, "http://odoo.company.local:8069"));
         assert!(!origin_is_allowed(CFG, "https://odoo.company.local:9999"));
+        assert!(!origin_is_allowed(CFG, "https://odoo.company.local:abc"));
         assert!(!origin_is_allowed(
             CFG,
             "https://user@odoo.company.local:8069"
@@ -121,10 +143,14 @@ mod tests {
         ));
     }
     #[test]
-    fn default_port_equivalence() {
+    fn default_port_and_ipv6_equivalence() {
         assert!(origin_is_allowed(
             "https://odoo.example.com",
             "https://odoo.example.com:443"
+        ));
+        assert!(origin_is_allowed(
+            "https://[::1]:8069",
+            "https://[::1]:8069"
         ));
     }
     #[test]
@@ -138,6 +164,10 @@ mod tests {
         assert_eq!(
             validate_job_input(10, 0, 1, a4),
             Err(LimitError::TooManyPages)
+        );
+        assert_eq!(
+            validate_job_input(10, 1, 1, crate::PageSize::new(f64::NAN, 297.0)),
+            Err(LimitError::BadDimension)
         );
         assert!(valid_idempotency_key("job-123_abc"));
         assert!(!valid_idempotency_key(""));

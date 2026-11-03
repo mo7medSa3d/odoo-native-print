@@ -273,7 +273,7 @@ pub fn parse_message(bytes: &[u8]) -> Result<IppMessage, String> {
     let mut pos = 8usize;
     let mut groups: Vec<(u8, Vec<Attr>)> = Vec::new();
     let mut current_group: Option<u8> = None;
-    let mut last_attr: Option<usize> = None; // index into current group's attrs
+    let mut last_attr: Option<usize> = None; // index into current (last) group's attrs
     loop {
         if pos >= bytes.len() {
             return Err(format!("unterminated message at {pos}"));
@@ -283,7 +283,8 @@ pub fn parse_message(bytes: &[u8]) -> Result<IppMessage, String> {
             pos += 1;
             break;
         }
-        if (0x01..=0x05).contains(&b) {
+        // RFC 8010 section 3.5.1: delimiter tags are 0x00..=0x0F (0x03 is handled above).
+        if (0x01..=0x0F).contains(&b) {
             current_group = Some(b);
             groups.push((b, Vec::new()));
             last_attr = None;
@@ -291,7 +292,7 @@ pub fn parse_message(bytes: &[u8]) -> Result<IppMessage, String> {
             continue;
         }
         // A value tag.
-        let Some(&group_tag) = current_group.as_ref() else {
+        if current_group.is_none() {
             return Err(format!("attribute value before any group at {pos}"));
         };
         let vtag = b;
@@ -312,10 +313,9 @@ pub fn parse_message(bytes: &[u8]) -> Result<IppMessage, String> {
             return Err(format!("truncated attribute value at {pos}"));
         }
         let value = parse_value(vtag, &bytes[value_start..value_end]);
-        let group = groups
-            .iter_mut()
-            .find(|(g, _)| *g == group_tag)
-            .ok_or("group vanished")?;
+        // Always append into the most recently opened group (`groups.last_mut()`),
+        // so multiple groups with the same delimiter tag never panic on `last_attr`.
+        let group = groups.last_mut().ok_or("group vanished")?;
         if name_len == 0 {
             // Continuation value for the previous attribute.
             let Some(idx) = last_attr else {

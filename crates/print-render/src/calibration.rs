@@ -79,9 +79,8 @@ fn code39_value(ch: char) -> Option<u32> {
 
 /// Bar widths (in units) for a Code 39 string, with start/stop and a
 /// modulo-43 check character. Narrow = 1 unit, wide = 3 units; one narrow
-/// space separates characters. Returns (char, is_bar, width_units) triples
-/// flattened to (is_bar, width) runs including inter-character gaps as
-/// spaces. Unsupported characters produce an error string.
+/// space separates characters. Returns (is_bar, width) runs including
+/// inter-character gaps as spaces. Unsupported characters produce an error string.
 pub fn code39_runs(data: &str) -> Result<Vec<(bool, u32)>, String> {
     let data = data.to_uppercase();
     let mut sum: u32 = 0;
@@ -245,10 +244,10 @@ pub fn calibration_pdf() -> Vec<u8> {
     out
 }
 
-/// Thermal calibration bitmap for an 80 mm printer at 203 dpi
-/// (576 printable dots): border, centre cross, 30 mm square, barcode.
-pub fn calibration_thermal_80mm() -> MonoBitmap {
-    let width: u32 = 576;
+/// Thermal calibration bitmap for a thermal receipt printer at 203 dpi
+/// (`width_dots`: 576 dots for 80 mm paper, 384 dots for 58 mm paper).
+pub fn calibration_thermal_for_width(width_dots: u32) -> MonoBitmap {
+    let width = width_dots.max(384);
     let dpi = 203.0f64;
     let mm = |v: f64| (v * dpi / 25.4) as u32;
     let height = mm(80.0);
@@ -259,8 +258,9 @@ pub fn calibration_thermal_80mm() -> MonoBitmap {
     canvas.rect_outline((width - sq) / 2, mm(8.0), sq, sq, 2);
     // Code 39 bars under the square.
     if let Ok(runs) = code39_runs("TEST-2026") {
-        let unit: u32 = 3;
-        let total: u32 = runs.iter().map(|(_, w)| w * unit).sum();
+        let raw_units: u32 = runs.iter().map(|(_, w)| *w).sum();
+        let unit: u32 = if raw_units * 3 + 16 <= width { 3 } else { 2 };
+        let total: u32 = raw_units * unit;
         let mut x = width.saturating_sub(total) / 2;
         let y = mm(44.0);
         for (is_bar, w) in runs {
@@ -275,15 +275,22 @@ pub fn calibration_thermal_80mm() -> MonoBitmap {
     canvas.to_mono(128)
 }
 
+/// Thermal calibration bitmap for an 80 mm printer at 203 dpi (576 dots).
+pub fn calibration_thermal_80mm() -> MonoBitmap {
+    calibration_thermal_for_width(576)
+}
+
+/// Thermal calibration bitmap for a 58 mm printer at 203 dpi (384 dots).
+pub fn calibration_thermal_58mm() -> MonoBitmap {
+    calibration_thermal_for_width(384)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn code39_check_char_and_roundtrip() {
-        // 'A' has value 10; a single char checks to itself mod 43.
         let runs = code39_runs("A").unwrap();
-        // Decode runs back to characters using the same table (internal
-        // consistency; scannability is a hardware-kit field check).
         let mut chars = Vec::new();
         let mut i = 0;
         while i < runs.len() {
@@ -298,7 +305,7 @@ mod tests {
                 .chars()
                 .find(|&c| code39_pattern(c) == Some(pattern));
             chars.push(ch.unwrap_or('?'));
-            i += 10; // 9 elements + 1 gap
+            i += 10;
         }
         assert_eq!(chars, vec!['*', 'A', 'A', '*']);
     }
@@ -315,10 +322,14 @@ mod tests {
         assert!(s.contains("Calibration Page"));
     }
     #[test]
-    fn thermal_calibration_bitmap() {
-        let bm = calibration_thermal_80mm();
-        assert_eq!(bm.width_dots, 576);
-        assert!(bm.pixel_is_black(4, 4)); // border
-        assert!(!bm.pixel_is_black(288, 200)); // inside, below square
+    fn thermal_calibration_bitmap_80_and_58() {
+        let bm80 = calibration_thermal_80mm();
+        assert_eq!(bm80.width_dots, 576);
+        assert!(bm80.pixel_is_black(4, 4));
+        assert!(!bm80.pixel_is_black(288, 200));
+
+        let bm58 = calibration_thermal_58mm();
+        assert_eq!(bm58.width_dots, 384);
+        assert!(bm58.pixel_is_black(4, 4));
     }
 }

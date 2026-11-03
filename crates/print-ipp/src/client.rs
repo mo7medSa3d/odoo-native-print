@@ -102,11 +102,15 @@ impl IppClient {
         let mut stream = TcpStream::connect_timeout(&sock, self.timeout)?;
         stream.set_read_timeout(Some(self.timeout))?;
         stream.set_write_timeout(Some(self.timeout))?;
+        let host_hdr = if self.host.contains(':') && !self.host.starts_with('[') {
+            format!("[{}]:{}", self.host, self.port)
+        } else {
+            format!("{}:{}", self.host, self.port)
+        };
         let request = format!(
-            "POST {} HTTP/1.1\r\nHost: {}:{}\r\nContent-Type: application/ipp\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/ipp\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             self.path,
-            self.host,
-            self.port,
+            host_hdr,
             body.len()
         );
         stream.write_all(request.as_bytes())?;
@@ -119,7 +123,10 @@ impl IppClient {
     fn exchange(&mut self, body: &[u8]) -> Result<IppMessage, IppError> {
         let raw = self.post(body)?;
         let msg = proto::parse_message(&raw).map_err(IppError::Parse)?;
-        if msg.code != 0 {
+        // RFC 8011 section 4.1.6.1: 0x0000..=0x00FF are all `successful-*`
+        // status codes (`successful-ok`, `successful-ok-ignored-or-substituted-attributes`,
+        // `successful-ok-conflicting-attributes`).
+        if msg.code > 0x00FF {
             return Err(IppError::IppStatus(msg.code));
         }
         Ok(msg)
@@ -210,36 +217,44 @@ impl IppClient {
     }
 }
 
-fn parse_http_response(raw: &[u8]) -> Result<Vec<u8>, IppError> {
-    let split = raw
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .ok_or_else(|| IppError::Parse("no HTTP header terminator".into()))?;
-    let headers = String::from_utf8_lossy(&raw[..split]).to_string();
-    let status: u16 = headers
-        .split_whitespace()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .ok_or_else(|| IppError::Parse("no HTTP status".into()))?;
-    if status != 200 {
-        return Err(IppError::Http(status));
-    }
-    let body = &raw[split + 4..];
-    let lower = headers.to_lowercase();
-    if lower.contains("transfer-encoding: chunked") {
-        dechunk(body).map_err(IppError::Parse)
-    } else if let Some(len) = lower
-        .lines()
-        .find(|l| l.starts_with("content-length:"))
-        .and_then(|l| l.split(':').nth(1))
-        .and_then(|v| v.trim().parse::<usize>().ok())
-    {
-        if body.len() < len {
-            return Err(IppError::Parse("short HTTP body".into()));
+fn parse_http_response(mut raw: &[u8]) -> Result<Vec<u8>, IppError> {
+    loop {
+        let split = raw
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .ok_or_else(|| IppError::Parse("no HTTP header terminator".into()))?;
+        let headers = String::from_utf8_lossy(&raw[..split]).to_string();
+        let status: u16 = headers
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .ok_or_else(|| IppError::Parse("no HTTP status".into()))?;
+        // Skip interim 1xx responses (e.g. `HTTP/1.1 100 Continue`) that CUPS
+        // and embedded IPP servers frequently prepend before `HTTP/1.1 200 OK`.
+        if (100..200).contains(&status) {
+            raw = &raw[split + 4..];
+            continue;
         }
-        Ok(body[..len].to_vec())
-    } else {
-        Ok(body.to_vec())
+        if status != 200 {
+            return Err(IppError::Http(status));
+        }
+        let body = &raw[split + 4..];
+        let lower = headers.to_lowercase();
+        return if lower.contains("transfer-encoding: chunked") {
+            dechunk(body).map_err(IppError::Parse)
+        } else if let Some(len) = lower
+            .lines()
+            .find(|l| l.starts_with("content-length:"))
+            .and_then(|l| l.split(':').nth(1))
+            .and_then(|v| v.trim().parse::<usize>().ok())
+        {
+            if body.len() < len {
+                return Err(IppError::Parse("short HTTP body".into()));
+            }
+            Ok(body[..len].to_vec())
+        } else {
+            Ok(body.to_vec())
+        };
     }
 }
 
@@ -275,14 +290,11 @@ mod tests {
     use crate::proto::{encode_response, parse_message};
     use std::net::TcpListener;
 
-    /// A mock IPP printer: serves one request, records its raw body,
-    /// replies with the scripted IPP response.
     fn mock_printer(response: Vec<u8>) -> (u16, std::thread::JoinHandle<Vec<u8>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let handle = std::thread::spawn(move || {
             let (mut s, _) = listener.accept().unwrap();
-            // Read headers.
             let mut raw = Vec::new();
             let mut buf = [0u8; 4096];
             let header_end = loop {
@@ -354,15 +366,39 @@ mod tests {
         let mut client = IppClient::new("127.0.0.1", port);
         let caps = client.get_printer_attributes().unwrap();
         let request = server.join().unwrap();
-        // The request on the wire is a valid Get-Printer-Attributes.
         let parsed = parse_message(&request).unwrap();
         assert_eq!(parsed.code, op::GET_PRINTER_ATTRIBUTES);
         assert_eq!(caps.name, "MockJet");
         assert_eq!(caps.state, 3);
         assert!(caps.accepts_pdf());
         assert_eq!(caps.choose_format().unwrap(), "application/pdf");
-        assert_eq!(caps.media_supported.len(), 2); // 1setOf continuations parsed
+        assert_eq!(caps.media_supported.len(), 2);
         assert!(caps.color_supported);
+    }
+
+    #[test]
+    fn print_job_accepts_0x0001_substituted_attributes_and_100_continue() {
+        // Status 0x0001 = successful-ok-ignored-or-substituted-attributes
+        let job_response = encode_response(
+            0x0001,
+            2,
+            &[(
+                tag::GROUP_JOB,
+                vec![
+                    Attr::integer("job-id", 42),
+                    Attr::enumeration("job-state", 5),
+                ],
+            )],
+        );
+        let raw_http = [
+            b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nContent-Type: application/ipp\r\n\r\n"
+                .as_slice(),
+            &job_response,
+        ]
+        .concat();
+        let body = parse_http_response(&raw_http).unwrap();
+        let parsed = parse_message(&body).unwrap();
+        assert!(parsed.code <= 0x00FF);
     }
 
     #[test]
@@ -387,10 +423,10 @@ mod tests {
         let request = server.join().unwrap();
         let parsed = parse_message(&request).unwrap();
         assert_eq!(parsed.code, op::PRINT_JOB);
-        assert_eq!(parsed.data, pdf); // document arrives byte-exact after the end tag
-        assert_eq!(parsed.count_attr("document-format"), 1); // never duplicated (CUPS #1457)
+        assert_eq!(parsed.data, pdf);
+        assert_eq!(parsed.count_attr("document-format"), 1);
         assert_eq!(info.job_id, Some(42));
-        assert_eq!(info.job_state, Some(5)); // processing
+        assert_eq!(info.job_state, Some(5));
     }
 
     #[test]

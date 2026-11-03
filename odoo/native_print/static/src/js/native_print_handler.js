@@ -10,20 +10,142 @@ import { rpc } from "@web/core/network/rpc";
  * - Inside the Native Print app the shell injects window.__NATIVE_PRINT__
  *   on the configured origin only. We then ask the SERVER which rule and
  *   profile apply (policy is never invented client-side), fetch the PDF
- *   with the user's own session, hand the raw bytes to the bridge, report
- *   the job state back, and return true so Odoo skips its download.
+ *   with the user's own session, hand the raw bytes to the bridge, watch
+ *   the local worker status until terminal, report the job state back,
+ *   and return true so Odoo skips its download.
  * - If the server says there is no rule for this report, we also return
  *   undefined: native printing is opt-in per report, by configuration.
  */
 
-function nativePrintBridge() {
+const TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);
+
+export function nativePrintBridge() {
     return window.__NATIVE_PRINT__ || null;
 }
 
-function buildReportUrl(action) {
-    const ids = (action.context && action.context.active_ids) || action.ids || [];
-    const docids = Array.isArray(ids) ? ids.join(",") : String(ids);
-    return `/report/pdf/${action.report_name}/${docids}`;
+export function buildReportUrl(action, converter = "pdf", env = null) {
+    let url = `/report/${converter}/${action.report_name}`;
+    const actionContext = action.context || {};
+    const userContext = (env && env.services && env.services.user && env.services.user.context) || {};
+    const mergedContext = Object.assign({}, userContext, actionContext);
+    const hasWizardData =
+        action.data &&
+        typeof action.data === "object" &&
+        Object.keys(action.data).length > 0;
+    if (hasWizardData) {
+        const encodedOptions = encodeURIComponent(JSON.stringify(action.data));
+        const encodedContext = encodeURIComponent(JSON.stringify(mergedContext));
+        url += `?options=${encodedOptions}&context=${encodedContext}`;
+    } else {
+        const ids =
+            actionContext.active_ids ||
+            (actionContext.active_id ? [actionContext.active_id] : null) ||
+            action.ids ||
+            (action.res_id ? [action.res_id] : []);
+        const docids = Array.isArray(ids) ? ids.join(",") : String(ids || "");
+        if (docids) {
+            url += `/${docids}`;
+        }
+        if (Object.keys(mergedContext).length > 0) {
+            const encodedContext = encodeURIComponent(JSON.stringify(mergedContext));
+            url += `?context=${encodedContext}`;
+        }
+    }
+    return url;
+}
+
+function notifyUser(env, message, type = "info", title = "Native Print") {
+    try {
+        if (env && env.services && env.services.notification) {
+            env.services.notification.add(message, { title, type });
+        }
+    } catch (_err) {
+        // Notification is informational; never block printing.
+    }
+}
+
+export async function watchJobToCompletion(bridge, jobId, meta, env) {
+    let lastState = "queued";
+    let lastPages = meta.pages || 1;
+    let lastAttempts = 1;
+    for (let i = 0; i < 40; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        try {
+            let state = null;
+            let errorCode = null;
+            let pages = lastPages;
+            let attempts = lastAttempts;
+            if (typeof bridge.jobDetail === "function") {
+                const detail = await bridge.jobDetail(jobId);
+                if (detail) {
+                    state = detail.state;
+                    errorCode = detail.errorCode || null;
+                    pages = detail.pages || pages;
+                    attempts = detail.attempts || attempts;
+                }
+            } else if (typeof bridge.printStatus === "function") {
+                state = await bridge.printStatus(jobId);
+            }
+            if (!state) {
+                continue;
+            }
+            if (state !== lastState || pages !== lastPages || attempts !== lastAttempts) {
+                lastState = state;
+                lastPages = pages;
+                lastAttempts = attempts;
+                await rpc(
+                    "/native_print/job_status",
+                    {
+                        idempotency_key: jobId,
+                        state,
+                        error_code: errorCode,
+                        device: meta.printerPattern,
+                        report_name: meta.reportName,
+                        profile_id: meta.profileId,
+                        pages,
+                        byte_size: meta.byteSize,
+                        attempts,
+                    },
+                    { silent: true },
+                ).catch(() => {});
+            }
+            if (TERMINAL_STATES.has(state)) {
+                if (state === "done") {
+                    notifyUser(
+                        env,
+                        `Printed "${meta.reportName}" on ${meta.printerPattern}`,
+                        "success",
+                    );
+                } else if (state === "failed" || state === "dead_letter") {
+                    notifyUser(
+                        env,
+                        `Print failed on ${meta.printerPattern} (${errorCode || state})`,
+                        "danger",
+                    );
+                }
+                return state;
+            }
+        } catch (_err) {
+            break;
+        }
+    }
+    return lastState;
+}
+
+async function handleCloseOnReportDownload(action, options, env) {
+    const onClose = options && options.onClose;
+    if (action.close_on_report_download) {
+        if (env && env.services && env.services.action) {
+            await env.services.action.doAction(
+                { type: "ir.actions.act_window_close" },
+                { onClose },
+            );
+            return;
+        }
+    }
+    if (typeof onClose === "function") {
+        onClose();
+    }
 }
 
 registry.category("ir.actions.report handlers").add(
@@ -42,14 +164,11 @@ registry.category("ir.actions.report handlers").add(
         if (!resolved || !resolved.rule) {
             return undefined; // No native rule configured for this report.
         }
+        const rule = resolved.rule;
+
         if (action.report_type === "qweb-text") {
-            // Kitchen tickets and simple text labels: text mode ESC/POS.
-            // (Arabic text never uses this path; it prints via PDF/raster.)
-            const ids = (action.context && action.context.active_ids) || action.ids || [];
-            const docids = Array.isArray(ids) ? ids.join(",") : String(ids);
-            const resp = await fetch(`/report/text/${action.report_name}/${docids}`, {
-                credentials: "same-origin",
-            });
+            const textUrl = buildReportUrl(action, "text", env);
+            const resp = await fetch(textUrl, { credentials: "same-origin" });
             if (!resp.ok) {
                 throw new Error(`Native Print: text report fetch failed (${resp.status})`);
             }
@@ -57,58 +176,105 @@ registry.category("ir.actions.report handlers").add(
             const textKey =
                 `odoo-txt-${action.id || action.report_name}-${Date.now()}-` +
                 Math.random().toString(36).slice(2, 10);
-            await bridge.printText({
-                idempotencyKey: textKey,
-                reportName: action.report_name,
-                printerPattern: resolved.rule.printer_pattern,
-                text,
-                cut: true,
+            await rpc("/native_print/job_status", {
+                idempotency_key: textKey,
+                state: "queued",
+                device: rule.printer_pattern,
+                report_name: action.report_name,
+                profile_id: rule.profile_id,
+                pages: 1,
+                byte_size: text.length,
             });
+            try {
+                await bridge.printText({
+                    idempotencyKey: textKey,
+                    reportName: action.report_name,
+                    printerPattern: rule.printer_pattern,
+                    text,
+                    cut: true,
+                    copies: rule.copies || 1,
+                });
+                watchJobToCompletion(
+                    bridge,
+                    textKey,
+                    {
+                        reportName: action.report_name,
+                        printerPattern: rule.printer_pattern,
+                        profileId: rule.profile_id,
+                        byteSize: text.length,
+                        pages: 1,
+                    },
+                    env,
+                );
+            } catch (error) {
+                await rpc("/native_print/job_status", {
+                    idempotency_key: textKey,
+                    state: "failed",
+                    error_code: "BRIDGE_ERROR",
+                    device: rule.printer_pattern,
+                });
+                notifyUser(env, `Native Print error: ${error.message || error}`, "danger");
+                throw error;
+            }
+            await handleCloseOnReportDownload(action, options, env);
             return true;
         }
-        const url = buildReportUrl(action);
+
+        const url = buildReportUrl(action, "pdf", env);
         const response = await fetch(url, { credentials: "same-origin" });
         if (!response.ok) {
             throw new Error(`Native Print: report fetch failed (${response.status})`);
         }
-        const bytes = new Uint8Array(await response.arrayBuffer());
+        const bytes = Array.from(new Uint8Array(await response.arrayBuffer()));
         const idempotencyKey =
             `odoo-${action.id || action.report_name}-${Date.now()}-` +
             Math.random().toString(36).slice(2, 10);
         await rpc("/native_print/job_status", {
             idempotency_key: idempotencyKey,
             state: "queued",
+            device: rule.printer_pattern,
             report_name: action.report_name,
+            profile_id: rule.profile_id,
             byte_size: bytes.length,
         });
         try {
-            // The bridge returns once the job is durably queued in the app.
-            // Later states (rendering/spooling/printing/done) are the app's
-            // own queue states; the job log row created above is updated by
-            // the app through this same endpoint when the app holds a
-            // session, and is always visible in the app's diagnostics.
             await bridge.printPdf({
                 idempotencyKey,
                 reportName: action.report_name,
-                printerPattern: resolved.rule.printer_pattern,
-                mode: resolved.rule.mode,
-                paper: resolved.rule.paper,
-                copies: resolved.rule.copies,
-                scalePolicy: resolved.rule.scale_policy,
+                printerPattern: rule.printer_pattern,
+                mode: rule.mode,
+                paper: rule.paper,
+                copies: rule.copies,
+                duplex: !!rule.duplex,
+                color: rule.color !== false,
+                tray: rule.tray || null,
+                scalePolicy: rule.scale_policy,
                 url,
                 bytes,
             });
+            watchJobToCompletion(
+                bridge,
+                idempotencyKey,
+                {
+                    reportName: action.report_name,
+                    printerPattern: rule.printer_pattern,
+                    profileId: rule.profile_id,
+                    byteSize: bytes.length,
+                    pages: 1,
+                },
+                env,
+            );
         } catch (error) {
             await rpc("/native_print/job_status", {
                 idempotency_key: idempotencyKey,
                 state: "failed",
                 error_code: "BRIDGE_ERROR",
+                device: rule.printer_pattern,
             });
+            notifyUser(env, `Native Print error: ${error.message || error}`, "danger");
             throw error;
         }
-        if (action.close_on_report_download && options && options.onClose) {
-            options.onClose();
-        }
+        await handleCloseOnReportDownload(action, options, env);
         return true; // Skip Odoo's default download.
     },
 );

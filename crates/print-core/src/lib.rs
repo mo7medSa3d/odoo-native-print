@@ -17,7 +17,7 @@ pub use page::{PageSize, Rotation};
 pub use paper::{match_paper, Form, MatchKind, PaperError, ScalePolicy};
 pub use printer::{PrinterCapabilities, PrinterInfo, PrinterKind, PrinterStatus};
 pub use profiles::{PrinterQuirks, ProfileDb};
-pub use queue::{Job, Queue, QueueError};
+pub use queue::{Job, JobOptions, Queue, QueueError};
 pub use routing::{printer_pattern_matches, resolve_printer, resolve_rule, PrintRule};
 pub use state::{JobState, TransitionError};
 pub use worker::{BackendError, PrintBackend, Worker, WorkerConfig};
