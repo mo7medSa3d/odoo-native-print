@@ -1,6 +1,7 @@
 /** @odoo-module **/
 import { registry } from "@web/core/registry";
 import { rpc } from "@web/core/network/rpc";
+import { resolveBridgeTarget } from "./native_print_client";
 
 /*
  * Native Print report handler (API contract v1, docs/api-contract.md).
@@ -8,13 +9,15 @@ import { rpc } from "@web/core/network/rpc";
  * - Normal browser: no bridge exists -> return undefined (falsy) and Odoo
  *   behaves exactly as usual. This is the most important line in the file.
  * - Inside the Native Print app the shell injects window.__NATIVE_PRINT__
- *   on the configured origin only. We then ask the SERVER which rule and
- *   profile apply (policy is never invented client-side), fetch the PDF
- *   with the user's own session, hand the raw bytes to the bridge, watch
- *   the local worker status until terminal, report the job state back,
- *   and return true so Odoo skips its download.
- * - If the server says there is no rule for this report, we also return
- *   undefined: native printing is opt-in per report, by configuration.
+ *   on the configured origin only. Printers live on THIS PC only:
+ *   the target is resolved live from the bridge inventory (the printer
+ *   the user selected in the systray, else the OS default), its real
+ *   capabilities are read from the driver at click time, the PDF is
+ *   fetched with the user's own session, handed to the bridge, and the
+ *   job outcome is reported to the server job log. Nothing about
+ *   printers is stored on the server.
+ * - If this PC has no printer right now, we also return undefined and
+ *   Odoo's standard download happens.
  */
 
 const TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);
@@ -68,8 +71,10 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
     let lastState = "queued";
     let lastPages = meta.pages || 1;
     let lastAttempts = 1;
-    for (let i = 0; i < 40; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 600));
+    const deadline = Date.now() + 5 * 60 * 1000;
+    for (let i = 0; Date.now() < deadline; i++) {
+        await new Promise((resolve) =>
+            setTimeout(resolve, i < 10 ? 600 : 2000));
         try {
             let state = null;
             let errorCode = null;
@@ -101,7 +106,6 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
                         error_code: errorCode,
                         device: meta.printerPattern,
                         report_name: meta.reportName,
-                        profile_id: meta.profileId,
                         pages,
                         byte_size: meta.byteSize,
                         attempts,
@@ -158,19 +162,18 @@ registry.category("ir.actions.report handlers").add(
         if (!["qweb-pdf", "qweb-text"].includes(action.report_type)) {
             return undefined; // Other report types keep the default flow.
         }
-        const resolved = await rpc("/native_print/rules", {
-            report_name: action.report_name,
-        });
-        if (!resolved || !resolved.rule) {
-            return undefined; // No native rule configured for this report.
+        const target = await resolveBridgeTarget(bridge).catch(() => null);
+        if (!target) {
+            return undefined; // No printer on this PC right now.
         }
-        const rule = resolved.rule;
+        const rule = target.rule;
 
         if (action.report_type === "qweb-text") {
             const textUrl = buildReportUrl(action, "text", env);
             const resp = await fetch(textUrl, { credentials: "same-origin" });
             if (!resp.ok) {
-                throw new Error(`Native Print: text report fetch failed (${resp.status})`);
+                // Let Odoo's default flow handle (and report) it.
+                return undefined;
             }
             const text = await resp.text();
             const textKey =
@@ -181,10 +184,9 @@ registry.category("ir.actions.report handlers").add(
                 state: "queued",
                 device: rule.printer_pattern,
                 report_name: action.report_name,
-                profile_id: rule.profile_id,
                 pages: 1,
                 byte_size: text.length,
-            });
+            }).catch(() => {});
             try {
                 await bridge.printText({
                     idempotencyKey: textKey,
@@ -200,7 +202,6 @@ registry.category("ir.actions.report handlers").add(
                     {
                         reportName: action.report_name,
                         printerPattern: rule.printer_pattern,
-                        profileId: rule.profile_id,
                         byteSize: text.length,
                         pages: 1,
                     },
@@ -213,8 +214,12 @@ registry.category("ir.actions.report handlers").add(
                     error_code: "BRIDGE_ERROR",
                     device: rule.printer_pattern,
                 });
-                notifyUser(env, `Native Print error: ${error.message || error}`, "danger");
-                throw error;
+                notifyUser(
+                    env,
+                    `Native Print failed (${error.message || error}). Downloading the file instead.`,
+                    "warning",
+                );
+                return undefined; // Fall back to the standard download.
             }
             await handleCloseOnReportDownload(action, options, env);
             return true;
@@ -223,7 +228,8 @@ registry.category("ir.actions.report handlers").add(
         const url = buildReportUrl(action, "pdf", env);
         const response = await fetch(url, { credentials: "same-origin" });
         if (!response.ok) {
-            throw new Error(`Native Print: report fetch failed (${response.status})`);
+            // Let Odoo's default flow handle (and report) it.
+            return undefined;
         }
         const bytes = Array.from(new Uint8Array(await response.arrayBuffer()));
         const idempotencyKey =
@@ -234,21 +240,22 @@ registry.category("ir.actions.report handlers").add(
             state: "queued",
             device: rule.printer_pattern,
             report_name: action.report_name,
-            profile_id: rule.profile_id,
             byte_size: bytes.length,
-        });
+        }).catch(() => {});
         try {
             await bridge.printPdf({
                 idempotencyKey,
                 reportName: action.report_name,
                 printerPattern: rule.printer_pattern,
                 mode: rule.mode,
-                paper: rule.paper,
+                paper: rule.paper || null,
                 copies: rule.copies,
                 duplex: !!rule.duplex,
                 color: rule.color !== false,
                 tray: rule.tray || null,
                 scalePolicy: rule.scale_policy,
+                mediaRollWidthMm:
+                    (rule.media && rule.media.roll_width_mm) || undefined,
                 url,
                 bytes,
             });
@@ -258,7 +265,6 @@ registry.category("ir.actions.report handlers").add(
                 {
                     reportName: action.report_name,
                     printerPattern: rule.printer_pattern,
-                    profileId: rule.profile_id,
                     byteSize: bytes.length,
                     pages: 1,
                 },
@@ -271,8 +277,12 @@ registry.category("ir.actions.report handlers").add(
                 error_code: "BRIDGE_ERROR",
                 device: rule.printer_pattern,
             });
-            notifyUser(env, `Native Print error: ${error.message || error}`, "danger");
-            throw error;
+            notifyUser(
+                env,
+                `Native Print failed (${error.message || error}). Downloading the PDF instead.`,
+                "warning",
+            );
+            return undefined; // Fall back to the standard download.
         }
         await handleCloseOnReportDownload(action, options, env);
         return true; // Skip Odoo's default download.

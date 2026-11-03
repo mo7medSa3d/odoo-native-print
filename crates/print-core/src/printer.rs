@@ -108,17 +108,21 @@ impl PrinterCapabilities {
         if !self.custom_size_supported {
             return false;
         }
-        if let Some((w, h)) = self.min_custom_mm {
-            if size.width_mm < w || size.height_mm < h {
-                return false;
+        let fits_orientation = |width: f64, height: f64| {
+            if let Some((min_w, min_h)) = self.min_custom_mm {
+                if width < min_w || height < min_h {
+                    return false;
+                }
             }
-        }
-        if let Some((w, h)) = self.max_custom_mm {
-            if size.width_mm > w || size.height_mm > h {
-                return false;
+            if let Some((max_w, max_h)) = self.max_custom_mm {
+                if width > max_w || height > max_h {
+                    return false;
+                }
             }
-        }
-        true
+            true
+        };
+        fits_orientation(size.width_mm, size.height_mm)
+            || fits_orientation(size.height_mm, size.width_mm)
     }
 }
 

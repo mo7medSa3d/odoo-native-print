@@ -3,7 +3,7 @@
 //! closed on every path out of its function.
 
 use crate::GdiJobOptions;
-use print_core::paper::{match_paper, Form, MatchKind, ScalePolicy};
+use print_core::paper::{match_paper, match_paper_auto, Form, MatchKind, ScalePolicy};
 use print_core::PageSize;
 use print_render::split_subjobs;
 use std::ffi::c_void;
@@ -48,9 +48,15 @@ extern "system" {
 
 const DC_PAPERS: u16 = 2;
 const DC_PAPERSIZE: u16 = 3;
+const DC_MINEXTENT: u16 = 4;
+const DC_MAXEXTENT: u16 = 5;
 const DC_BINS: u16 = 6;
+const DC_DUPLEX: u16 = 7;
 const DC_BINNAMES: u16 = 12;
+const DC_ENUMRESOLUTIONS: u16 = 13;
 const DC_PAPERNAMES: u16 = 16;
+const DC_COPIES: u16 = 18;
+const DC_COLORDEVICE: u16 = 32;
 
 // DocumentPropertiesW flags & DEVMODEW constants (wingdi.h / winspool.h).
 const DM_OUT_BUFFER: u32 = 2;
@@ -396,22 +402,31 @@ pub fn print_pdf_gdi_with_options(
         page_sizes.push(doc.page_size_mm(i).map_err(|e| e.to_string())?);
     }
     let subjobs = split_subjobs(&page_sizes);
-    let forms = paper_forms(printer).unwrap_or_default();
+    let capabilities = printer_capabilities(printer).map_err(|e| e.to_string())?;
     let name = wide(printer);
     let mut total_sent = 0usize;
 
     for _copy in 0..opts.copies.max(1) {
         for sub in &subjobs {
-            let matched = if !forms.is_empty() {
-                Some(match_paper(sub.size, &forms, opts.scale_policy).map_err(|e| e.to_string())?)
-            } else {
+            let matched = if capabilities.forms.is_empty() && !capabilities.custom_size_supported {
                 None
+            } else if opts.scale_policy == ScalePolicy::CustomAllowed {
+                Some(match_paper_auto(sub.size, &capabilities).map_err(|e| e.to_string())?)
+            } else {
+                Some(
+                    match_paper(sub.size, &capabilities.forms, opts.scale_policy)
+                        .map_err(|e| e.to_string())?,
+                )
             };
             let match_ref = matched.as_ref().map(|m| (&m.form, m.kind));
             let match_kind = matched.as_ref().map(|m| m.kind).unwrap_or(MatchKind::Exact);
+            let media_size = matched
+                .as_ref()
+                .map(|selection| selection.form.size)
+                .unwrap_or(sub.size);
             let devmode = build_printer_devmode(
                 printer,
-                sub.size,
+                media_size,
                 match_ref,
                 opts.duplex,
                 opts.color,
@@ -452,6 +467,9 @@ pub fn print_canvas_gdi(
     canvas: &print_render::bitmap::Canvas,
     copies: u16,
 ) -> Result<usize, String> {
+    if canvas.width == 0 || canvas.height == 0 {
+        return Err("empty image canvas".to_string());
+    }
     let page = print_render::RenderedPage {
         width_px: canvas.width,
         height_px: canvas.height,
@@ -460,15 +478,40 @@ pub fn print_canvas_gdi(
         pixels: canvas.px.clone(),
     };
     let dib = crate::dib::build_dib(&page);
+
+    // POS/kitchen PNG jobs that use GDI must obey the same media contract as
+    // PDF jobs: derive the physical page geometry from the 203-DPI raster,
+    // then select an exact/roll/custom/larger media form from the driver.
+    let page_size = PageSize::new(
+        canvas.width as f64 * 25.4 / 203.0,
+        canvas.height as f64 * 25.4 / 203.0,
+    );
+    let capabilities = printer_capabilities(printer)?;
+    if capabilities.forms.is_empty() && !capabilities.custom_size_supported {
+        return Err(
+            "PRINTER_MEDIA_UNAVAILABLE: Windows driver reported no supported forms or custom-size bounds"
+                .to_string(),
+        );
+    }
+    let matched = match_paper_auto(page_size, &capabilities).map_err(|error| {
+        format!("PAPER_MISMATCH: no safe media form for the receipt image: {error}")
+    })?;
+    let media_page_size = matched.form.size;
+    let devmode = build_printer_devmode(
+        printer,
+        media_page_size,
+        Some((&matched.form, matched.kind)),
+        false,
+        false,
+        None,
+    )
+    .ok_or_else(|| {
+        "PRINTER_DEVMODE_UNAVAILABLE: Windows driver could not apply the selected media form"
+            .to_string()
+    })?;
     let name = wide(printer);
-    let dc = unsafe {
-        CreateDCW(
-            std::ptr::null(),
-            name.as_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-        )
-    };
+    let init_ptr = devmode.as_ptr() as *const c_void;
+    let dc = unsafe { CreateDCW(std::ptr::null(), name.as_ptr(), std::ptr::null(), init_ptr) };
     if dc.is_null() {
         return Err(format!("CreateDC for {printer:?}: {}", last_error()));
     }
@@ -489,10 +532,10 @@ pub fn print_canvas_gdi(
     let mut sent = 0usize;
     let mut failure: Option<String> = None;
     for _ in 0..copies.max(1) {
-        match blit_dib_page(dc, &dib, None, MatchKind::Exact) {
+        match blit_dib_page(dc, &dib, Some(page_size), matched.kind) {
             Ok(()) => sent += 1,
-            Err(e) => {
-                failure = Some(e);
+            Err(error) => {
+                failure = Some(error);
                 break;
             }
         }
@@ -504,7 +547,7 @@ pub fn print_canvas_gdi(
     }
     unsafe { DeleteDC(dc) };
     match failure {
-        Some(e) => Err(e),
+        Some(error) => Err(error),
         None => Ok(sent),
     }
 }
@@ -869,14 +912,18 @@ pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
     for i in 0..valid_count {
         let w_mm = sizes[i * 2] as f64 / 10.0;
         let h_mm = sizes[i * 2 + 1] as f64 / 10.0;
-        if w_mm > 0.0 && h_mm > 0.0 {
-            let raw_name = if got_names > 0 && i < (got_names as usize) {
-                let block = &name_blocks[i * 64..(i + 1) * 64];
-                let end = block.iter().position(|&c| c == 0).unwrap_or(64);
-                String::from_utf16_lossy(&block[..end])
-            } else {
-                String::new()
-            };
+        let raw_name = if got_names > 0 && i < (got_names as usize) {
+            let block = &name_blocks[i * 64..(i + 1) * 64];
+            let end = block.iter().position(|&c| c == 0).unwrap_or(64);
+            String::from_utf16_lossy(&block[..end])
+        } else {
+            String::new()
+        };
+        let lower_name = raw_name.to_ascii_lowercase();
+        let named_roll = lower_name.contains("roll")
+            || lower_name.contains("receipt")
+            || lower_name.contains("continuous");
+        if w_mm > 0.0 && (h_mm > 0.0 || named_roll) {
             let mut form = crate::discovery::classify_form(&raw_name, w_mm, h_mm);
             if got_ids > 0 && i < (got_ids as usize) && paper_ids[i] > 0 {
                 form.paper_id = Some(paper_ids[i]);
@@ -885,6 +932,123 @@ pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
         }
     }
     Ok(forms)
+}
+
+/// Query capabilities reported by the installed Windows printer driver.
+pub fn printer_capabilities(printer: &str) -> Result<print_core::PrinterCapabilities, String> {
+    let name = wide(printer);
+    let forms = paper_forms(printer).unwrap_or_default();
+    let count = |capability: u16| unsafe {
+        DeviceCapabilitiesW(
+            name.as_ptr(),
+            std::ptr::null(),
+            capability,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        )
+    };
+    let duplex = count(DC_DUPLEX) > 0;
+    let color = count(DC_COLORDEVICE) > 0;
+    let max_copies = count(DC_COPIES).clamp(1, u16::MAX as i32) as u16;
+
+    let resolution_count = count(DC_ENUMRESOLUTIONS).clamp(0, 128) as usize;
+    let mut resolution_pairs = vec![0i32; resolution_count * 2];
+    let got_resolutions = if resolution_count == 0 {
+        0
+    } else {
+        unsafe {
+            DeviceCapabilitiesW(
+                name.as_ptr(),
+                std::ptr::null(),
+                DC_ENUMRESOLUTIONS,
+                resolution_pairs.as_mut_ptr() as *mut c_void,
+                std::ptr::null(),
+            )
+        }
+    };
+    let mut resolutions_dpi: Vec<u32> = (0..(got_resolutions.max(0) as usize)
+        .min(resolution_count))
+        .filter_map(|i| {
+            let x = resolution_pairs[i * 2];
+            let y = resolution_pairs[i * 2 + 1];
+            (x > 0 && y > 0).then_some(x.min(y) as u32)
+        })
+        .collect();
+    resolutions_dpi.sort_unstable();
+    resolutions_dpi.dedup();
+
+    let bin_count = count(DC_BINS).clamp(0, 128) as usize;
+    let mut bin_ids = vec![0u16; bin_count];
+    let got_bins = if bin_count == 0 {
+        0
+    } else {
+        unsafe {
+            DeviceCapabilitiesW(
+                name.as_ptr(),
+                std::ptr::null(),
+                DC_BINS,
+                bin_ids.as_mut_ptr() as *mut c_void,
+                std::ptr::null(),
+            )
+        }
+    };
+    let mut bin_names = vec![0u16; bin_count * 24];
+    let got_bin_names = if bin_count == 0 {
+        0
+    } else {
+        unsafe {
+            DeviceCapabilitiesW(
+                name.as_ptr(),
+                std::ptr::null(),
+                DC_BINNAMES,
+                bin_names.as_mut_ptr() as *mut c_void,
+                std::ptr::null(),
+            )
+        }
+    };
+    let valid_bins = (got_bins.max(0) as usize)
+        .min(got_bin_names.max(0) as usize)
+        .min(bin_count);
+    let bins = (0..valid_bins)
+        .filter_map(|i| {
+            let block = &bin_names[i * 24..(i + 1) * 24];
+            let end = block.iter().position(|v| *v == 0).unwrap_or(24);
+            let name = String::from_utf16_lossy(&block[..end]).trim().to_string();
+            (!name.is_empty()).then_some(name)
+        })
+        .collect();
+
+    // DC_MINEXTENT and DC_MAXEXTENT return packed width/length in the
+    // function result (LOWORD / HIWORD); pOutput is not used for these flags.
+    let extent = |capability: u16| -> Option<(f64, f64)> {
+        let packed = count(capability);
+        if packed <= 0 {
+            return None;
+        }
+        let packed = packed as u32;
+        let width_tenths_mm = (packed & 0xffff) as u16;
+        let length_tenths_mm = (packed >> 16) as u16;
+        if width_tenths_mm == 0 || length_tenths_mm == 0 {
+            return None;
+        }
+        Some((
+            width_tenths_mm as f64 / 10.0,
+            length_tenths_mm as f64 / 10.0,
+        ))
+    };
+    let min_custom_mm = extent(DC_MINEXTENT);
+    let max_custom_mm = extent(DC_MAXEXTENT);
+    Ok(print_core::PrinterCapabilities {
+        forms,
+        resolutions_dpi,
+        duplex,
+        color,
+        bins,
+        max_copies,
+        custom_size_supported: min_custom_mm.is_some() && max_custom_mm.is_some(),
+        min_custom_mm,
+        max_custom_mm,
+    })
 }
 
 /// Submit raw bytes (ESC/POS, ZPL, TSPL) to a printer through the spooler

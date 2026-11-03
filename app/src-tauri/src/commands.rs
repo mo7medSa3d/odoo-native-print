@@ -7,7 +7,7 @@
 
 use crate::config;
 use print_core::diagnostics::{build_bundle_from_queue, bundle_to_json, JobSummary};
-use print_core::paper::{match_paper, Form, ScalePolicy};
+use print_core::paper::{match_paper, match_paper_auto, Form, ScalePolicy};
 use print_core::printer::{needs_intervention, PrinterInfo, PrinterStatus};
 use print_core::routing::resolve_printer;
 use print_core::security::{origin_is_allowed, validate_job_input};
@@ -159,6 +159,8 @@ pub struct PrintPdfRequest {
     pub color: bool,
     #[serde(default)]
     pub tray: Option<String>,
+    #[serde(default)]
+    pub media_roll_width_mm: Option<f64>,
     #[allow(dead_code)]
     pub url: String,
     #[serde(deserialize_with = "deserialize_bytes")]
@@ -206,18 +208,30 @@ pub fn print_pdf(
         color: req.color,
         cut: true,
         tray: req.tray.clone(),
+        media_roll_width_mm: req.media_roll_width_mm,
     };
     let id = {
         let mut queue = state
             .queue
             .lock()
             .map_err(|_| "queue_poisoned".to_string())?;
-        let id = queue.enqueue(&job).map_err(|e| e.to_string())?;
-        queue
-            .store_payload(&id, "pdf", &req.bytes)
-            .map_err(|e| e.to_string())?;
-        queue.store_options(&id, &opts).map_err(|e| e.to_string())?;
-        id
+        // Duplicate submissions (same idempotency key) return the
+        // original job untouched: never overwrite its payload/options.
+        let id = match queue.enqueue_new(&job).map_err(|e| e.to_string())? {
+            Some(new_id) => {
+                queue
+                    .store_payload(&new_id, "pdf", &req.bytes)
+                    .map_err(|e| e.to_string())?;
+                queue
+                    .store_options(&new_id, &opts)
+                    .map_err(|e| e.to_string())?;
+                new_id
+            }
+            None => queue
+                .job_id_for_key(&job.idempotency_key)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "queue_inconsistent".to_string())?,
+        };
     };
     state.notify_worker();
     Ok(id)
@@ -276,25 +290,37 @@ pub fn print_text(
     };
     let opts = JobOptions {
         mode: "escpos".to_string(),
-        paper: Some("80mm".to_string()),
+        paper: None,
         copies: copies.max(1),
         scale_policy: None,
         duplex: false,
         color: false,
         cut: req.cut,
         tray: None,
+        media_roll_width_mm: None,
     };
     let id = {
         let mut queue = state
             .queue
             .lock()
             .map_err(|_| "queue_poisoned".to_string())?;
-        let id = queue.enqueue(&job).map_err(|e| e.to_string())?;
-        queue
-            .store_payload(&id, "escpos", &bytes)
-            .map_err(|e| e.to_string())?;
-        queue.store_options(&id, &opts).map_err(|e| e.to_string())?;
-        id
+        // Duplicate submissions (same idempotency key) return the
+        // original job untouched: never overwrite its payload/options.
+        let id = match queue.enqueue_new(&job).map_err(|e| e.to_string())? {
+            Some(new_id) => {
+                queue
+                    .store_payload(&new_id, "escpos", &bytes)
+                    .map_err(|e| e.to_string())?;
+                queue
+                    .store_options(&new_id, &opts)
+                    .map_err(|e| e.to_string())?;
+                new_id
+            }
+            None => queue
+                .job_id_for_key(&job.idempotency_key)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "queue_inconsistent".to_string())?,
+        };
     };
     state.notify_worker();
     Ok(id)
@@ -307,6 +333,8 @@ pub struct PrintImageRequest {
     pub report_name: String,
     pub printer_pattern: String,
     pub paper: Option<String>,
+    #[serde(default)]
+    pub media_roll_width_mm: Option<f64>,
     #[serde(default)]
     pub mode: Option<String>,
     #[serde(default)]
@@ -345,25 +373,37 @@ pub fn print_image(
     };
     let opts = JobOptions {
         mode: req.mode.unwrap_or_else(|| "escpos".to_string()),
-        paper: Some(req.paper.unwrap_or_else(|| "80mm".to_string())),
+        paper: req.paper,
         copies: copies.max(1),
         scale_policy: Some("custom_allowed".to_string()),
         duplex: false,
         color: false,
         cut: true,
         tray: None,
+        media_roll_width_mm: req.media_roll_width_mm,
     };
     let id = {
         let mut queue = state
             .queue
             .lock()
             .map_err(|_| "queue_poisoned".to_string())?;
-        let id = queue.enqueue(&job).map_err(|e| e.to_string())?;
-        queue
-            .store_payload(&id, "image-png", &req.bytes)
-            .map_err(|e| e.to_string())?;
-        queue.store_options(&id, &opts).map_err(|e| e.to_string())?;
-        id
+        // Duplicate submissions (same idempotency key) return the
+        // original job untouched: never overwrite its payload/options.
+        let id = match queue.enqueue_new(&job).map_err(|e| e.to_string())? {
+            Some(new_id) => {
+                queue
+                    .store_payload(&new_id, "image-png", &req.bytes)
+                    .map_err(|e| e.to_string())?;
+                queue
+                    .store_options(&new_id, &opts)
+                    .map_err(|e| e.to_string())?;
+                new_id
+            }
+            None => queue
+                .job_id_for_key(&job.idempotency_key)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "queue_inconsistent".to_string())?,
+        };
     };
     state.notify_worker();
     Ok(id)
@@ -429,9 +469,7 @@ pub struct AppOverviewResponse {
     pub odoo_origin: Option<String>,
     pub locked_by_policy: bool,
     pub auto_reprint: bool,
-    pub config_path: String,
     pub pdfium_ready: bool,
-    pub pdfium_detail: String,
     pub printers: Vec<PrinterInfo>,
     pub default_printer: Option<String>,
     pub state_counts: Vec<(String, u64)>,
@@ -444,11 +482,8 @@ pub fn app_overview(
     state: State<'_, AppState>,
 ) -> Result<AppOverviewResponse, String> {
     check_origin(&webview, &state)?;
-    let (pdfium_ready, pdfium_detail) = match print_render::Pdfium::load() {
-        Ok(p) => (true, p.loaded_from().display().to_string()),
-        Err(e) => (false, e.to_string()),
-    };
-    let printers = print_win::discover_printers().unwrap_or_default();
+    let pdfium_ready = print_render::Pdfium::load().is_ok();
+    let printers = print_win::discover_printers().map_err(|e| e.to_string())?;
     let default_printer = print_win::default_printer_name().ok();
     let origin = state
         .configured_origin
@@ -472,9 +507,7 @@ pub fn app_overview(
         odoo_origin: origin,
         locked_by_policy: state.locked_by_policy,
         auto_reprint,
-        config_path: state.config_dir.join("config.json").display().to_string(),
         pdfium_ready,
-        pdfium_detail,
         printers,
         default_printer,
         state_counts: bundle.state_counts,
@@ -488,7 +521,7 @@ pub fn list_printers(
     state: State<'_, AppState>,
 ) -> Result<Vec<PrinterInfo>, String> {
     check_origin(&webview, &state)?;
-    Ok(print_win::discover_printers().unwrap_or_default())
+    print_win::discover_printers().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -499,6 +532,18 @@ pub fn printer_forms(
 ) -> Result<Vec<Form>, String> {
     check_origin(&webview, &state)?;
     print_win::paper_forms(&printer).map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn printer_capabilities(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    printer: String,
+) -> Result<print_core::PrinterCapabilities, String> {
+    check_origin(&webview, &state)?;
+    if printer.trim().is_empty() {
+        return Err("printer_required".to_string());
+    }
+    print_win::printer_capabilities(printer.trim()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -550,6 +595,7 @@ pub fn run_test_print(
                     color: false,
                     cut: true,
                     tray: None,
+                    media_roll_width_mm: None,
                 },
                 10,
             )
@@ -569,6 +615,7 @@ pub fn run_test_print(
                     color: false,
                     cut: false,
                     tray: None,
+                    media_roll_width_mm: None,
                 },
                 5,
             )
@@ -591,11 +638,12 @@ pub fn run_test_print(
                     color: false,
                     cut: false,
                     tray: None,
+                    media_roll_width_mm: None,
                 },
                 5,
             )
         }
-        _ => {
+        "pdf-a4" | "pdf" | "gdi" => {
             let pdf = print_render::calibration::calibration_pdf();
             (
                 "pdf",
@@ -609,10 +657,12 @@ pub fn run_test_print(
                     color: false,
                     cut: false,
                     tray: None,
+                    media_roll_width_mm: None,
                 },
                 0,
             )
         }
+        _ => return Err("unsupported_test_kind".to_string()),
     };
     let job = Job {
         id: key.clone(),
@@ -786,6 +836,60 @@ impl NativePrintBackend {
         }
     }
 
+    fn receipt_width_dots(
+        printer: &str,
+        paper_override: Option<&str>,
+    ) -> Result<u32, BackendError> {
+        if let Some(paper) = paper_override {
+            let dots = print_render::receipt_dots_for_paper(paper);
+            // An explicit paper choice is verified against the driver's
+            // reported roll forms when they are available: rendering an
+            // 80mm receipt for a 58mm roll (or the reverse) clips or
+            // scales the customer's receipt.
+            if let Ok(caps) = print_win::printer_capabilities(printer) {
+                let rolls: Vec<f64> = caps
+                    .forms
+                    .iter()
+                    .filter(|f| f.roll)
+                    .map(|f| f.size.width_mm)
+                    .collect();
+                if !rolls.is_empty() {
+                    let nominal_mm = dots as f64 * 25.4 / 203.0 + 8.0;
+                    if !rolls.iter().any(|w| (w - nominal_mm).abs() <= 6.0) {
+                        return Err(BackendError::fatal(
+                            "PAPER_MISMATCH",
+                            &format!(
+                                "requested paper {paper:?} does not match the roll forms reported by the driver: {rolls:?} mm"
+                            ),
+                        ));
+                    }
+                }
+            }
+            return Ok(dots);
+        }
+        let capabilities = print_win::printer_capabilities(printer).map_err(|error| {
+            BackendError::fatal(
+                "PRINTER_CAPABILITIES_UNAVAILABLE",
+                &format!("The Windows driver did not expose printer capabilities: {error}"),
+            )
+        })?;
+        let roll = capabilities.forms.iter().find(|form| form.roll).ok_or_else(|| {
+            BackendError::fatal(
+                "ROLL_MEDIA_NOT_REPORTED",
+                "The printer driver did not report a continuous/receipt paper form. Install or update the vendor driver; Native Print will not assume 58mm or 80mm.",
+            )
+        })?;
+        print_render::receipt_dots_for_width_mm(roll.size.width_mm).ok_or_else(|| {
+            BackendError::fatal(
+                "ROLL_WIDTH_UNSUPPORTED",
+                &format!(
+                    "The detected roll width ({:.1} mm) has no verified ESC/POS print-head profile.",
+                    roll.size.width_mm
+                ),
+            )
+        })
+    }
+
     fn parse_scale_policy(s: Option<&str>) -> ScalePolicy {
         match s.unwrap_or("custom_allowed") {
             "strict" => ScalePolicy::Strict,
@@ -852,9 +956,11 @@ impl NativePrintBackend {
     fn pdf_to_raw_stream(
         pdf_bytes: &[u8],
         mode: &str,
-        paper: &str,
+        paper: Option<&str>,
+        target_width_dots: Option<u32>,
         copies: u16,
         cut: bool,
+        label_box: Option<(u32, u32)>,
     ) -> Result<Vec<u8>, BackendError> {
         let pdfium = print_render::Pdfium::load()
             .map_err(|e| BackendError::fatal("PDFIUM_LOAD_ERROR", &e.to_string()))?;
@@ -867,7 +973,14 @@ impl NativePrintBackend {
         }
         match mode {
             "escpos" => {
-                let target_w = print_render::receipt_dots_for_paper(paper);
+                let target_w = target_width_dots
+                    .or_else(|| paper.map(print_render::receipt_dots_for_paper))
+                    .ok_or_else(|| {
+                        BackendError::fatal(
+                            "AUTO_MEDIA_UNAVAILABLE",
+                            "No driver-reported roll width is available for ESC/POS rendering.",
+                        )
+                    })?;
                 let mut stream = print_raw::EscPos::new();
                 for _ in 0..copies.max(1) {
                     for i in 0..count {
@@ -898,6 +1011,10 @@ impl NativePrintBackend {
                     let w_aligned = page.width_px.div_ceil(8) * 8;
                     let bm = MonoBitmap::from_packed(w_aligned, page.height_px, page.pixels)
                         .map_err(|e| BackendError::fatal("BITMAP_PACK_ERROR", &e.to_string()))?;
+                    let bm = match label_box {
+                        Some((w, h)) => print_render::bitmap::fit_mono_to_box(&bm, w, h),
+                        None => bm,
+                    };
                     out.push_str(&print_raw::zpl_label_with_options(&bm, 0, 0, copies));
                 }
                 Ok(out.into_bytes())
@@ -911,10 +1028,14 @@ impl NativePrintBackend {
                     let w_aligned = page.width_px.div_ceil(8) * 8;
                     let bm = MonoBitmap::from_packed(w_aligned, page.height_px, page.pixels)
                         .map_err(|e| BackendError::fatal("BITMAP_PACK_ERROR", &e.to_string()))?;
-                    let w_mm = ((page.width_px as f64) * 25.4 / (page.dpi.max(1) as f64))
+                    let bm = match label_box {
+                        Some((w, h)) => print_render::bitmap::fit_mono_to_box(&bm, w, h),
+                        None => bm,
+                    };
+                    let w_mm = ((bm.width_dots as f64) * 25.4 / (page.dpi.max(1) as f64))
                         .round()
                         .max(20.0) as u32;
-                    let h_mm = ((page.height_px as f64) * 25.4 / (page.dpi.max(1) as f64))
+                    let h_mm = ((bm.height_dots as f64) * 25.4 / (page.dpi.max(1) as f64))
                         .round()
                         .max(20.0) as u32;
                     let tspl = print_raw::tspl::TsplLabel::new(w_mm, h_mm, 3)
@@ -933,31 +1054,48 @@ impl NativePrintBackend {
                     let w_aligned = page.width_px.div_ceil(8) * 8;
                     let bm = MonoBitmap::from_packed(w_aligned, page.height_px, page.pixels)
                         .map_err(|e| BackendError::fatal("BITMAP_PACK_ERROR", &e.to_string()))?;
+                    let bm = match label_box {
+                        Some((w, h)) => print_render::bitmap::fit_mono_to_box(&bm, w, h),
+                        None => bm,
+                    };
                     out.extend_from_slice(&print_raw::epl::epl_label_copies(&bm, copies));
                 }
                 Ok(out)
             }
-            _ => Ok(pdf_bytes.to_vec()),
+            _ => Err(BackendError::fatal(
+                "UNKNOWN_MODE",
+                &format!("unsupported print mode {mode:?} for a PDF document"),
+            )),
         }
     }
 
     fn png_to_raw_stream(
         png_bytes: &[u8],
         mode: &str,
-        paper: &str,
+        paper: Option<&str>,
+        target_width_dots: Option<u32>,
         copies: u16,
+        label_box: Option<(u32, u32)>,
     ) -> Result<Vec<u8>, BackendError> {
         match mode {
             "zpl" => {
                 let canvas = print_render::decode_png(png_bytes)
                     .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
                 let mono = canvas.to_mono(print_render::image::RECEIPT_THRESHOLD);
+                let mono = match label_box {
+                    Some((w, h)) => print_render::bitmap::fit_mono_to_box(&mono, w, h),
+                    None => mono,
+                };
                 Ok(print_raw::zpl_label_with_options(&mono, 0, 0, copies).into_bytes())
             }
             "tspl" => {
                 let canvas = print_render::decode_png(png_bytes)
                     .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
                 let mono = canvas.to_mono(print_render::image::RECEIPT_THRESHOLD);
+                let mono = match label_box {
+                    Some((w, h)) => print_render::bitmap::fit_mono_to_box(&mono, w, h),
+                    None => mono,
+                };
                 let w_mm = ((mono.width_dots as f64) * 25.4 / 203.0).round().max(20.0) as u32;
                 let h_mm = ((mono.height_dots as f64) * 25.4 / 203.0).round().max(20.0) as u32;
                 Ok(print_raw::tspl::TsplLabel::new(w_mm, h_mm, 3)
@@ -968,17 +1106,34 @@ impl NativePrintBackend {
                 let canvas = print_render::decode_png(png_bytes)
                     .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
                 let mono = canvas.to_mono(print_render::image::RECEIPT_THRESHOLD);
+                let mono = match label_box {
+                    Some((w, h)) => print_render::bitmap::fit_mono_to_box(&mono, w, h),
+                    None => mono,
+                };
                 Ok(print_raw::epl::epl_label_copies(&mono, copies))
             }
-            _ => {
-                let single = print_render::receipt_png_to_escpos(png_bytes, paper)
-                    .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
+            "escpos" => {
+                let target_width_dots = target_width_dots
+                    .or_else(|| paper.map(print_render::receipt_dots_for_paper))
+                    .ok_or_else(|| {
+                        BackendError::fatal(
+                            "AUTO_MEDIA_UNAVAILABLE",
+                            "No driver-reported roll width is available for ESC/POS rendering.",
+                        )
+                    })?;
+                let single =
+                    print_render::receipt_png_to_escpos_width(png_bytes, target_width_dots)
+                        .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
                 let mut out = Vec::with_capacity(single.len() * copies.max(1) as usize);
                 for _ in 0..copies.max(1) {
                     out.extend_from_slice(&single);
                 }
                 Ok(out)
             }
+            _ => Err(BackendError::fatal(
+                "UNKNOWN_MODE",
+                &format!("unsupported print mode {mode:?} for an image"),
+            )),
         }
     }
 }
@@ -992,15 +1147,36 @@ impl PrintBackend for NativePrintBackend {
             .map_err(|e| BackendError::retryable("QUEUE_DB_ERROR", &e.to_string()))?
             .ok_or_else(|| BackendError::fatal("MISSING_PAYLOAD", "job payload not found"))?;
         let opts = q.options(&job.id).unwrap_or_default();
-        let paper = opts.paper.as_deref().unwrap_or("A4");
+        let paper = opts.paper.as_deref();
         let title = job.report.as_deref().unwrap_or("Odoo Native Print Job");
 
         // 1. Direct TCP 9100 transport (tcp://host:port or raw://host:port)
         if job.printer.starts_with("tcp://") || job.printer.starts_with("raw://") {
             let (host, port, _) = Self::parse_host_port(&job.printer, 9100)?;
+            // No local driver exists for a raw network printer: the
+            // server-reported roll width (from the driver forms it
+            // synced) is the media truth used to fit the output.
+            let media_width_dots = opts
+                .media_roll_width_mm
+                .and_then(print_render::receipt_dots_for_width_mm);
             let raw_bytes = match kind.as_str() {
-                "pdf" => Self::pdf_to_raw_stream(&data, &opts.mode, paper, opts.copies, opts.cut)?,
-                "image-png" => Self::png_to_raw_stream(&data, &opts.mode, paper, opts.copies)?,
+                "pdf" => Self::pdf_to_raw_stream(
+                    &data,
+                    &opts.mode,
+                    paper,
+                    media_width_dots,
+                    opts.copies,
+                    opts.cut,
+                    None,
+                )?,
+                "image-png" => Self::png_to_raw_stream(
+                    &data,
+                    &opts.mode,
+                    paper,
+                    media_width_dots,
+                    opts.copies,
+                    None,
+                )?,
                 _ => {
                     let mut v = Vec::with_capacity(data.len() * opts.copies.max(1) as usize);
                     for _ in 0..opts.copies.max(1) {
@@ -1016,7 +1192,7 @@ impl PrintBackend for NativePrintBackend {
                 Duration::from_secs(5),
                 Duration::from_secs(20),
             )
-            .map_err(|e| BackendError::retryable("TCP9100_ERROR", &e.to_string()))?;
+            .map_err(|e| BackendError::ambiguous("TCP9100_ERROR", &e.to_string()))?;
             return Ok(());
         }
 
@@ -1040,7 +1216,7 @@ impl PrintBackend for NativePrintBackend {
                 .map_err(|e| BackendError::fatal("IPP_FORMAT_UNSUPPORTED", &e.to_string()))?;
             client
                 .print_job(&data, fmt, title, opts.copies.max(1))
-                .map_err(|e| BackendError::retryable("IPP_PRINT_ERROR", &e.to_string()))?;
+                .map_err(|e| BackendError::ambiguous("IPP_PRINT_ERROR", &e.to_string()))?;
             return Ok(());
         }
 
@@ -1074,26 +1250,84 @@ impl PrintBackend for NativePrintBackend {
             }
         }
 
+        let target_width_dots =
+            if opts.mode == "escpos" && matches!(kind.as_str(), "pdf" | "image-png") {
+                Some(Self::receipt_width_dots(&target_name, paper)?)
+            } else {
+                None
+            };
+
+        // Label modes: the fit box is the printer's largest discrete
+        // form (or its roll width when only continuous media exists),
+        // so a rendered label can never exceed the physical media.
+        let label_box = if matches!(opts.mode.as_str(), "zpl" | "tspl" | "epl")
+            && matches!(kind.as_str(), "pdf" | "image-png")
+        {
+            print_win::printer_capabilities(&target_name)
+                .ok()
+                .and_then(|caps| {
+                    let mut best: Option<(u32, u32)> = None;
+                    let mut roll_w: Option<u32> = None;
+                    for form in &caps.forms {
+                        let w = (form.size.width_mm * 203.0 / 25.4) as u32;
+                        if form.roll {
+                            roll_w = Some(w);
+                            continue;
+                        }
+                        let cand = (w, (form.size.height_mm * 203.0 / 25.4) as u32);
+                        let area = cand.0 as u64 * cand.1 as u64;
+                        if best.map_or(true, |b: (u32, u32)| area > b.0 as u64 * b.1 as u64) {
+                            best = Some(cand);
+                        }
+                    }
+                    best.or_else(|| roll_w.map(|w| (w, u32::MAX)))
+                })
+        } else {
+            None
+        };
+
         match (kind.as_str(), opts.mode.as_str()) {
             ("pdf", "escpos" | "zpl" | "tspl" | "epl") => {
-                let raw_bytes =
-                    Self::pdf_to_raw_stream(&data, &opts.mode, paper, opts.copies, opts.cut)?;
+                let raw_bytes = Self::pdf_to_raw_stream(
+                    &data,
+                    &opts.mode,
+                    paper,
+                    target_width_dots,
+                    opts.copies,
+                    opts.cut,
+                    label_box,
+                )?;
                 print_win::print_raw(&target_name, title, &raw_bytes)
-                    .map_err(|e| BackendError::retryable("SPOOLER_RAW_ERROR", &e.to_string()))?;
+                    .map_err(|e| BackendError::ambiguous("SPOOLER_RAW_ERROR", &e.to_string()))?;
                 Ok(())
             }
-            ("pdf", _) => {
+            ("pdf", "gdi") => {
                 let policy = Self::parse_scale_policy(opts.scale_policy.as_deref());
-                // Verify paper ladder when driver forms are available.
-                if let Ok(forms) = print_win::paper_forms(&target_name) {
-                    if !forms.is_empty() {
-                        if let Ok(info) = print_render::parse_pdf_info(&data) {
-                            for p in &info.pages {
-                                match_paper(p.size, &forms, policy).map_err(|e| {
-                                    BackendError::fatal("PAPER_MISMATCH", &e.to_string())
-                                })?;
-                            }
+                // Validate page geometry against the current Windows driver.
+                let capabilities =
+                    print_win::printer_capabilities(&target_name).map_err(|error| {
+                        BackendError::fatal(
+                            "PRINTER_CAPABILITIES_UNAVAILABLE",
+                            &format!(
+                                "The Windows driver did not expose media capabilities: {error}"
+                            ),
+                        )
+                    })?;
+                if let Ok(info) = print_render::parse_pdf_info(&data) {
+                    for page in &info.pages {
+                        if capabilities.forms.is_empty() && !capabilities.custom_size_supported {
+                            return Err(BackendError::fatal(
+                                "PRINTER_MEDIA_UNAVAILABLE",
+                                "The installed driver reported no paper forms or custom-size limits; install/update the vendor printer driver.",
+                            ));
                         }
+                        let result = if policy == ScalePolicy::CustomAllowed {
+                            match_paper_auto(page.size, &capabilities)
+                        } else {
+                            match_paper(page.size, &capabilities.forms, policy)
+                        };
+                        result
+                            .map_err(|e| BackendError::fatal("PAPER_MISMATCH", &e.to_string()))?;
                     }
                 }
                 let render_mode = if opts.color {
@@ -1111,26 +1345,37 @@ impl PrintBackend for NativePrintBackend {
                     tray: opts.tray.clone(),
                 };
                 print_win::print_pdf_gdi_with_options(&target_name, title, &data, &gdi_opts)
-                    .map_err(|e| BackendError::retryable("GDI_PRINT_ERROR", &e.to_string()))?;
+                    .map_err(|e| BackendError::ambiguous("GDI_PRINT_ERROR", &e.to_string()))?;
                 Ok(())
             }
+            ("pdf" | "image-png", _) => Err(BackendError::fatal(
+                "UNKNOWN_MODE",
+                &format!("unsupported print mode {:?} for this document", opts.mode),
+            )),
             ("image-png", "gdi") => {
                 let canvas = print_render::decode_png(&data)
                     .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
                 print_win::print_canvas_gdi(&target_name, title, &canvas, opts.copies.max(1))
-                    .map_err(|e| BackendError::retryable("GDI_PRINT_ERROR", &e.to_string()))?;
+                    .map_err(|e| BackendError::ambiguous("GDI_PRINT_ERROR", &e.to_string()))?;
                 Ok(())
             }
             ("image-png", _) => {
-                let raw_bytes = Self::png_to_raw_stream(&data, &opts.mode, paper, opts.copies)?;
+                let raw_bytes = Self::png_to_raw_stream(
+                    &data,
+                    &opts.mode,
+                    paper,
+                    target_width_dots,
+                    opts.copies,
+                    label_box,
+                )?;
                 print_win::print_raw(&target_name, title, &raw_bytes)
-                    .map_err(|e| BackendError::retryable("SPOOLER_RAW_ERROR", &e.to_string()))?;
+                    .map_err(|e| BackendError::ambiguous("SPOOLER_RAW_ERROR", &e.to_string()))?;
                 Ok(())
             }
             _ => {
                 for _ in 0..opts.copies.max(1) {
                     print_win::print_raw(&target_name, title, &data).map_err(|e| {
-                        BackendError::retryable("SPOOLER_RAW_ERROR", &e.to_string())
+                        BackendError::ambiguous("SPOOLER_RAW_ERROR", &e.to_string())
                     })?;
                 }
                 Ok(())

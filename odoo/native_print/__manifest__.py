@@ -1,6 +1,6 @@
 {
     "name": "Native Print",
-    "version": "19.0.1.2.0",
+    "version": "19.0.2.0.0",
     "category": "Productivity",
     "summary": "Zero-gateway local printing for Odoo reports, labels, and POS receipts",
     "author": "Odoo Native Print Team",
@@ -14,6 +14,7 @@
     "assets": {
         "web.assets_backend": [
             "native_print/static/src/scss/native_print.scss",
+            "native_print/static/src/js/native_print_client.js",
             "native_print/static/src/js/native_print_handler.js",
             "native_print/static/src/js/native_print_systray.js",
             "native_print/static/src/xml/native_print_systray.xml",
@@ -22,6 +23,7 @@
         # only loads inside the POS app, so the POS extension needs no
         # hard dependency on point_of_sale for backend-only users.
         "point_of_sale._assets_pos": [
+            "native_print/static/src/js/native_print_client.js",
             "native_print/static/src/js/pos_native_print.js",
         ],
     },

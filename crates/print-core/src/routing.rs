@@ -19,9 +19,11 @@ pub struct PrintRule {
     pub priority: i64,
 }
 
-/// Resolve the winning rule: company must match, report must match
-/// (exact or wildcard), group must be absent or held by the user.
-/// Highest priority wins; ties keep the earlier rule (stable).
+/// Resolve the winning rule with the same semantics as the server
+/// resolver (the server is the authority): an exact report match
+/// outranks the catch-all regardless of priority; priority decides
+/// within a tier; ties keep the earlier rule (stable). Company must
+/// match; a group-scoped rule applies only to group members.
 pub fn resolve_rule<'a>(
     rules: &'a [PrintRule],
     report_name: &str,
@@ -37,7 +39,18 @@ pub fn resolve_rule<'a>(
                 .as_deref()
                 .is_none_or(|g| user_groups.iter().any(|u| u == g))
         })
-        .max_by_key(|r| r.priority)
+        .enumerate()
+        .max_by(|(ia, a), (ib, b)| {
+            let tier = |r: &PrintRule| if r.report_name.is_some() { 1 } else { 0 };
+            tier(a)
+                .cmp(&tier(b))
+                .then(a.priority.cmp(&b.priority))
+                // Stable ties: the earlier rule wins, so on equal keys
+                // the element with the smaller index must compare
+                // greater for max_by to keep it.
+                .then(ib.cmp(ia))
+        })
+        .map(|(_, r)| r)
 }
 
 /// Printer pattern matching: `*` is the only wildcard (any run of
@@ -141,6 +154,20 @@ mod tests {
         let r = resolve_rule(&rules, "account.move", &groups, "Acme").unwrap();
         assert_eq!(r.profile_name, "catch-all");
         assert!(resolve_rule(&rules, "sale.report", &groups, "Other").is_none());
+    }
+    #[test]
+    fn exact_report_beats_catch_all_priority_and_ties_are_stable() {
+        // A high-priority catch-all must not shadow an exact rule
+        // (server semantics), and equal keys keep the earlier rule.
+        let rules = vec![
+            rule(None, None, 100, "greedy-catch-all"),
+            rule(Some("sale.report"), None, 1, "exact"),
+            rule(Some("sale.report"), None, 1, "exact-later"),
+        ];
+        let r = resolve_rule(&rules, "sale.report", &[], "Acme").unwrap();
+        assert_eq!(r.profile_name, "exact");
+        let r = resolve_rule(&rules, "other.report", &[], "Acme").unwrap();
+        assert_eq!(r.profile_name, "greedy-catch-all");
     }
     #[test]
     fn pattern_matching() {

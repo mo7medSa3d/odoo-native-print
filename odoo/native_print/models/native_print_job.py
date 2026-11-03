@@ -1,4 +1,5 @@
-from odoo import fields, models
+from odoo import _, fields, models
+from odoo.exceptions import UserError
 
 
 class NativePrintJob(models.Model):
@@ -41,10 +42,6 @@ class NativePrintJob(models.Model):
         string="Source Name",
         index=True,
     )
-    profile_id = fields.Many2one(
-        "native.print.profile",
-        string="Printer Profile",
-    )
     pages = fields.Integer(default=1, string="Pages")
     byte_size = fields.Integer(string="Bytes")
     attempts = fields.Integer(default=1, string="Attempts")
@@ -55,29 +52,25 @@ class NativePrintJob(models.Model):
         string="Company",
     )
 
-    def action_retry_job(self):
-        for rec in self:
-            if rec.state in ("failed", "dead_letter", "canceled"):
-                rec.write({
-                    "state": "queued",
-                    "error_code": False,
-                    "attempts": (rec.attempts or 0) + 1,
-                })
-        return True
+    _idempotency_key_company_uniq = models.Constraint(
+        "unique(name, company_id)",
+        "A print job with this idempotency key already exists for this company.",
+    )
 
-    def action_cancel_job(self):
-        for rec in self:
-            if rec.state in ("queued", "rendering", "spooling"):
-                rec.write({
-                    "state": "canceled",
-                    "error_code": "CANCELED_BY_USER",
-                })
-        return True
-
-    def action_mark_done(self):
-        for rec in self:
-            rec.write({
-                "state": "done",
-                "error_code": False,
-            })
-        return True
+    def write(self, vals):
+        # Job states are facts reported by the desktop app's print worker
+        # through /native_print/job_status. Changing them from the Odoo UI
+        # would display outcomes that never happened (a "done" job that
+        # never printed, a "retry" nothing reprints), so state transitions
+        # are accepted only from the status-sync path.
+        if "state" in vals and not self.env.context.get(
+            "native_print_status_sync"
+        ):
+            for rec in self:
+                if rec.state != vals["state"]:
+                    raise UserError(_(
+                        "Print job status is reported by the desktop app "
+                        "and cannot be changed manually. To print again, "
+                        "print the document again from Odoo."
+                    ))
+        return super().write(vals)

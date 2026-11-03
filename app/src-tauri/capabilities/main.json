@@ -1,1 +1,14 @@
-{"$schema":"../gen/schemas/desktop-schema.json","description":"Print and diagnostics commands only. Remote access is restricted at the ACL layer to the configured Odoo origin schemes (HTTPS anywhere, or HTTP to a private IP) and strictly locked to the exact configured Odoo origin in Rust on every command call (ADR-0002). No fs, shell, http, or opener permissions are granted anywhere in this app.","identifier":"main-odoo-origin","local":true,"permissions":["allow-print-pdf","allow-print-status"],"remote":{"urls":["https://*/*","https://*:*/*","http://*/*","http://*:*/*"]},"windows":["main"]}
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "description": "Local window capability (Control Center at tauri://localhost): all print, status and queue-admin commands. No fs, shell, http, or opener permissions are granted anywhere in this app.",
+  "identifier": "main-odoo-origin",
+  "local": true,
+  "permissions": [
+    "allow-print-pdf",
+    "allow-print-status",
+    "allow-queue-admin"
+  ],
+  "windows": [
+    "main"
+  ]
+}

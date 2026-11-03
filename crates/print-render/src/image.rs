@@ -46,8 +46,40 @@ pub fn receipt_dots_for_paper(paper: &str) -> u32 {
     {
         384
     } else {
-        576 // 80mm is the default receipt width.
+        576 // Legacy fallback for old queued jobs only.
     }
+}
+
+/// Map the printer driver's reported roll width to a known ESC/POS print head.
+/// Unsupported widths are rejected rather than silently treated as 80mm.
+pub fn receipt_dots_for_width_mm(width_mm: f64) -> Option<u32> {
+    if !width_mm.is_finite() || width_mm <= 0.0 {
+        return None;
+    }
+    if (width_mm - 58.0).abs() <= 4.0 {
+        Some(384)
+    } else if (width_mm - 80.0).abs() <= 8.0 || (width_mm - 72.0).abs() <= 4.0 {
+        Some(576)
+    } else if (width_mm - 112.0).abs() <= 8.0 {
+        Some(832)
+    } else {
+        None
+    }
+}
+
+/// Render a receipt image using the print-head width resolved from the driver.
+pub fn receipt_png_to_escpos_width(
+    png_bytes: &[u8],
+    target_width_dots: u32,
+) -> Result<Vec<u8>, ImageError> {
+    if !(256..=1200).contains(&target_width_dots) || target_width_dots % 8 != 0 {
+        return Err(ImageError::DimensionsTooLarge(target_width_dots, 1));
+    }
+    let img = decode_png(png_bytes)?;
+    let scaled = scale_to_width(&img, target_width_dots);
+    let mono = scaled.to_mono(RECEIPT_THRESHOLD);
+    let stream = EscPos::new().raster(&mono).feed_lines(3).cut_partial();
+    Ok(stream.bytes().to_vec())
 }
 
 fn luma_over_white(r: u8, g: u8, b: u8, a: u8) -> u8 {
@@ -211,6 +243,15 @@ mod tests {
             }
         }
         make_png(width, height, png::ColorType::Rgba, &px)
+    }
+
+    #[test]
+    fn driver_roll_width_maps_only_known_receipt_heads() {
+        assert_eq!(receipt_dots_for_width_mm(58.0), Some(384));
+        assert_eq!(receipt_dots_for_width_mm(80.0), Some(576));
+        assert_eq!(receipt_dots_for_width_mm(112.0), Some(832));
+        assert_eq!(receipt_dots_for_width_mm(100.0), None);
+        assert_eq!(receipt_dots_for_width_mm(f64::NAN), None);
     }
 
     #[test]

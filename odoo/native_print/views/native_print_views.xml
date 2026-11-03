@@ -1,274 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <!-- ================================================================ -->
-    <!-- PRINTER PROFILES (native.print.profile)                          -->
-    <!-- ================================================================ -->
-    <record id="view_profile_list" model="ir.ui.view">
-        <field name="name">native.print.profile.list</field>
-        <field name="model">native.print.profile</field>
-        <field name="arch" type="xml">
-            <list decoration-muted="not active" sample="1">
-                <field name="active" column_invisible="True"/>
-                <field name="name" class="fw-bold"/>
-                <field name="printer_pattern" class="font-monospace"/>
-                <field name="mode" widget="badge"
-                       decoration-primary="mode == 'gdi'"
-                       decoration-success="mode == 'escpos'"
-                       decoration-info="mode in ('zpl', 'tspl', 'epl')"
-                       decoration-warning="mode == 'ipp'"/>
-                <field name="paper"/>
-                <field name="copies"/>
-                <field name="scale_policy" optional="show"/>
-                <field name="recovery_mode" optional="hide"/>
-                <field name="rule_count" string="Rules"/>
-                <field name="job_count" string="Jobs"/>
-                <field name="company_id" optional="show"/>
-            </list>
-        </field>
-    </record>
-
-    <record id="view_profile_kanban" model="ir.ui.view">
-        <field name="name">native.print.profile.kanban</field>
-        <field name="model">native.print.profile</field>
-        <field name="arch" type="xml">
-            <kanban sample="1">
-                <field name="name"/>
-                <field name="printer_pattern"/>
-                <field name="mode"/>
-                <field name="paper"/>
-                <field name="copies"/>
-                <field name="rule_count"/>
-                <field name="job_count"/>
-                <field name="failed_job_count"/>
-                <field name="active"/>
-                <templates>
-                    <t t-name="card">
-                        <div class="d-flex justify-content-between align-items-start mb-2">
-                            <div class="d-flex align-items-center gap-2">
-                                <span class="fa fa-print fa-lg text-primary" title="Printer Profile"/>
-                                <field name="name" class="fw-bold fs-5"/>
-                            </div>
-                            <field name="mode" widget="badge"
-                                   decoration-primary="mode == 'gdi'"
-                                   decoration-success="mode == 'escpos'"
-                                   decoration-info="mode in ('zpl', 'tspl', 'epl')"
-                                   decoration-warning="mode == 'ipp'"/>
-                        </div>
-                        <div class="text-muted small font-monospace mb-2">
-                            <i class="fa fa-desktop me-1" title="Pattern"/>
-                            <field name="printer_pattern"/>
-                        </div>
-                        <div class="d-flex flex-wrap gap-2 mb-2">
-                            <span t-if="record.paper.raw_value" class="badge text-bg-light border">
-                                <i class="fa fa-file-o me-1" title="Paper"/>
-                                <field name="paper"/>
-                            </span>
-                            <span class="badge text-bg-light border">
-                                <i class="fa fa-clone me-1" title="Copies"/>
-                                <field name="copies"/>x
-                            </span>
-                        </div>
-                        <footer class="pt-2 border-top d-flex justify-content-between align-items-center">
-                            <span class="small text-muted">
-                                <i class="fa fa-random me-1" title="Rules"/>
-                                <field name="rule_count"/> rules •
-                                <i class="fa fa-tasks ms-1 me-1" title="Jobs"/>
-                                <field name="job_count"/> jobs
-                            </span>
-                            <span t-if="record.failed_job_count.raw_value &gt; 0" class="badge text-bg-danger">
-                                <i class="fa fa-exclamation-triangle me-1" title="Failed"/>
-                                <field name="failed_job_count"/> failed
-                            </span>
-                        </footer>
-                    </t>
-                </templates>
-            </kanban>
-        </field>
-    </record>
-
-    <record id="view_profile_form" model="ir.ui.view">
-        <field name="name">native.print.profile.form</field>
-        <field name="model">native.print.profile</field>
-        <field name="arch" type="xml">
-            <form>
-                <sheet>
-                    <div class="oe_button_box" name="button_box">
-                        <button class="oe_stat_button" type="object" name="action_view_rules" icon="fa-random">
-                            <field string="Routing Rules" name="rule_count" widget="statinfo"/>
-                        </button>
-                        <button class="oe_stat_button" type="object" name="action_view_jobs" icon="fa-print">
-                            <field string="Print Jobs" name="job_count" widget="statinfo"/>
-                        </button>
-                    </div>
-                    <widget name="web_ribbon" title="Archived" bg_color="text-bg-danger" invisible="active"/>
-                    <div class="oe_title">
-                        <label for="name" string="Printer Profile Name"/>
-                        <h1>
-                            <field name="name" placeholder="e.g. Reception Laser A4 or POS Thermal 80mm"/>
-                        </h1>
-                    </div>
-                    <group>
-                        <group string="Printer Target &amp; Protocol">
-                            <field name="active" invisible="True"/>
-                            <field name="printer_pattern" placeholder="e.g. HP LaserJet* or tcp://192.168.1.200:9100"/>
-                            <field name="mode" widget="radio"/>
-                            <field name="company_id"/>
-                        </group>
-                        <group string="Page &amp; Media Geometry">
-                            <field name="paper" placeholder="e.g. A4, A5, 80mm, 58mm, 100x150mm"/>
-                            <field name="copies"/>
-                            <field name="tray" invisible="mode != 'gdi'" placeholder="e.g. Tray 1 / Auto"/>
-                            <field name="duplex" invisible="mode != 'gdi'"/>
-                            <field name="color" invisible="mode != 'gdi'"/>
-                        </group>
-                    </group>
-                    <group>
-                        <group string="Safety &amp; Paper Ladder (ADR-0003)">
-                            <field name="scale_policy"/>
-                        </group>
-                        <group string="Crash Recovery Policy (ADR-0004)">
-                            <field name="recovery_mode"/>
-                        </group>
-                    </group>
-                    <notebook>
-                        <page string="Hardware Quirks &amp; Operator Notes" name="notes">
-                            <field name="notes" placeholder="Record any model-specific notes, physical offsets, or driver versions verified with the calibration kit..."/>
-                        </page>
-                    </notebook>
-                </sheet>
-            </form>
-        </field>
-    </record>
-
-    <record id="view_profile_search" model="ir.ui.view">
-        <field name="name">native.print.profile.search</field>
-        <field name="model">native.print.profile</field>
-        <field name="arch" type="xml">
-            <search>
-                <field name="name"/>
-                <field name="printer_pattern"/>
-                <field name="paper"/>
-                <filter name="f_gdi" string="Office (GDI)" domain="[('mode', '=', 'gdi')]"/>
-                <filter name="f_escpos" string="Thermal (ESC/POS)" domain="[('mode', '=', 'escpos')]"/>
-                <filter name="f_label" string="Label (ZPL / TSPL / EPL)" domain="[('mode', 'in', ('zpl', 'tspl', 'epl'))]"/>
-                <filter name="f_ipp" string="Network IPP" domain="[('mode', '=', 'ipp')]"/>
-                <separator/>
-                <filter name="f_archived" string="Archived" domain="[('active', '=', False)]"/>
-                <group>
-                    <filter name="g_mode" string="Print Mode" context="{'group_by': 'mode'}"/>
-                    <filter name="g_company" string="Company" context="{'group_by': 'company_id'}"/>
-                </group>
-            </search>
-        </field>
-    </record>
-
-    <record id="action_profiles" model="ir.actions.act_window">
-        <field name="name">Print Profiles</field>
-        <field name="res_model">native.print.profile</field>
-        <field name="view_mode">kanban,list,form</field>
-        <field name="search_view_id" ref="view_profile_search"/>
-    </record>
-
-    <!-- ================================================================ -->
-    <!-- ROUTING RULES (native.print.rule)                                -->
-    <!-- ================================================================ -->
-    <record id="view_rule_list" model="ir.ui.view">
-        <field name="name">native.print.rule.list</field>
-        <field name="model">native.print.rule</field>
-        <field name="arch" type="xml">
-            <list decoration-muted="not active" sample="1">
-                <field name="active" column_invisible="True"/>
-                <field name="priority" widget="handle"/>
-                <field name="name" class="fw-bold"/>
-                <field name="target_source_display" string="Matched Source"/>
-                <field name="report_id" optional="hide"/>
-                <field name="report_name" class="font-monospace" optional="hide"/>
-                <field name="profile_id"/>
-                <field name="mode" widget="badge"
-                       decoration-primary="mode == 'gdi'"
-                       decoration-success="mode == 'escpos'"
-                       decoration-info="mode in ('zpl', 'tspl', 'epl')"
-                       decoration-warning="mode == 'ipp'"/>
-                <field name="printer_pattern" class="font-monospace" optional="show"/>
-                <field name="group_id" optional="show"/>
-                <field name="company_id" optional="show"/>
-            </list>
-        </field>
-    </record>
-
-    <record id="view_rule_form" model="ir.ui.view">
-        <field name="name">native.print.rule.form</field>
-        <field name="model">native.print.rule</field>
-        <field name="arch" type="xml">
-            <form>
-                <sheet>
-                    <widget name="web_ribbon" title="Archived" bg_color="text-bg-danger" invisible="active"/>
-                    <div class="oe_title">
-                        <label for="name" string="Routing Rule Name"/>
-                        <h1>
-                            <field name="name" placeholder="e.g. Sales Invoices -> Reception Laser A4"/>
-                        </h1>
-                    </div>
-                    <div class="alert alert-info" role="status">
-                        <i class="fa fa-info-circle me-2" title="Info"/>
-                        <strong>Routing Precedence:</strong> Rules are evaluated server-side by highest
-                        <strong>Priority</strong> within the user's current company. For Point of Sale receipts,
-                        leave <em>Odoo Report</em> empty and set <em>Source name (non-report)</em> to
-                        <code>point_of_sale.receipt</code>. Leave both empty to create a catch-all wildcard rule (<code>*</code>).
-                    </div>
-                    <group>
-                        <group string="Source Matching">
-                            <field name="report_id" placeholder="Select a QWeb PDF or Text report..."/>
-                            <field name="report_name" placeholder="e.g. point_of_sale.receipt"/>
-                            <field name="target_source_display" readonly="True"/>
-                            <field name="group_id" placeholder="All users (optional group filter)"/>
-                        </group>
-                        <group string="Destination Profile &amp; Priority">
-                            <field name="profile_id"/>
-                            <field name="mode" widget="badge"/>
-                            <field name="printer_pattern" class="font-monospace"/>
-                            <field name="priority"/>
-                            <field name="active"/>
-                            <field name="company_id"/>
-                        </group>
-                    </group>
-                </sheet>
-            </form>
-        </field>
-    </record>
-
-    <record id="view_rule_search" model="ir.ui.view">
-        <field name="name">native.print.rule.search</field>
-        <field name="model">native.print.rule</field>
-        <field name="arch" type="xml">
-            <search>
-                <field name="name"/>
-                <field name="report_id"/>
-                <field name="report_name"/>
-                <field name="profile_id"/>
-                <filter name="f_pos" string="POS Receipts" domain="[('report_name', '=', 'point_of_sale.receipt')]"/>
-                <filter name="f_reports" string="Standard Reports" domain="[('report_id', '!=', False)]"/>
-                <separator/>
-                <filter name="f_archived" string="Archived" domain="[('active', '=', False)]"/>
-                <group>
-                    <filter name="g_profile" string="Printer Profile" context="{'group_by': 'profile_id'}"/>
-                    <filter name="g_report" string="Report" context="{'group_by': 'report_id'}"/>
-                    <filter name="g_company" string="Company" context="{'group_by': 'company_id'}"/>
-                </group>
-            </search>
-        </field>
-    </record>
-
-    <record id="action_rules" model="ir.actions.act_window">
-        <field name="name">Print Rules</field>
-        <field name="res_model">native.print.rule</field>
-        <field name="view_mode">list,form</field>
-        <field name="search_view_id" ref="view_rule_search"/>
-    </record>
-
-    <!-- ================================================================ -->
-    <!-- PRINT JOBS LOG (native.print.job)                                -->
-    <!-- ================================================================ -->
     <record id="view_job_list" model="ir.ui.view">
         <field name="name">native.print.job.list</field>
         <field name="model">native.print.job</field>
@@ -282,7 +13,6 @@
                 <field name="name" class="font-monospace"/>
                 <field name="report_id"/>
                 <field name="report_name" optional="show"/>
-                <field name="profile_id" optional="show"/>
                 <field name="device" class="font-monospace"/>
                 <field name="pages" sum="Total Pages"/>
                 <field name="byte_size" optional="hide"/>
@@ -294,12 +24,6 @@
                        decoration-muted="state == 'canceled'"/>
                 <field name="error_code" class="font-monospace text-danger" optional="show"/>
                 <field name="user_id" widget="many2one_avatar_user"/>
-                <button name="action_retry_job" type="object" string="Retry"
-                        icon="fa-refresh" class="btn-link"
-                        invisible="state not in ('failed', 'dead_letter', 'canceled')"/>
-                <button name="action_cancel_job" type="object" string="Cancel"
-                        icon="fa-times" class="btn-link text-danger"
-                        invisible="state not in ('queued', 'rendering', 'spooling')"/>
             </list>
         </field>
     </record>
@@ -361,15 +85,6 @@
         <field name="arch" type="xml">
             <form>
                 <header>
-                    <button name="action_retry_job" type="object" string="Retry Job"
-                            class="btn-primary" icon="fa-refresh"
-                            invisible="state not in ('failed', 'dead_letter', 'canceled')"/>
-                    <button name="action_mark_done" type="object" string="Mark Done"
-                            class="btn-secondary" icon="fa-check"
-                            invisible="state in ('done', 'canceled')"/>
-                    <button name="action_cancel_job" type="object" string="Cancel Job"
-                            class="btn-secondary" icon="fa-times"
-                            invisible="state not in ('queued', 'rendering', 'spooling')"/>
                     <field name="state" widget="statusbar"
                            statusbar_visible="queued,rendering,spooling,printing,done,failed"/>
                 </header>
@@ -392,7 +107,6 @@
                         <group string="Print Source &amp; Routing">
                             <field name="report_id"/>
                             <field name="report_name" class="font-monospace"/>
-                            <field name="profile_id"/>
                             <field name="device" class="font-monospace"/>
                         </group>
                         <group string="Document Metrics &amp; Audit">
@@ -476,14 +190,4 @@
               parent="menu_native_print_root"
               action="action_jobs"
               sequence="10"/>
-    <menuitem id="menu_profiles"
-              name="Profiles"
-              parent="menu_native_print_root"
-              action="action_profiles"
-              sequence="20"/>
-    <menuitem id="menu_rules"
-              name="Rules"
-              parent="menu_native_print_root"
-              action="action_rules"
-              sequence="30"/>
 </odoo>

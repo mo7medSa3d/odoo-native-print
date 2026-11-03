@@ -201,3 +201,163 @@ msgstr "ملغاة"
 #: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__dead_letter
 msgid "Dead letter"
 msgstr "تحتاج لتدخل (Dead Letter)"
+
+#. module: native_print
+msgid "Printer Class"
+msgstr "فئة الطابعة"
+
+#. module: native_print
+msgid "Detected Mode"
+msgstr "بروتوكول الطباعة المكتشف"
+
+#. module: native_print
+msgid "Detection Reason"
+msgstr "سبب اكتشاف البروتوكول"
+
+#. module: native_print
+msgid "Detected Printer"
+msgstr "الطابعة المكتشفة"
+
+#. module: native_print
+msgid "Automatically Detected Capabilities"
+msgstr "الإمكانيات المكتشفة تلقائيًا"
+
+#. module: native_print
+msgid "Supported Papers"
+msgstr "مقاسات الورق المدعومة"
+
+#. module: native_print
+msgid "Forms Data"
+msgstr "نماذج الورق"
+
+#. module: native_print
+msgid "Bins Data"
+msgstr "أدراج ومصادر الورق"
+
+#. module: native_print
+msgid "Resolutions Data"
+msgstr "دقة الطباعة"
+
+#. module: native_print
+msgid "Supports Duplex"
+msgstr "يدعم الطباعة على الوجهين"
+
+#. module: native_print
+msgid "Supports Color"
+msgstr "يدعم الطباعة الملونة"
+
+#. module: native_print
+msgid "Supports Custom Size"
+msgstr "يدعم المقاسات المخصصة"
+
+#. module: native_print
+msgid "Max Copies"
+msgstr "أقصى عدد نسخ"
+
+#. module: native_print
+msgid "Max Copies Allowed"
+msgstr "أقصى عدد نسخ مدعوم"
+
+#. module: native_print
+msgid "Office / Document"
+msgstr "مكتبية / مستندات"
+
+#. module: native_print
+msgid "Thermal Receipt"
+msgstr "حرارية / إيصالات"
+
+#. module: native_print
+msgid "Label Printer"
+msgstr "طابعة ملصقات"
+
+#. module: native_print
+msgid "Virtual Printer"
+msgstr "طابعة افتراضية"
+
+#. module: native_print
+msgid "Windows Driver (GDI)"
+msgstr "تعريف Windows (GDI)"
+
+#. module: native_print
+msgid "ESC/POS Thermal"
+msgstr "حرارية (ESC/POS)"
+
+#. module: native_print
+msgid "ZPL Label"
+msgstr "ملصقات (ZPL)"
+
+#. module: native_print
+msgid "TSPL Label"
+msgstr "ملصقات (TSPL)"
+
+#. module: native_print
+msgid "EPL Label"
+msgstr "ملصقات (EPL)"
+
+#. module: native_print
+msgid "IPP Network"
+msgstr "شبكة (IPP)"
+
+#. module: native_print
+msgid "Automatic media configuration."
+msgstr "إعداد الورق تلقائيًا."
+
+#. module: native_print
+msgid "Native Print reads paper sizes, roll width, trays, resolution and print capabilities from the installed Windows driver."
+msgstr "يقرأ Native Print مقاسات الورق وعرض الرول والأدراج والدقة وإمكانيات الطباعة من تعريف الطابعة المثبت في Windows."
+
+#. module: native_print
+msgid "Each document or kitchen receipt is matched to supported media automatically. No paper size or protocol selection is required."
+msgstr "يتم اختيار وسيط الطباعة المناسب تلقائيًا لكل مستند أو إيصال مطبخ وفقًا للمقاسات المدعومة. لا تحتاج إلى تحديد مقاس الورق أو بروتوكول الطباعة."
+
+#. module: native_print
+msgid "Detected Media & Trays"
+msgstr "الورق والأدراج المكتشفة"
+
+#. module: native_print
+msgid "Driver Media Forms"
+msgstr "نماذج الورق من التعريف"
+
+#. module: native_print
+msgid "Input Trays / Bins"
+msgstr "أدراج ومصادر إدخال الورق"
+
+#. module: native_print
+msgid "Detection Details"
+msgstr "تفاصيل الاكتشاف"
+
+#. module: native_print
+msgid "Reliability"
+msgstr "الموثوقية"
+
+#. module: native_print
+msgid "Media from driver: "
+msgstr "الورق من تعريف الطابعة: "
+
+#. module: native_print
+msgid "Select a printer detected by the desktop app..."
+msgstr "اختر طابعة اكتشفها تطبيق سطح المكتب..."
+
+#. module: native_print
+msgid "Automatic media fallback"
+msgstr "اختيار وسيط الطباعة تلقائيًا"
+
+#. module: native_print
+msgid "No raw-language signature detected; use the installed Windows driver."
+msgstr "لم يتم التعرف على بروتوكول خام معروف؛ سيتم استخدام تعريف Windows المثبت."
+
+#. module: native_print
+msgid "No paper forms reported by the driver."
+msgstr "لم يُبلّغ تعريف الطابعة عن نماذج ورق مدعومة."
+
+#. module: native_print
+msgid "No input trays reported by the driver."
+msgstr "لم يُبلّغ تعريف الطابعة عن أدراج إدخال ورق."
+
+#. module: native_print
+msgid "Resolution not reported by the driver."
+msgstr "لم يُبلّغ تعريف الطابعة عن دقة الطباعة."
+
+#. module: native_print
+msgid "IPP/AirPrint-capable network queue; print through the installed Windows driver."
+msgstr "طابعة شبكة تدعم IPP/AirPrint؛ تتم الطباعة عبر تعريف Windows المثبت."

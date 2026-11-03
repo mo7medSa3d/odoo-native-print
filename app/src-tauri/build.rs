@@ -9,6 +9,7 @@ fn main() {
             "app_overview",
             "list_printers",
             "printer_forms",
+            "printer_capabilities",
             "run_test_print",
             "retry_job_cmd",
             "cancel_job_cmd",

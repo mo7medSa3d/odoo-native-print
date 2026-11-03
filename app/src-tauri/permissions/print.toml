@@ -10,13 +10,20 @@ commands.allow = [
 
 [[permission]]
 identifier = "allow-print-status"
-description = "Allow the configured Odoo origin and local Control Center to query job status, printers, and diagnostics."
+description = "Allow the configured Odoo origin and local Control Center to query job status and printer information (read-only)."
 commands.allow = [
     "print_status",
     "job_detail",
     "app_overview",
     "list_printers",
     "printer_forms",
+    "printer_capabilities",
+]
+
+[[permission]]
+identifier = "allow-queue-admin"
+description = "Local Control Center only: manage the queue, export diagnostics, change settings. Never granted to the remote Odoo origin."
+commands.allow = [
     "retry_job_cmd",
     "cancel_job_cmd",
     "clear_finished_cmd",

@@ -1,0 +1,144 @@
+/** @odoo-module **/
+// ---------------------------------------------------------------------
+// Live printer model: printers are never stored on the server. The
+// desktop app on THIS PC is the only printer authority; these helpers
+// turn its live inventory into a print target at click time.
+// ---------------------------------------------------------------------
+
+const SELECTION_KEY = "native_print.selected_printer";
+
+export function getSelectedPrinter() {
+    try {
+        return window.localStorage.getItem(SELECTION_KEY) || null;
+    } catch (_error) {
+        return null;
+    }
+}
+
+export function setSelectedPrinter(name) {
+    try {
+        if (name) {
+            window.localStorage.setItem(SELECTION_KEY, name);
+        } else {
+            window.localStorage.removeItem(SELECTION_KEY);
+        }
+    } catch (_error) {
+        // Selection is a convenience; printing must not depend on it.
+    }
+}
+
+/** Conservative protocol inference from the installed driver identity. */
+export function detectPrinterType(printer) {
+    const signature =
+        `${(printer && printer.name) || ""} ${(printer && printer.driver) || ""}`
+            .toLowerCase();
+    const kind = (printer && printer.kind) || "local";
+    if (kind === "virtual") {
+        return { mode: "gdi", printerClass: "virtual" };
+    }
+    if (["zdesigner", "zebra", "zpl"].some((t) => signature.includes(t))) {
+        return { mode: "zpl", printerClass: "label" };
+    }
+    if (["tsc", "tspl"].some((t) => signature.includes(t))) {
+        return { mode: "tspl", printerClass: "label" };
+    }
+    if (signature.includes("epl")) {
+        return { mode: "epl", printerClass: "label" };
+    }
+    const thermalTokens = [
+        "epson tm-", "epson tm ", "xprinter", "rongta", "bixolon",
+        "star tsp", "citizen ct-", "sewoo", "esc/pos", "escpos",
+        "thermal receipt", "receipt printer", "pos-58", "pos-80",
+    ];
+    if (thermalTokens.some((t) => signature.includes(t))) {
+        return { mode: "escpos", printerClass: "thermal" };
+    }
+    if (
+        kind === "network" &&
+        (signature.includes("ipp") || signature.includes("airprint"))
+    ) {
+        return { mode: "gdi", printerClass: "office" };
+    }
+    return { mode: "gdi", printerClass: "office" };
+}
+
+function isIpLiteral(value) {
+    const text = String(value || "").trim();
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(text)) return true;
+    return text.includes(":") && /^[0-9a-fA-F:]+$/.test(text);
+}
+
+/** Raw printers reachable at an IP print directly; everything else
+ * goes through its installed Windows queue by name. */
+export function printerPatternFor(printer, mode) {
+    const rawModes = ["escpos", "zpl", "tspl", "epl"];
+    const port = (printer && printer.port) || "";
+    if (rawModes.includes(mode) && isIpLiteral(port)) {
+        return `tcp://${port}:9100`;
+    }
+    return printer.name;
+}
+
+/** Receipt roll width from the driver-reported forms, if any. */
+export function rollWidthMm(capabilities) {
+    const forms = (capabilities && capabilities.forms) || [];
+    for (const form of forms) {
+        if (form && form.roll && form.size && form.size.width_mm) {
+            return form.size.width_mm;
+        }
+    }
+    return null;
+}
+
+/**
+ * Resolve the printer to use RIGHT NOW on this PC: the user's
+ * selection when it is still connected, else a preferred-class
+ * printer when asked (POS receipts prefer thermal/label), else the
+ * OS default, else the first printer. Returns null when this PC has
+ * no printer at the moment — callers then keep Odoo's normal flow.
+ */
+export async function resolveBridgeTarget(bridge, options = {}) {
+    if (!bridge || typeof bridge.listPrinters !== "function") return null;
+    const printers = await bridge.listPrinters();
+    if (!Array.isArray(printers) || !printers.length) return null;
+    const prefer = options.preferClasses || [];
+    const classOf = (p) => detectPrinterType(p).printerClass;
+    const selected = printers.find((p) => p.name === getSelectedPrinter()) || null;
+    let printer = null;
+    if (selected && prefer.includes(classOf(selected))) {
+        printer = selected;
+    }
+    if (!printer && prefer.length) {
+        printer = printers.find((p) => prefer.includes(classOf(p))) || null;
+    }
+    if (!printer) {
+        printer =
+            selected ||
+            printers.find((p) => p.is_default || p.isDefault) ||
+            printers[0];
+    }
+    let capabilities = null;
+    if (typeof bridge.printerCapabilities === "function") {
+        try {
+            capabilities = await bridge.printerCapabilities(printer.name);
+        } catch (_error) {
+            capabilities = null;
+        }
+    }
+    const detection = detectPrinterType(printer);
+    return {
+        printer,
+        capabilities,
+        rule: {
+            printer_pattern: printerPatternFor(printer, detection.mode),
+            mode: detection.mode,
+            paper: null,
+            copies: 1,
+            tray: null,
+            duplex: Boolean(capabilities && capabilities.duplex),
+            color: !capabilities || capabilities.color !== false,
+            scale_policy: "custom_allowed",
+            media: { roll_width_mm: rollWidthMm(capabilities) },
+        },
+    };
+}

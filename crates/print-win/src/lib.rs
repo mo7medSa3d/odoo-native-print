@@ -58,7 +58,8 @@ mod win;
 #[cfg(windows)]
 pub use win::{
     default_printer_name, discover_printers, paper_forms, print_canvas_gdi, print_pdf_gdi,
-    print_pdf_gdi_copies, print_pdf_gdi_with_options, print_raw, printer_status,
+    print_pdf_gdi_copies, print_pdf_gdi_with_options, print_raw, printer_capabilities,
+    printer_status,
 };
 
 #[cfg(not(windows))]
@@ -73,6 +74,11 @@ mod stub {
         Err(Unsupported)
     }
     pub fn paper_forms(_printer: &str) -> Result<Vec<Form>, Unsupported> {
+        Err(Unsupported)
+    }
+    pub fn printer_capabilities(
+        _printer: &str,
+    ) -> Result<print_core::PrinterCapabilities, Unsupported> {
         Err(Unsupported)
     }
     pub fn print_raw(_printer: &str, _title: &str, _bytes: &[u8]) -> Result<u32, Unsupported> {
@@ -124,5 +130,6 @@ mod stub {
 #[cfg(not(windows))]
 pub use stub::{
     default_printer_name, discover_printers, paper_forms, print_canvas_gdi, print_pdf_gdi,
-    print_pdf_gdi_copies, print_pdf_gdi_with_options, print_raw, printer_status, Unsupported,
+    print_pdf_gdi_copies, print_pdf_gdi_with_options, print_raw, printer_capabilities,
+    printer_status, Unsupported,
 };

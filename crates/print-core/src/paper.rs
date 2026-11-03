@@ -1,4 +1,5 @@
 use crate::page::PageSize;
+use crate::printer::PrinterCapabilities;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -178,6 +179,62 @@ pub fn match_paper(
     })
 }
 
+/// Select media without a user-specified paper name or scaling policy.
+/// Exact forms and compatible rolls win; custom size is used only inside
+/// driver-reported bounds; otherwise the smallest larger reported form is fit.
+pub fn match_paper_auto(
+    page: PageSize,
+    capabilities: &PrinterCapabilities,
+) -> Result<PaperMatch, PaperError> {
+    // Exact sheet forms have priority.
+    if let Some(form) = capabilities
+        .forms
+        .iter()
+        .find(|form| !form.roll && same_size(form.size, page))
+    {
+        return Ok(PaperMatch {
+            kind: MatchKind::Exact,
+            form: form.clone(),
+        });
+    }
+
+    // A roll can print a shorter/narrower raster without inventing another
+    // paper size. Keep the physical roll width in the selected DEVMODE and
+    // retain the job's own length.
+    if page.width_mm.is_finite() && page.width_mm > 0.0 {
+        if let Some(form) = capabilities
+            .forms
+            .iter()
+            .find(|form| form.roll && page.width_mm <= form.size.width_mm + EXACT_TOLERANCE_MM)
+        {
+            return Ok(PaperMatch {
+                kind: MatchKind::Roll,
+                form: Form {
+                    name: form.name.clone(),
+                    size: PageSize::new(form.size.width_mm, page.height_mm),
+                    roll: true,
+                    paper_id: form.paper_id,
+                },
+            });
+        }
+    }
+
+    // Only use a custom size when both dimensions fit the driver's reported
+    // minimum/maximum limits (in either orientation).
+    if capabilities.custom_size_ok(page) {
+        return Ok(PaperMatch {
+            kind: MatchKind::Custom,
+            form: Form {
+                name: "Custom".to_string(),
+                size: page,
+                roll: false,
+                paper_id: None,
+            },
+        });
+    }
+    match_paper(page, &capabilities.forms, ScalePolicy::NearestLargerFit)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,6 +284,78 @@ mod tests {
         let small = vec![Form::sheet("A5", PageSize::a5())];
         assert!(match_paper(PageSize::a4(), &small, ScalePolicy::NearestLargerFit).is_err());
     }
+    #[test]
+    fn automatic_media_prefers_exact_then_supported_custom() {
+        use crate::printer::PrinterCapabilities;
+        let caps = PrinterCapabilities {
+            forms: forms(),
+            resolutions_dpi: vec![300],
+            duplex: false,
+            color: true,
+            bins: vec![],
+            max_copies: 1,
+            custom_size_supported: true,
+            min_custom_mm: Some((25.0, 25.0)),
+            max_custom_mm: Some((300.0, 500.0)),
+        };
+        assert_eq!(
+            match_paper_auto(PageSize::a4(), &caps).unwrap().kind,
+            MatchKind::Exact
+        );
+        assert_eq!(
+            match_paper_auto(PageSize::label_100x150(), &caps)
+                .unwrap()
+                .kind,
+            MatchKind::Custom
+        );
+    }
+
+    #[test]
+    fn automatic_media_fits_narrower_content_to_reported_roll_width() {
+        use crate::printer::PrinterCapabilities;
+        let caps = PrinterCapabilities {
+            forms: vec![Form::roll("80mm Roll", 80.0)],
+            resolutions_dpi: vec![203],
+            duplex: false,
+            color: false,
+            bins: vec![],
+            max_copies: 1,
+            custom_size_supported: false,
+            min_custom_mm: None,
+            max_custom_mm: None,
+        };
+        let selected = match_paper_auto(PageSize::new(72.0, 180.0), &caps).unwrap();
+        assert_eq!(selected.kind, MatchKind::Roll);
+        assert_eq!(selected.form.size.width_mm, 80.0);
+        assert_eq!(selected.form.size.height_mm, 180.0);
+        assert!(match_paper_auto(PageSize::new(90.0, 180.0), &caps).is_err());
+    }
+
+    #[test]
+    fn automatic_media_uses_larger_form_when_custom_is_out_of_bounds() {
+        use crate::printer::PrinterCapabilities;
+        let caps = PrinterCapabilities {
+            forms: vec![Form::sheet("A4", PageSize::a4())],
+            resolutions_dpi: vec![300],
+            duplex: false,
+            color: false,
+            bins: vec![],
+            max_copies: 1,
+            custom_size_supported: true,
+            min_custom_mm: Some((50.0, 50.0)),
+            max_custom_mm: Some((100.0, 150.0)),
+        };
+        let matched = match_paper_auto(PageSize::new(160.0, 220.0), &caps).unwrap();
+        assert_eq!(matched.kind, MatchKind::NearestLargerFit);
+        assert_eq!(matched.form.name, "A4");
+        let no_match = PrinterCapabilities {
+            forms: vec![Form::sheet("A5", PageSize::a5())],
+            custom_size_supported: false,
+            ..caps
+        };
+        assert!(match_paper_auto(PageSize::a4(), &no_match).is_err());
+    }
+
     #[test]
     fn roll_matches_any_height_same_width() {
         let forms = vec![Form::roll("80mm Roll", 80.0)];

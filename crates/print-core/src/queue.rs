@@ -50,6 +50,11 @@ pub struct JobOptions {
     pub cut: bool,
     #[serde(default)]
     pub tray: Option<String>,
+    /// Receipt roll width (mm) reported by the server from the
+    /// printer's driver forms. Lets network (TCP/IPP) printers fit
+    /// output to their real media even with no local Windows driver.
+    #[serde(default)]
+    pub media_roll_width_mm: Option<f64>,
 }
 
 impl Default for JobOptions {
@@ -63,6 +68,7 @@ impl Default for JobOptions {
             color: true,
             cut: true,
             tray: None,
+            media_roll_width_mm: None,
         }
     }
 }
@@ -218,6 +224,33 @@ impl Queue {
             |r| r.get(0),
         )?;
         Ok(id)
+    }
+
+    /// Like `enqueue`, but reports whether the job was newly inserted.
+    /// Returns `Ok(Some(id))` for a new job and `Ok(None)` when the
+    /// idempotency key already exists: a duplicate submission must never
+    /// overwrite the original job's payload or options (the worker may
+    /// already be printing them).
+    pub fn enqueue_new(&mut self, job: &Job) -> Result<Option<String>, QueueError> {
+        let existed = self.job_id_for_key(&job.idempotency_key)?.is_some();
+        let id = self.enqueue(job)?;
+        if existed {
+            Ok(None)
+        } else {
+            Ok(Some(id))
+        }
+    }
+
+    /// The job id stored for an idempotency key, if any.
+    pub fn job_id_for_key(&self, key: &str) -> Result<Option<String>, QueueError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM jobs WHERE idempotency_key=?1")?;
+        let mut rows = stmt.query(params![key])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row.get(0)?)),
+            None => Ok(None),
+        }
     }
 
     /// Store a job's document payload (the queue row holds metadata; the
@@ -401,6 +434,21 @@ mod tests {
         let b = q.enqueue(&job("2", "k-1", "p1", 0)).unwrap();
         assert_eq!(a, b);
         assert_eq!(q.count_by_state(JobState::Queued).unwrap(), 1);
+    }
+    #[test]
+    fn duplicate_submission_never_overwrites_payload() {
+        let mut q = Queue::in_memory().unwrap();
+        let first = q.enqueue_new(&job("1", "k-dup", "p1", 0)).unwrap();
+        assert_eq!(first.as_deref(), Some("1"));
+        q.store_payload("1", "pdf", b"ORIGINAL").unwrap();
+        // Same key, different job id and different bytes: not new, and
+        // the stored payload stays the original.
+        let dup = q.enqueue_new(&job("2", "k-dup", "p1", 0)).unwrap();
+        assert_eq!(dup, None);
+        assert_eq!(q.job_id_for_key("k-dup").unwrap().as_deref(), Some("1"));
+        let (kind, data) = q.payload("1").unwrap().unwrap();
+        assert_eq!(kind, "pdf");
+        assert_eq!(data, b"ORIGINAL");
     }
     #[test]
     fn priority_then_fifo_claim() {

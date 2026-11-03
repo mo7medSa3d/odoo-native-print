@@ -3,18 +3,16 @@
 //! permission-gated by default, and CVE-2026-42184 showed origin
 //! classification itself can be wrong. So we never trust it alone.
 
-/// Exact-origin check. `configured` is the admin-locked Odoo origin, e.g.
-/// `https://odoo.company.local:8069`. `actual` is the caller's origin.
-/// Rules: exact scheme+host+port match, no userinfo, no path tricks,
-/// subdomains never match a parent, and `*.localhost`-style or
-/// first-label tricks (CVE-2026-42184) never match.
+/// Exact-origin check. `configured` is the configured Odoo origin and
+/// `actual` is the caller's origin. Exact scheme, host and port matching
+/// is required; credentials, paths, queries and fragments are rejected.
 ///
-/// Scheme policy (amended 2026-11-03 at the product owner's decision —
-/// see ADR-0002 amendment): HTTPS is allowed for any host. Plain HTTP is
-/// allowed ONLY when the host is a private, loopback, or link-local IP
-/// literal — the common LAN deployment where Odoo is reached by IP
-/// (e.g. `http://192.168.1.20:8069`) and no TLS certificate exists.
-/// Hostnames and public IPs over HTTP are still rejected.
+/// Scheme policy (ADR-0002, owner decision 2026-11-03): HTTPS is
+/// accepted for any host. HTTP is accepted for any IP literal — LAN
+/// installs are reached by IP (e.g. http://192.168.1.20:8069) and the
+/// owner also accepts external IPs over HTTP. Hostnames over HTTP are
+/// rejected. HTTP is unencrypted: the Control Center shows a standing
+/// warning whenever an HTTP origin is configured.
 pub fn origin_is_allowed(configured: &str, actual: &str) -> bool {
     let (Some(c), Some(a)) = (parse_origin(configured), parse_origin(actual)) else {
         return false;
@@ -23,32 +21,18 @@ pub fn origin_is_allowed(configured: &str, actual: &str) -> bool {
 }
 
 fn scheme_allowed(origin: &(String, String, u16)) -> bool {
-    match origin.0.as_str() {
-        "https" => true,
-        "http" => host_is_private_ip(&origin.1),
-        _ => false,
-    }
+    origin.0 == "https" || (origin.0 == "http" && host_is_ip_literal(&origin.1))
 }
 
-/// True when `host` is an IP literal on a private, loopback, or
-/// link-local range (RFC 1918, 127.0.0.0/8, 169.254.0.0/16, ::1,
-/// fc00::/7, fe80::/10). Hostnames return false.
-fn host_is_private_ip(host: &str) -> bool {
+/// True when `host` is a syntactically valid IPv4 or IPv6 literal
+/// (private, loopback, link-local, or public). Hostnames return false.
+fn host_is_ip_literal(host: &str) -> bool {
     use std::net::IpAddr;
     let bare = host
         .strip_prefix('[')
         .and_then(|h| h.strip_suffix(']'))
         .unwrap_or(host);
-    match bare.parse::<IpAddr>() {
-        Ok(IpAddr::V4(v4)) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
-        Ok(IpAddr::V6(v6)) => {
-            let seg = v6.segments();
-            v6 == std::net::Ipv6Addr::LOCALHOST
-                || (seg[0] & 0xfe00) == 0xfc00 // unique local fc00::/7
-                || (seg[0] & 0xffc0) == 0xfe80 // link-local fe80::/10
-        }
-        Err(_) => false,
-    }
+    bare.parse::<IpAddr>().is_ok()
 }
 
 /// Minimal strict origin parser: scheme://host[:port] and nothing else.
@@ -58,12 +42,13 @@ fn parse_origin(s: &str) -> Option<(String, String, u16)> {
     if rest.is_empty() || rest.contains(['/', '?', '#', '@', '\\']) {
         return None;
     }
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return None;
+    }
     let default_port = if scheme.eq_ignore_ascii_case("https") {
         443
-    } else if scheme.eq_ignore_ascii_case("http") {
-        80
     } else {
-        return None;
+        80
     };
     let (host, port) = if let Some(after_open) = rest.strip_prefix('[') {
         let (ipv6, after_close) = after_open.split_once(']')?;
@@ -150,18 +135,19 @@ pub fn valid_idempotency_key(key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    const CFG: &str = "https://odoo.company.local:8069";
+    const CFG: &str = "http://192.168.1.20:8069";
     #[test]
     fn exact_origin_passes() {
         assert!(origin_is_allowed(CFG, CFG));
     }
     #[test]
-    fn evil_subdomain_fails() {
-        assert!(!origin_is_allowed(CFG, "https://odoo.evil.com:8069"));
+    fn domains_and_scheme_changes_fail() {
+        assert!(!origin_is_allowed(CFG, "http://odoo.evil.com:8069"));
         assert!(!origin_is_allowed(
-            "https://app.localhost",
-            "https://app.evil.com"
+            "http://app.localhost",
+            "http://app.evil.com"
         ));
+        assert!(!origin_is_allowed(CFG, "https://192.168.1.20:8069"));
     }
     #[test]
     fn http_and_port_and_userinfo_fail() {
@@ -178,8 +164,21 @@ mod tests {
         ));
     }
     #[test]
-    fn http_private_ip_passes_http_others_fail() {
-        // LAN deployments: Odoo by IP over HTTP (owner decision, ADR-0002).
+    fn https_any_host_and_http_any_ip() {
+        // HTTPS: any host, name or IP.
+        assert!(origin_is_allowed(
+            "https://odoo.company.local:8069",
+            "https://odoo.company.local:8069"
+        ));
+        assert!(origin_is_allowed(
+            "https://192.168.1.20:8069",
+            "https://192.168.1.20:8069"
+        ));
+        assert!(origin_is_allowed(
+            "https://8.8.8.8:8069",
+            "https://8.8.8.8:8069"
+        ));
+        // HTTP: any IP literal, private or public.
         assert!(origin_is_allowed(
             "http://192.168.1.20:8069",
             "http://192.168.1.20:8069"
@@ -198,35 +197,44 @@ mod tests {
             "http://[fd00::25]:8069",
             "http://[fd00::25]:8069"
         ));
-        // Still rejected: hostnames and public IPs over HTTP.
+        assert!(origin_is_allowed(
+            "http://[fe80::1]:8069",
+            "http://[fe80::1]:8069"
+        ));
+        assert!(origin_is_allowed(
+            "http://8.8.8.8:8069",
+            "http://8.8.8.8:8069"
+        ));
+        assert!(origin_is_allowed(
+            "http://68.221.27.248:8070",
+            "http://68.221.27.248:8070"
+        ));
+        assert!(origin_is_allowed(
+            "http://172.32.0.1:8069",
+            "http://172.32.0.1:8069"
+        ));
+        assert!(origin_is_allowed(
+            "http://[2001:4860:4860::8888]:8069",
+            "http://[2001:4860:4860::8888]:8069"
+        ));
+        // HTTP to hostnames stays rejected (names require HTTPS).
         assert!(!origin_is_allowed(
             "http://odoo.company.local:8069",
             "http://odoo.company.local:8069"
         ));
+        // Scheme must match exactly between configured and actual.
         assert!(!origin_is_allowed(
-            "http://8.8.8.8:8069",
-            "http://8.8.8.8:8069"
-        ));
-        assert!(!origin_is_allowed(
-            "http://172.32.0.1:8069",
-            "http://172.32.0.1:8069"
-        ));
-        // And an HTTP origin never matches an HTTPS configuration.
-        assert!(!origin_is_allowed(
-            "https://192.168.1.20:8069",
-            "http://192.168.1.20:8069"
+            "https://odoo.company.local:8069",
+            "http://odoo.company.local:8069"
         ));
     }
     #[test]
     fn default_port_and_ipv6_equivalence() {
         assert!(origin_is_allowed(
-            "https://odoo.example.com",
-            "https://odoo.example.com:443"
+            "http://192.168.1.20",
+            "http://192.168.1.20:80"
         ));
-        assert!(origin_is_allowed(
-            "https://[::1]:8069",
-            "https://[::1]:8069"
-        ));
+        assert!(origin_is_allowed("http://[::1]:8069", "http://[::1]:8069"));
     }
     #[test]
     fn limits() {

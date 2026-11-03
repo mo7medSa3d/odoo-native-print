@@ -26,7 +26,7 @@ const BRIDGE_JS: &str = r#"
     return window.__TAURI_INTERNALS__.invoke(cmd, args || {});
   }
   window.__NATIVE_PRINT__ = {
-    version: "1.0.0",
+    version: "__APP_VERSION__",
     printPdf: function (args) {
       const payload = Object.assign({}, args, { bytes: normalizeBytes(args && args.bytes) });
       return invoke("print_pdf", { req: payload });
@@ -52,6 +52,9 @@ const BRIDGE_JS: &str = r#"
     },
     printerForms: function (printer) {
       return invoke("printer_forms", { printer: printer });
+    },
+    printerCapabilities: function (printer) {
+      return invoke("printer_capabilities", { printer: printer });
     },
     runTestPrint: function (printer, kind, paper) {
       return invoke("run_test_print", { printer: printer, kind: kind, paper: paper || null });
@@ -131,7 +134,7 @@ pub fn run() {
                 worker_wake,
             });
 
-            // If a valid HTTPS Odoo origin is configured, open it directly;
+            // If a valid HTTP IP Odoo origin is configured, open it directly;
             // otherwise open the built-in local Control Center (`index.html`)
             // so the administrator can configure the origin or run printer
             // diagnostics without the app crashing on startup.
@@ -148,7 +151,7 @@ pub fn run() {
                 .title("Odoo Native Print")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(960.0, 640.0)
-                .initialization_script(BRIDGE_JS)
+                .initialization_script(BRIDGE_JS.replace("__APP_VERSION__", env!("CARGO_PKG_VERSION")))
                 .on_navigation(move |u| {
                     if u.as_str() == "about:blank" || is_local_app_url(u) {
                         return true;
@@ -176,6 +179,7 @@ pub fn run() {
             commands::app_overview,
             commands::list_printers,
             commands::printer_forms,
+            commands::printer_capabilities,
             commands::run_test_print,
             commands::retry_job_cmd,
             commands::cancel_job_cmd,

@@ -27,16 +27,13 @@ pub struct ResolvedConfig {
     pub odoo_origin: Option<String>,
     pub locked_by_policy: bool,
     pub auto_reprint: bool,
-    pub config_path: String,
     pub status_message: Option<String>,
 }
 
 pub fn validate_origin(origin: &str) -> Result<String, String> {
     let origin = origin.trim().trim_end_matches('/').to_string();
     if !print_core::security::origin_is_allowed(&origin, &origin) {
-        return Err(format!(
-            "configured Odoo origin is not a valid origin (HTTPS, or HTTP to a private IP): {origin}"
-        ));
+        return Err("invalid Odoo address (HTTPS, or HTTP to an IP address)".to_string());
     }
     if cfg!(not(debug_assertions)) && (origin.contains(".invalid") || origin.contains("example.")) {
         return Err("configured Odoo origin is still a placeholder".to_string());
@@ -162,15 +159,11 @@ pub fn load_origin(config_dir: &Path) -> Result<String, String> {
             return validate_origin(&v);
         }
     }
-    Err(format!(
-        "no Odoo origin configured: expected {} with {{\"odoo_origin\": \"https://...\"}} or an http:// private-IP origin",
-        file.display()
-    ))
+    Err("no Odoo address configured; set odoo_origin (HTTPS, or HTTP to an IP address)".to_string())
 }
 
 pub fn resolve_config(config_dir: &Path) -> ResolvedConfig {
     let file = config_dir.join("config.json");
-    let config_path = file.display().to_string();
     let locked_by_policy = gpo::policy_locked() || gpo::policy_origin().is_some();
     let mut auto_reprint = false;
     if let Ok(raw) = std::fs::read_to_string(&file) {
@@ -183,14 +176,12 @@ pub fn resolve_config(config_dir: &Path) -> ResolvedConfig {
             odoo_origin: Some(origin),
             locked_by_policy,
             auto_reprint,
-            config_path,
             status_message: None,
         },
         Err(msg) => ResolvedConfig {
             odoo_origin: None,
             locked_by_policy,
             auto_reprint,
-            config_path,
             status_message: Some(msg),
         },
     }
@@ -217,13 +208,15 @@ mod tests {
     use super::*;
     #[test]
     fn origin_validation() {
-        assert!(validate_origin("https://odoo.company.local:8069").is_ok());
-        assert!(validate_origin("https://odoo.company.local:8069/").is_ok());
-        assert!(validate_origin("http://odoo.company.local").is_err());
-        // LAN by IP is allowed over HTTP (ADR-0002 amendment).
         assert!(validate_origin("http://192.168.1.20:8069").is_ok());
         assert!(validate_origin("http://192.168.1.20:8069/").is_ok());
-        assert!(validate_origin("http://8.8.8.8:8069").is_err());
+        assert!(validate_origin("http://[::1]:8069").is_ok());
+        assert!(validate_origin("https://192.168.1.20:8069").is_ok());
+        assert!(validate_origin("https://odoo.company.local:8069").is_ok());
+        assert!(validate_origin("http://8.8.8.8:8069").is_ok());
+        assert!(validate_origin("http://68.221.27.248:8070").is_ok());
+        assert!(validate_origin("http://odoo.company.local:8069").is_err());
+        assert!(validate_origin("http://999.999.999.999:8069").is_err());
         assert!(validate_origin("not a url").is_err());
     }
 
@@ -231,12 +224,12 @@ mod tests {
     fn save_and_resolve_roundtrip() {
         let dir = std::env::temp_dir().join(format!("np-cfg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let saved = save_origin(&dir, "https://erp.company.local:8443/", true).unwrap();
-        assert_eq!(saved, "https://erp.company.local:8443");
+        let saved = save_origin(&dir, "http://192.168.1.20:8069/", true).unwrap();
+        assert_eq!(saved, "http://192.168.1.20:8069");
         let resolved = resolve_config(&dir);
         assert_eq!(
             resolved.odoo_origin.as_deref(),
-            Some("https://erp.company.local:8443")
+            Some("http://192.168.1.20:8069")
         );
         assert!(resolved.auto_reprint);
         std::fs::remove_dir_all(&dir).ok();

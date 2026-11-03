@@ -100,3 +100,76 @@ Owner spec: Master Build Prompt — Odoo Native Print Client (Windows, then Andr
    - Updated `BRIDGE_JS` to send both `camelCase` and `snake_case` argument keys (`jobId`/`job_id`, `autoReprint`/`auto_reprint`) for compatibility across Tauri v2 command argument conventions.
    - Hardened `/native_print/job_status` (`controllers/main.py`) with `_safe_int` parsing, field length caps (`2000` chars on `error_message`, `256` chars on `printer_name`/`report_name`), and same-company `profile_id` ownership verification.
    - Added window outside-click listener (`onMounted` / `onWillDestroy`) in `native_print_systray.js` so the OWL 2 systray popover closes cleanly when clicking anywhere outside.
+
+## Principal Engineering Mission (2026-11-03) — main tree audit & repair
+Full report: `docs/engineering-mission-2026-11-03.md`. Headlines:
+- CRITICAL fixed: sync_printers crashed on every call (UnboundLocalError,
+  zero controller tests); repeat sync blind after archive sweep
+  (active_test=False); Odoo 19 ignores _sql_constraints — device/job
+  unique indexes did not exist, now models.Constraint + addon
+  19.0.1.3.0 pre-migration dedupe; origin-policy fork (HTTP-only/IP-only,
+  HTTPS rejected) unified to HTTPS-any-host + HTTP-any-IP per the
+  owner's recorded ADR-0002 decision.
+- HIGH fixed: fake job actions removed + state-write guard +
+  owner-scoped job_status + job record rules; desktop idempotency
+  payload overwrite (enqueue_new); ambiguous submission failures no
+  longer auto-retry (BackendError::ambiguous); unknown print modes
+  fail loud; client routing aligned to server tiers.
+- MEDIUM fixed: terminal-state monotonicity, scale_policy passthrough,
+  profile counters, forms JSON truncation, JS status-watch windows,
+  remote capability least-privilege split, paper-override roll check,
+  odoo.yml runs on odoo/** changes, bridge version = package version.
+- Verified here: Rust 90 + print-win 8 tests, clippy/fmt clean,
+  PDFium render 4/4, bench/chaos PASS, cargo-deny ok, Odoo 19 suite
+  26/26 green on a fresh DB with both unique indexes present,
+  Control Center 9/9 + jsdom DOM policy check.
+- Still gated: Windows CI on push, signing certificate, field spikes.
+
+## Zero-config mission (2026-11-03)
+- Sync now finishes setup itself (`_ensure_auto_setup`): a profile per
+  synced printer + a first-time catch-all rule to the default physical
+  printer (priority 0), because regular users are read-only on
+  profiles/rules. Idempotent; hand-modelled config outranks it.
+  Profile create() accepts the controller's auto-setup context and
+  validates against the device owner.
+- Rule payload carries a compact `media` block (roll width from the
+  driver forms + form count); handler and POS pass it to the bridge
+  as `mediaRollWidthMm`.
+- Desktop: JobOptions.media_roll_width_mm; TCP/IPP raw printing fits
+  receipts to the server-reported roll width when no local driver
+  exists; label modes fit rendered bitmaps into the largest
+  driver-reported label form via print-render::fit_mono_to_box
+  (downscale only, 8-dot aligned, unit-tested).
+- Addon 19.0.1.4.0. Verified: Odoo suite 28/28 on a fresh DB,
+  workspace 93 tests + clippy clean, Control Center 9/9, JS syntax ok.
+  Docs: docs/zero-config.md.
+
+## Routing & interception hardening (2026-11-03, research-driven)
+- Handler fallbacks: report-fetch failures and bridge submission
+  failures now fall back to Odoo's standard download with a warning
+  toast instead of throwing (job still logged failed server-side).
+- One-click default printer: /native_print/set_default_printer
+  re-points the user's catch-all; /native_print/overview reports the
+  routing default; the systray lists the desktop's printers with
+  Set default / star badge. Addon 19.0.1.5.0.
+- docs/routing-and-interception.md records the benchmarked design
+  (OCA, Ventor, PrintNode, QZ, IoT) and the rejected alternatives.
+- Verified: Odoo suite 29/29 on a fresh DB; JS syntax ok.
+
+## Live printer model — simplification (2026-11-03, owner decision)
+- Removed ALL server-side printer storage: native.print.device /
+  .profile / .rule models, their views, menus, ACLs and record
+  rules are gone; the endpoints /native_print/sync_printers,
+  /native_print/rules and /native_print/set_default_printer are
+  gone (a test asserts they 404). The server keeps only the job
+  log (job_status + overview counters). Addon 19.0.2.0.0.
+- Printing resolves live in the page from the desktop bridge:
+  systray-selected printer (browser storage only) -> POS prefers
+  thermal/label -> Windows default -> first printer. Capabilities
+  and media are read from the driver at click time; protocol is
+  inferred client-side from the driver identity (the former server
+  detection table, ported to native_print_client.js); raw printers
+  on an IP port print via tcp://<ip>:9100, others via their queue.
+- Verified: Odoo suite 11/11 fresh DB exit 0 (job log + controller
+  tests incl. removed-route 404s); node live-target tests pass
+  (detection, patterns, selection order, stale-selection fallback).

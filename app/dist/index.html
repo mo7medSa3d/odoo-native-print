@@ -632,14 +632,6 @@
     display: none !important;
   }
 
-  .footer-bar {
-    padding: 0.9rem 1.5rem;
-    text-align: center;
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    border-top: 1px solid var(--border-color);
-    background: var(--bg-surface);
-  }
 </style>
 </head>
 <body>
@@ -725,7 +717,7 @@
     <div id="originAlertBanner" class="alert-banner alert-warn hidden">
       <div style="display:flex;align-items:center;gap:0.65rem;">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-        <span id="originAlertText">لم يتم ضبط رابط خادم Odoo (HTTPS) بعد. يرجى ضبط الرابط من تبويب الإعدادات لبدء التشغيل المباشر.</span>
+        <span id="originAlertText" data-i18n="origin_not_configured">لم يتم ضبط رابط Odoo بعد. أدخل عنوان IP والمنفذ من الإعدادات.</span>
       </div>
       <button class="btn btn-sm btn-primary" onclick="switchTab('settings')" data-i18n="btn_configure_now">ضبط الرابط الآن</button>
     </div>
@@ -792,7 +784,7 @@
               <button class="filter-pill" data-filter="attention" onclick="setJobFilter('attention')" data-i18n="filter_attention">فاشلة / Dead Letter</button>
               <button class="filter-pill" data-filter="done" onclick="setJobFilter('done')" data-i18n="filter_done">مكتملة</button>
             </div>
-            <button class="btn btn-sm btn-secondary" onclick="clearFinishedJobs()">
+            <button class="btn btn-sm btn-secondary" id="btnClearFinished" onclick="clearFinishedJobs()">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
               <span data-i18n="btn_clear_done">مسح المكتملة</span>
             </button>
@@ -834,7 +826,9 @@
             <div class="form-group">
               <label class="form-label" data-i18n="lbl_target_printer">اختر الطابعة</label>
               <select id="customPrinterSelect" class="select" onchange="onTestPrinterChange()"></select>
-              <input type="text" id="customPrinterUri" class="input mono hidden" dir="ltr" placeholder="tcp://192.168.1.200:9100" style="margin-top:0.5rem;" />
+              <input type="text" id="customPrinterUri" class="input mono hidden" dir="ltr" placeholder="tcp://192.168.1.200:9100" autocomplete="off" spellcheck="false" aria-describedby="customPrinterUriHelp customPrinterUriError" style="margin-top:0.5rem;" />
+              <div class="form-help hidden" id="customPrinterUriHelp" data-i18n="custom_printer_uri_help">TCP/RAW: tcp://IP:9100 أو IPP: ipp://IP:631/ipp/print</div>
+              <div class="form-error hidden" id="customPrinterUriError" role="alert"></div>
             </div>
             <div class="form-group">
               <label class="form-label" data-i18n="lbl_test_type">نوع صفحة المعايرة والاختبار</label>
@@ -873,11 +867,10 @@
           <div class="form-grid">
             <div class="form-group">
               <label class="form-label" data-i18n="lbl_odoo_origin">رابط Odoo</label>
-              <input type="url" id="inputOdooOrigin" class="input mono" dir="ltr" placeholder="http://192.168.1.20:8069" />
-              <div class="form-help" data-i18n="help_odoo_origin">
-                الرابط كما يظهر في المتصفح. HTTPS لأي عنوان، أو HTTP لعنوان IP داخل شبكتك — مثل http://192.168.1.20:8069
-              </div>
-              <div class="form-error hidden" id="originError"></div>
+              <input type="url" id="inputOdooOrigin" class="input mono" dir="ltr" placeholder="http://192.168.1.20:8069" autocomplete="url" spellcheck="false" aria-describedby="helpOdooOrigin originHttpWarning originError" />
+              <div class="form-help" id="helpOdooOrigin" data-i18n="help_odoo_origin">الرابط كما يظهر في المتصفح. HTTPS لأي عنوان، أو HTTP لأي عنوان IP — مثل http://192.168.1.20:8069</div>
+              <div class="form-help hidden" id="originHttpWarning" data-i18n="origin_http_warning" style="color:var(--status-warn-fg);font-weight:600;" role="note">تنبيه: HTTP غير مشفّر. استخدمه للاختبار أو داخل شبكة موثوقة فقط.</div>
+              <div class="form-error hidden" id="originError" role="alert"></div>
             </div>
 
             <div class="form-group">
@@ -897,28 +890,11 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
               <span data-i18n="btn_save_origin">حفظ الإعدادات</span>
             </button>
-            <button class="btn btn-Launch" onclick="openOdooApp()">
+            <button class="btn btn-Launch" id="btnSaveAndOpen" onclick="saveAndOpenOdoo()">
               <span data-i18n="btn_save_and_launch">حفظ وفتح Odoo</span>
             </button>
           </div>
 
-          <div style="margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid var(--border-color);display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem;">
-            <div>
-              <div class="form-label" data-i18n="lbl_config_file">ملف الإعدادات</div>
-              <div class="mono" style="color:var(--text-secondary);margin-top:0.25rem;word-break:break-all;" id="txtConfigPath">—</div>
-            </div>
-            <div>
-              <div class="form-label" data-i18n="lbl_pdfium_engine">محرك PDF</div>
-              <div class="mono" style="color:var(--text-secondary);margin-top:0.25rem;word-break:break-all;" id="txtPdfiumPath">—</div>
-            </div>
-            <div>
-              <div class="form-label" data-i18n="lbl_shortcut">اختصار لوحة المفاتيح السريع</div>
-              <div style="color:var(--text-secondary);margin-top:0.25rem;">
-                <code class="mono" style="background:var(--bg-subtle);padding:0.15rem 0.45rem;border-radius:5px;">Ctrl + Shift + P</code>
-                <span data-i18n="help_shortcut">للتبديل الفوري بين شاشة Odoo ومركز التحكم</span>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </section>
@@ -932,25 +908,21 @@
             <span data-i18n="diag_title">حزمة التشخيص الآمنة (Redacted Diagnostics Bundle)</span>
           </div>
           <div style="display:flex;gap:0.5rem;">
-            <button class="btn btn-sm btn-secondary" onclick="loadDiagnosticsBundle()" data-i18n="btn_generate_diag">توليد الحزمة</button>
-            <button class="btn btn-sm btn-secondary" onclick="copyDiagnosticsBundle()" data-i18n="btn_copy_diag">نسخ JSON</button>
-            <button class="btn btn-sm btn-primary" onclick="downloadDiagnosticsBundle()" data-i18n="btn_download_diag">تنزيل ملف JSON</button>
+            <button class="btn btn-sm btn-secondary" id="btnGenerateDiagnostics" onclick="loadDiagnosticsBundle()" data-i18n="btn_generate_diag">توليد الحزمة</button>
+            <button class="btn btn-sm btn-secondary" id="btnCopyDiagnostics" onclick="copyDiagnosticsBundle()" data-i18n="btn_copy_diag">نسخ JSON</button>
+            <button class="btn btn-sm btn-primary" id="btnDownloadDiagnostics" onclick="downloadDiagnosticsBundle()" data-i18n="btn_download_diag">تنزيل ملف JSON</button>
           </div>
         </div>
         <div class="card-body">
           <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.85rem;" data-i18n="diag_desc">
             تحتوي هذه الحزمة على إصدار التطبيق وإحصائيات الحالات وآخر 200 مهمة طباعة بدون أي بيانات سرية أو محتوى مستندات أو رموز جلسات (آمنة تماماً لإرفاقها في تذاكر الدعم الفني).
           </p>
-          <pre class="code-box" id="diagnosticsOutput">{ "status": "Click Generate Bundle to inspect live diagnostics..." }</pre>
+          <pre class="code-box" id="diagnosticsOutput" aria-live="polite">{ "status": "اضغط على توليد الحزمة لإنشاء تقرير تشخيص حقيقي." }</pre>
         </div>
       </div>
     </section>
 
   </main>
-
-  <footer class="footer-bar">
-    Odoo Native Print Client • Tauri v2 + PDFium + Win32 Spooler/GDI + ESC/POS + ZPL/TSPL + IPP • Shortcut: <strong class="mono">Ctrl+Shift+P</strong>
-  </footer>
 
   <div class="toast-container" id="toastContainer"></div>
 
@@ -958,7 +930,7 @@
   const I18N = {
     ar: {
       app_title: "بوابة الطباعة",
-      app_subtitle: "طباعة محلية من Odoo — بدون خادم وسيط",
+      app_subtitle: "طباعة مباشرة من Odoo إلى الطابعة المحلية",
       btn_open_odoo: "فتح نظام Odoo",
       btn_refresh: "تحديث",
       btn_theme: "المظهر",
@@ -993,15 +965,23 @@
       btn_send_test: "إرسال صفحة المعايرة للطابعة",
       settings_title: "الاتصال بـ Odoo",
       lbl_odoo_origin: "رابط Odoo",
-      help_odoo_origin: "الرابط كما يظهر في المتصفح. HTTPS لأي عنوان، أو HTTP لعنوان IP داخل شبكتك — مثل http://192.168.1.20:8069",
+      help_odoo_origin: "الرابط كما يظهر في المتصفح. HTTPS لأي عنوان، أو HTTP لأي عنوان IP — مثل http://192.168.1.20:8069",
+      origin_http_warning: "تنبيه: HTTP غير مشفّر. استخدمه داخل شبكتك المحلية فقط، وفضّل HTTPS دائمًا.",
+      origin_invalid: "عنوان غير صالح — HTTPS، أو HTTP مع عنوان IP.",
+      origin_not_configured: "لم يتم ضبط رابط Odoo بعد. أدخل عنوان IP والمنفذ من الإعدادات.",
+      native_bridge_unavailable: "خدمة الطباعة المحلية غير متاحة. افتح تطبيق سطح المكتب ثم أعد المحاولة.",
+      custom_printer_uri_help: "TCP/RAW: tcp://IP:9100 أو IPP: ipp://IP:631/ipp/print",
+      custom_printer_uri_invalid: "عنوان الطابعة غير صالح. استخدم tcp:// أو raw:// أو ipp:// مع IP صحيح.",
+      kpi_pdf_ready: "محرك PDF جاهز",
+      kpi_pdf_unavailable: "محرك PDF غير متاح",
+      confirm_clear_done: "هل تريد حذف مهام الطباعة المكتملة؟ لا يمكن التراجع.",
+      diagnostics_copied: "تم نسخ تقرير التشخيص",
+      diagnostics_downloaded: "تم تنزيل تقرير التشخيص",
+      diagnostics_failed: "تعذر إنشاء تقرير التشخيص. راجع الخطأ وحاول مجدداً.",
       lbl_recovery_mode: "عند توقف مفاجئ",
       help_recovery_mode: "المهام التي لم تُرسل للطابعة تُستأنف دائمًا. المهام المُرسلة يحددها هذا الخيار.",
       btn_save_origin: "حفظ الإعدادات",
       btn_save_and_launch: "حفظ وفتح Odoo",
-      lbl_config_file: "ملف الإعدادات",
-      lbl_pdfium_engine: "محرك PDF",
-      lbl_shortcut: "اختصار لوحة المفاتيح السريع",
-      help_shortcut: "للتبديل الفوري بين شاشة Odoo ومركز التحكم",
       diag_title: "حزمة التشخيص الآمنة (Redacted Diagnostics Bundle)",
       btn_generate_diag: "توليد الحزمة",
       btn_copy_diag: "نسخ JSON",
@@ -1010,7 +990,7 @@
     },
     en: {
       app_title: "Print Gateway — Odoo",
-      app_subtitle: "Local printing for Odoo. No gateway.",
+      app_subtitle: "Direct local printing from Odoo to your printers.",
       btn_open_odoo: "Open Odoo",
       btn_refresh: "Refresh",
       btn_theme: "Theme",
@@ -1045,15 +1025,23 @@
       btn_send_test: "Send Calibration Page",
       settings_title: "Odoo connection",
       lbl_odoo_origin: "Odoo address",
-      help_odoo_origin: "The address exactly as in the browser. HTTPS for any address, or HTTP for a private IP on your network, e.g. http://192.168.1.20:8069.",
+      help_odoo_origin: "The address exactly as in the browser. HTTPS for any address, or HTTP for any IP address, e.g. http://192.168.1.20:8069.",
+      origin_http_warning: "Notice: HTTP is unencrypted. Use it only on your local network; prefer HTTPS.",
+      origin_invalid: "Invalid address — HTTPS, or HTTP with an IP address.",
+      origin_not_configured: "The Odoo address is not configured. Enter its IP address and port in Settings.",
+      native_bridge_unavailable: "The local print service is unavailable. Open the desktop app and try again.",
+      custom_printer_uri_help: "TCP/RAW: tcp://IP:9100 or IPP: ipp://IP:631/ipp/print",
+      custom_printer_uri_invalid: "Invalid printer address. Use tcp://, raw://, or ipp:// with a valid IP address.",
+      kpi_pdf_ready: "PDF engine ready",
+      kpi_pdf_unavailable: "PDF engine unavailable",
+      confirm_clear_done: "Delete completed print jobs? This cannot be undone.",
+      diagnostics_copied: "Diagnostics report copied",
+      diagnostics_downloaded: "Diagnostics report downloaded",
+      diagnostics_failed: "Could not generate diagnostics. Check the error and try again.",
       lbl_recovery_mode: "After a sudden stop",
       help_recovery_mode: "Jobs not yet sent to the printer always resume. Jobs already sent follow this choice.",
       btn_save_origin: "Save Settings",
       btn_save_and_launch: "Save & open Odoo",
-      lbl_config_file: "Config file",
-      lbl_pdfium_engine: "PDF engine",
-      lbl_shortcut: "Quick Keyboard Shortcut",
-      help_shortcut: "Toggle between Odoo ERP and this Control Center anytime",
       diag_title: "One-Click Redacted Diagnostics Bundle",
       btn_generate_diag: "Generate Bundle",
       btn_copy_diag: "Copy JSON",
@@ -1066,32 +1054,15 @@
   let currentFilter = "all";
   let overviewState = null;
 
-  const FALLBACK_DEMO = {
-    appVersion: "1.1.1",
-    os: "windows",
-    odooOrigin: "https://erp.company.local:8069",
-    lockedByPolicy: false,
-    autoReprint: false,
-    configPath: "C:\\Users\\Operator\\AppData\\Roaming\\com.company.odoo-native-print\\config.json",
-    pdfiumReady: true,
-    pdfiumDetail: "C:\\Program Files\\Odoo Native Print\\resources\\pdfium.dll (158.0.8125.0)",
-    defaultPrinter: "HP LaserJet Pro MFP M428fdw",
-    printers: [
-      { name: "HP LaserJet Pro MFP M428fdw", driver: "HP Universal Printing PCL 6", port: "IP_192.168.1.40", kind: "network", status: "ready", is_default: true },
-      { name: "EPSON TM-T88VII Receipt", driver: "EPSON Advanced Printer Driver 6", port: "USB001", kind: "local", status: "ready", is_default: false },
-      { name: "Zebra ZD421-203dpi ZPL", driver: "ZDesigner ZD421-203dpi ZPL", port: "USB002", kind: "local", status: "ready", is_default: false },
-      { name: "Microsoft Print to PDF", driver: "Microsoft Print To PDF", port: "PORTPROMPT:", kind: "virtual", status: "ready", is_default: false }
-    ],
-    stateCounts: [["queued", 0], ["rendering", 0], ["spooling", 0], ["printing", 0], ["done", 18], ["failed", 1], ["canceled", 0], ["dead_letter", 0]],
-    recentJobs: [
-      { id: "pos-Order-00412-1730598120", printer: "EPSON TM-T88VII Receipt", report: "point_of_sale.receipt", pages: 1, bytes: 42810, state: "done", attempts: 1, error_code: null },
-      { id: "odoo-sale.report_saleorder-1730598095", printer: "HP LaserJet Pro MFP M428fdw", report: "sale.report_saleorder", pages: 2, bytes: 98412, state: "done", attempts: 1, error_code: null },
-      { id: "odoo-stock.report_picking-1730597900", printer: "Zebra ZD421-203dpi ZPL", report: "stock.report_picking", pages: 1, bytes: 19320, state: "failed", attempts: 2, error_code: "PAPER_OUT" }
-    ]
-  };
-
   function bridge() {
     return window.__NATIVE_PRINT__ || null;
+  }
+
+  function setNativeControlsEnabled(enabled) {
+    for (const id of ["btnOpenOdoo", "btnSaveOrigin", "btnSaveAndOpen", "btnClearFinished", "btnCustomTestPrint", "btnGenerateDiagnostics", "btnCopyDiagnostics", "btnDownloadDiagnostics"]) {
+      const element = document.getElementById(id);
+      if (element) element.disabled = !enabled;
+    }
   }
 
   function showToast(msg, isError = false) {
@@ -1193,19 +1164,32 @@
     if (overviewState) renderJobsTable(overviewState.recentJobs || []);
   }
 
-  async function refreshAll() {
-    const b = bridge();
-    if (b && typeof b.appOverview === "function") {
-      try {
-        overviewState = await b.appOverview();
-      } catch (e) {
-        showToast(String(e), true);
-        overviewState = FALLBACK_DEMO;
-      }
-    } else {
-      overviewState = FALLBACK_DEMO;
+  async function refreshAll(options = {}) {
+    const silent = !!options.silent;
+    const api = bridge();
+    if (!api || typeof api.appOverview !== "function") {
+      overviewState = null;
+      setNativeControlsEnabled(false);
+      document.getElementById("originAlertBanner").classList.remove("hidden");
+      document.getElementById("originAlertText").textContent = I18N[currentLang].native_bridge_unavailable;
+      if (!silent) showToast(I18N[currentLang].native_bridge_unavailable, true);
+      return false;
     }
-    renderOverview(overviewState);
+    setNativeControlsEnabled(true);
+    try {
+      const data = await api.appOverview();
+      if (!data || typeof data !== "object") throw new Error("invalid_app_overview");
+      overviewState = data;
+      renderOverview(data);
+      return true;
+    } catch (error) {
+      document.getElementById("originAlertBanner").classList.remove("hidden");
+      document.getElementById("originAlertText").textContent = currentLang === "ar"
+        ? "تعذر الاتصال بخدمة الطباعة المحلية. تحقق من تشغيل التطبيق ثم أعد التحديث."
+        : "Could not contact the local print service. Check that the desktop app is running, then refresh.";
+      if (!silent) showToast(String(error), true);
+      return false;
+    }
   }
 
   function renderOverview(data) {
@@ -1225,13 +1209,14 @@
     document.getElementById("kpiDoneCount").textContent = String(done);
     document.getElementById("kpiFailedCount").textContent = String(attention);
     document.getElementById("kpiPdfiumStatus").textContent = data.pdfiumReady
-      ? "PDFium: Ready (Chromium/8125)"
-      : "PDFium: Not Loaded";
+      ? I18N[currentLang].kpi_pdf_ready
+      : I18N[currentLang].kpi_pdf_unavailable;
 
     const alertBanner = document.getElementById("originAlertBanner");
     if (!data.odooOrigin) {
       alertBanner.classList.remove("hidden");
-      document.getElementById("kpiOriginMeta").textContent = currentLang === "ar" ? "الأصل: غير مضبوط" : "Origin: Not configured";
+      document.getElementById("originAlertText").textContent = I18N[currentLang].origin_not_configured;
+      document.getElementById("kpiOriginMeta").textContent = currentLang === "ar" ? "غير مضبوط" : "Not configured";
       document.getElementById("btnOpenOdoo").disabled = true;
     } else {
       alertBanner.classList.add("hidden");
@@ -1247,14 +1232,12 @@
     originInput.disabled = !!data.lockedByPolicy;
     document.getElementById("inputAutoReprint").value = data.autoReprint ? "true" : "false";
     document.getElementById("inputAutoReprint").disabled = !!data.lockedByPolicy;
-    document.getElementById("btnSaveOrigin").disabled = !!data.lockedByPolicy;
     document.getElementById("policyStatusBadge").textContent = data.lockedByPolicy
-      ? (currentLang === "ar" ? "مقفل بسياسة GPO" : "Locked by Windows GPO")
-      : (currentLang === "ar" ? "قابل للتعديل محلياً" : "Editable (config.json)");
-    document.getElementById("txtConfigPath").textContent = data.configPath || "—";
-    document.getElementById("txtPdfiumPath").textContent = data.pdfiumDetail || "—";
+      ? (currentLang === "ar" ? "مقفل بواسطة مسؤول النظام" : "Managed by administrator")
+      : (currentLang === "ar" ? "قابل للتعديل على هذا الجهاز" : "Editable on this device");
 
     populatePrinterSelect(printers, data.defaultPrinter);
+    validateOriginField();
 
     renderJobsTable(data.recentJobs || []);
     renderPrintersGrid(printers);
@@ -1364,8 +1347,8 @@
   async function runPrinterTest(printerName, kind) {
     const b = bridge();
     if (!b || typeof b.runTestPrint !== "function") {
-      showToast(currentLang === "ar" ? `وضع المعاينة: تم إرسال اختبار (${kind}) إلى ${printerName}` : `Preview: Sent ${kind} test to ${printerName}`);
-      return;
+      showToast(I18N[currentLang].native_bridge_unavailable, true);
+      return false;
     }
     try {
       const id = await b.runTestPrint(printerName, kind, null);
@@ -1404,6 +1387,7 @@
     const sel = document.getElementById("customPrinterSelect");
     const uri = document.getElementById("customPrinterUri");
     if (sel && uri) uri.classList.toggle("hidden", sel.value !== "__uri__");
+    validateCustomPrinterUriField();
   }
 
   function selectedTestPrinter() {
@@ -1416,8 +1400,13 @@
   async function triggerCustomTestPrint() {
     const printer = selectedTestPrinter();
     const kind = document.getElementById("customTestKind").value;
+    const select = document.getElementById("customPrinterSelect");
     if (!printer) {
       showToast(currentLang === "ar" ? "اختر طابعة أولاً" : "Choose a printer first", true);
+      return;
+    }
+    if (select && select.value === "__uri__" && !validateCustomPrinterUriField()) {
+      document.getElementById("customPrinterUri").focus();
       return;
     }
     await runPrinterTest(printer, kind);
@@ -1429,7 +1418,7 @@
     box.classList.remove("hidden");
     const b = bridge();
     if (!b || typeof b.printerForms !== "function") {
-      box.innerHTML = `<div class="mono">A4 (210×297mm, sheet) • A5 (148×210mm, sheet) • 80mm Roll (80×3276mm, roll)</div>`;
+      box.textContent = I18N[currentLang].native_bridge_unavailable;
       return;
     }
     try {
@@ -1449,7 +1438,7 @@
   async function retryJob(id) {
     const b = bridge();
     if (!b || typeof b.retryJob !== "function") {
-      showToast(`Preview: Retried ${id}`);
+      showToast(I18N[currentLang].native_bridge_unavailable, true);
       return;
     }
     try {
@@ -1464,7 +1453,7 @@
   async function cancelJob(id) {
     const b = bridge();
     if (!b || typeof b.cancelJob !== "function") {
-      showToast(`Preview: Canceled ${id}`);
+      showToast(I18N[currentLang].native_bridge_unavailable, true);
       return;
     }
     try {
@@ -1479,9 +1468,10 @@
   async function clearFinishedJobs() {
     const b = bridge();
     if (!b || typeof b.clearFinished !== "function") {
-      showToast("Preview: Cleared finished jobs");
+      showToast(I18N[currentLang].native_bridge_unavailable, true);
       return;
     }
+    if (!window.confirm(I18N[currentLang].confirm_clear_done)) return;
     try {
       const n = await b.clearFinished();
       showToast(currentLang === "ar" ? `تم مسح ${n} مهمة مكتملة` : `Cleared ${n} finished job(s)`);
@@ -1493,134 +1483,235 @@
 
   // Mirrors print-core::security::origin_is_allowed (ADR-0002 amendment):
   // HTTPS anywhere; HTTP only to a private / loopback / link-local IP.
-  function isPrivateIp(host) {
-    const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-    if (v4) {
-      const a = +v4[1], b = +v4[2];
-      if ([+v4[1], +v4[2], +v4[3], +v4[4]].some((o) => o > 255)) return false;
-      return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) ||
-        (a === 192 && b === 168) || (a === 169 && b === 254);
+  // Mirrors Rust: HTTP with a valid IPv4/IPv6 literal only.
+  function isAllowedOrigin(value) {
+    // Mirrors print-core::security::origin_is_allowed (ADR-0002):
+    // HTTPS for any host; HTTP for any IP literal (private or public).
+    // Exact origin: no credentials, path, query or fragment; ports
+    // 1-65535. HTTP is unencrypted; the form warns about it.
+    function isIpLiteral(host) {
+      const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+      if (v4) return [+v4[1], +v4[2], +v4[3], +v4[4]].every((o) => o <= 255);
+      const h = host.toLowerCase().replace(/^\[|\]$/g, "");
+      return h.includes(":") && /^[0-9a-f:]+$/.test(h);
     }
-    const h = host.toLowerCase();
-    if (h === "::1" || h === "[::1]") return true;
-    const first = parseInt(h.replace(/^\[|\]$/g, "").split(":")[0], 16);
-    if (Number.isNaN(first)) return false;
-    return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
+    const normalized = String(value || "").trim();
+    if (!normalized || normalized.includes("\\")) return false;
+    let url;
+    try { url = new URL(normalized); } catch { return false; }
+    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+    if (url.username || url.password) return false;
+    if (url.pathname !== "/" && url.pathname !== "") return false;
+    if (url.search || url.hash || url.port === "0") return false;
+    const scheme = url.protocol === "https:" ? "https://" : "http://";
+    const authority = normalized.slice(scheme.length).replace(/\/$/, "");
+    if (!/^\[[0-9a-f:.]+\](?::[0-9]{1,5})?$/i.test(authority) &&
+        !/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?$/.test(authority)) return false;
+    if (url.port) {
+      const port = Number(url.port);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) return false;
+    }
+    if (url.protocol === "https:") return url.hostname.length > 0;
+    return isIpLiteral(url.hostname);
   }
 
-  function isAllowedOrigin(value) {
-    let u;
-    try { u = new URL(value); } catch { return false; }
-    if (u.username || u.password) return false;
-    if (u.pathname !== "/" && u.pathname !== "") return false;
-    if (u.protocol === "https:") return u.hostname.length > 0;
-    if (u.protocol === "http:") return isPrivateIp(u.hostname);
-    return false;
+  function isAllowedPrinterUri(value) {
+    const normalized = String(value || "").trim();
+    const match = normalized.match(/^(tcp|raw|ipp):\/\/(\[[0-9a-f:.]+\]|(?:0|[1-9][0-9]{0,2}\.){3}(?:0|[1-9][0-9]{0,2}))(?::([0-9]{1,5}))?(\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*)?$/i);
+    if (!match) return false;
+    const scheme = match[1].toLowerCase(), host = match[2], port = match[3], path = match[4];
+    if (scheme !== "ipp" && path) return false;
+    if (port !== undefined && (!Number.isInteger(Number(port)) || Number(port) < 1 || Number(port) > 65535)) return false;
+    if (host.startsWith("[")) {
+      try { return new URL("http://" + host + (port ? ":" + port : "") + "/").hostname.includes(":"); }
+      catch { return false; }
+    }
+    return host.split(".").length === 4 && host.split(".").every((part) => Number(part) <= 255);
   }
 
   // Live field validation: the error appears while typing and clears
   // the moment the address becomes valid (no stale messages).
   function validateOriginField() {
     const input = document.getElementById("inputOdooOrigin");
-    const err = document.getElementById("originError");
-    if (!input || !err) return true;
-    const v = input.value.trim();
-    const ok = v === "" || isAllowedOrigin(v);
-    input.classList.toggle("invalid", !ok);
-    if (ok) {
-      err.textContent = "";
-      err.classList.add("hidden");
-    } else {
-      err.textContent = currentLang === "ar"
-        ? "رابط غير صالح — HTTPS، أو HTTP مع IP داخلي"
-        : "Invalid address — HTTPS, or HTTP with a private IP";
-      err.classList.remove("hidden");
+    const error = document.getElementById("originError");
+    const warning = document.getElementById("originHttpWarning");
+    if (!input || !error) return true;
+    const value = input.value.trim();
+    const valid = value.length > 0 && isAllowedOrigin(value);
+    input.classList.toggle("invalid", value.length > 0 && !valid);
+    error.textContent = valid || !value ? "" : I18N[currentLang].origin_invalid;
+    error.classList.toggle("hidden", valid || !value);
+    if (warning) warning.classList.toggle("hidden", !(valid && value.toLowerCase().startsWith("http://")));
+    const locked = !!(overviewState && overviewState.lockedByPolicy);
+    const save = document.getElementById("btnSaveOrigin");
+    const saveOpen = document.getElementById("btnSaveAndOpen");
+    if (save) save.disabled = locked || !valid;
+    if (saveOpen) saveOpen.disabled = locked || !valid;
+    return valid;
+  }
+
+  function validateCustomPrinterUriField() {
+    const select = document.getElementById("customPrinterSelect");
+    const input = document.getElementById("customPrinterUri");
+    const error = document.getElementById("customPrinterUriError");
+    const help = document.getElementById("customPrinterUriHelp");
+    if (!select || !input || !error) return true;
+    const custom = select.value === "__uri__";
+    if (help) help.classList.toggle("hidden", !custom);
+    if (!custom) {
+      input.classList.remove("invalid");
+      error.textContent = "";
+      error.classList.add("hidden");
+      return true;
     }
-    return ok;
+    const valid = isAllowedPrinterUri(input.value);
+    input.classList.toggle("invalid", !valid);
+    error.textContent = valid ? "" : I18N[currentLang].custom_printer_uri_invalid;
+    error.classList.toggle("hidden", valid);
+    return valid;
   }
 
   async function saveOriginSettings() {
-    const origin = document.getElementById("inputOdooOrigin").value.trim();
+    const input = document.getElementById("inputOdooOrigin");
+    const origin = input.value.trim();
     const autoReprint = document.getElementById("inputAutoReprint").value === "true";
     if (!isAllowedOrigin(origin)) {
       validateOriginField();
-      document.getElementById("inputOdooOrigin").focus();
-      showToast(currentLang === "ar" ? "رابط غير صالح — HTTPS، أو HTTP مع IP داخلي" : "Invalid address — HTTPS, or HTTP with a private IP", true);
-      return;
+      input.focus();
+      showToast(I18N[currentLang].origin_invalid, true);
+      return false;
     }
-    const b = bridge();
-    if (!b || typeof b.saveOrigin !== "function") {
-      overviewState.odooOrigin = origin.replace(/\/+$/, "");
-      overviewState.autoReprint = autoReprint;
-      renderOverview(overviewState);
-      showToast(currentLang === "ar" ? "تم حفظ الإعدادات بنجاح" : "Configuration saved");
-      return;
+    const api = bridge();
+    if (!api || typeof api.saveOrigin !== "function") {
+      showToast(I18N[currentLang].native_bridge_unavailable, true);
+      return false;
     }
+    const button = document.getElementById("btnSaveOrigin");
+    if (button) button.disabled = true;
     try {
-      const saved = await b.saveOrigin(origin, autoReprint);
-      showToast(currentLang === "ar" ? `تم حفظ الرابط: ${saved}` : `Saved origin: ${saved}`);
-      await refreshAll();
-    } catch (e) {
-      showToast(String(e), true);
+      const saved = await api.saveOrigin(origin, autoReprint);
+      showToast(currentLang === "ar" ? `تم حفظ العنوان: ${saved}` : `Saved address: ${saved}`);
+      await refreshAll({ silent: true });
+      return true;
+    } catch (error) {
+      showToast(String(error), true);
+      return false;
+    } finally {
+      if (button) button.disabled = !!(overviewState && overviewState.lockedByPolicy);
+      validateOriginField();
     }
+  }
+  async function openOdooApp() {
+    const api = bridge();
+    if (!api || typeof api.openOdooOrigin !== "function") {
+      showToast(I18N[currentLang].native_bridge_unavailable, true);
+      return false;
+    }
+    try { await api.openOdooOrigin(); return true; }
+    catch (error) { showToast(String(error), true); return false; }
   }
 
-  async function openOdooApp() {
-    const b = bridge();
-    if (b && typeof b.openOdooOrigin === "function") {
-      try {
-        await b.openOdooOrigin();
-      } catch (e) {
-        showToast(String(e), true);
-      }
-    } else if (overviewState && overviewState.odooOrigin) {
-      showToast(`Preview: Would navigate webview to ${overviewState.odooOrigin}`);
-    }
+  async function saveAndOpenOdoo() {
+    const saved = await saveOriginSettings();
+    if (!saved) return false;
+    return await openOdooApp();
   }
+
+  let diagnosticsGenerated = false;
 
   async function loadDiagnosticsBundle() {
-    const out = document.getElementById("diagnosticsOutput");
-    const b = bridge();
-    if (b && typeof b.exportDiagnostics === "function") {
-      try {
-        out.textContent = await b.exportDiagnostics();
-      } catch (e) {
-        out.textContent = JSON.stringify({ error: String(e) }, null, 2);
-      }
-    } else {
-      out.textContent = JSON.stringify({
-        app_version: overviewState ? overviewState.appVersion : "1.1.1",
-        core_version: "0.1.0",
-        os: overviewState ? overviewState.os : "windows",
-        state_counts: overviewState ? overviewState.stateCounts : [],
-        recent_jobs: overviewState ? overviewState.recentJobs : []
-      }, null, 2);
+    const output = document.getElementById("diagnosticsOutput");
+    const button = document.getElementById("btnGenerateDiagnostics");
+    const api = bridge();
+    if (!api || typeof api.exportDiagnostics !== "function") {
+      diagnosticsGenerated = false;
+      output.textContent = JSON.stringify({ error: I18N[currentLang].native_bridge_unavailable }, null, 2);
+      showToast(I18N[currentLang].native_bridge_unavailable, true);
+      return false;
+    }
+    if (button) button.disabled = true;
+    try {
+      const raw = await api.exportDiagnostics();
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || parsed.error) throw new Error("invalid_diagnostics_payload");
+      output.textContent = JSON.stringify(parsed, null, 2);
+      diagnosticsGenerated = true;
+      return true;
+    } catch (error) {
+      diagnosticsGenerated = false;
+      output.textContent = JSON.stringify({ error: String(error) }, null, 2);
+      showToast(I18N[currentLang].diagnostics_failed + " " + String(error), true);
+      return false;
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function getDiagnosticsPayload() {
+    if (!diagnosticsGenerated && !(await loadDiagnosticsBundle())) return null;
+    try {
+      const parsed = JSON.parse(document.getElementById("diagnosticsOutput").textContent);
+      if (!parsed || typeof parsed !== "object" || parsed.error) return null;
+      return JSON.stringify(parsed, null, 2);
+    } catch (_error) {
+      diagnosticsGenerated = false;
+      showToast(I18N[currentLang].diagnostics_failed, true);
+      return null;
     }
   }
 
   async function copyDiagnosticsBundle() {
-    const text = document.getElementById("diagnosticsOutput").textContent;
+    const text = await getDiagnosticsPayload();
+    if (!text) return;
     try {
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") throw new Error("clipboard_api_unavailable");
       await navigator.clipboard.writeText(text);
-      showToast(currentLang === "ar" ? "تم نسخ حزمة التشخيص للحافظة" : "Copied diagnostics JSON to clipboard");
-    } catch (_e) {
-      showToast("Clipboard copy failed", true);
+      showToast(I18N[currentLang].diagnostics_copied);
+      return;
+    } catch (_error) {
+      // Clipboard permissions vary in WebView; use a selected textarea fallback.
+    }
+    const fallback = document.createElement("textarea");
+    fallback.value = text;
+    fallback.setAttribute("readonly", "");
+    fallback.style.position = "fixed";
+    fallback.style.opacity = "0";
+    document.body.appendChild(fallback);
+    fallback.focus();
+    fallback.select();
+    let copied = false;
+    try { copied = document.execCommand("copy"); } finally { fallback.remove(); }
+    if (copied) showToast(I18N[currentLang].diagnostics_copied);
+    else showToast(currentLang === "ar" ? "تعذر النسخ تلقائياً. حدّد JSON وانسخه يدوياً." : "Automatic copy failed. Select the JSON and copy it manually.", true);
+  }
+
+  async function downloadDiagnosticsBundle() {
+    const text = await getDiagnosticsPayload();
+    if (!text) return;
+    let objectUrl = null;
+    const anchor = document.createElement("a");
+    try {
+      objectUrl = URL.createObjectURL(new Blob([text], { type: "application/json;charset=utf-8" }));
+      anchor.href = objectUrl;
+      anchor.download = `native-print-diagnostics-${Date.now()}.json`;
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => { if (objectUrl) URL.revokeObjectURL(objectUrl); }, 60000);
+      showToast(I18N[currentLang].diagnostics_downloaded);
+    } catch (error) {
+      if (anchor.isConnected) anchor.remove();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      showToast(String(error), true);
     }
   }
 
-  function downloadDiagnosticsBundle() {
-    const text = document.getElementById("diagnosticsOutput").textContent;
-    const blob = new Blob([text], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `odoo-native-print-diagnostics-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }
-
   document.getElementById("inputOdooOrigin").addEventListener("input", validateOriginField);
+  document.getElementById("customPrinterUri").addEventListener("input", validateCustomPrinterUriField);
   refreshAll();
-  setInterval(refreshAll, 3000);
+  setInterval(() => refreshAll({ silent: true }), 3000);
+
 </script>
 </body>
 </html>

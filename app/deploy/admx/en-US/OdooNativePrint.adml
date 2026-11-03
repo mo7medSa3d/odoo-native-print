@@ -8,14 +8,14 @@
   <resources>
     <stringTable>
       <string id="ONP_Category">Odoo Native Print</string>
-      <string id="OdooOrigin">Odoo origin URL</string>
-      <string id="OdooOrigin_Explain">The exact HTTPS origin of the company Odoo server, for example https://odoo.company.local:8069. The app is locked to this origin: it loads only this site and accepts print commands only from it. Set by IT; end users cannot change it when DisableOriginChange is also enabled.</string>
+      <string id="OdooOrigin">Odoo HTTP IP address</string>
+      <string id="OdooOrigin_Explain">Enter the exact Odoo address, e.g. https://odoo.company.local:8069 or http://192.168.1.20:8069. HTTPS is supported for any address; HTTP is accepted for any IP address (hostnames over HTTP are rejected). The desktop app is locked to this exact address and port. Set by IT; end users cannot change it when DisableOriginChange is also enabled. Prefer HTTPS: HTTP is unencrypted.</string>
       <string id="DisableOriginChange">Lock the Odoo origin</string>
       <string id="DisableOriginChange_Explain">When enabled, the app reads its Odoo origin only from machine policy/install configuration and ignores per-user changes.</string>
     </stringTable>
     <presentationTable>
       <presentation id="OdooOrigin">
-        <textBox refId="OdooOriginValue"><label>Odoo origin (HTTPS)</label></textBox>
+        <textBox refId="OdooOriginValue"><label>Odoo HTTP IP address</label></textBox>
       </presentation>
     </presentationTable>
   </resources>

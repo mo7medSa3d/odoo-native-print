@@ -35,6 +35,18 @@ impl BackendError {
             retryable: false,
         }
     }
+    /// The submission may already have reached the printer (spooler,
+    /// TCP stream, IPP job) before the failure surfaced, so the outcome
+    /// is unknown. Ambiguous errors are never auto-retried: reprinting
+    /// could duplicate physical output. The job fails with its code
+    /// and a human decides whether to reprint.
+    pub fn ambiguous(code: &str, message: &str) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            retryable: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -228,6 +240,29 @@ mod tests {
         // One-click retry from dead letter works.
         q.set_state("1", JobState::Queued, None).unwrap();
         assert_eq!(q.count_by_state(JobState::Queued).unwrap(), 1);
+    }
+    #[test]
+    fn ambiguous_error_fails_without_retry() {
+        // A failure after the bytes may have reached the printer must
+        // not auto-requeue: the job fails once, with its code kept.
+        let mut q = Queue::in_memory().unwrap();
+        q.enqueue(&job("1")).unwrap();
+        q.store_payload("1", "pdf", b"%PDF-1.4").unwrap();
+        let mut w = Worker {
+            queue: &mut q,
+            backend: ScriptedBackend {
+                results: std::collections::VecDeque::from(vec![Err(BackendError::ambiguous(
+                    "SPOOLER_RAW_ERROR",
+                    "write failed mid-job",
+                ))]),
+            },
+            cfg: WorkerConfig::default(),
+            sleep: |_| {},
+            entropy: 0,
+        };
+        assert_eq!(w.run_once("p1").unwrap(), Outcome::Failed("1".into()));
+        assert_eq!(q.count_by_state(JobState::Failed).unwrap(), 1);
+        assert_eq!(q.count_by_state(JobState::Queued).unwrap(), 0);
     }
     #[test]
     fn fatal_fails_without_retry() {

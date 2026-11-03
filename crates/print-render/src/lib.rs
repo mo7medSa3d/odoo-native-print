@@ -12,7 +12,8 @@ pub mod pdfium;
 pub mod plan;
 
 pub use image::{
-    decode_png, receipt_dots_for_paper, receipt_png_to_escpos, scale_to_width, ImageError,
+    decode_png, receipt_dots_for_paper, receipt_dots_for_width_mm, receipt_png_to_escpos,
+    receipt_png_to_escpos_width, scale_to_width, ImageError,
 };
 pub use pdf::{parse_pdf_info, PdfInfo, PdfPageInfo, PdfParseError};
 pub use pdfium::{PdfDocument, Pdfium, PdfiumError, RenderedPage};

@@ -47,6 +47,28 @@
                 <div class="small text-muted mb-2" t-else="">
                     Standard browser session: reports download normally unless opened inside the Native Print app.
                 </div>
+                <div t-if="state.bridgeActive and state.discoveredPrinters.length" class="mb-3">
+                    <t t-foreach="state.discoveredPrinters" t-as="printer" t-key="printer.name">
+                        <div class="d-flex justify-content-between align-items-center py-1 border-bottom">
+                            <span class="small text-truncate font-monospace" t-esc="printer.name"/>
+                            <span t-if="state.selectedPrinter === printer.name || (!state.selectedPrinter &amp;&amp; state.defaultPrinter === printer.name)" class="badge text-bg-primary ms-2">
+                                <i class="fa fa-star me-1"/>In use
+                            </span>
+                            <button t-else="" type="button" class="btn btn-sm btn-link py-0 ms-2"
+                                    t-on-click="() => this.selectPrinter(printer)">
+                                Use this printer
+                            </button>
+                        </div>
+                    </t>
+                </div>
+
+                <button t-if="state.bridgeActive" type="button"
+                        class="btn btn-sm btn-outline-secondary w-100 mb-3"
+                        t-on-click="refreshPrinters" t-att-disabled="state.syncingPrinters">
+                    <i t-att-class="state.syncingPrinters ? 'fa fa-spinner fa-spin me-2' : 'fa fa-refresh me-2'"/>
+                    <t t-if="state.syncingPrinters">Discovering printers…</t>
+                    <t t-else="">Refresh desktop printers (<t t-esc="state.printersCount"/>)</t>
+                </button>
 
                 <div class="row g-2 text-center mb-3">
                     <div class="col-4">
@@ -73,14 +95,8 @@
                     <button type="button" class="btn btn-sm btn-primary text-start" t-on-click="openJobs">
                         <i class="fa fa-list-ul me-2" title="Jobs"/>Print Jobs Log
                     </button>
-                    <button type="button" class="btn btn-sm btn-light border text-start" t-on-click="openProfiles">
-                        <i class="fa fa-print me-2" title="Profiles"/>Printer Profiles (<t t-esc="state.profilesCount"/>)
-                    </button>
-                    <button type="button" class="btn btn-sm btn-light border text-start" t-on-click="openRules">
-                        <i class="fa fa-random me-2" title="Rules"/>Routing Rules (<t t-esc="state.rulesCount"/>)
-                    </button>
                     <button t-if="state.bridgeActive" type="button" class="btn btn-sm btn-outline-primary text-start mt-1" t-on-click="runQuickTestPrint">
-                        <i class="fa fa-check-square-o me-2" title="Test"/>Send A4 Calibration Page
+                        <i class="fa fa-check-square-o me-2" title="Test"/>Send Compatible Printer Test
                     </button>
                     <button t-if="state.bridgeActive" type="button" class="btn btn-sm btn-outline-secondary text-start" t-on-click="openControlCenter">
                         <i class="fa fa-sliders me-2" title="Control Center"/>Open Native Control Center

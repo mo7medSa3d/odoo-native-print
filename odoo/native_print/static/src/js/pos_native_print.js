@@ -2,6 +2,7 @@
 import { ReceiptScreen } from "@point_of_sale/app/screens/receipt_screen/receipt_screen";
 import { patch } from "@web/core/utils/patch";
 import { rpc } from "@web/core/network/rpc";
+import { resolveBridgeTarget } from "./native_print_client";
 
 /*
  * Native Print for POS receipts (Odoo 17, 18, and 19 compatible).
@@ -138,8 +139,12 @@ async function elementToPngBytes(element, scale = 2) {
 }
 
 async function watchPosJob(bridge, jobId, rule, byteSize) {
-    for (let i = 0; i < 30; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 600));
+    // Receipts usually finish in seconds, but a busy queue can take much
+    // longer; watch for up to ~3 minutes so the terminal state is reported.
+    const deadline = Date.now() + 3 * 60 * 1000;
+    for (let i = 0; Date.now() < deadline; i++) {
+        await new Promise((resolve) =>
+            setTimeout(resolve, i < 10 ? 600 : 2000));
         try {
             let state = null;
             let errorCode = null;
@@ -163,7 +168,6 @@ async function watchPosJob(bridge, jobId, rule, byteSize) {
                         error_code: errorCode,
                         device: rule.printer_pattern,
                         report_name: POS_RECEIPT_SOURCE,
-                        profile_id: rule.profile_id,
                         pages: 1,
                         byte_size: byteSize,
                         attempts,
@@ -183,13 +187,11 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
     if (!bridge || typeof bridge.printImage !== "function") {
         return false;
     }
-    const resolved = await rpc(
-        "/native_print/rules",
-        { report_name: POS_RECEIPT_SOURCE },
-        { silent: true },
-    );
-    if (!resolved || !resolved.rule) {
-        return false;
+    const target = await resolveBridgeTarget(
+        bridge, { preferClasses: ["thermal", "label"] },
+    ).catch(() => null);
+    if (!target) {
+        return false; // No printer on this PC right now.
     }
     const element = findReceiptElement();
     if (!element) {
@@ -210,13 +212,16 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
     const idempotencyKey =
         `pos-${safeRef}-${Date.now()}-` +
         Math.random().toString(36).slice(2, 10);
-    const rule = resolved.rule;
+    const rule = target.rule;
     await bridge.printImage({
         idempotencyKey,
         reportName: POS_RECEIPT_SOURCE,
         printerPattern: rule.printer_pattern,
         mode: rule.mode || "escpos",
-        paper: rule.paper || "80mm",
+        // The driver-reported roll width is resolved by the native worker.
+        // Never guess 58mm or 80mm for a kitchen/POS receipt.
+        mediaRollWidthMm:
+            (rule.media && rule.media.roll_width_mm) || undefined,
         copies: rule.copies || 1,
         bytes,
     });
@@ -227,7 +232,6 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
             state: "queued",
             device: rule.printer_pattern,
             report_name: POS_RECEIPT_SOURCE,
-            profile_id: rule.profile_id,
             pages: 1,
             byte_size: bytes.length,
         },
