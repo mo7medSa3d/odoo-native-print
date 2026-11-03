@@ -15,9 +15,9 @@ env:
 jobs:
   core-linux:
     name: Core (Linux) - fmt, clippy, tests, addon checks, bench, chaos
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -59,16 +59,16 @@ jobs:
           cargo run --release -p print-tools -- chaos | tee evidence/chaos.txt
           cargo run --release -p print-tools -- calibration | tee evidence/calibration.txt
       - name: Upload Linux evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-evidence-linux
           path: evidence/
 
   audit:
     name: Supply chain - audit and deny
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
       - uses: rustsec/audit-check@v2
         with:
@@ -78,7 +78,7 @@ jobs:
     name: Windows - workspace tests + print-win (real Win32 compile)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -94,7 +94,7 @@ jobs:
           cargo test
           cargo build --release --bin npwin_probe
       - name: Upload the Windows probe
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: npwin-probe
           path: crates/print-win/target/release/npwin_probe.exe
@@ -103,9 +103,9 @@ jobs:
     name: Windows - build the app installers (MSI + NSIS)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
@@ -123,7 +123,7 @@ jobs:
         shell: powershell
         run: Get-ChildItem -Recurse app/src-tauri/target/release/bundle | Select-Object FullName, Length
       - name: Upload installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-installers-unsigned
           path: |
@@ -137,7 +137,7 @@ jobs:
     needs: windows-tests
     steps:
       - name: Download the probe
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: npwin-probe
       - name: Discover printers on this runner
@@ -149,7 +149,7 @@ jobs:
           Write-Host "Note: GitHub-hosted runners normally expose no real printers."
           Write-Host "Real-printer coverage runs in the Printer Lab workflow on a self-hosted runner."
       - name: Upload smoke results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-print-smoke
           path: probe-list.txt
