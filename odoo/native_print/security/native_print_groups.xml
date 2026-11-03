@@ -6,7 +6,11 @@
     <record id="group_native_print_manager" model="res.groups">
         <field name="name">Native Print / Manager</field>
         <field name="implied_ids" eval="[(4, ref('group_native_print_user'))]"/>
-        <field name="users" eval="[(4, ref('base.user_root')), (4, ref('base.user_admin'))]"/>
+        <field name="user_ids" eval="[(4, ref('base.user_root')), (4, ref('base.user_admin'))]"/>
+    </record>
+    <!-- Grant administrators Native Print / Manager by default -->
+    <record id="base.group_system" model="res.groups">
+        <field name="implied_ids" eval="[(4, ref('group_native_print_manager'))]"/>
     </record>
     <!-- Grant internal users Native Print / User by default so standard Odoo users
          can resolve print rules and log print jobs out of the box -->

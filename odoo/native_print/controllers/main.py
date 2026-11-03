@@ -104,7 +104,12 @@ class NativePrintController(http.Controller):
 
     def _first_matching_rule(self, domain):
         rules = request.env["native.print.rule"].search(domain)
-        user_groups = set(request.env.user.groups_id.ids)
+        user = request.env.user
+        # Odoo 19 renamed groups_id -> group_ids, with all_group_ids including implied groups
+        groups = getattr(user, "all_group_ids", None)
+        if groups is None:
+            groups = getattr(user, "group_ids", getattr(user, "groups_id", None))
+        user_groups = set(groups.ids) if groups else set()
         for rule in rules:  # model _order = priority desc, id
             if not rule.profile_id or not rule.profile_id.active:
                 continue
