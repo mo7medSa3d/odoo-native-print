@@ -65,7 +65,7 @@
             <filter name="f_failed" string="Failed" domain="[('state', '=', 'failed')]"/>
             <filter name="f_dead" string="Dead letter" domain="[('state', '=', 'dead_letter')]"/>
             <filter name="f_done" string="Done" domain="[('state', '=', 'done')]"/>
-            <group expand="0" string="Group by">
+            <group>
                 <filter name="g_state" string="State" context="{'group_by': 'state'}"/>
                 <filter name="g_report" string="Report" context="{'group_by': 'report_id'}"/>
             </group>

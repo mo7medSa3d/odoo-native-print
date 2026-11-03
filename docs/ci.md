@@ -19,7 +19,13 @@ all of them.
   build, uploaded as an artifact.
 - **Windows — build the app installers**: Node 20 + Tauri CLI, builds
   the app and its MSI + NSIS bundles, fails if no installer is
-  produced, uploads them as `windows-installers-unsigned`.
+  produced, uploads them as `windows-installers-unsigned`. Since RC5
+  the bundles embed no WebView2 installer (`webviewInstallMode: skip`;
+  target machines are Windows 11, whose runtime is built in) and do
+  embed the vendored PDFium DLL as a resource (docs/pdfium.md). The
+  Linux job fetches the pinned Linux PDFium first and runs the render
+  tests with `PDFIUM_TEST_REQUIRED=1`, so a render regression fails CI
+  instead of silently skipping.
 - **Windows — printer discovery smoke**: downloads the probe and runs
   `npwin_probe list` on the hosted runner, plus `Get-Printer`. Hosted
   runners normally expose **no real printers** — this job proves the
@@ -36,8 +42,9 @@ all of them.
   until the company's certificate is wired in (see the comment in the
   workflow for where the signing step goes).
 
-## odoo.yml — manual, and on release tags
-Pulls an Odoo Docker image (prefers `odoo:19.0`), starts Postgres 16,
+## odoo.yml — manual, on release tags, and on odoo/** changes
+Runs on `workflow_dispatch`, on `v*` tag pushes, and on pushes/PRs to
+`main` that touch `odoo/**`. Pulls an Odoo Docker image (prefers `odoo:19.0`), starts Postgres 16,
 installs `native_print` with `--test-enable --stop-after-init`, and
 fails on a non-zero Odoo exit or a failed-test summary in the log.
 The full log is always uploaded (`odoo-test-log`) — calibrate the

@@ -33,7 +33,7 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let mut queue = Queue::open(data_dir.join("print-queue.db").to_str().unwrap())
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
             // Crash recovery per ADR-0004 (safe default: no auto-reprint).
             let _ = queue.recover_on_startup(false);
             app.manage(AppState {

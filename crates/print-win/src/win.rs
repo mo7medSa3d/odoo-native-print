@@ -39,6 +39,185 @@ extern "system" {
 const DC_PAPERS: u16 = 2;
 const DC_PAPERSIZE: u16 = 3;
 
+// --- GDI (gdi32) for the PDF bitmap backend ---------------------------
+
+type Hdc = *mut c_void;
+
+#[repr(C)]
+struct DocInfoW {
+    size: i32,
+    doc_name: *const u16,
+    output: *const u16,
+    datatype: *const u16,
+    fw_type: u32,
+}
+
+#[link(name = "gdi32")]
+extern "system" {
+    fn CreateDCW(
+        driver: *const u16,
+        device: *const u16,
+        output: *const u16,
+        init_data: *const c_void,
+    ) -> Hdc;
+    fn DeleteDC(dc: Hdc) -> Bool;
+    fn GetDeviceCaps(dc: Hdc, index: i32) -> i32;
+    fn StartDocW(dc: Hdc, doc_info: *const DocInfoW) -> i32;
+    fn StartPage(dc: Hdc) -> i32;
+    fn EndPage(dc: Hdc) -> i32;
+    fn EndDoc(dc: Hdc) -> i32;
+    fn AbortDoc(dc: Hdc) -> i32;
+    fn StretchDIBits(
+        dc: Hdc,
+        x_dest: i32,
+        y_dest: i32,
+        dest_w: i32,
+        dest_h: i32,
+        x_src: i32,
+        y_src: i32,
+        src_w: i32,
+        src_h: i32,
+        bits: *const c_void,
+        bitmap_info: *const c_void,
+        usage: u32,
+        rop: u32,
+    ) -> i32;
+}
+
+const HORZRES: i32 = 8;
+const VERTRES: i32 = 10;
+const DIB_RGB_COLORS: u32 = 0;
+const SRCCOPY: u32 = 0x00CC_0020;
+const GDI_ERROR: i32 = -1;
+
+/// Print a PDF through GDI: each page is rendered to a bitmap by the
+/// shared PDFium renderer (print-render) and blitted to the printer
+/// device context. Returns the number of pages sent.
+///
+/// The printer's own selected form/paper governs the physical page;
+/// the rendered bitmap (planned from the PDF's page size) is fitted
+/// into the DC's printable resolution preserving aspect — the same
+/// "never silently print at a wrong size" ladder has already matched
+/// the profile's form to this printer before a job reaches here.
+pub fn print_pdf_gdi(
+    printer: &str,
+    title: &str,
+    pdf_bytes: &[u8],
+    mode: print_render::RenderMode,
+    dpi: u32,
+) -> Result<usize, String> {
+    let pdfium = print_render::Pdfium::load().map_err(|e| e.to_string())?;
+    let doc = pdfium.load_document(pdf_bytes).map_err(|e| e.to_string())?;
+    let pages = doc.page_count();
+    if pages == 0 {
+        return Err("PDF has no pages".to_string());
+    }
+    let name = wide(printer);
+    let dc = unsafe {
+        CreateDCW(
+            std::ptr::null(),
+            name.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    };
+    if dc.is_null() {
+        return Err(format!("CreateDC for {printer:?}: {}", last_error()));
+    }
+    let result = print_pdf_gdi_inner(dc, &doc, title, mode, dpi);
+    unsafe { DeleteDC(dc) };
+    result
+}
+
+fn print_pdf_gdi_inner(
+    dc: Hdc,
+    doc: &print_render::PdfDocument,
+    title: &str,
+    mode: print_render::RenderMode,
+    dpi: u32,
+) -> Result<usize, String> {
+    let doc_name = wide(title);
+    let info = DocInfoW {
+        size: std::mem::size_of::<DocInfoW>() as i32,
+        doc_name: doc_name.as_ptr(),
+        output: std::ptr::null(),
+        datatype: std::ptr::null(),
+        fw_type: 0,
+    };
+    let started = unsafe { StartDocW(dc, &info) };
+    if started <= 0 {
+        return Err(format!("StartDoc: {}", last_error()));
+    }
+    let mut sent = 0usize;
+    let mut failure: Option<String> = None;
+    for i in 0..doc.page_count() {
+        match print_one_page(dc, doc, i, mode, dpi) {
+            Ok(()) => sent += 1,
+            Err(e) => {
+                failure = Some(format!("page {}: {e}", i + 1));
+                break;
+            }
+        }
+    }
+    if failure.is_some() {
+        unsafe { AbortDoc(dc) };
+    } else {
+        unsafe { EndDoc(dc) };
+    }
+    match failure {
+        Some(e) => Err(e),
+        None => Ok(sent),
+    }
+}
+
+fn print_one_page(
+    dc: Hdc,
+    doc: &print_render::PdfDocument,
+    index: usize,
+    mode: print_render::RenderMode,
+    dpi: u32,
+) -> Result<(), String> {
+    let page = doc
+        .render_page(index, mode, dpi)
+        .map_err(|e| e.to_string())?;
+    let dib = crate::dib::build_dib(&page);
+    let area_w = unsafe { GetDeviceCaps(dc, HORZRES) };
+    let area_h = unsafe { GetDeviceCaps(dc, VERTRES) };
+    if area_w <= 0 || area_h <= 0 {
+        return Err(format!("GetDeviceCaps: {}", last_error()));
+    }
+    let (x, y, w, h) = crate::dib::fit_to_page(dib.width, dib.height, area_w as u32, area_h as u32);
+    if unsafe { StartPage(dc) } <= 0 {
+        return Err(format!("StartPage: {}", last_error()));
+    }
+    let info = dib.bitmap_info();
+    let drawn = unsafe {
+        StretchDIBits(
+            dc,
+            x,
+            y,
+            w as i32,
+            h as i32,
+            0,
+            0,
+            dib.width as i32,
+            dib.height as i32,
+            dib.bits.as_ptr() as *const c_void,
+            info.as_ptr() as *const c_void,
+            DIB_RGB_COLORS,
+            SRCCOPY,
+        )
+    };
+    let end = unsafe { EndPage(dc) };
+    if drawn == GDI_ERROR || drawn == 0 {
+        return Err(format!("StretchDIBits: {}", last_error()));
+    }
+    if end <= 0 {
+        return Err(format!("EndPage: {}", last_error()));
+    }
+    Ok(())
+}
+
 #[repr(C)]
 struct PrinterInfo2W {
     server_name: *const u16,

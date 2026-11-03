@@ -3,10 +3,16 @@
 ## Install (per machine, enterprise)
 1. Deploy the MSI silently: `msiexec /i OdooNativePrint.msi /qn ODOO_ORIGIN=https://odoo.company.local:8069`
    (the installer writes config.json with odoo_origin; or set the GPO policy).
-2. WebView2: the bundle uses the offline installer mode so no internet is
-   needed at install time. Trade-off: with a fixed/offline runtime, the IT
-   team owns WebView2 patching; with Evergreen, Microsoft patches it.
-   Choose per site policy and record the choice.
+2. WebView2: the installers bundle NO WebView2 installer
+   (`webviewInstallMode: skip` since RC5). The app uses the machine's
+   own WebView2 runtime, which is part of Windows 11 and ships with
+   Microsoft Edge on Windows 10 — so target machines must be Windows 11,
+   or Windows 10 with Edge/WebView2 present. Verify before rollout if a
+   site runs stripped images: open Edge, or check
+   `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`.
+   Trade-off: installers stay small and Microsoft keeps the runtime
+   patched (Evergreen); the cost is the runtime is a machine
+   prerequisite, not something the installer can fix offline.
 3. Install the Odoo addon (see docs/odoo-setup.md) and create at least one
    profile + rule, or nothing will route to native printing (by design).
 4. First run: sign in to Odoo inside the app, print the calibration page

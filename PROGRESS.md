@@ -106,3 +106,74 @@ at the client's site, per the user's instruction on 2026-11-02.
   (no GitHub remote/credentials in this VM); the first Windows run is
   still the first real compile of the Tauri app — expect to iterate
   from its uploaded logs if it complains.
+
+### RC5 additions (2026-11-03): no bundled WebView2, PDFium embedded, Odoo tested live
+- WebView2: installers bundle NO WebView2 installer any more
+  (`webviewInstallMode: skip` in tauri.conf.json). The app uses the
+  system runtime — Windows 11 ships it; Windows 10 needs Edge/WebView2
+  present. This removes ~127-190 MB per installer (the RC4 artifact
+  mystery: the 440 MB artifact was two installers each carrying the
+  full offline WebView2 installer). Requirement is documented in
+  docs/runbooks.md (Install step 2) and docs/odoo-setup.md; the
+  now-pointless CI step that installed WebView2 on the build runner
+  was removed (the app is never launched in CI).
+- PDFium is embedded — nothing left to install for PDF printing:
+  pinned bblanchon/pdfium-binaries chromium/8125 (PDFium
+  158.0.8125.0, non-V8 build). pdfium.dll (7,586,816 bytes, sha256
+  4b0dec92...) is vendored at app/src-tauri/resources/pdfium.dll,
+  bundled into both installers via bundle.resources, license beside
+  it; full provenance in docs/pdfium.md. tools/fetch-pdfium.sh
+  (sha256-verified) fetches the Linux build for dev/CI.
+- PDF rendering is real now (was: planning parser only):
+  print-render::pdfium binds PDFium dynamically via libloading
+  (search: NATIVE_PRINT_PDFIUM_PATH, exe dir, exe resources/, system),
+  renders through the existing render plan (DPI ladder + 128 MiB/page
+  ceiling, enforced on the actual allocation too) into the existing
+  bitmap model (BGRA / grayscale / MonoBitmap threshold). Missing
+  library = loud error, no fallback. Linux integration tests render
+  the calibration A4 against the real library: 4/4 pass, and CI runs
+  them with PDFIUM_TEST_REQUIRED=1 so they cannot silently skip.
+- GDI backend (the S5 build item) is code-complete: print-win::dib
+  (platform-independent DIB construction + page-fit math, unit-tested
+  on Linux) and win::print_pdf_gdi (CreateDC/StartDoc/StretchDIBits
+  over PDFium bitmaps). npwin_probe gains `pdf-gdi <printer> <file>`
+  and `pdf-gdi-test <printer>`; the Printer Lab workflow has a gated
+  pdf-gdi-test step. Its first compile is GitHub Windows CI after
+  push — it has NOT compiled yet; no Windows result is claimed.
+- Odoo 19 was installed IN THIS VM (Postgres 16 + Odoo 19.0 source in
+  a venv; Docker was not used — the VM's apt route was the reliable
+  one) and the addon tests were run with the odoo.yml command. The
+  run caught a real bug the static checks had missed for four RCs:
+  the job search view used `<group expand="0" string="...">`, which
+  Odoo 19's RNG rejects; fixed to the modern bare `<group>` form.
+  Final result (log: ~/workspace/rc5-evidence/odoo-test-green.log):
+  "odoo.tests.result: 0 failed, 0 error(s) of 1563 tests",
+  Odoo exit code 0 — all 4 native_print tests pass (job log states,
+  POS receipt rule by source name, profile defaults, rule priority).
+  An earlier run in this VM's default shell env showed 2 failures in
+  Odoo core's own TestConfigManager (data_dir /root vs /home/hatch
+  from the VM's uid-0-with-foreign-HOME setup, plus proxy env vars
+  leaking into the config); with a clean env (HOME=/root, proxy vars
+  unset) the same tree is 1563/1563 green, which pins those two on
+  the VM shell, not on any code. In GitHub's odoo.yml the Docker
+  image provides the clean env (and wkhtmltopdf/cairo) by default.
+- odoo.yml now also runs on pushes/PRs to main touching odoo/**.
+- Local gates for RC5: fmt (incl. Windows-only sources) clean,
+  clippy -D warnings clean (workspace, print-win, and the Tauri app —
+  the app was cargo check + clippy verified on Linux with GTK dev
+  libs installed; that first-ever app clippy run surfaced 3
+  pre-existing lints — unused API-contract fields in commands.rs and
+  an io::Error::new(Other) — fixed in RC5 with the contract fields
+  documented as informational), 76 workspace tests + 7 print-win tests pass,
+  cargo-deny (0.20.2): advisories/bans/licenses/sources ok,
+  bench 8,771 jobs/sec PASS, chaos PASS, calibration PASS, addon
+  static checks pass, all 4 workflow YAMLs parse.
+- App version aligned to 0.5.0 (package.json, tauri.conf.json,
+  src-tauri/Cargo.toml); app Cargo.lock is now committed.
+- Honest limits / BLOCKED: Windows compile of the GDI backend and of
+  the Tauri bundle with the new resource wiring = first GitHub
+  Windows CI run after the user pushes (this VM cannot compile or
+  run them; the GitHub App here is read-only, so the user pushes).
+  Real-printer proof (S1/S3-S8 field items), signing certificate,
+  soak/pilot: unchanged, at the client's site. RC5 must not be
+  described as production-released until the Windows CI run is green.

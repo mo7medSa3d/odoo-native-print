@@ -34,9 +34,15 @@
 - [ ] 72-hour soak on a pilot terminal; RDS/Citrix session check
 - [ ] Pilot: one department, one week, job-log review, then broad rollout
 
-## Known limitations in RC1 (honest)
-- PDF inspection uses a built-in parser for planning; PDFium on Windows
-  is the authoritative renderer and replaces planning values at print time.
+## Known limitations (honest, updated RC5)
+- PDF inspection uses a built-in parser for planning; PDFium
+  (vendored, docs/pdfium.md) is the authoritative renderer and
+  replaces planning values at print time. Its GDI backend is
+  code-complete in RC5; the first Windows compile is the GitHub
+  Windows CI run after this RC is pushed, and field proof is S5.
+- Installers bundle no WebView2 installer (RC5): target machines must
+  be Windows 11, or Windows 10 with Edge/WebView2 present
+  (docs/runbooks.md, Install step 2).
 - The app's byte transfer uses standard Tauri invoke serialisation until
   the S4 raw-body optimisation is verified on Windows.
 - TSPL/EPL encoders, Bluetooth/USB-OTG, Android and iOS are later phases

@@ -2,6 +2,16 @@
 
 Target: Odoo 19 (17/18 expected to work; verify on spike S2 environments).
 
+## Client machine requirements (the Windows app)
+
+- Windows 11 (any edition), or Windows 10 with Microsoft Edge /
+  WebView2 runtime present. Since RC5 the installers bundle **no**
+  WebView2 installer (`webviewInstallMode: skip`): the app uses the
+  system runtime, which Windows 11 ships out of the box.
+- PDF rendering needs nothing installed: PDFium is bundled inside the
+  installer (see docs/pdfium.md).
+- A printer driver installed in Windows for every printer used.
+
 ## Install
 1. Copy `odoo/native_print` into the server's addons path.
 2. Restart Odoo, update the apps list, install **Native Print**.

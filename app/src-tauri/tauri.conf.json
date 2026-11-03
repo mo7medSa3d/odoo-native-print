@@ -27,10 +27,12 @@
       "msi",
       "nsis"
     ],
+    "resources": {
+      "resources/pdfium.dll": "pdfium.dll"
+    },
     "windows": {
       "webviewInstallMode": {
-        "silent": true,
-        "type": "offlineInstaller"
+        "type": "skip"
       }
     },
     "icon": [
@@ -43,5 +45,5 @@
   },
   "identifier": "com.company.odoo-native-print",
   "productName": "Odoo Native Print",
-  "version": "0.3.0"
+  "version": "0.5.0"
 }

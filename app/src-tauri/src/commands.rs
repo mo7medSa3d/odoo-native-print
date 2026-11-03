@@ -23,9 +23,17 @@ pub struct PrintPdfRequest {
     pub report_name: String,
     pub printer_pattern: String,
     pub mode: String,
+    // Contract fields (API v1): accepted and type-checked at the
+    // door, currently informational — the server resolves rules and
+    // paper/scale from the profile; the client routes by
+    // printer_pattern + mode. Kept so the wire contract stays
+    // complete and forward-compatible.
+    #[allow(dead_code)]
     pub paper: Option<String>,
     pub copies: u16,
+    #[allow(dead_code)]
     pub scale_policy: Option<String>,
+    #[allow(dead_code)]
     pub url: String,
     // NOTE (spike S4): bytes currently arrive through Tauri's standard
     // invoke serialisation. The raw-body transfer (<2s for 50 MB,
@@ -150,6 +158,10 @@ pub struct PrintImageRequest {
     pub report_name: String,
     pub printer_pattern: String,
     /// Receipt paper from the server profile: "80mm" (default) or "58mm".
+    /// Contract field: the backend applies the profile's paper at
+    /// print time (receipt_png_to_escpos); accepted here so the wire
+    /// contract stays complete.
+    #[allow(dead_code)]
     pub paper: Option<String>,
     /// PNG bytes captured by the POS extension (receipt as an image).
     pub bytes: Vec<u8>,

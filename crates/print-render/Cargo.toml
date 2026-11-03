@@ -1,12 +1,14 @@
 [package]
 name = "print-render"
 version = "0.1.0"
+publish = false
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
 thiserror = { workspace = true }
+libloading = "0.8"
 png = "0.17"
 print-core = { path = "../print-core" }
 print-raw = { path = "../print-raw" }

@@ -14,17 +14,22 @@
 //!   EndPage/EndDoc/ClosePrinter) for ESC/POS and ZPL byte streams — this
 //!   is the transport under the thermal/label modes.
 //!
-//! What plugs in next on Windows: the GDI bitmap backend (PDFium bitmap ->
-//! printer DC) implementing print_core::PrintBackend for mode `gdi`,
-//! following docs/research/pdfium-gdi-windows-printing.md.
+//! GDI bitmap backend (RC5): PDF pages rendered by the shared PDFium
+//! renderer in print-render, converted to DIBs by the platform-
+//! independent `dib` module (unit-tested everywhere), and blitted to
+//! the printer DC in `win::print_pdf_gdi`. Code-complete; its first
+//! compile is the Windows CI job, and field proof is spike S5.
 
+pub mod dib;
 pub mod discovery;
 
 #[cfg(windows)]
 mod win;
 
 #[cfg(windows)]
-pub use win::{default_printer_name, discover_printers, paper_forms, print_raw, printer_status};
+pub use win::{
+    default_printer_name, discover_printers, paper_forms, print_pdf_gdi, print_raw, printer_status,
+};
 
 #[cfg(not(windows))]
 mod stub {
@@ -42,6 +47,15 @@ mod stub {
     pub fn print_raw(_printer: &str, _title: &str, _bytes: &[u8]) -> Result<u32, Unsupported> {
         Err(Unsupported)
     }
+    pub fn print_pdf_gdi(
+        _printer: &str,
+        _title: &str,
+        _pdf_bytes: &[u8],
+        _mode: print_render::RenderMode,
+        _dpi: u32,
+    ) -> Result<usize, Unsupported> {
+        Err(Unsupported)
+    }
     pub fn discover_printers() -> Result<Vec<print_core::PrinterInfo>, Unsupported> {
         Err(Unsupported)
     }
@@ -52,5 +66,6 @@ mod stub {
 
 #[cfg(not(windows))]
 pub use stub::{
-    default_printer_name, discover_printers, paper_forms, print_raw, printer_status, Unsupported,
+    default_printer_name, discover_printers, paper_forms, print_pdf_gdi, print_raw, printer_status,
+    Unsupported,
 };

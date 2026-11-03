@@ -8,10 +8,12 @@ pub mod bitmap;
 pub mod calibration;
 pub mod image;
 pub mod pdf;
+pub mod pdfium;
 pub mod plan;
 
 pub use image::{
     decode_png, receipt_dots_for_paper, receipt_png_to_escpos, scale_to_width, ImageError,
 };
 pub use pdf::{parse_pdf_info, PdfInfo, PdfPageInfo, PdfParseError};
+pub use pdfium::{PdfDocument, Pdfium, PdfiumError, RenderedPage};
 pub use plan::{plan_render, split_subjobs, RenderMode, RenderPlan, SubJob};

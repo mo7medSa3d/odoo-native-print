@@ -22,5 +22,3 @@ See PROGRESS.md and docs/spikes/S1-S8.md. Short version: the
 platform-independent core is built and green (tests + clippy -D warnings);
 everything Windows/Odoo/hardware-bound is explicitly marked BLOCKED with an
 exact procedure, not claimed.
-# odoo-native-print
-# odoo-native-print

@@ -8,6 +8,14 @@
 //!   npwin_probe forms <printer>           paper forms of one printer
 //!   npwin_probe escpos-test <printer>     print the 80mm calibration
 //!                                         page (a REAL print)
+//!   npwin_probe pdf-gdi <printer> <file.pdf>
+//!                                         print a PDF via the GDI
+//!                                         bitmap backend (spike S5;
+//!                                         use "Microsoft Print to PDF"
+//!                                         as the printer for proof)
+//!   npwin_probe pdf-gdi-test <printer>    GDI-print the built-in
+//!                                         calibration PDF (a REAL
+//!                                         print; for the lab / S5)
 //!   npwin_probe raw <printer> <file>      send a file's bytes RAW
 //! Exit codes: 0 ok, 2 usage, 3 platform/FFI error.
 
@@ -81,6 +89,50 @@ fn main() -> ExitCode {
             }
             None => ExitCode::from(2),
         },
+        Some("pdf-gdi-test") => match args.get(2) {
+            Some(name) => {
+                let bytes = print_render::calibration::calibration_pdf();
+                match print_win::print_pdf_gdi(
+                    name,
+                    "Native Print calibration (GDI)",
+                    &bytes,
+                    print_render::RenderMode::Grayscale,
+                    300,
+                ) {
+                    Ok(pages) => {
+                        println!(
+                            "pdf-gdi-test printed pages={pages} bytes={} printer={name:?}",
+                            bytes.len()
+                        );
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => fail(e),
+                }
+            }
+            None => ExitCode::from(2),
+        },
+        Some("pdf-gdi") => match (args.get(2), args.get(3)) {
+            (Some(name), Some(path)) => match std::fs::read(path) {
+                Ok(bytes) => match print_win::print_pdf_gdi(
+                    name,
+                    "Native Print PDF (GDI)",
+                    &bytes,
+                    print_render::RenderMode::Grayscale,
+                    300,
+                ) {
+                    Ok(pages) => {
+                        println!(
+                            "pdf-gdi printed pages={pages} bytes={} printer={name:?} file={path:?}",
+                            bytes.len()
+                        );
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => fail(e),
+                },
+                Err(e) => fail(e),
+            },
+            _ => ExitCode::from(2),
+        },
         Some("raw") => match (args.get(2), args.get(3)) {
             (Some(name), Some(path)) => match std::fs::read(path) {
                 Ok(bytes) => match print_win::print_raw(name, "Native Print raw job", &bytes) {
@@ -98,7 +150,9 @@ fn main() -> ExitCode {
             _ => ExitCode::from(2),
         },
         _ => {
-            eprintln!("usage: npwin_probe <list|status|forms|escpos-test|raw> ...");
+            eprintln!(
+                "usage: npwin_probe <list|status|forms|escpos-test|pdf-gdi|pdf-gdi-test|raw> ..."
+            );
             ExitCode::from(2)
         }
     }
