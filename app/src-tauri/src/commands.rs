@@ -26,7 +26,6 @@ use tauri::State;
 
 pub struct AppState {
     pub queue: Arc<Mutex<Queue>>,
-    pub db_path: String,
     pub configured_origin: RwLock<Option<String>>,
     pub config_dir: PathBuf,
     pub locked_by_policy: bool,
