@@ -126,7 +126,6 @@ pub fn run() {
             let initial_origin = resolved.odoo_origin.clone();
             app.manage(AppState {
                 queue: queue_arc,
-                db_path,
                 configured_origin: RwLock::new(initial_origin.clone()),
                 config_dir,
                 locked_by_policy: resolved.locked_by_policy,
