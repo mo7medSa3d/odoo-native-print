@@ -16,9 +16,9 @@ env:
 jobs:
   gate-linux:
     name: Release gate (Linux) - full test suite
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -34,7 +34,7 @@ jobs:
           git archive --format=tar.gz --prefix="odoo-native-print-${VERSION}/" \
             -o "odoo-native-print-${VERSION}-source.tar.gz" HEAD
       - name: Upload source tarball
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: source-tarball
           path: "*-source.tar.gz"
@@ -43,9 +43,9 @@ jobs:
     name: Release - Windows installers (MSI + NSIS)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
@@ -74,7 +74,7 @@ jobs:
             Out-File -Encoding ascii release-files/SHA256SUMS.txt
           Get-ChildItem release-files | Select-Object Name, Length
       - name: Upload installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-installers
           path: release-files/
@@ -86,14 +86,14 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [gate-linux, windows-installers]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
       - name: Download all release files
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
