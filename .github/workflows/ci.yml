@@ -113,13 +113,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: app/src-tauri -> target
-      - name: Ensure WebView2 runtime (evergreen bootstrapper)
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Continue"
-          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile "MicrosoftEdgeWebview2Setup.exe"
-          Start-Process -FilePath "MicrosoftEdgeWebview2Setup.exe" -ArgumentList "/silent","/install" -Wait
-          Write-Host "WebView2 bootstrapper finished (already-installed is fine)."
       - name: Install Tauri CLI
         working-directory: app
         run: npm ci
