@@ -154,11 +154,7 @@ pub fn run() {
                         return true;
                     }
                     let state = app_handle.state::<AppState>();
-                    let allowed = state
-                        .configured_origin
-                        .read()
-                        .ok()
-                        .and_then(|g| g.clone());
+                    let allowed = state.configured_origin.read().ok().and_then(|g| g.clone());
                     match allowed {
                         Some(cfg_origin) => {
                             let o = u.origin().ascii_serialization();

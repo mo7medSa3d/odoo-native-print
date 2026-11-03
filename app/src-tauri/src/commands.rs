@@ -68,10 +68,7 @@ where
 }
 
 fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
-    let clean: Vec<u8> = input
-        .bytes()
-        .filter(|b| !b.is_ascii_whitespace())
-        .collect();
+    let clean: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
     if clean.is_empty() {
         return Ok(Vec::new());
     }
@@ -757,10 +754,7 @@ pub fn open_control_center(
 }
 
 #[tauri::command]
-pub fn open_odoo_origin(
-    webview: tauri::Webview,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub fn open_odoo_origin(webview: tauri::Webview, state: State<'_, AppState>) -> Result<(), String> {
     check_origin(&webview, &state)?;
     let origin = state
         .configured_origin
@@ -1005,9 +999,7 @@ impl PrintBackend for NativePrintBackend {
         if job.printer.starts_with("tcp://") || job.printer.starts_with("raw://") {
             let (host, port, _) = Self::parse_host_port(&job.printer, 9100)?;
             let raw_bytes = match kind.as_str() {
-                "pdf" => {
-                    Self::pdf_to_raw_stream(&data, &opts.mode, paper, opts.copies, opts.cut)?
-                }
+                "pdf" => Self::pdf_to_raw_stream(&data, &opts.mode, paper, opts.copies, opts.cut)?,
                 "image-png" => Self::png_to_raw_stream(&data, &opts.mode, paper, opts.copies)?,
                 _ => {
                     let mut v = Vec::with_capacity(data.len() * opts.copies.max(1) as usize);

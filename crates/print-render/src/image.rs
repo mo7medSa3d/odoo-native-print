@@ -39,7 +39,11 @@ pub enum ImageError {
 /// - `80mm` (or `72mm`/`80 mm` roll) -> 72 mm printable = 576 dots
 pub fn receipt_dots_for_paper(paper: &str) -> u32 {
     let lower = paper.trim().to_ascii_lowercase();
-    if lower.starts_with("58") || lower.contains("58mm") || lower.contains("58 mm") || lower.starts_with("57") {
+    if lower.starts_with("58")
+        || lower.contains("58mm")
+        || lower.contains("58 mm")
+        || lower.starts_with("57")
+    {
         384
     } else {
         576 // 80mm is the default receipt width.

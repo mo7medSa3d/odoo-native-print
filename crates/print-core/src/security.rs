@@ -36,13 +36,12 @@ fn parse_origin(s: &str) -> Option<(String, String, u16)> {
         }
         let port = if after_close.is_empty() {
             default_port
-        } else if let Some(p) = after_close.strip_prefix(':') {
+        } else {
+            let p = after_close.strip_prefix(':')?;
             if p.is_empty() || !p.chars().all(|c| c.is_ascii_digit()) {
                 return None;
             }
             p.parse::<u16>().ok()?
-        } else {
-            return None;
         };
         (format!("[{ipv6}]"), port)
     } else {

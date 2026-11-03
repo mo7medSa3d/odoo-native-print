@@ -402,10 +402,7 @@ pub fn print_pdf_gdi_with_options(
     for _copy in 0..opts.copies.max(1) {
         for sub in &subjobs {
             let matched = if !forms.is_empty() {
-                Some(
-                    match_paper(sub.size, &forms, opts.scale_policy)
-                        .map_err(|e| e.to_string())?,
-                )
+                Some(match_paper(sub.size, &forms, opts.scale_policy).map_err(|e| e.to_string())?)
             } else {
                 None
             };
@@ -423,14 +420,8 @@ pub fn print_pdf_gdi_with_options(
                 .as_ref()
                 .map(|b| b.as_ptr() as *const c_void)
                 .unwrap_or(std::ptr::null());
-            let dc = unsafe {
-                CreateDCW(
-                    std::ptr::null(),
-                    name.as_ptr(),
-                    std::ptr::null(),
-                    init_ptr,
-                )
-            };
+            let dc =
+                unsafe { CreateDCW(std::ptr::null(), name.as_ptr(), std::ptr::null(), init_ptr) };
             if dc.is_null() {
                 return Err(format!("CreateDC for {printer:?}: {}", last_error()));
             }

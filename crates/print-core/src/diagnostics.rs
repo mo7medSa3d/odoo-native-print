@@ -53,10 +53,7 @@ const ALL_STATES: [JobState; 8] = [
 ];
 
 /// Build the bundle; at most the last 200 job summaries are included.
-pub fn build_bundle(
-    queue: &Queue,
-    recent: &[JobSummary],
-) -> Result<DiagnosticsBundle, QueueError> {
+pub fn build_bundle(queue: &Queue, recent: &[JobSummary]) -> Result<DiagnosticsBundle, QueueError> {
     let mut counts = Vec::new();
     for s in ALL_STATES {
         counts.push((s.as_str().to_string(), queue.count_by_state(s)?));

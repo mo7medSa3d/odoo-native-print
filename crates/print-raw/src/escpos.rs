@@ -139,7 +139,7 @@ mod tests {
     }
     #[test]
     fn text_line_strips_esc_pos_control_injection() {
-        let out = EscPos::new().text_line("ITEM 1\x1Bp\x00\x19\xFA\x1DV\x00");
+        let out = EscPos::new().text_line("ITEM 1\x1Bp\x00\x19\u{fa}\x1DV\x00");
         // Starts with ESC @ (2 bytes), then "ITEM 1", p, 0x19, 0xFA, V, LF — no injected ESC (0x1B) or GS (0x1D) after index 1.
         assert!(!out.bytes()[2..].contains(&0x1B));
         assert!(!out.bytes()[2..].contains(&0x1D));

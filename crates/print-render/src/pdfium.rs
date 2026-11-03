@@ -447,16 +447,7 @@ impl PdfDocument {
             // White background (BGRA 0xFFFFFFFF) so transparent page
             // areas print as paper, not black.
             (api.bitmap_fill_rect)(bitmap, 0, 0, w as c_int, h as c_int, 0xFFFF_FFFF);
-            (api.render_page_bitmap)(
-                bitmap,
-                page,
-                0,
-                0,
-                w as c_int,
-                h as c_int,
-                0,
-                render_flags,
-            );
+            (api.render_page_bitmap)(bitmap, page, 0, 0, w as c_int, h as c_int, 0, render_flags);
             let bw = (api.bitmap_get_width)(bitmap) as u32;
             let bh = (api.bitmap_get_height)(bitmap) as u32;
             let stride = (api.bitmap_get_stride)(bitmap) as usize;
