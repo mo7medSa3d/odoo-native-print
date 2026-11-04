@@ -10,6 +10,8 @@ denied at runtime by the ACL even though the Rust handler exists:
                                      the remote origin only its subset
 
 Exits non-zero with a diff when the surfaces disagree.
+Also models capabilities/toolbar.json and scans the shell's JS
+surfaces for invoke() calls naming commands that do not exist.
 """
 import json
 import re
@@ -18,15 +20,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "app" / "src-tauri"
-
-
-def rust_commands(text, start_marker):
-    start = text.index(start_marker)
-    end = text.index("]", start)
-    block = text[start:end]
-    return set(re.findall(r'"([a-z_]+)"', block)) or set(
-        re.findall(r"commands::([a-z_]+)", block)
-    )
 
 
 def main():
@@ -41,9 +34,10 @@ def main():
             perms[m.group(1)] = set(re.findall(r'"([a-z_]+)"', m.group(2)))
     granted = set().union(*perms.values()) if perms else set()
     caps = {}
-    for name in ("main.json", "remote.json"):
+    for name in ("main.json", "remote.json", "toolbar.json"):
         data = json.loads((SRC / "capabilities" / name).read_text(encoding="utf-8"))
         caps[name] = set()
+        caps[name + ":groups"] = set(data["permissions"])
         for p in data["permissions"]:
             caps[name] |= perms.get(p, set())
 
@@ -61,6 +55,24 @@ def main():
     leaked = caps["remote.json"] & admin
     if leaked:
         problems.append(f"remote capability leaks queue-admin commands: {sorted(leaked)}")
+    # The toolbar capability (for a future child webview) may only ever
+    # carry its own group; anything else appearing there is a leak the
+    # old gate could not see.
+    toolbar_groups = caps["toolbar.json:groups"]
+    if toolbar_groups != {"allow-toolbar"}:
+        problems.append(f"toolbar capability groups drifted: {sorted(toolbar_groups)}")
+    toolbar_leaked = caps["toolbar.json"] & admin
+    if toolbar_leaked:
+        problems.append(f"toolbar capability leaks queue-admin commands: {sorted(toolbar_leaked)}")
+    # Every raw invoke("...") in the shell's own JS surfaces (bridge
+    # facade, Control Center, toolbar page) must name a real command.
+    js_surfaces = [SRC / "src" / "lib.rs", SRC.parent / "dist" / "index.html", SRC.parent / "dist" / "toolbar.html"]
+    called = set()
+    for surface in js_surfaces:
+        called |= set(re.findall(r'invoke\(\s*"([a-z_]+)"', surface.read_text(encoding="utf-8")))
+    unknown_calls = called - handler
+    if unknown_calls:
+        problems.append(f"JS invokes commands missing from the handler: {sorted(unknown_calls)}")
 
     if problems:
         print("COMMAND SURFACE INCONSISTENT:")

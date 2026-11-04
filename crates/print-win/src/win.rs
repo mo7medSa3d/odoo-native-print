@@ -44,6 +44,7 @@ extern "system" {
     fn WritePrinter(handle: Handle, buffer: *const c_void, count: u32, written: *mut u32) -> Bool;
     fn EndPagePrinter(handle: Handle) -> Bool;
     fn EndDocPrinter(handle: Handle) -> Bool;
+    fn AbortPrinter(handle: Handle) -> Bool;
 }
 
 const DC_PAPERS: u16 = 2;
@@ -208,12 +209,23 @@ fn resolve_printer_bin_id(printer_wide: &[u16], tray_spec: &str) -> Option<i16> 
     }
     let count_ok = (got_ids as usize).min(got_names as usize).min(n);
     let target = trimmed.to_ascii_lowercase();
-    for i in 0..count_ok {
-        let block = &bin_names[i * 24..(i + 1) * 24];
-        let end = block.iter().position(|&c| c == 0).unwrap_or(24);
-        let name = String::from_utf16_lossy(&block[..end])
-            .trim()
-            .to_ascii_lowercase();
+    let names: Vec<String> = (0..count_ok)
+        .map(|i| {
+            let block = &bin_names[i * 24..(i + 1) * 24];
+            let end = block.iter().position(|&c| c == 0).unwrap_or(24);
+            String::from_utf16_lossy(&block[..end])
+                .trim()
+                .to_ascii_lowercase()
+        })
+        .collect();
+    // Exact match first: a substring pass would resolve "Tray 1" to
+    // "Tray 10" whenever the driver enumerates it first. (Audit L7.)
+    for (i, name) in names.iter().enumerate() {
+        if !name.is_empty() && *name == target {
+            return Some(bin_ids[i] as i16);
+        }
+    }
+    for (i, name) in names.iter().enumerate() {
         if !name.is_empty() && name.contains(&target) {
             return Some(bin_ids[i] as i16);
         }
@@ -744,10 +756,21 @@ unsafe fn convert_info2(info: &PrinterInfo2W) -> crate::discovery::RawPrinterInf
 
 /// Discover all local and per-user connected printers (EnumPrinters
 /// level 2). Two-call pattern: size query, then fill.
+/// How long a discovery snapshot is shared between callers. The
+/// worker path resolves a printer per job; 5 s keeps bursts cheap
+/// while a (dis)appearing printer is noticed quickly. UI callers
+/// layer their own longer cache on top.
+const DISCOVERY_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+static DISCOVERY_CACHE: crate::discovery::DiscoveryCache = crate::discovery::DiscoveryCache::new();
+
 pub fn discover_printers() -> Result<Vec<print_core::PrinterInfo>, String> {
+    DISCOVERY_CACHE.get_or_discover(DISCOVERY_TTL, discover_printers_uncached)
+}
+
+fn discover_printers_uncached() -> Result<Vec<print_core::PrinterInfo>, String> {
     let mut needed: u32 = 0;
     let mut returned: u32 = 0;
-    unsafe {
+    let probe_ok = unsafe {
         EnumPrintersW(
             PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS,
             std::ptr::null(),
@@ -756,9 +779,15 @@ pub fn discover_printers() -> Result<Vec<print_core::PrinterInfo>, String> {
             0,
             &mut needed,
             &mut returned,
-        );
-    }
+        )
+    };
     if needed == 0 {
+        // A successful probe reporting no buffer is a genuinely empty
+        // spooler; a FAILED probe is an error and must not masquerade
+        // as "no printers installed". (Audit L8.)
+        if probe_ok == 0 {
+            return Err(last_error());
+        }
         return Ok(Vec::new());
     }
     let mut buf = vec![0u8; needed as usize];
@@ -790,8 +819,11 @@ pub fn discover_printers() -> Result<Vec<print_core::PrinterInfo>, String> {
     Ok(out)
 }
 
-/// Sensor read for one printer: open it and read its level-2 status
-/// (paper out, jam, door open, toner, offline...) via GetPrinter.
+/// Spooler-reported status for one printer: open it and read its
+/// level-2 status via GetPrinter. This is the driver/spooler's view
+/// of the device (it can be delayed or incomplete), NOT a direct
+/// physical sensor read — for supported thermal printers the real
+/// device status path is DLE EOT in print-raw.
 pub fn printer_status(printer: &str) -> Result<print_core::PrinterStatus, String> {
     let name = wide(printer);
     let mut handle: Handle = std::ptr::null_mut();
@@ -1072,25 +1104,44 @@ pub fn print_raw(printer: &str, title: &str, bytes: &[u8]) -> Result<u32, String
         if job_id == 0 {
             Err(last_error())
         } else if StartPagePrinter(handle) == 0 {
+            // Capture the error BEFORE EndDocPrinter can clobber it.
+            let err = last_error();
             EndDocPrinter(handle);
-            Err(last_error())
+            Err(err)
         } else {
-            let mut written: u32 = 0;
-            let w_ok = WritePrinter(
-                handle,
-                bytes.as_ptr() as *const c_void,
-                bytes.len() as u32,
-                &mut written,
-            );
-            EndPagePrinter(handle);
-            EndDocPrinter(handle);
-            if w_ok == 0 || written as usize != bytes.len() {
-                Err(format!(
-                    "WritePrinter wrote {written} of {} bytes: {}",
-                    bytes.len(),
-                    last_error()
-                ))
+            // WritePrinter may accept fewer bytes than requested;
+            // loop until the whole payload is in the spooler. On any
+            // failure the job is ABORTED, never ended: EndDocPrinter
+            // would commit a truncated stream as a complete document
+            // while the caller sees an error and retries — printing a
+            // truncated copy plus a duplicate. (Audit H1.)
+            let mut offset = 0usize;
+            let mut failure: Option<String> = None;
+            while offset < bytes.len() {
+                let chunk = &bytes[offset..];
+                let mut written: u32 = 0;
+                let w_ok = WritePrinter(
+                    handle,
+                    chunk.as_ptr() as *const c_void,
+                    u32::try_from(chunk.len()).unwrap_or(u32::MAX),
+                    &mut written,
+                );
+                let err = last_error();
+                if w_ok == 0 || written == 0 {
+                    failure = Some(format!(
+                        "WritePrinter failed at byte {offset} of {}: {err}",
+                        bytes.len()
+                    ));
+                    break;
+                }
+                offset += written as usize;
+            }
+            if let Some(err) = failure {
+                AbortPrinter(handle);
+                Err(err)
             } else {
+                EndPagePrinter(handle);
+                EndDocPrinter(handle);
                 Ok(job_id)
             }
         }

@@ -1046,6 +1046,7 @@
       kpi_pdf_ready: "محرك PDF جاهز",
       kpi_pdf_unavailable: "محرك PDF غير متاح",
       confirm_clear_done: "هل تريد حذف مهام الطباعة المكتملة؟ لا يمكن التراجع.",
+      confirm_cancel_job: "إلغاء مهمة الطباعة هذه؟ لن تُطبع.",
       diagnostics_copied: "تم نسخ تقرير التشخيص",
       diagnostics_downloaded: "تم تنزيل تقرير التشخيص",
       diagnostics_failed: "تعذر إنشاء تقرير التشخيص. راجع الخطأ وحاول مجدداً.",
@@ -1111,6 +1112,7 @@
       kpi_pdf_ready: "PDF engine ready",
       kpi_pdf_unavailable: "PDF engine unavailable",
       confirm_clear_done: "Delete completed print jobs? This cannot be undone.",
+      confirm_cancel_job: "Cancel this print job? It will not print.",
       diagnostics_copied: "Diagnostics report copied",
       diagnostics_downloaded: "Diagnostics report downloaded",
       diagnostics_failed: "Could not generate diagnostics. Check the error and try again.",
@@ -1248,15 +1250,6 @@
       .replace(/'/g, "&#39;");
   }
 
-  function escapeJsStr(s) {
-    return escapeHtml(
-      String(s == null ? "" : s)
-        .replace(/\\/g, "\\\\")
-        .replace(/'/g, "\\'")
-        .replace(/\r/g, "\\r")
-        .replace(/\n/g, "\\n")
-    );
-  }
 
   function formatBytes(b) {
     const n = Number(b) || 0;
@@ -1328,7 +1321,20 @@
     if (overviewState) renderJobsTable(overviewState.recentJobs || []);
   }
 
+  let refreshInFlight = false;
   async function refreshAll(options = {}) {
+    // A slow overview (cold printer discovery takes seconds) must not
+    // stack overlapping polls on the 5 s interval.
+    if (refreshInFlight) return false;
+    refreshInFlight = true;
+    try {
+      return await refreshAllInner(options);
+    } finally {
+      refreshInFlight = false;
+    }
+  }
+
+  async function refreshAllInner(options = {}) {
     const silent = !!options.silent;
     const api = bridge();
     if (!api || typeof api.appOverview !== "function") {
@@ -1486,7 +1492,7 @@
       const canCancel = s === "queued" || s === "rendering" || s === "spooling";
       return `
         <tr>
-          <td class="mono">${escapeHtml(j.id)}</td>
+          <td class="mono">${escapeHtml(j.id)}${j.diag_id ? `<div style="font-size:0.68rem;color:var(--text-muted);" title="Diagnostics ID">${escapeHtml(j.diag_id)}</div>` : ""}</td>
           <td><strong>${escapeHtml(j.report || "—")}</strong></td>
           <td>${escapeHtml(j.printer)}</td>
           <td>${Number(j.pages) || 1}p • <span class="mono">${formatBytes(j.bytes)}</span></td>
@@ -1495,8 +1501,8 @@
           <td class="mono" style="color:var(--status-err-fg);">${escapeHtml(j.error_code || "—")}</td>
           <td>
             <div style="display:flex;gap:0.35rem;">
-              ${canRetry ? `<button class="btn btn-sm btn-primary" onclick="retryJob('${escapeJsStr(j.id)}')">${currentLang === "ar" ? "إعادة محاولة" : "Retry"}</button>` : ""}
-              ${canCancel ? `<button class="btn btn-sm btn-danger" onclick="cancelJob('${escapeJsStr(j.id)}')">${currentLang === "ar" ? "إلغاء" : "Cancel"}</button>` : ""}
+              ${canRetry ? `<button class="btn btn-sm btn-primary" data-action="retry-job" data-job-id="${escapeHtml(j.id)}">${currentLang === "ar" ? "إعادة محاولة" : "Retry"}</button>` : ""}
+              ${canCancel ? `<button class="btn btn-sm btn-danger" data-action="cancel-job" data-job-id="${escapeHtml(j.id)}">${currentLang === "ar" ? "إلغاء" : "Cancel"}</button>` : ""}
               ${!canRetry && !canCancel ? `<span style="color:var(--text-muted);font-size:0.75rem;">—</span>` : ""}
             </div>
           </td>
@@ -1557,16 +1563,16 @@
         <div id="forms-box-${idx}" class="hidden" style="font-size:0.76rem;background:var(--bg-subtle);padding:0.6rem;border-radius:8px;max-height:110px;overflow:auto;"></div>
 
         <div class="printer-actions">
-          <button class="btn btn-sm btn-primary" onclick="runPrinterTest('${escapeJsStr(p.name)}', 'pdf-a4')">
+          <button class="btn btn-sm btn-primary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="pdf-a4">
             A4 PDF (GDI)
           </button>
-          <button class="btn btn-sm btn-secondary" onclick="runPrinterTest('${escapeJsStr(p.name)}', 'thermal-80mm')">
+          <button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="thermal-80mm">
             80mm ESC/POS
           </button>
-          <button class="btn btn-sm btn-secondary" onclick="runPrinterTest('${escapeJsStr(p.name)}', 'zpl-label')">
+          <button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="zpl-label">
             ZPL Label
           </button>
-          <button class="btn btn-sm btn-secondary" onclick="inspectForms('${escapeJsStr(p.name)}', ${idx})">
+          <button class="btn btn-sm btn-secondary" data-action="inspect-forms" data-printer="${escapeHtml(p.name)}" data-idx="${idx}">
             ${currentLang === "ar" ? "مقاسات الورق" : "Paper Forms"}
           </button>
         </div>
@@ -1574,6 +1580,22 @@
     `).join("");
     if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
   }
+
+  // Delegated handler for every dynamically rendered action button.
+  // Job ids and printer names reach the page from the remote origin /
+  // the OS and are attacker-influenceable, so they are carried in
+  // data-* attributes and read back as strings — never interpolated
+  // into inline handler code (audit B-1: the old onclick + escaping
+  // combination was a stored script injection into this admin page).
+  document.addEventListener("click", (ev) => {
+    const btn = ev.target && ev.target.closest ? ev.target.closest("[data-action]") : null;
+    if (!btn) return;
+    const action = btn.getAttribute("data-action");
+    if (action === "retry-job") retryJob(btn.getAttribute("data-job-id"));
+    else if (action === "cancel-job") cancelJob(btn.getAttribute("data-job-id"));
+    else if (action === "test-print") runPrinterTest(btn.getAttribute("data-printer"), btn.getAttribute("data-kind"));
+    else if (action === "inspect-forms") inspectForms(btn.getAttribute("data-printer"), Number(btn.getAttribute("data-idx")));
+  });
 
   async function runPrinterTest(printerName, kind) {
     const b = bridge();
@@ -1692,6 +1714,7 @@
   }
 
   async function cancelJob(id) {
+    if (!window.confirm(I18N[currentLang].confirm_cancel_job)) return;
     const b = bridge();
     if (!b || typeof b.cancelJob !== "function") {
       showToast(I18N[currentLang].native_bridge_unavailable, true);
@@ -1734,7 +1757,12 @@
       const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
       if (v4) return [+v4[1], +v4[2], +v4[3], +v4[4]].every((o) => o <= 255);
       const h = host.toLowerCase().replace(/^\[|\]$/g, "");
-      return h.includes(":") && /^[0-9a-f:]+$/.test(h);
+      // One "::" compression at most, no stray single ':' at the edges.
+      const shapeOk = /^[0-9a-f:]+$/.test(h)
+        && (h.match(/::/g) || []).length <= 1
+        && (!h.startsWith(":") || h.startsWith("::"))
+        && (!h.endsWith(":") || h.endsWith("::"));
+      return h.includes(":") && shapeOk;
     }
     const normalized = String(value || "").trim();
     if (!normalized || normalized.includes("\\")) return false;

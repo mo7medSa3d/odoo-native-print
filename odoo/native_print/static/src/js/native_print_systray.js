@@ -3,6 +3,7 @@ import { Component, onMounted, onWillDestroy, onWillStart, useState } from "@odo
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { rpc } from "@web/core/network/rpc";
+import { _t } from "@web/core/l10n/translation";
 import { getSelectedPrinter, setSelectedPrinter } from "./native_print_client";
 
 export class NativePrintSystray extends Component {
@@ -59,8 +60,8 @@ export class NativePrintSystray extends Component {
         const bridge = window.__NATIVE_PRINT__ || null;
         if (!bridge || typeof bridge.appOverview !== "function") {
             if (showNotice) this.notification.add(
-                "Open Odoo inside the Yaseir Print desktop app to see this PC's printers.",
-                { title: "Desktop App Required", type: "warning" },
+                _t("Open Odoo inside the Yaseir Print desktop app to see this PC's printers."),
+                { title: _t("Desktop App Required"), type: "warning" },
             );
             return;
         }
@@ -76,12 +77,12 @@ export class NativePrintSystray extends Component {
             this.state.discoveredPrinters = printers;
             this.state.selectedPrinter = getSelectedPrinter();
             if (showNotice) this.notification.add(
-                `${printers.length} printer(s) found on this PC.`,
-                { title: "Printers Refreshed", type: "success" },
+                _t("%s printer(s) found on this PC.", printers.length),
+                { title: _t("Printers Refreshed"), type: "success" },
             );
         } catch (error) {
             if (showNotice) this.notification.add(String(error && error.message || error),
-                { title: "Printer Refresh Failed", type: "danger" });
+                { title: _t("Printer Refresh Failed"), type: "danger" });
         } finally {
             this.state.syncingPrinters = false;
         }
@@ -123,8 +124,8 @@ export class NativePrintSystray extends Component {
             await bridge.openControlCenter();
         } else {
             this.notification.add(
-                "The Control Center is available when running inside the Yaseir Print desktop app (Ctrl+Shift+Y).",
-                { title: "Browser Fallback Mode", type: "info" },
+                _t("The Control Center is available when running inside the Yaseir Print desktop app (Ctrl+Shift+Y)."),
+                { title: _t("Browser Fallback Mode"), type: "info" },
             );
         }
     }
@@ -139,8 +140,8 @@ export class NativePrintSystray extends Component {
         setSelectedPrinter(printer.name);
         this.state.selectedPrinter = printer.name;
         this.notification.add(
-            `${printer.name} will be used for printing from this PC.`,
-            { title: "Printer Selected", type: "success" },
+            _t("%s will be used for printing from this PC.", printer.name),
+            { title: _t("Printer Selected"), type: "success" },
         );
     }
 
@@ -148,8 +149,8 @@ export class NativePrintSystray extends Component {
         const bridge = window.__NATIVE_PRINT__ || null;
         if (!bridge || typeof bridge.runTestPrint !== "function") {
             this.notification.add(
-                "Open Odoo inside the Yaseir Print app to send hardware calibration prints.",
-                { title: "Native App Required", type: "warning" },
+                _t("Open Odoo inside the Yaseir Print app to send hardware calibration prints."),
+                { title: _t("Native App Required"), type: "warning" },
             );
             return;
         }
@@ -165,8 +166,8 @@ export class NativePrintSystray extends Component {
         const selected = chosen || defaultPhysical || physicalPrinters[0];
         if (!selected || !selected.name) {
             this.notification.add(
-                "No physical printer was discovered. Connect or install a printer, then refresh the printer list.",
-                { title: "No Printer Available", type: "warning" },
+                _t("No physical printer was discovered. Connect or install a printer, then refresh the printer list."),
+                { title: _t("No Printer Available"), type: "warning" },
             );
             return;
         }
@@ -203,13 +204,13 @@ export class NativePrintSystray extends Component {
 
             const jobId = await bridge.runTestPrint(selected.name, testKind, paper);
             this.notification.add(
-                `Queued ${paper} calibration test (${jobId}) on ${selected.name}`,
-                { title: "Calibration Queued", type: "success" },
+                _t("Queued %s calibration test (%s) on %s", paper, jobId, selected.name),
+                { title: _t("Calibration Queued"), type: "success" },
             );
             await this.refreshStats();
         } catch (err) {
             this.notification.add(String(err), {
-                title: "Calibration Failed",
+                title: _t("Calibration Failed"),
                 type: "danger",
             });
         }

@@ -162,6 +162,12 @@ impl Queue {
                event TEXT NOT NULL,
                detail TEXT);",
         )?;
+        // Schema version marker: future migrations key off this
+        // instead of probing ad-hoc. 1 = the current schema.
+        let user_version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if user_version == 0 {
+            conn.pragma_update(None, "user_version", 1)?;
+        }
         // Migration: jobs.updated_at (unix seconds of the last state
         // change) powers stale-job reconciliation. Added in place so
         // existing queue databases upgrade without data loss.
@@ -252,14 +258,14 @@ impl Queue {
         Ok(())
     }
 
-    /// Retry a failed or dead-letter job, resetting its attempt counter so
-    /// the worker gives it a fresh retry cycle.
+    /// Retry a failed or dead-letter job. The attempt counter is NOT
+    /// reset: attempts are monotonic across the job's whole life (the
+    /// audit invariant), so max-attempts accounting and diagnostics
+    /// stay truthful across manual retries.
     pub fn retry_job(&mut self, id: &str) -> Result<(), QueueError> {
         self.set_state(id, JobState::Queued, None)?;
-        self.conn.execute(
-            "UPDATE jobs SET attempts=0, error_code=NULL WHERE id=?1",
-            params![id],
-        )?;
+        self.conn
+            .execute("UPDATE jobs SET error_code=NULL WHERE id=?1", params![id])?;
         Ok(())
     }
 
@@ -409,9 +415,25 @@ impl Queue {
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .ok();
+            // Full-payload comparison, not just size: a same-size but
+            // different document under a reused key is still a conflict
+            // (first writer wins either way; this only drives the log).
+            let payload_differs = match &existing {
+                Some((existing_id, _)) => {
+                    let stored: Option<Vec<u8>> = tx
+                        .query_row(
+                            "SELECT data FROM payloads WHERE job_id=?1",
+                            params![existing_id],
+                            |r| r.get(0),
+                        )
+                        .ok();
+                    stored.map(|d| d != data).unwrap_or(false)
+                }
+                None => false,
+            };
             drop(tx);
             if let Some((existing_id, existing_bytes)) = existing {
-                if existing_bytes as u64 != job.bytes {
+                if existing_bytes as u64 != job.bytes || payload_differs {
                     let _ = self.record_event(
                         &existing_id,
                         "duplicate_conflict",
@@ -551,10 +573,27 @@ impl Queue {
     ) -> Result<(), QueueError> {
         let job = self.get(id)?;
         job.state.transition_to(next)?;
-        self.conn.execute(
-            "UPDATE jobs SET state=?1, error_code=?2, updated_at=?3 WHERE id=?4",
-            params![next.as_str(), error_code, now_unix(), id],
+        // Guarded write: the UPDATE only lands if the stored state is
+        // still the state we validated against. Two connections (worker
+        // + reconciler, app + probe tool) can no longer interleave a
+        // read-check-update into a transition the machine forbids; the
+        // loser sees 0 rows changed and gets the transition error.
+        let changed = self.conn.execute(
+            "UPDATE jobs SET state=?1, error_code=?2, updated_at=?3 WHERE id=?4 AND state=?5",
+            params![
+                next.as_str(),
+                error_code,
+                now_unix(),
+                id,
+                job.state.as_str()
+            ],
         )?;
+        if changed == 0 {
+            return Err(QueueError::Transition(crate::state::TransitionError {
+                from: job.state,
+                to: next,
+            }));
+        }
         let _ = self.record_event(id, &format!("state:{}", next.as_str()), error_code);
         Ok(())
     }
@@ -614,7 +653,7 @@ impl Queue {
     }
 
     /// Reconciliation for wedged jobs: a job sitting in a working
-    /// state (rendering/spooling/printing) whose last update is older
+    /// state (rendering/spooling) whose last update is older
     /// than STALE_JOB_THRESHOLD_SECS belongs to a worker that is gone
     /// or stuck. Fail it loudly with RECONCILED_STALE — the user can
     /// retry it — instead of letting it block the queue forever.
@@ -625,7 +664,7 @@ impl Queue {
         let cutoff = now_unix() - STALE_JOB_THRESHOLD_SECS;
         let ids: Vec<String> = {
             let mut stmt = self.conn.prepare(
-                "SELECT id FROM jobs WHERE state IN ('rendering','spooling','printing') AND updated_at > 0 AND updated_at < ?1",
+                "SELECT id FROM jobs WHERE state IN ('rendering','spooling') AND updated_at > 0 AND updated_at < ?1",
             )?;
             let rows = stmt.query_map(params![cutoff], |r| r.get::<_, String>(0))?;
             let mut out = Vec::new();
@@ -640,7 +679,7 @@ impl Queue {
             // for states the normal machine would route differently;
             // 'failed' is reachable from every working state anyway.
             let changed = self.conn.execute(
-                "UPDATE jobs SET state='failed', error_code='RECONCILED_STALE', updated_at=?1 WHERE id=?2 AND state IN ('rendering','spooling','printing')",
+                "UPDATE jobs SET state='failed', error_code='RECONCILED_STALE', updated_at=?1 WHERE id=?2 AND state IN ('rendering','spooling')",
                 params![now_unix(), id],
             )?;
             if changed > 0 {
@@ -670,7 +709,16 @@ fn row_to_job(r: &rusqlite::Row) -> rusqlite::Result<Job> {
         pages: r.get::<_, i64>(4)? as u32,
         bytes: r.get::<_, i64>(5)? as u64,
         priority: r.get(6)?,
-        state: JobState::parse(&state_s).unwrap_or(JobState::Failed),
+        state: JobState::parse(&state_s).ok_or_else(|| {
+            rusqlite::Error::FromSqlConversionFailure(
+                7,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown job state in database: {state_s}"),
+                )),
+            )
+        })?,
         attempts: r.get::<_, i64>(8)? as u32,
         error_code: r.get(9)?,
     })
@@ -871,6 +919,42 @@ mod tests {
         assert!(matches!(err, QueueError::QueueFull(_)), "{err}");
         // Duplicates of an existing key are not new load.
         assert!(q.enqueue(&job("g1b", "k-g1", "printer-a", 0)).is_ok());
+    }
+
+    #[test]
+    fn retry_keeps_attempts_monotonic() {
+        let mut q = Queue::in_memory().unwrap();
+        let j = job("j1", "k1", "P1", 0);
+        q.enqueue_with_payload(&j, "pdf", b"data", &JobOptions::default())
+            .unwrap();
+        let claimed = q.claim_next("P1").unwrap().unwrap();
+        assert_eq!(claimed.attempts, 1);
+        q.set_state("j1", JobState::Failed, Some("E")).unwrap();
+        q.retry_job("j1").unwrap();
+        let after = q.get("j1").unwrap();
+        assert_eq!(after.state, JobState::Queued);
+        assert_eq!(after.attempts, 1, "attempts must never decrease");
+    }
+
+    #[test]
+    fn reconcile_never_fails_a_printing_job() {
+        let mut q = Queue::in_memory().unwrap();
+        let j = job("j2", "k2", "P1", 0);
+        q.enqueue_with_payload(&j, "pdf", b"data", &JobOptions::default())
+            .unwrap();
+        q.claim_next("P1").unwrap();
+        q.set_state("j2", JobState::Spooling, None).unwrap();
+        q.set_state("j2", JobState::Printing, None).unwrap();
+        q.conn
+            .execute(
+                "UPDATE jobs SET updated_at=?1 WHERE id='j2'",
+                params![now_unix() - STALE_JOB_THRESHOLD_SECS - 60],
+            )
+            .unwrap();
+        // A long physical print is not a wedge: reconciliation must
+        // leave 'printing' to startup recovery (ambiguous-outcome path).
+        assert_eq!(q.reconcile_stale().unwrap(), 0);
+        assert_eq!(q.get("j2").unwrap().state, JobState::Printing);
     }
 
     #[test]

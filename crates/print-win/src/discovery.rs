@@ -98,6 +98,48 @@ pub fn classify_form(raw_name: &str, width_mm: f64, height_mm: f64) -> Form {
     }
 }
 
+/// Process-level discovery snapshot cache with single-flight refresh.
+///
+/// Full spooler enumeration can take seconds when offline network
+/// queues are installed, and the print worker needs a printer list
+/// for every job — without this cache a 50-receipt POS burst paid a
+/// full enumeration per receipt. Callers within `ttl` share one
+/// snapshot; the lock is held across a refresh so concurrent misses
+/// collapse into a single enumeration.
+pub struct DiscoveryCache {
+    snapshot: std::sync::Mutex<Option<(std::time::Instant, Vec<print_core::PrinterInfo>)>>,
+}
+
+impl DiscoveryCache {
+    pub const fn new() -> Self {
+        Self {
+            snapshot: std::sync::Mutex::new(None),
+        }
+    }
+
+    pub fn get_or_discover<E>(
+        &self,
+        ttl: std::time::Duration,
+        discover: impl FnOnce() -> Result<Vec<print_core::PrinterInfo>, E>,
+    ) -> Result<Vec<print_core::PrinterInfo>, E> {
+        let mut guard = self.snapshot.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, printers)) = &*guard {
+            if at.elapsed() < ttl {
+                return Ok(printers.clone());
+            }
+        }
+        let printers = discover()?;
+        *guard = Some((std::time::Instant::now(), printers.clone()));
+        Ok(printers)
+    }
+}
+
+impl Default for DiscoveryCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,6 +157,44 @@ mod tests {
             job_count: 0,
         }
     }
+    #[test]
+    fn discovery_cache_shares_snapshot_within_ttl() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let cache = DiscoveryCache::new();
+        let calls = AtomicUsize::new(0);
+        let make = |cache: &DiscoveryCache, calls: &AtomicUsize| {
+            cache.get_or_discover(std::time::Duration::from_secs(60), || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok::<_, String>(vec![print_core::PrinterInfo {
+                    name: "P".into(),
+                    driver: "D".into(),
+                    port: "USB001".into(),
+                    kind: print_core::PrinterKind::Local,
+                    status: print_core::PrinterStatus::Ready,
+                    is_default: true,
+                }])
+            })
+        };
+        let a = make(&cache, &calls).unwrap();
+        let b = make(&cache, &calls).unwrap();
+        assert_eq!(a.len(), 1);
+        assert_eq!(b.len(), 1);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "second call must hit the cache"
+        );
+        // An expired TTL refreshes.
+        let c = cache
+            .get_or_discover(std::time::Duration::ZERO, || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok::<_, String>(Vec::new())
+            })
+            .unwrap();
+        assert!(c.is_empty());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
     #[test]
     fn convert_maps_status_and_default() {
         let info = convert(&raw(0x10, PRINTER_ATTRIBUTE_DEFAULT));

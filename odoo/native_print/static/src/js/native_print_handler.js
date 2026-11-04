@@ -1,6 +1,7 @@
 /** @odoo-module **/
 import { registry } from "@web/core/registry";
 import { rpc } from "@web/core/network/rpc";
+import { _t } from "@web/core/l10n/translation";
 import { notifyUser, resolveBridgeTarget } from "./native_print_client";
 
 /*
@@ -83,8 +84,14 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
     let lastPages = meta.pages || 1;
     let lastAttempts = 1;
     let consecutiveErrors = 0;
-    const deadline = Date.now() + 5 * 60 * 1000;
-    for (let i = 0; Date.now() < deadline; i++) {
+    // Give up only after 5 minutes WITHOUT any state progress (a job
+    // queued behind a busy desktop queue legitimately takes longer),
+    // with a 30-minute absolute cap. The watcher is the only status
+    // source for the server record: a fixed deadline silently left
+    // long jobs non-terminal on the server forever. (Audit F7.)
+    let lastProgressAt = Date.now();
+    const absoluteDeadline = Date.now() + 30 * 60 * 1000;
+    for (let i = 0; Date.now() < absoluteDeadline && Date.now() - lastProgressAt < 5 * 60 * 1000; i++) {
         await new Promise((resolve) =>
             setTimeout(resolve, i < 10 ? 600 : 2000));
         try {
@@ -111,13 +118,14 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
                 lastState = state;
                 lastPages = pages;
                 lastAttempts = attempts;
+                lastProgressAt = Date.now();
                 await rpc(
                     "/native_print/job_status",
                     {
                         idempotency_key: jobId,
                         state,
                         error_code: errorCode,
-                        device: meta.printerPattern,
+                        device: meta.printerName || meta.printerPattern,
                         report_name: meta.reportName,
                         pages,
                         byte_size: meta.byteSize,
@@ -129,15 +137,18 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
             if (TERMINAL_STATES.has(state)) {
                 const printerLabel = meta.printerName || meta.printerPattern;
                 if (state === "done") {
+                    // "Done" means the desktop backend accepted and
+                    // completed its submission stage; it is not proof
+                    // paper physically emerged on every transport.
                     notifyUser(
                         env,
-                        `Printed "${meta.reportName}" on ${printerLabel}`,
+                        _t('Sent "%s" to %s', meta.reportName, printerLabel),
                         "success",
                     );
                 } else if (state === "failed" || state === "dead_letter") {
                     notifyUser(
                         env,
-                        `Printing failed on "${printerLabel}" (${errorCode || state}). Nothing was printed.`,
+                        _t('Printing failed on "%s" (%s). Check the printer before reprinting.', printerLabel, errorCode || state),
                         "danger",
                     );
                 }
@@ -152,6 +163,13 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
                 break;
             }
         }
+    }
+    if (!TERMINAL_STATES.has(lastState)) {
+        notifyUser(
+            env,
+            _t('Print job "%s" is still %s; its final outcome is unconfirmed. Check Print Jobs later.', meta.reportName, lastState),
+            "warning",
+        );
     }
     return lastState;
 }
@@ -195,12 +213,21 @@ async function handleReportSubmission(action, options, env, bridge) {
 
     if (action.report_type === "qweb-text") {
         const textUrl = buildReportUrl(action, "text", env);
-        const resp = await fetch(textUrl, { credentials: "same-origin" });
-        if (!resp.ok) {
-            // Let Odoo's default flow handle (and report) it.
+        let text;
+        try {
+            const resp = await fetch(textUrl, { credentials: "same-origin" });
+            if (!resp.ok) {
+                // Let Odoo's default flow handle (and report) it.
+                return undefined;
+            }
+            text = await resp.text();
+        } catch (_fetchError) {
+            // Network failure / server restart mid-click: the
+            // fallback contract is "return undefined and Odoo
+            // downloads as usual" — a rejected fetch must not escape
+            // the handler as an exception. (Audit F1.)
             return undefined;
         }
-        const text = await resp.text();
         const textKey =
             `odoo-txt-${action.id || action.report_name}-${Date.now()}-` +
             Math.random().toString(36).slice(2, 10);
@@ -208,7 +235,7 @@ async function handleReportSubmission(action, options, env, bridge) {
         await rpc("/native_print/job_status", {
             idempotency_key: textKey,
             state: "queued",
-            device: rule.printer_pattern,
+            device: target.printer.name,
             report_name: action.report_name,
             source_type: "report",
             source_model: textSource.model,
@@ -251,11 +278,11 @@ async function handleReportSubmission(action, options, env, bridge) {
                 idempotency_key: textKey,
                 state: "failed",
                 error_code: "BRIDGE_ERROR",
-                device: rule.printer_pattern,
+                device: target.printer.name,
             }, { silent: true }).catch(() => {});
             notifyUser(
                 env,
-                `Native Print could not print on "${target.printer.name}": ${error.message || error}. The file was downloaded instead.`,
+                _t('Native Print could not print on "%s": %s. The file was downloaded instead.', target.printer.name, error.message || error),
                 "warning",
             );
             return undefined; // Fall back to the standard download.
@@ -265,12 +292,18 @@ async function handleReportSubmission(action, options, env, bridge) {
     }
 
     const url = buildReportUrl(action, "pdf", env);
-    const response = await fetch(url, { credentials: "same-origin" });
-    if (!response.ok) {
-        // Let Odoo's default flow handle (and report) it.
+    let bytes;
+    try {
+        const response = await fetch(url, { credentials: "same-origin" });
+        if (!response.ok) {
+            // Let Odoo's default flow handle (and report) it.
+            return undefined;
+        }
+        bytes = Array.from(new Uint8Array(await response.arrayBuffer()));
+    } catch (_fetchError) {
+        // Same fallback contract as the text branch. (Audit F1.)
         return undefined;
     }
-    const bytes = Array.from(new Uint8Array(await response.arrayBuffer()));
     const idempotencyKey =
         `odoo-${action.id || action.report_name}-${Date.now()}-` +
         Math.random().toString(36).slice(2, 10);
@@ -278,7 +311,7 @@ async function handleReportSubmission(action, options, env, bridge) {
     await rpc("/native_print/job_status", {
         idempotency_key: idempotencyKey,
         state: "queued",
-        device: rule.printer_pattern,
+        device: target.printer.name,
         report_name: action.report_name,
         source_type: "report",
         source_model: pdfSource.model,
@@ -326,11 +359,11 @@ async function handleReportSubmission(action, options, env, bridge) {
             idempotency_key: idempotencyKey,
             state: "failed",
             error_code: "BRIDGE_ERROR",
-            device: rule.printer_pattern,
+            device: target.printer.name,
         }, { silent: true }).catch(() => {});
         notifyUser(
             env,
-            `Native Print could not print on "${target.printer.name}": ${error.message || error}. The PDF was downloaded instead.`,
+            _t('Native Print could not print on "%s": %s. The PDF was downloaded instead.', target.printer.name, error.message || error),
             "warning",
         );
         return undefined; // Fall back to the standard download.
@@ -349,6 +382,19 @@ registry.category("ir.actions.report handlers").add(
         if (!["qweb-pdf", "qweb-text"].includes(action.report_type)) {
             return undefined; // Other report types keep the default flow.
         }
+        const dataFingerprint = (() => {
+            try {
+                const raw = JSON.stringify(action.data || "") +
+                    "|" + JSON.stringify(action.ids || action.res_id || "");
+                let h = 0;
+                for (let i = 0; i < raw.length; i++) {
+                    h = (h * 31 + raw.charCodeAt(i)) | 0;
+                }
+                return String(h);
+            } catch (_e) {
+                return "";
+            }
+        })();
         const guardKey =
             `${action.report_name}|` +
             JSON.stringify(
@@ -356,7 +402,8 @@ registry.category("ir.actions.report handlers").add(
                     (action.context.active_ids ||
                         action.context.active_id)) ||
                     "",
-            );
+            ) +
+            `|${dataFingerprint}`;
         if (inFlightReports.has(guardKey)) {
             // The same report for the same records is already
             // being submitted (double-click, key repeat): the

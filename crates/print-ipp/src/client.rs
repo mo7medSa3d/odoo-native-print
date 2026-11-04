@@ -28,37 +28,71 @@ pub struct PrinterCaps {
     pub media_supported: Vec<String>,
     pub color_supported: bool,
     pub sides_supported: Vec<String>,
+    /// printer-is-accepting-jobs; None when the printer did not
+    /// report it (unknown, NOT assumed true).
+    pub accepting_jobs: Option<bool>,
 }
 
 impl PrinterCaps {
-    /// Document format preference order: PDF first (no conversion), then
-    /// the standard raster formats in IPP Everywhere / AirPrint order.
-    pub const FORMAT_PREFERENCE: [&'static str; 4] = [
-        "application/pdf",
-        "image/pwg-raster",
-        "image/urf",
-        "image/jpeg",
-    ];
+    /// Document formats this client can actually PRODUCE. Only PDF:
+    /// the job payload is PDF and no PWG Raster / URF / JPEG encoder
+    /// exists in the product. Printers that do not accept PDF are
+    /// rejected loudly (NoUsableFormat) — sending PDF bytes labeled
+    /// as a raster format would print garbage or be rejected by the
+    /// device after claiming success here. (Audit D-1.)
+    pub const FORMAT_PREFERENCE: [&'static str; 1] = ["application/pdf"];
     pub fn accepts_pdf(&self) -> bool {
         self.formats_supported
             .iter()
-            .any(|f| f == "application/pdf")
+            .any(|f| base_format(f) == "application/pdf")
     }
     pub fn choose_format(&self) -> Result<&str, IppError> {
         for pref in Self::FORMAT_PREFERENCE {
-            if self.formats_supported.iter().any(|f| f == pref) {
-                return Ok(match pref {
-                    "application/pdf" => "application/pdf",
-                    "image/pwg-raster" => "image/pwg-raster",
-                    "image/urf" => "image/urf",
-                    _ => "image/jpeg",
-                });
+            if self
+                .formats_supported
+                .iter()
+                .any(|f| base_format(f) == pref)
+            {
+                return Ok(pref);
             }
         }
         Err(IppError::NoUsableFormat(self.formats_supported.join(", ")))
     }
     pub fn is_stopped(&self) -> bool {
         self.state == 5
+    }
+    /// State reasons (RFC 8011 printer-state-reasons, severity suffix
+    /// stripped) that mean the device cannot physically print now.
+    pub fn blocking_reasons(&self) -> Vec<&str> {
+        const BLOCKING: [&str; 8] = [
+            "media-empty",
+            "media-jam",
+            "door-open",
+            "cover-open",
+            "marker-supply-empty",
+            "offline",
+            "input-tray-missing",
+            "output-full",
+        ];
+        self.state_reasons
+            .iter()
+            .map(|r| {
+                r.trim()
+                    .trim_end_matches("-error")
+                    .trim_end_matches("-warning")
+                    .trim_end_matches("-report")
+            })
+            .filter(|r| BLOCKING.contains(r))
+            .collect()
+    }
+    /// True when submission would go to a device that cannot print:
+    /// stopped state, not accepting jobs, or a blocking state reason.
+    /// An idle printer (state 3) with reasons like "media-low" or
+    /// "toner-low" is NOT blocked — those are warnings.
+    pub fn is_blocked(&self) -> bool {
+        self.is_stopped()
+            || self.accepting_jobs == Some(false)
+            || !self.blocking_reasons().is_empty()
     }
 }
 
@@ -140,6 +174,7 @@ impl IppClient {
                 Value::Text(tag::KEYWORD, "printer-name".into()),
                 Value::Text(tag::KEYWORD, "printer-state".into()),
                 Value::Text(tag::KEYWORD, "printer-state-reasons".into()),
+                Value::Text(tag::KEYWORD, "printer-is-accepting-jobs".into()),
                 Value::Text(tag::KEYWORD, "document-format-supported".into()),
                 Value::Text(tag::KEYWORD, "media-supported".into()),
                 Value::Text(tag::KEYWORD, "color-supported".into()),
@@ -169,6 +204,7 @@ impl IppClient {
                 .bool(tag::GROUP_PRINTER, "color-supported")
                 .unwrap_or(false),
             sides_supported: msg.texts(tag::GROUP_PRINTER, "sides-supported"),
+            accepting_jobs: msg.bool(tag::GROUP_PRINTER, "printer-is-accepting-jobs"),
         })
     }
 
@@ -215,6 +251,16 @@ impl IppClient {
         self.next_request_id = self.next_request_id.wrapping_add(1).max(1);
         id
     }
+}
+
+/// MIME base type of a document-format value: parameters after ';'
+/// and case are presentation details, not a different format.
+fn base_format(f: &str) -> String {
+    f.split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
 }
 
 fn parse_http_response(mut raw: &[u8]) -> Result<Vec<u8>, IppError> {
@@ -430,7 +476,10 @@ mod tests {
     }
 
     #[test]
-    fn format_choice_without_pdf() {
+    fn format_choice_without_pdf_is_rejected_not_mislabeled() {
+        // Audit D-1: this client produces PDF only. A raster-only
+        // printer must be rejected loudly, never sent PDF bytes
+        // labeled as image/urf.
         let caps = PrinterCaps {
             name: "RasterOnly".into(),
             state: 3,
@@ -439,14 +488,60 @@ mod tests {
             media_supported: vec![],
             color_supported: false,
             sides_supported: vec![],
+            accepting_jobs: None,
         };
         assert!(!caps.accepts_pdf());
-        assert_eq!(caps.choose_format().unwrap(), "image/urf");
+        assert!(caps.choose_format().is_err());
         let none = PrinterCaps {
             formats_supported: vec!["text/plain".into()],
-            ..caps
+            ..caps.clone()
         };
         assert!(none.choose_format().is_err());
+        // Format values with parameters / different case still match.
+        let fancy = PrinterCaps {
+            formats_supported: vec!["Application/PDF; version=1.7".into()],
+            ..caps
+        };
+        assert!(fancy.accepts_pdf());
+        assert_eq!(fancy.choose_format().unwrap(), "application/pdf");
+    }
+
+    #[test]
+    fn blocked_state_reasons() {
+        let base = PrinterCaps {
+            name: "Office".into(),
+            state: 3,
+            state_reasons: vec![],
+            formats_supported: vec!["application/pdf".into()],
+            media_supported: vec![],
+            color_supported: false,
+            sides_supported: vec![],
+            accepting_jobs: Some(true),
+        };
+        assert!(!base.is_blocked());
+        let low = PrinterCaps {
+            state_reasons: vec!["media-low-warning".into(), "toner-low".into()],
+            ..base.clone()
+        };
+        assert!(!low.is_blocked(), "warnings do not block");
+        let empty = PrinterCaps {
+            state_reasons: vec!["media-empty-error".into()],
+            ..base.clone()
+        };
+        assert!(empty.is_blocked());
+        assert_eq!(empty.blocking_reasons(), vec!["media-empty"]);
+        let jam = PrinterCaps {
+            state_reasons: vec!["media-jam".into()],
+            ..base.clone()
+        };
+        assert!(jam.is_blocked());
+        let not_accepting = PrinterCaps {
+            accepting_jobs: Some(false),
+            ..base.clone()
+        };
+        assert!(not_accepting.is_blocked());
+        let stopped = PrinterCaps { state: 5, ..base };
+        assert!(stopped.is_blocked());
     }
 
     #[test]

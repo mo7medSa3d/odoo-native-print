@@ -46,10 +46,15 @@ impl ProfileDb {
     /// driver name contains it (drivers append version noise).
     pub fn lookup(&self, driver: &str) -> PrinterQuirks {
         let d = driver.to_ascii_lowercase();
-        self.by_driver
-            .iter()
-            .find(|(k, _)| d.contains(&k.to_ascii_lowercase()))
-            .map(|(_, v)| v.clone())
+        // Deterministic: the LONGEST (most specific) matching key
+        // wins. HashMap iteration order must never decide which quirk
+        // set a printer gets (e.g. "EPSON" vs "EPSON TM-T88").
+        let mut keys: Vec<&String> = self.by_driver.keys().collect();
+        keys.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+        keys.into_iter()
+            .find(|k| d.contains(&k.to_ascii_lowercase()))
+            .and_then(|k| self.by_driver.get(k))
+            .cloned()
             .unwrap_or_default()
     }
     pub fn merge_overrides(&mut self, overrides: ProfileDb) {

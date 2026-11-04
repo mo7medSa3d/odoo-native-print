@@ -112,7 +112,7 @@ export async function resolveBridgeTarget(bridge, options = {}) {
     if (options.preferPrinterName) {
         printer = printers.find((p) => p.name === options.preferPrinterName) || null;
     }
-    if (selected && prefer.includes(classOf(selected))) {
+    if (!printer && selected && prefer.includes(classOf(selected))) {
         printer = selected;
     }
     if (!printer && prefer.length) {

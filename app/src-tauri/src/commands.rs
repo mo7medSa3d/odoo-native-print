@@ -109,7 +109,18 @@ where
     match BytePayload::deserialize(deserializer)? {
         BytePayload::Seq(v) => Ok(v),
         BytePayload::Str(s) => decode_base64(&s).map_err(serde::de::Error::custom),
-        BytePayload::Map(m) => Ok(m.into_values().collect()),
+        BytePayload::Map(m) => {
+            // A sparse index map ({0:.., 2:..}) would silently
+            // compress into a shorter, shifted payload. Reject gaps:
+            // keys must be exactly 0..len in order (BTreeMap iterates
+            // ascending, so position must equal key).
+            if m.keys().enumerate().any(|(i, k)| *k != i) {
+                return Err(serde::de::Error::custom(
+                    "sparse byte map payload: indices must be contiguous from 0",
+                ));
+            }
+            Ok(m.into_values().collect())
+        }
     }
 }
 
@@ -218,7 +229,7 @@ fn default_true() -> bool {
 }
 
 #[tauri::command]
-pub fn print_pdf(
+pub async fn print_pdf(
     webview: tauri::Webview,
     state: State<'_, AppState>,
     req: PrintPdfRequest,
@@ -393,7 +404,7 @@ pub struct PrintImageRequest {
 }
 
 #[tauri::command]
-pub fn print_image(
+pub async fn print_image(
     webview: tauri::Webview,
     state: State<'_, AppState>,
     req: PrintImageRequest,
@@ -765,6 +776,7 @@ pub fn retry_job_cmd(
     job_id: String,
 ) -> Result<(), String> {
     check_origin(&webview, &state)?;
+    check_local_only(&webview)?;
     {
         let mut queue = state
             .queue
@@ -783,6 +795,7 @@ pub fn cancel_job_cmd(
     job_id: String,
 ) -> Result<(), String> {
     check_origin(&webview, &state)?;
+    check_local_only(&webview)?;
     let mut queue = state
         .queue
         .lock()
@@ -796,6 +809,7 @@ pub fn clear_finished_cmd(
     state: State<'_, AppState>,
 ) -> Result<u64, String> {
     check_origin(&webview, &state)?;
+    check_local_only(&webview)?;
     let mut queue = state
         .queue
         .lock()
@@ -809,6 +823,7 @@ pub fn export_diagnostics(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     check_origin(&webview, &state)?;
+    check_local_only(&webview)?;
     let queue = state
         .queue
         .lock()

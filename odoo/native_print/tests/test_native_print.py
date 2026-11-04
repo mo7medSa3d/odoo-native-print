@@ -81,3 +81,19 @@ class TestNativePrintJobLog(TransactionCase):
         job = self._job("job-key-2")
         self.assertEqual(job.company_id, self.env.company)
         self.assertEqual(job.user_id, self.env.user)
+
+    def test_device_registry_is_read_only_for_everyone(self):
+        # The registry is auto-synced history (audit F6): neither the
+        # user nor the manager group may create/write/unlink rows by
+        # hand — a manual rename or delete would corrupt the job log's
+        # printer history. Creation happens only via the controller's
+        # sudo() registration path.
+        access = self.env["ir.model.access"].search([
+            ("model_id.model", "=", "native.print.device"),
+        ])
+        self.assertTrue(access, "device access rules must exist")
+        for rule in access:
+            self.assertTrue(rule.perm_read)
+            self.assertFalse(rule.perm_create, rule.name)
+            self.assertFalse(rule.perm_write, rule.name)
+            self.assertFalse(rule.perm_unlink, rule.name)

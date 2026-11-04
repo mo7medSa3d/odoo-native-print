@@ -215,3 +215,26 @@ Full report: `docs/engineering-mission-2026-11-03.md`. Headlines:
 - Verified: Odoo suite 11/11 fresh DB exit 0 (job log + controller
   tests incl. removed-route 404s); node live-target tests pass
   (detection, patterns, selection order, stale-selection fallback).
+
+## 2026-11-04 — Full engineering audit & repair cycle (app 1.4.2, addon 19.0.2.8.0)
+- Four-track audit (Rust core, app shell/bridge/Control Center, Odoo
+  addon, protocols/status) of the v1.4.1 ZIP as delivered; findings and
+  fixes are recorded in ENGINEERING_AUDIT.md / CHANGELOG_ENGINEERING.md
+  at the repo root, evidence in VERIFICATION_REPORT.md.
+- Headline fixes: Control Center stored-XSS via inline handlers
+  (delegated data-action buttons now); RAW spooler partial-write loop +
+  AbortPrinter; IPP is PDF-only (no mislabeled raster formats) with
+  blocking state-reason interpretation; Windows status decoder covers
+  USER_INTERVENTION/PAPER_PROBLEM/BUSY and more; queue set_state is
+  atomic, retry keeps attempts monotonic, reconcile never fails a
+  printing job; worker discovery is cached (5 s single-flight);
+  queue-admin commands are local-only in Rust as well as by ACL;
+  print_pdf/print_image are async; addon: fetch fallback, display-name
+  device registry (reprint prefill works for network printers),
+  race-safe job creation, read-only device registry, inactivity-based
+  watchers, rebuilt Arabic catalog (110 entries, JS strings via _t).
+- Verified in the Linux VM: workspace tests 110/110, print-win 10/10,
+  clippy -D warnings clean, fmt clean, both consistency gates green,
+  jsdom suites green, Odoo scoped suite 16/16 fresh AND on upgrade
+  from 19.0.2.7.0. Windows CI + real-printer gates remain open
+  (unchanged from the standing gate list below).

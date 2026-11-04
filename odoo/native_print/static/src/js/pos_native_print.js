@@ -2,6 +2,7 @@
 import { ReceiptScreen } from "@point_of_sale/app/screens/receipt_screen/receipt_screen";
 import { patch } from "@web/core/utils/patch";
 import { rpc } from "@web/core/network/rpc";
+import { _t } from "@web/core/l10n/translation";
 import { notifyUser, resolveBridgeTarget } from "./native_print_client";
 
 /*
@@ -17,10 +18,10 @@ import { notifyUser, resolveBridgeTarget } from "./native_print_client";
  * 1. In `ReceiptScreen.prototype.setup()`, we wrap `this.pos.printReceipt`
  *    on the PosStore instance/prototype (idempotently) so manual prints,
  *    auto-prints, and TicketScreen reprints all route through Native Print.
- * 2. When `TicketScreen` reprints an order before `ReceiptScreen` is mounted,
- *    and no `.pos-receipt` DOM exists in the main document, we render the
- *    order receipt via `posStore.printer` / `env.services.renderer` in an
- *    offscreen container, capture it at 2x PNG, and clean it up immediately.
+ * 2. When no `.pos-receipt` DOM exists in the document (e.g. a
+ *    TicketScreen reprint before ReceiptScreen mounts), the native
+ *    path declines (returns false) and Odoo's standard POS printing
+ *    runs unchanged — there is no offscreen rendering path.
  * 3. We also patch `ReceiptScreen.prototype.printReceipt` for Odoo 17.
  */
 
@@ -49,7 +50,7 @@ function notifyPosFallback(contextObj) {
     // never stack this toast.
     notifyUser(
         notificationEnv(contextObj),
-        "Native Print could not print this receipt. The standard POS printing was used instead.",
+        _t("Native Print could not print this receipt. The standard POS printing was used instead."),
         "warning",
     );
 }
@@ -175,7 +176,9 @@ function posReceiptKey(safeRef) {
         record = JSON.parse(sessionStorage.getItem(storeKey) || "null");
     } catch (_err) { /* storage unavailable: fall through */ }
     if (record && record.key && now - (record.ts || 0) < 15000) {
-        record.ts = now;
+        // The 15 s window stays anchored at the first submission:
+        // refreshing it on every reuse would let repeated prints
+        // dedupe into one desktop job indefinitely. (Audit F12.)
         try {
             sessionStorage.setItem(storeKey, JSON.stringify(record));
         } catch (_err) { /* ignore */ }
@@ -206,11 +209,15 @@ function finishPosReceiptAttempt(safeRef) {
 }
 
 async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, env) {
-    // Same watch ladder as report jobs: up to ~5 minutes so a busy
-    // queue still gets its terminal state reported to the job log.
-    const deadline = Date.now() + 5 * 60 * 1000;
+    // Same watch policy as report jobs: poll until terminal, giving
+    // up only after 5 minutes without any state progress (a busy
+    // queue legitimately takes longer), 30-minute absolute cap.
+    const absoluteDeadline = Date.now() + 30 * 60 * 1000;
+    let lastProgressAt = Date.now();
+    let lastSeenState = null;
+    let reachedTerminal = false;
     let consecutiveErrors = 0;
-    for (let i = 0; Date.now() < deadline; i++) {
+    for (let i = 0; Date.now() < absoluteDeadline && Date.now() - lastProgressAt < 5 * 60 * 1000; i++) {
         await new Promise((resolve) =>
             setTimeout(resolve, i < 10 ? 600 : 2000));
         try {
@@ -228,7 +235,12 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
                 state = await bridge.printStatus(jobId);
             }
             consecutiveErrors = 0;
+            if (state && state !== lastSeenState) {
+                lastSeenState = state;
+                lastProgressAt = Date.now();
+            }
             if (state && TERMINAL_STATES.has(state)) {
+                reachedTerminal = true;
                 // Terminal: the next print of this order is a new,
                 // deliberate attempt with a fresh idempotency key.
                 if (safeRef) {
@@ -240,7 +252,7 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
                         idempotency_key: jobId,
                         state,
                         error_code: errorCode,
-                        device: rule.printer_pattern,
+                        device: printerName || rule.printer_pattern,
                         report_name: POS_RECEIPT_SOURCE,
                         source_type: "pos_receipt",
                         pages: 1,
@@ -250,13 +262,15 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
                     { silent: true },
                 ).catch(() => {});
                 if (state === "failed" || state === "dead_letter") {
-                    // The cashier must know this receipt did NOT
-                    // print; success stays silent (the receipt
-                    // itself, plus the receipt screen, is the
-                    // feedback).
+                    // The cashier must know this receipt failed;
+                    // success stays silent (the receipt itself, plus
+                    // the receipt screen, is the feedback). Wording
+                    // stays honest: a failed submission can still
+                    // have produced partial output on some paths, so
+                    // the cashier is told to check before reprinting.
                     notifyUser(
                         env,
-                        `Receipt printing failed on "${printerName || rule.printer_pattern}" (${errorCode || state}). Nothing was printed.`,
+                        _t('Receipt printing failed on "%s" (%s). Check the printer before reprinting.', printerName || rule.printer_pattern, errorCode || state),
                         "danger",
                     );
                 }
@@ -270,6 +284,14 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
             }
         }
     }
+    if (!reachedTerminal) {
+        notifyUser(
+            env,
+            _t('Receipt job on "%s" is taking long; its final outcome is unconfirmed. Check Print Jobs later.', printerName || rule.printer_pattern),
+            "warning",
+        );
+    }
+
 }
 
 async function printPosReceiptNatively(contextObj, explicitOrder = null) {
@@ -318,7 +340,7 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
         {
             idempotency_key: idempotencyKey,
             state: "queued",
-            device: rule.printer_pattern,
+            device: target.printer.name,
             report_name: POS_RECEIPT_SOURCE,
             source_type: "pos_receipt",
             copies: rule.copies || 1,

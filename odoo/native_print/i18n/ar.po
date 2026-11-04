@@ -13,119 +13,14 @@ msgid "Native Print"
 msgstr "الطباعة المحلية"
 
 #. module: native_print
-#: model:ir.ui.menu,name:native_print.menu_profiles
-msgid "Profiles"
-msgstr "ملفات الطابعات"
-
-#. module: native_print
-#: model:ir.ui.menu,name:native_print.menu_rules
-msgid "Rules"
-msgstr "قواعد التوجيه"
-
-#. module: native_print
 #: model:ir.ui.menu,name:native_print.menu_jobs
 msgid "Jobs"
 msgstr "سجل مهام الطباعة"
 
 #. module: native_print
-#: model:ir.actions.act_window,name:native_print.action_profiles
-msgid "Print Profiles"
-msgstr "ملفات تعريف الطابعات"
-
-#. module: native_print
-#: model:ir.actions.act_window,name:native_print.action_rules
-msgid "Print Rules"
-msgstr "قواعد توجيه الطباعة"
-
-#. module: native_print
 #: model:ir.actions.act_window,name:native_print.action_jobs
 msgid "Print Jobs"
 msgstr "مهام الطباعة"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_profile__name
-msgid "Profile Name"
-msgstr "اسم ملف الطابعة"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_profile__printer_pattern
-msgid "Printer Name / Pattern"
-msgstr "اسم الطابعة / النمط"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_profile__mode
-msgid "Print Mode"
-msgstr "وضع الطباعة"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_profile__paper
-msgid "Paper Format"
-msgstr "مقاس الورق"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_profile__copies
-msgid "Default Copies"
-msgstr "عدد النسخ الافتراضي"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_profile__tray
-msgid "Paper Tray / Bin"
-msgstr "درج الورق"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_profile__duplex
-msgid "Duplex (Two-Sided)"
-msgstr "طباعة على الوجهين (Duplex)"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_profile__color
-msgid "Color Printing"
-msgstr "طباعة ملونة"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_profile__scale_policy
-msgid "Paper Scale Policy"
-msgstr "سياسة مطابقة مقاس الورق"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_profile__recovery_mode
-msgid "Crash Recovery Policy"
-msgstr "سياسة الاسترجاع بعد التوقف"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_profile__notes
-msgid "Hardware Quirks & Notes"
-msgstr "ملاحظات الطابعة والإزاحة"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_rule__name
-msgid "Rule Name"
-msgstr "اسم القاعدة"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_rule__report_id
-msgid "Odoo Report"
-msgstr "تقرير أودو"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_rule__report_name
-msgid "Source name (non-report)"
-msgstr "اسم المصدر (لغير التقارير مثل إيصال POS)"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_rule__group_id
-msgid "Restricted to Group"
-msgstr "مقيد بمجموعة صلاحيات"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_rule__profile_id
-msgid "Printer Profile"
-msgstr "ملف الطابعة"
-
-#. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_rule__priority
-msgid "Priority"
-msgstr "الأولوية"
 
 #. module: native_print
 #: model:ir.model.fields,field_description:native_print.field_native_print_job__name
@@ -361,3 +256,157 @@ msgstr "لم يُبلّغ تعريف الطابعة عن دقة الطباعة."
 #. module: native_print
 msgid "IPP/AirPrint-capable network queue; print through the installed Windows driver."
 msgstr "طابعة شبكة تدعم IPP/AirPrint؛ تتم الطباعة عبر تعريف Windows المثبت."
+
+
+msgid "Reprint"
+msgstr "إعادة الطباعة"
+
+msgid "Executed"
+msgstr "المنفذة"
+
+msgid "Active / Queued"
+msgstr "نشطة / في الانتظار"
+
+msgid "My Print Jobs"
+msgstr "مهام الطباعة الخاصة بي"
+
+msgid "Source Type"
+msgstr "نوع المصدر"
+
+msgid "Source Model"
+msgstr "موديل المصدر"
+
+msgid "Source Records"
+msgstr "سجلات المصدر"
+
+msgid "Source Name"
+msgstr "اسم المصدر"
+
+msgid "POS Receipt"
+msgstr "إيصال نقطة البيع"
+
+msgid "Test Print"
+msgstr "طباعة تجريبية"
+
+msgid "Copies"
+msgstr "النسخ"
+
+msgid "Printer"
+msgstr "الطابعة"
+
+msgid "Printer (as reported)"
+msgstr "الطابعة (كما تم الإبلاغ عنها)"
+
+msgid "Report"
+msgstr "التقرير"
+
+msgid "Color"
+msgstr "الألوان"
+
+msgid "Company"
+msgstr "الشركة"
+
+msgid "Duplex"
+msgstr "الطباعة على الوجهين"
+
+msgid "Paper"
+msgstr "الورق"
+
+msgid "Print Mode"
+msgstr "وضع الطباعة"
+
+msgid "User"
+msgstr "المستخدم"
+
+msgid "Native Print / User"
+msgstr "الطباعة الأصلية / مستخدم"
+
+msgid "Native Print / Manager"
+msgstr "الطباعة الأصلية / مدير"
+
+msgid "This job cannot be reprinted: the original report or its records were not recorded for it (for example, POS receipts are reprinted from the POS)."
+msgstr "لا يمكن إعادة طباعة هذه المهمة: لم يتم تسجيل التقرير الأصلي أو سجلاته لها (على سبيل المثال، تتم إعادة طباعة إيصالات نقطة البيع من نقطة البيع نفسها)."
+
+msgid "Print job status is reported by the desktop app and cannot be changed manually. To print again, print the document again from Odoo."
+msgstr "يتم إبلاغ حالة مهمة الطباعة بواسطة تطبيق سطح المكتب ولا يمكن تغييرها يدويًا. للطباعة مرة أخرى، اطبع المستند من جديد من Odoo."
+
+msgid "Reprint this document now? The original printer and print settings are restored when that printer is connected to this PC."
+msgstr "إعادة طباعة هذا المستند الآن؟ ستتم استعادة الطابعة الأصلية وإعدادات الطباعة عندما تكون تلك الطابعة متصلة بهذا الكمبيوتر."
+
+msgid "Sent \"%s\" to %s"
+msgstr "تم إرسال \"%s\" إلى %s"
+
+msgid "Printing failed on \"%s\" (%s). Check the printer before reprinting."
+msgstr "فشلت الطباعة على \"%s\" (%s). افحص الطابعة قبل إعادة الطباعة."
+
+msgid "Print job \"%s\" is still %s; its final outcome is unconfirmed. Check Print Jobs later."
+msgstr "مهمة الطباعة \"%s\" ما زالت %s؛ نتيجتها النهائية غير مؤكدة. راجع مهام الطباعة لاحقًا."
+
+msgid "Native Print could not print on \"%s\": %s. The file was downloaded instead."
+msgstr "تعذرت الطباعة الأصلية على \"%s\": %s. تم تنزيل الملف بدلاً من ذلك."
+
+msgid "Native Print could not print on \"%s\": %s. The PDF was downloaded instead."
+msgstr "تعذرت الطباعة الأصلية على \"%s\": %s. تم تنزيل ملف PDF بدلاً من ذلك."
+
+msgid "Native Print could not print this receipt. The standard POS printing was used instead."
+msgstr "تعذرت طباعة هذا الإيصال أصليًا. تم استخدام طباعة نقطة البيع القياسية بدلاً من ذلك."
+
+msgid "Receipt printing failed on \"%s\" (%s). Check the printer before reprinting."
+msgstr "فشلت طباعة الإيصال على \"%s\" (%s). افحص الطابعة قبل إعادة الطباعة."
+
+msgid "Receipt job on \"%s\" is taking long; its final outcome is unconfirmed. Check Print Jobs later."
+msgstr "مهمة الإيصال على \"%s\" تستغرق وقتًا طويلاً؛ نتيجتها النهائية غير مؤكدة. راجع مهام الطباعة لاحقًا."
+
+msgid "Open Odoo inside the Yaseir Print desktop app to see this PC's printers."
+msgstr "افتح Odoo داخل تطبيق يسير برنت لسطح المكتب لعرض طابعات هذا الكمبيوتر."
+
+msgid "Desktop App Required"
+msgstr "تطبيق سطح المكتب مطلوب"
+
+msgid "%s printer(s) found on this PC."
+msgstr "تم العثور على %s طابعة على هذا الكمبيوتر."
+
+msgid "Printers Refreshed"
+msgstr "تم تحديث الطابعات"
+
+msgid "Printer Refresh Failed"
+msgstr "فشل تحديث الطابعات"
+
+msgid "The Control Center is available when running inside the Yaseir Print desktop app (Ctrl+Shift+Y)."
+msgstr "مركز التحكم متاح عند التشغيل داخل تطبيق يسير برنت لسطح المكتب (Ctrl+Shift+Y)."
+
+msgid "Browser Fallback Mode"
+msgstr "وضع المتصفح الاحتياطي"
+
+msgid "%s will be used for printing from this PC."
+msgstr "سيتم استخدام %s للطباعة من هذا الكمبيوتر."
+
+msgid "Printer Selected"
+msgstr "تم اختيار الطابعة"
+
+msgid "Open Odoo inside the Yaseir Print app to send hardware calibration prints."
+msgstr "افتح Odoo داخل تطبيق يسير برنت لإرسال مطبوعات معايرة العتاد."
+
+msgid "Native App Required"
+msgstr "التطبيق الأصلي مطلوب"
+
+msgid "No physical printer was discovered. Connect or install a printer, then refresh the printer list."
+msgstr "لم يتم اكتشاف أي طابعة فعلية. وصّل طابعة أو ثبّتها ثم حدّث قائمة الطابعات."
+
+msgid "No Printer Available"
+msgstr "لا توجد طابعة متاحة"
+
+msgid "Queued %s calibration test (%s) on %s"
+msgstr "تمت جدولة اختبار معايرة %s (%s) على %s"
+
+msgid "Calibration Queued"
+msgstr "تمت جدولة المعايرة"
+
+msgid "Calibration Failed"
+msgstr "فشلت المعايرة"
+
+msgid "This printer is already registered for this company."
+msgstr "هذه الطابعة مسجلة بالفعل لهذه الشركة."
+
+msgid "A print job with this idempotency key already exists for this company."
+msgstr "توجد بالفعل مهمة طباعة بمفتاح عدم التكرار هذا لهذه الشركة."

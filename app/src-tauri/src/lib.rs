@@ -61,7 +61,7 @@ const BRIDGE_JS: &str = r#"
     var r = ev && ev.reason;
     npPushError("promise", (r && (r.message || r)) || "unhandled rejection");
   });
-  window.__NATIVE_PRINT__ = {
+  const __npFacade = {
     version: "__APP_VERSION__",
     printPdf: function (args) {
       const payload = Object.assign({}, args, { bytes: normalizeBytes(args && args.bytes) });
@@ -75,10 +75,10 @@ const BRIDGE_JS: &str = r#"
       return invoke("print_image", { req: payload });
     },
     printStatus: function (jobId) {
-      return invoke("print_status", { jobId: jobId, job_id: jobId });
+      return invoke("print_status", { jobId: jobId });
     },
     jobDetail: function (jobId) {
-      return invoke("job_detail", { jobId: jobId, job_id: jobId });
+      return invoke("job_detail", { jobId: jobId });
     },
     appOverview: function () {
       return invoke("app_overview", {});
@@ -96,10 +96,10 @@ const BRIDGE_JS: &str = r#"
       return invoke("run_test_print", { printer: printer, kind: kind, paper: paper || null });
     },
     retryJob: function (jobId) {
-      return invoke("retry_job_cmd", { jobId: jobId, job_id: jobId });
+      return invoke("retry_job_cmd", { jobId: jobId });
     },
     cancelJob: function (jobId) {
-      return invoke("cancel_job_cmd", { jobId: jobId, job_id: jobId });
+      return invoke("cancel_job_cmd", { jobId: jobId });
     },
     clearFinished: function () {
       return invoke("clear_finished_cmd", {});
@@ -110,8 +110,7 @@ const BRIDGE_JS: &str = r#"
     saveOrigin: function (origin, autoReprint) {
       return invoke("save_origin_cmd", {
         origin: origin,
-        autoReprint: !!autoReprint,
-        auto_reprint: !!autoReprint
+        autoReprint: !!autoReprint
       });
     },
     openControlCenter: function () {
@@ -127,6 +126,20 @@ const BRIDGE_JS: &str = r#"
       return invoke("clear_web_data_cmd", {});
     },
   };
+  // Publish the facade as a non-writable, non-configurable property:
+  // page scripts (including third-party Odoo JS) must not be able to
+  // replace or wrap it to intercept payloads or fake results. The
+  // fallback assignment covers a page that somehow pre-defined the
+  // name as configurable. (Audit B-6.)
+  try {
+    Object.defineProperty(window, "__NATIVE_PRINT__", {
+      value: __npFacade,
+      writable: false,
+      configurable: false,
+    });
+  } catch (e) {
+    window.__NATIVE_PRINT__ = __npFacade;
+  }
 
   // ------------------------------------------------------------------
   // Environment probes + boot watchdog. The Odoo frontend is a large
@@ -290,7 +303,9 @@ const BRIDGE_JS: &str = r#"
     });
   }
   function npBootWatchdog() {
+    if (window.__NP_WATCHDOG_ARMED__) return;
     if (npIsLocalPage() || !npIsBackendPage()) return;
+    window.__NP_WATCHDOG_ARMED__ = true;
     var delays = window.__NP_BOOT_DELAYS__ || { tickMs: 1000, failAfter: 30 };
     var env = window.__NATIVE_PRINT_ENV__ || npProbeEnvironment();
     var ticks = 0;
@@ -310,6 +325,20 @@ const BRIDGE_JS: &str = r#"
   if (!npIsLocalPage()) {
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", function () { npReportEnvironment(); npBootWatchdog(); npHttpWarning(); });
+      // Odoo is an SPA: it can soft-navigate from a non-backend
+      // landing page into /odoo or /web without a new document load,
+      // in which case the load-time check above never armed the
+      // watchdog for this session. Re-check on history transitions;
+      // npBootWatchdog self-guards (armed flag + backend path).
+      try {
+        var npPushState = window.history.pushState;
+        window.history.pushState = function () {
+          var r = npPushState.apply(this, arguments);
+          window.setTimeout(npBootWatchdog, 0);
+          return r;
+        };
+        window.addEventListener("popstate", function () { npBootWatchdog(); });
+      } catch (e) { /* history patching is best-effort */ }
     } else {
       npReportEnvironment();
       npBootWatchdog();

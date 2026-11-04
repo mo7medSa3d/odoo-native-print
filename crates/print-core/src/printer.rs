@@ -15,6 +15,7 @@ pub enum PrinterStatus {
     Paused,
     Printing,
     Error,
+    UserIntervention,
     Unknown,
 }
 
@@ -35,6 +36,7 @@ pub fn needs_intervention(s: PrinterStatus) -> bool {
             | PrinterStatus::NoToner
             | PrinterStatus::Paused
             | PrinterStatus::Error
+            | PrinterStatus::UserIntervention
     )
 }
 
@@ -48,6 +50,12 @@ pub fn decode_printer_status(flags: u32) -> PrinterStatus {
     const PROCESSING: u32 = 0x0000_4000;
     const NO_TONER: u32 = 0x0004_0000;
     const DOOR_OPEN: u32 = 0x0040_0000;
+    const PAPER_PROBLEM: u32 = 0x0000_0040;
+    const BUSY: u32 = 0x0000_0200;
+    const MANUAL_FEED: u32 = 0x0000_0020;
+    const NOT_AVAILABLE: u32 = 0x0000_1000;
+    const OUTPUT_BIN_FULL: u32 = 0x0000_0800;
+    const USER_INTERVENTION: u32 = 0x0010_0000;
     // Priority: what the user must fix first, then activity states.
     if flags & DOOR_OPEN != 0 {
         PrinterStatus::DoorOpen
@@ -57,13 +65,23 @@ pub fn decode_printer_status(flags: u32) -> PrinterStatus {
         PrinterStatus::PaperOut
     } else if flags & NO_TONER != 0 {
         PrinterStatus::NoToner
-    } else if flags & OFFLINE != 0 {
+    } else if flags & OFFLINE != 0 || flags & NOT_AVAILABLE != 0 {
         PrinterStatus::Offline
+    } else if flags & USER_INTERVENTION != 0
+        || flags & MANUAL_FEED != 0
+        || flags & OUTPUT_BIN_FULL != 0
+    {
+        // A human must act (or the device needs attention) before
+        // anything can print — never let these fall through to Unknown,
+        // which every consumer treats as printable.
+        PrinterStatus::UserIntervention
+    } else if flags & PAPER_PROBLEM != 0 {
+        PrinterStatus::Error
     } else if flags & PAUSED != 0 {
         PrinterStatus::Paused
     } else if flags & ERROR != 0 {
         PrinterStatus::Error
-    } else if flags & (PRINTING | PROCESSING) != 0 {
+    } else if flags & (PRINTING | PROCESSING | BUSY) != 0 {
         PrinterStatus::Printing
     } else if flags == 0 {
         PrinterStatus::Ready
@@ -75,9 +93,11 @@ pub fn decode_printer_status(flags: u32) -> PrinterStatus {
 fn is_ipv4(s: &str) -> bool {
     let parts: Vec<&str> = s.split('.').collect();
     parts.len() == 4
-        && parts
-            .iter()
-            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+        && parts.iter().all(|p| {
+            !p.is_empty()
+                && p.chars().all(|c| c.is_ascii_digit())
+                && p.parse::<u16>().map(|v| v <= 255).unwrap_or(false)
+        })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,6 +164,14 @@ impl PrinterInfo {
             PrinterKind::Virtual
         } else if name.starts_with("\\\\") {
             PrinterKind::Shared
+        } else if p.starts_with("USB")
+            || p.starts_with("COM")
+            || p.starts_with("LPT")
+            || p.starts_with("FILE:")
+        {
+            // Physical local ports and print-to-file: the ':' in
+            // "COM1:" / "FILE:" must not read as a network endpoint.
+            PrinterKind::Local
         } else if p.contains("IP_")
             || p.contains("IPP")
             || p.contains("WSD")
@@ -160,6 +188,29 @@ impl PrinterInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn intervention_flags_decode() {
+        // Audit D-2: flags that used to fall through to Unknown
+        // (treated as printable by every gate).
+        assert_eq!(
+            decode_printer_status(0x0010_0000),
+            PrinterStatus::UserIntervention
+        );
+        assert!(needs_intervention(PrinterStatus::UserIntervention));
+        assert_eq!(
+            decode_printer_status(0x0000_0020),
+            PrinterStatus::UserIntervention
+        ); // manual feed
+        assert_eq!(
+            decode_printer_status(0x0000_0800),
+            PrinterStatus::UserIntervention
+        ); // output bin full
+        assert_eq!(decode_printer_status(0x0000_0040), PrinterStatus::Error); // paper problem
+        assert_eq!(decode_printer_status(0x0000_1000), PrinterStatus::Offline); // not available
+        assert_eq!(decode_printer_status(0x0000_0200), PrinterStatus::Printing);
+        // busy
+    }
+
     #[test]
     fn status_priority() {
         assert_eq!(decode_printer_status(0), PrinterStatus::Ready);
@@ -178,6 +229,27 @@ mod tests {
         assert!(needs_intervention(PrinterStatus::PaperJam));
         assert!(!needs_intervention(PrinterStatus::Printing));
     }
+    #[test]
+    fn classify_local_ports() {
+        // Audit L11: ':' in a local port name is not a network endpoint.
+        assert_eq!(
+            PrinterInfo::classify("HP LaserJet", "COM1:"),
+            PrinterKind::Local
+        );
+        assert_eq!(
+            PrinterInfo::classify("HP LaserJet", "LPT1:"),
+            PrinterKind::Local
+        );
+        assert_eq!(
+            PrinterInfo::classify("HP LaserJet", "USB001"),
+            PrinterKind::Local
+        );
+        assert_eq!(
+            PrinterInfo::classify("HP LaserJet", "FILE:"),
+            PrinterKind::Local
+        );
+    }
+
     #[test]
     fn classify_kinds() {
         assert_eq!(

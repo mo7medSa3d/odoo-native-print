@@ -30,7 +30,6 @@ commands.allow = [
     "clear_finished_cmd",
     "export_diagnostics",
     "save_origin_cmd",
-    "open_odoo_origin",
 ]
 
 [[permission]]

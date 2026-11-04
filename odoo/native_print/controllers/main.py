@@ -163,6 +163,7 @@ class NativePrintController(http.Controller):
             parsed_copies = 1
         if parsed_copies > 99:
             parsed_copies = 99
+        created = False
         if not job:
             report = False
             if report_name and isinstance(report_name, str):
@@ -188,8 +189,22 @@ class NativePrintController(http.Controller):
                 "company_id": company,
                 "user_id": request.env.user.id,
             })
-            job = Job.create(vals)
-        else:
+            # Race-safe creation, mirroring device registration
+            # above: two concurrent first posts for one key+company
+            # must produce ONE job row. The loser of the unique
+            # constraint re-reads the winner's row and falls into the
+            # update path below instead of failing the post with a
+            # 500 (its state/device/attempts updates still apply).
+            try:
+                with Job.env.cr.savepoint():
+                    job = Job.create(vals)
+                created = True
+            except IntegrityError:
+                job = Job.search([
+                    ("name", "=", idempotency_key),
+                    ("company_id", "=", company),
+                ], limit=1)
+        if job and not created:
             # A later post may carry the source reference the creating
             # post missed (or vice versa): fill blanks, never overwrite.
             if not job.source_ids:

@@ -13,7 +13,7 @@
         <field name="implied_ids" eval="[(4, ref('group_native_print_manager'))]"/>
     </record>
     <!-- Grant internal users Native Print / User by default so standard Odoo users
-         can resolve print rules and log print jobs out of the box -->
+         can print natively and see the print job log out of the box -->
     <record id="base.group_user" model="res.groups">
         <field name="implied_ids" eval="[(4, ref('group_native_print_user'))]"/>
     </record>

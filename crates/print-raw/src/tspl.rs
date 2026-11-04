@@ -40,7 +40,15 @@ impl TsplLabel {
     }
     /// TEXT x,y,"font",rotation,x-mult,y-mult,"content"
     pub fn text(mut self, x: u32, y: u32, content: &str) -> Self {
-        let safe = content.replace('"', "'");
+        // Strip control bytes: an embedded CR/LF would break out of
+        // the TEXT command into arbitrary TSPL commands (the ESC/POS
+        // builder strips them for the same reason). Quotes are folded
+        // so the string literal cannot terminate early.
+        let safe: String = content
+            .chars()
+            .filter(|c| !c.is_control())
+            .map(|c| if c == '"' { '\'' } else { c })
+            .collect();
         self.buf
             .extend_from_slice(format!("TEXT {x},{y},\"3\",0,1,1,\"{safe}\"\r\n").as_bytes());
         self
@@ -55,6 +63,25 @@ impl TsplLabel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn text_strips_control_injection() {
+        let out = TsplLabel::new(50, 30, 3)
+            .text(1, 1, "evil\"\r\nPRINT 99\u{7}")
+            .print(1, 1);
+        let text = String::from_utf8_lossy(&out);
+        // The words stay as inert quoted TEXT data; the CR/LF that
+        // would have turned them into a command must be gone.
+        assert!(
+            !text.contains("\r\nPRINT 99"),
+            "CR/LF injection must be stripped: {text}"
+        );
+        assert_eq!(
+            text.matches("\r\nPRINT ").count(),
+            1,
+            "only the real PRINT command remains"
+        );
+    }
+
     #[test]
     fn label_program_shape() {
         let bm = MonoBitmap::from_packed(16, 2, vec![0xFF, 0x00, 0x00, 0xFF]).unwrap();

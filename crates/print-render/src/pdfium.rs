@@ -172,8 +172,8 @@ impl Pdfium {
                 Ok(lib) => {
                     let api = load_api(&lib)?;
                     {
-                        let _guard = call_lock().lock().expect("pdfium lock poisoned");
-                        let mut count = init_refcount().lock().expect("pdfium lock poisoned");
+                        let _guard = call_lock().lock().unwrap_or_else(|e| e.into_inner());
+                        let mut count = init_refcount().lock().unwrap_or_else(|e| e.into_inner());
                         if *count == 0 {
                             unsafe { (api.init_library)() };
                         }
@@ -216,7 +216,7 @@ impl Pdfium {
     /// retains an owned copy inside [`PdfDocument`].
     pub fn load_document(self: &Arc<Self>, bytes: &[u8]) -> Result<PdfDocument, PdfiumError> {
         let owned = bytes.to_vec();
-        let _guard = call_lock().lock().expect("pdfium lock poisoned");
+        let _guard = call_lock().lock().unwrap_or_else(|e| e.into_inner());
         let doc = unsafe {
             (self.api.load_mem_document)(owned.as_ptr(), owned.len() as c_int, std::ptr::null())
         };
@@ -238,8 +238,8 @@ impl Pdfium {
 
 impl Drop for Pdfium {
     fn drop(&mut self) {
-        let _guard = call_lock().lock().expect("pdfium lock poisoned");
-        let mut count = init_refcount().lock().expect("pdfium lock poisoned");
+        let _guard = call_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let mut count = init_refcount().lock().unwrap_or_else(|e| e.into_inner());
         *count = count.saturating_sub(1);
         if *count == 0 {
             unsafe { (self.api.destroy_library)() };
@@ -347,14 +347,14 @@ unsafe impl Sync for PdfDocument {}
 
 impl PdfDocument {
     pub fn page_count(&self) -> usize {
-        let _guard = call_lock().lock().expect("pdfium lock poisoned");
+        let _guard = call_lock().lock().unwrap_or_else(|e| e.into_inner());
         let n = unsafe { (self.pdfium.api.get_page_count)(self.doc) };
         n.max(0) as usize
     }
 
     /// Page size in millimetres (from PDF points, 1pt = 1/72in).
     pub fn page_size_mm(&self, index: usize) -> Result<PageSize, PdfiumError> {
-        let _guard = call_lock().lock().expect("pdfium lock poisoned");
+        let _guard = call_lock().lock().unwrap_or_else(|e| e.into_inner());
         let page = self.load_page_locked(index)?;
         let w_pt = unsafe { (self.pdfium.api.get_page_width_f)(page) } as f64;
         let h_pt = unsafe { (self.pdfium.api.get_page_height_f)(page) } as f64;
@@ -390,7 +390,7 @@ impl PdfDocument {
         mode: RenderMode,
         requested_dpi: u32,
     ) -> Result<RenderedPage, PdfiumError> {
-        let _guard = call_lock().lock().expect("pdfium lock poisoned");
+        let _guard = call_lock().lock().unwrap_or_else(|e| e.into_inner());
         let api = &self.pdfium.api;
         let page = self.load_page_locked(index)?;
         let result = self.render_locked(api, page, mode, requested_dpi);
@@ -469,8 +469,12 @@ impl PdfDocument {
         };
         let pixels = match mode {
             RenderMode::Threshold => {
+                // A length mismatch here is an internal invariant
+                // failure; it must fail THIS job, not panic while the
+                // process-wide PDFium lock is held (a panic would
+                // poison the lock for every later PDF job).
                 let mono = print_raw::MonoBitmap::from_grayscale(&rendered, w, h, 128)
-                    .expect("grayscale buffer length matches width*height by construction");
+                    .map_err(|_| PdfiumError::BitmapFailed(w, h))?;
                 mono.data
             }
             _ => rendered,
@@ -487,7 +491,7 @@ impl PdfDocument {
 
 impl Drop for PdfDocument {
     fn drop(&mut self) {
-        let _guard = call_lock().lock().expect("pdfium lock poisoned");
+        let _guard = call_lock().lock().unwrap_or_else(|e| e.into_inner());
         unsafe { (self.pdfium.api.close_document)(self.doc) };
     }
 }
