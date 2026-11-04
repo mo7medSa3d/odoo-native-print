@@ -22,6 +22,45 @@ pub enum QueueError {
 /// unbounded memory/disk (spec section 5, bounded queue).
 pub const DEFAULT_MAX_ACTIVE_PER_PRINTER: u64 = 500;
 
+/// Global backpressure limit: active jobs across ALL printers.
+/// Bounds total disk/memory a runaway client can consume.
+pub const DEFAULT_MAX_PENDING_GLOBAL: u64 = 2000;
+
+/// A job in a working state (rendering/spooling/printing) whose last
+/// update is older than this is wedged, not working: the worker is
+/// gone or stuck. Reconciliation fails it loudly (RECONCILED_STALE)
+/// instead of letting it hang forever.
+pub const STALE_JOB_THRESHOLD_SECS: i64 = 900;
+
+/// Diagnostics correlation id for a job: a stable, short fingerprint
+/// of its idempotency key. Safe to log and quote in support reports
+/// (one-way fingerprint, not the key itself).
+pub fn diag_id_for_key(key: &str) -> String {
+    // FNV-1a 64-bit: deterministic across runs and platforms.
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in key.as_bytes() {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("np-{hash:016x}")
+}
+
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// One structured job event (the durable diagnostics log).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JobEvent {
+    pub job_id: String,
+    pub ts: i64,
+    pub event: String,
+    pub detail: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Job {
     pub id: String,
@@ -79,6 +118,7 @@ impl Default for JobOptions {
 pub struct Queue {
     conn: Connection,
     max_active_per_printer: u64,
+    max_pending_global: u64,
 }
 
 impl Queue {
@@ -92,7 +132,12 @@ impl Queue {
     fn init(conn: Connection) -> Result<Self, QueueError> {
         conn.busy_timeout(std::time::Duration::from_millis(5000))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        // FULL, not NORMAL: with WAL + NORMAL an OS crash or power
+        // loss can roll back the last commits — for a print queue that
+        // either loses an acknowledged job or resurrects a printed one
+        // (a duplicate). Enqueue rates here are human-scale, so the
+        // stronger durability costs nothing measurable (see bench).
+        conn.pragma_update(None, "synchronous", "FULL")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS jobs(
                seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,16 +154,83 @@ impl Queue {
                data BLOB NOT NULL);
              CREATE TABLE IF NOT EXISTS job_options(
                job_id TEXT PRIMARY KEY,
-               options_json TEXT NOT NULL);",
+               options_json TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS job_events(
+               seq INTEGER PRIMARY KEY AUTOINCREMENT,
+               job_id TEXT NOT NULL,
+               ts INTEGER NOT NULL,
+               event TEXT NOT NULL,
+               detail TEXT);",
         )?;
+        // Migration: jobs.updated_at (unix seconds of the last state
+        // change) powers stale-job reconciliation. Added in place so
+        // existing queue databases upgrade without data loss.
+        let has_updated_at: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('jobs') WHERE name='updated_at')",
+            [],
+            |r| r.get::<_, i64>(0),
+        )? == 1;
+        if !has_updated_at {
+            conn.execute(
+                "ALTER TABLE jobs ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
         Ok(Self {
             conn,
             max_active_per_printer: DEFAULT_MAX_ACTIVE_PER_PRINTER,
+            max_pending_global: DEFAULT_MAX_PENDING_GLOBAL,
         })
     }
 
     pub fn set_max_active_per_printer(&mut self, limit: u64) {
         self.max_active_per_printer = limit;
+    }
+
+    pub fn set_max_pending_global(&mut self, limit: u64) {
+        self.max_pending_global = limit;
+    }
+
+    /// Active (not finished) jobs across all printers.
+    pub fn count_active_global(&self) -> Result<u64, QueueError> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*) FROM jobs WHERE state IN ('queued','rendering','spooling','printing')",
+            [],
+            |r| r.get::<_, i64>(0),
+        )? as u64)
+    }
+
+    fn record_event(
+        &self,
+        job_id: &str,
+        event: &str,
+        detail: Option<&str>,
+    ) -> Result<(), QueueError> {
+        self.conn.execute(
+            "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,?3,?4)",
+            params![job_id, now_unix(), event, detail],
+        )?;
+        Ok(())
+    }
+
+    /// The most recent structured job events (the diagnostics log).
+    pub fn recent_events(&self, limit: usize) -> Result<Vec<JobEvent>, QueueError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT job_id, ts, event, detail FROM job_events ORDER BY seq DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |r| {
+            Ok(JobEvent {
+                job_id: r.get(0)?,
+                ts: r.get(1)?,
+                event: r.get(2)?,
+                detail: r.get(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     /// Jobs for this printer that are not finished yet.
@@ -159,6 +271,10 @@ impl Queue {
         )?;
         self.conn.execute(
             "DELETE FROM job_options WHERE job_id IN (SELECT id FROM jobs WHERE state IN ('done','canceled'))",
+            [],
+        )?;
+        self.conn.execute(
+            "DELETE FROM job_events WHERE job_id IN (SELECT id FROM jobs WHERE state IN ('done','canceled'))",
             [],
         )?;
         let removed = self.conn.execute(
@@ -213,11 +329,21 @@ impl Queue {
         {
             return Err(QueueError::QueueFull(job.printer.clone()));
         }
+        if !is_duplicate && self.count_active_global()? >= self.max_pending_global {
+            return Err(QueueError::QueueFull("global".to_string()));
+        }
         self.conn.execute(
-            "INSERT OR IGNORE INTO jobs(id,idempotency_key,printer,report,pages,bytes,priority,state,attempts,error_code)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,'queued',0,NULL)",
-            params![job.id, job.idempotency_key, job.printer, job.report, job.pages, job.bytes, job.priority],
+            "INSERT OR IGNORE INTO jobs(id,idempotency_key,printer,report,pages,bytes,priority,state,attempts,error_code,updated_at)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,'queued',0,NULL,?8)",
+            params![job.id, job.idempotency_key, job.printer, job.report, job.pages, job.bytes, job.priority, now_unix()],
         )?;
+        if !is_duplicate {
+            let _ = self.record_event(
+                &job.id,
+                "enqueued",
+                Some(&diag_id_for_key(&job.idempotency_key)),
+            );
+        }
         let id: String = self.conn.query_row(
             "SELECT id FROM jobs WHERE idempotency_key=?1",
             params![job.idempotency_key],
@@ -239,6 +365,101 @@ impl Queue {
         } else {
             Ok(Some(id))
         }
+    }
+
+    /// Atomic enqueue: job row + payload + options are written in a
+    /// SINGLE SQLite transaction. Either the complete job exists or
+    /// nothing does — a crash or power loss mid-submission can never
+    /// leave a queued job without its document (which the worker
+    /// would then fail) or a payload without a job. Returns
+    /// Ok(Some(id)) for a new job, Ok(None) for a duplicate key
+    /// (nothing written; the original job is untouched).
+    pub fn enqueue_with_payload(
+        &mut self,
+        job: &Job,
+        kind: &str,
+        data: &[u8],
+        opts: &JobOptions,
+    ) -> Result<Option<String>, QueueError> {
+        if !crate::security::valid_idempotency_key(&job.idempotency_key) {
+            return Err(QueueError::BadKey);
+        }
+        // IMMEDIATE, not deferred: the write lock is taken up front,
+        // so a concurrent enqueue on another connection waits on the
+        // busy timeout and then sees this job as a duplicate — a
+        // deferred transaction would fail spuriously with SQLITE_BUSY
+        // when upgrading its read lock mid-check.
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let is_duplicate: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM jobs WHERE idempotency_key=?1)",
+            params![job.idempotency_key],
+            |r| r.get::<_, i64>(0),
+        )? == 1;
+        if is_duplicate {
+            // Same key, different document size: the first writer
+            // wins (the stored job is NEVER overwritten), but the
+            // conflict is logged — it means a client bug or a key
+            // being reused across different prints.
+            let existing: Option<(String, i64)> = tx
+                .query_row(
+                    "SELECT id, bytes FROM jobs WHERE idempotency_key=?1",
+                    params![job.idempotency_key],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .ok();
+            drop(tx);
+            if let Some((existing_id, existing_bytes)) = existing {
+                if existing_bytes as u64 != job.bytes {
+                    let _ = self.record_event(
+                        &existing_id,
+                        "duplicate_conflict",
+                        Some(&format!(
+                            "existing_bytes={existing_bytes} submitted_bytes={}",
+                            job.bytes
+                        )),
+                    );
+                }
+            }
+            return Ok(None);
+        }
+        let active_printer: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM jobs WHERE printer=?1 AND state IN ('queued','rendering','spooling','printing')",
+            params![job.printer],
+            |r| r.get(0),
+        )?;
+        if active_printer as u64 >= self.max_active_per_printer {
+            return Err(QueueError::QueueFull(job.printer.clone()));
+        }
+        let active_global: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM jobs WHERE state IN ('queued','rendering','spooling','printing')",
+            [],
+            |r| r.get(0),
+        )?;
+        if active_global as u64 >= self.max_pending_global {
+            return Err(QueueError::QueueFull("global".to_string()));
+        }
+        tx.execute(
+            "INSERT INTO jobs(id,idempotency_key,printer,report,pages,bytes,priority,state,attempts,error_code,updated_at)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,'queued',0,NULL,?8)",
+            params![job.id, job.idempotency_key, job.printer, job.report, job.pages, job.bytes, job.priority, now_unix()],
+        )?;
+        tx.execute(
+            "INSERT INTO payloads(job_id, kind, data) VALUES(?1,?2,?3)",
+            params![job.id, kind, data],
+        )?;
+        let json = serde_json::to_string(opts).unwrap_or_else(|_| "{}".to_string());
+        tx.execute(
+            "INSERT INTO job_options(job_id, options_json) VALUES(?1,?2)",
+            params![job.id, json],
+        )?;
+        tx.execute(
+            "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'enqueued',?3)",
+            params![job.id, now_unix(), diag_id_for_key(&job.idempotency_key)],
+        )?;
+        tx.commit()?;
+        Ok(Some(job.id.clone()))
     }
 
     /// The job id stored for an idempotency key, if any.
@@ -331,9 +552,10 @@ impl Queue {
         let job = self.get(id)?;
         job.state.transition_to(next)?;
         self.conn.execute(
-            "UPDATE jobs SET state=?1, error_code=?2 WHERE id=?3",
-            params![next.as_str(), error_code, id],
+            "UPDATE jobs SET state=?1, error_code=?2, updated_at=?3 WHERE id=?4",
+            params![next.as_str(), error_code, now_unix(), id],
         )?;
+        let _ = self.record_event(id, &format!("state:{}", next.as_str()), error_code);
         Ok(())
     }
 
@@ -352,8 +574,8 @@ impl Queue {
         };
         let Some(id) = candidate else { return Ok(None) };
         let updated = self.conn.execute(
-            "UPDATE jobs SET state='rendering', error_code=NULL, attempts=attempts+1 WHERE id=?1 AND state='queued'",
-            params![id],
+            "UPDATE jobs SET state='rendering', error_code=NULL, attempts=attempts+1, updated_at=?2 WHERE id=?1 AND state='queued'",
+            params![id, now_unix()],
         )?;
         if updated == 0 {
             return Ok(None);
@@ -372,17 +594,61 @@ impl Queue {
     /// Returns (requeued, ambiguous) counts. Never silently duplicates.
     pub fn recover_on_startup(&mut self, auto_reprint: bool) -> Result<(u64, u64), QueueError> {
         let requeued = self.conn.execute(
-            "UPDATE jobs SET state='queued', error_code='RECOVERED_BEFORE_SPOOL' WHERE state IN ('rendering','spooling')", [])? as u64;
+            "UPDATE jobs SET state='queued', error_code='RECOVERED_BEFORE_SPOOL', updated_at=?1 WHERE state IN ('rendering','spooling')",
+            params![now_unix()])? as u64;
         let (state, code) = if auto_reprint {
             ("queued", "RECOVERED_AUTO_REPRINT")
         } else {
             ("failed", "RECOVERY_AMBIGUOUS")
         };
         let ambiguous = self.conn.execute(
-            "UPDATE jobs SET state=?1, error_code=?2 WHERE state='printing'",
-            params![state, code],
+            "UPDATE jobs SET state=?1, error_code=?2, updated_at=?3 WHERE state='printing'",
+            params![state, code, now_unix()],
         )? as u64;
+        let _ = self.record_event(
+            "__queue__",
+            "recovery",
+            Some(&format!("requeued={requeued} ambiguous={ambiguous}")),
+        );
         Ok((requeued, ambiguous))
+    }
+
+    /// Reconciliation for wedged jobs: a job sitting in a working
+    /// state (rendering/spooling/printing) whose last update is older
+    /// than STALE_JOB_THRESHOLD_SECS belongs to a worker that is gone
+    /// or stuck. Fail it loudly with RECONCILED_STALE — the user can
+    /// retry it — instead of letting it block the queue forever.
+    /// Jobs predating the updated_at column (updated_at = 0) are
+    /// never reconciled: absence of evidence is not evidence of a
+    /// wedge. Returns how many jobs were reconciled.
+    pub fn reconcile_stale(&mut self) -> Result<u64, QueueError> {
+        let cutoff = now_unix() - STALE_JOB_THRESHOLD_SECS;
+        let ids: Vec<String> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT id FROM jobs WHERE state IN ('rendering','spooling','printing') AND updated_at > 0 AND updated_at < ?1",
+            )?;
+            let rows = stmt.query_map(params![cutoff], |r| r.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            out
+        };
+        let mut n = 0u64;
+        for id in ids {
+            // Direct terminal write: reconciliation must succeed even
+            // for states the normal machine would route differently;
+            // 'failed' is reachable from every working state anyway.
+            let changed = self.conn.execute(
+                "UPDATE jobs SET state='failed', error_code='RECONCILED_STALE', updated_at=?1 WHERE id=?2 AND state IN ('rendering','spooling','printing')",
+                params![now_unix(), id],
+            )?;
+            if changed > 0 {
+                let _ = self.record_event(&id, "reconciled_stale", Some("RECONCILED_STALE"));
+                n += 1;
+            }
+        }
+        Ok(n)
     }
 
     pub fn count_by_state(&self, state: JobState) -> Result<u64, QueueError> {
@@ -473,6 +739,175 @@ mod tests {
         assert_eq!(q.count_by_state(JobState::Done).unwrap(), 1);
         assert!(q.set_state(&j.id, JobState::Queued, None).is_err());
     }
+    #[test]
+    fn atomic_enqueue_writes_job_payload_options_together() {
+        let mut q = Queue::in_memory().unwrap();
+        let opts = JobOptions {
+            mode: "escpos".into(),
+            ..JobOptions::default()
+        };
+        let id = q
+            .enqueue_with_payload(
+                &job("a1", "k-atomic", "p1", 0),
+                "image-png",
+                b"PNGDATA",
+                &opts,
+            )
+            .unwrap();
+        assert_eq!(id.as_deref(), Some("a1"));
+        let (kind, data) = q.payload("a1").unwrap().unwrap();
+        assert_eq!(kind, "image-png");
+        assert_eq!(data, b"PNGDATA");
+        assert_eq!(q.options("a1").unwrap().mode, "escpos");
+        // Duplicate: nothing written, original payload untouched.
+        let dup = q
+            .enqueue_with_payload(
+                &job("a2", "k-atomic", "p1", 0),
+                "image-png",
+                b"OTHER",
+                &opts,
+            )
+            .unwrap();
+        assert_eq!(dup, None);
+        assert_eq!(q.count_by_state(JobState::Queued).unwrap(), 1);
+        let (_, data) = q.payload("a1").unwrap().unwrap();
+        assert_eq!(data, b"PNGDATA");
+        // The enqueue was logged as a structured event with the diag id.
+        let events = q.recent_events(10).unwrap();
+        assert!(events.iter().any(|e| e.event == "enqueued"
+            && e.detail.as_deref() == Some(diag_id_for_key("k-atomic").as_str())));
+    }
+
+    #[test]
+    fn concurrent_same_key_enqueues_create_exactly_one_job() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("np-conc-{}.db", std::process::id()));
+        let p = path.to_string_lossy().to_string();
+        let _ = std::fs::remove_file(&path);
+        // Create the schema up front so the two connections race only
+        // on the enqueue itself.
+        drop(Queue::open(&p).unwrap());
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let mut handles = Vec::new();
+        for who in ["t1", "t2"] {
+            let (pp, bb) = (p.clone(), barrier.clone());
+            handles.push(std::thread::spawn(move || {
+                let mut q = Queue::open(&pp).unwrap();
+                let j = Job {
+                    id: who.into(),
+                    idempotency_key: "k-race".into(),
+                    printer: "p1".into(),
+                    report: None,
+                    pages: 1,
+                    bytes: 10,
+                    priority: 0,
+                    state: JobState::Queued,
+                    attempts: 0,
+                    error_code: None,
+                };
+                bb.wait();
+                q.enqueue_with_payload(&j, "pdf", b"X", &JobOptions::default())
+                    .unwrap()
+            }));
+        }
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let news = results.iter().filter(|r| r.is_some()).count();
+        assert_eq!(
+            news, 1,
+            "exactly one thread may win the enqueue: {results:?}"
+        );
+        let q = Queue::open(&p).unwrap();
+        assert_eq!(q.count_by_state(JobState::Queued).unwrap(), 1);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn duplicate_with_different_payload_is_logged_as_conflict() {
+        let mut q = Queue::in_memory().unwrap();
+        let opts = JobOptions::default();
+        let mut first = job("c1", "k-conflict", "p1", 0);
+        first.bytes = 100;
+        q.enqueue_with_payload(&first, "pdf", b"0123456789", &opts)
+            .unwrap();
+        // Same key, same size: an ordinary duplicate — no conflict.
+        let mut same = job("c2", "k-conflict", "p1", 0);
+        same.bytes = 100;
+        assert_eq!(
+            q.enqueue_with_payload(&same, "pdf", b"0123456789", &opts)
+                .unwrap(),
+            None
+        );
+        assert!(q
+            .recent_events(10)
+            .unwrap()
+            .iter()
+            .all(|e| e.event != "duplicate_conflict"));
+        // Same key, DIFFERENT size: first writer still wins, and the
+        // conflict lands in the structured event log.
+        let mut other = job("c3", "k-conflict", "p1", 0);
+        other.bytes = 999;
+        assert_eq!(
+            q.enqueue_with_payload(&other, "pdf", b"zzz", &opts)
+                .unwrap(),
+            None
+        );
+        let events = q.recent_events(10).unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|e| e.event == "duplicate_conflict" && e.job_id == "c1"),
+            "{events:?}"
+        );
+        assert_eq!(q.get("c1").unwrap().bytes, 100);
+    }
+
+    #[test]
+    fn global_limit_rejects_beyond_cap() {
+        let mut q = Queue::in_memory().unwrap();
+        q.set_max_pending_global(1);
+        q.enqueue(&job("g1", "k-g1", "printer-a", 0)).unwrap();
+        // A different printer does not help: the cap is global.
+        let err = q.enqueue(&job("g2", "k-g2", "printer-b", 0)).unwrap_err();
+        assert!(matches!(err, QueueError::QueueFull(_)), "{err}");
+        // Duplicates of an existing key are not new load.
+        assert!(q.enqueue(&job("g1b", "k-g1", "printer-a", 0)).is_ok());
+    }
+
+    #[test]
+    fn reconcile_stale_fails_only_old_working_jobs() {
+        let mut q = Queue::in_memory().unwrap();
+        q.enqueue(&job("s1", "k-s1", "p1", 0)).unwrap();
+        let claimed = q.claim_next("p1").unwrap().unwrap();
+        assert_eq!(claimed.state, JobState::Rendering);
+        // Fresh working job: untouched.
+        assert_eq!(q.reconcile_stale().unwrap(), 0);
+        // Age it beyond the threshold: reconciled to failed.
+        q.conn
+            .execute(
+                "UPDATE jobs SET updated_at=?1 WHERE id='s1'",
+                params![now_unix() - STALE_JOB_THRESHOLD_SECS - 10],
+            )
+            .unwrap();
+        assert_eq!(q.reconcile_stale().unwrap(), 1);
+        let after = q.get("s1").unwrap();
+        assert_eq!(after.state, JobState::Failed);
+        assert_eq!(after.error_code.as_deref(), Some("RECONCILED_STALE"));
+        // Queued jobs are never reconciled, however old.
+        q.enqueue(&job("s2", "k-s2", "p1", 0)).unwrap();
+        q.conn
+            .execute("UPDATE jobs SET updated_at=1 WHERE id='s2'", [])
+            .unwrap();
+        assert_eq!(q.reconcile_stale().unwrap(), 0);
+        assert_eq!(q.get("s2").unwrap().state, JobState::Queued);
+    }
+
+    #[test]
+    fn diag_id_is_stable_and_key_specific() {
+        assert_eq!(diag_id_for_key("order-42"), diag_id_for_key("order-42"));
+        assert_ne!(diag_id_for_key("order-42"), diag_id_for_key("order-43"));
+        assert!(diag_id_for_key("order-42").starts_with("np-"));
+    }
+
     #[test]
     fn recovery_semantics() {
         let mut q = Queue::in_memory().unwrap();

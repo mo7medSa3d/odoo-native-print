@@ -59,3 +59,40 @@
 4. If content is clipped/shifted, record the offset in the profile quirks
    (docs/hardware/validation-kit.md) instead of scaling the document.
 5. File the hardware kit result sheet for that printer class.
+
+## White page after sign-in (WebView2 environment)
+
+The Odoo frontend is a large JavaScript application. If the WebView2
+environment on a PC cannot run it (stale runtime, blocked storage, or
+a poisoned browsing profile), the app no longer fails silently:
+
+- A boot watchdog in the injected bridge watches backend pages; if
+  the Odoo client does not mount within ~20s, it shows a diagnostic
+  panel with the environment facts (JS level, storage, cookies,
+  WebSocket, secure context) and three working actions: Reload,
+  Clear web data, Control Center.
+- Environment probes are reported to Rust on every Odoo page load
+  and appear in the Control Center (Diagnostics tab → WebView2
+  card, with the runtime version) and in the diagnostics bundle.
+- "Clear web data" wipes the app's cache/cookies/storage/service
+  workers and reloads the origin — the one-click cure for a poisoned
+  profile. The user signs in again afterwards.
+- Installers now use the WebView2 embedBootstrapper: a missing or
+  outdated runtime is brought current during installation (requires
+  internet at install time, or a machine whose runtime is already
+  current).
+
+## Diagnostics bundle privacy
+
+The exported diagnostics bundle is metadata-only BY CONSTRUCTION and
+safe to share with support: app/WebView2 versions, queue state
+counts, and per-job summaries (printer pattern, report name, page
+count, byte size, state, attempts, error code, diagnostics id) plus
+the structured job-event log (state transitions and their error
+codes). It never contains document bytes or payloads, user names or
+credentials, or the Odoo session. The environment section holds the
+browser user-agent string and feature booleans (storage/cookies/
+WebSocket availability) — nothing that identifies a person. Job ids
+in the bundle are the idempotency keys the Odoo job log already
+stores; the short `np-...` diagnostics id is the value to quote in
+support reports.

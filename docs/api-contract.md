@@ -26,7 +26,7 @@ are rejected). HTTP is unencrypted; the Control Center warns about it.
 
 - **`window.__NATIVE_PRINT__.printStatus(jobId)`** -> `Promise<string>` (`"queued" | "rendering" | "spooling" | "printing" | "done" | "failed" | "canceled" | "dead_letter"`)
 - **`window.__NATIVE_PRINT__.jobDetail(jobId)`** -> `Promise<{ id, state, errorCode, printer, report, pages, bytes, attempts }>`
-- **`window.__NATIVE_PRINT__.appOverview()`** -> `Promise<AppOverviewResponse>` (version, OS, configured origin, GPO lock status, PDFium status, discovered printers, default printer, state counts, recent 200 jobs)
+- **`window.__NATIVE_PRINT__.appOverview()`** -> `Promise<AppOverviewResponse>` (version, OS, configured origin, GPO lock status, PDFium status, **WebView2 runtime version**, **latest environment probe**, discovered printers, default printer, state counts, recent 200 jobs)
 - **`window.__NATIVE_PRINT__.listPrinters()`** -> `Promise<PrinterInfo[]>`
 - **`window.__NATIVE_PRINT__.printerForms(printer)`** -> `Promise<Form[]>`
 - **`window.__NATIVE_PRINT__.printerCapabilities(printer)`** -> `Promise<PrinterCapabilities>` (paper forms, trays, resolutions, duplex/color, custom-size bounds and copy limit)
@@ -36,7 +36,19 @@ are rejected). HTTP is unencrypted; the Control Center warns about it.
 - **`window.__NATIVE_PRINT__.clearFinished()`** -> `Promise<number>`
 - **`window.__NATIVE_PRINT__.exportDiagnostics()`** -> `Promise<string>` (redacted JSON bundle)
 - **`window.__NATIVE_PRINT__.saveOrigin(origin, autoReprint)`** -> `Promise<string>` (callable only from the local Control Center origin and only when not locked by Windows Group Policy)
-- **`window.__NATIVE_PRINT__.openControlCenter()` / `openOdooOrigin()`** -> toggles between the Odoo webview and the built-in Control Center (`Ctrl+Shift+P`).
+- **`window.__NATIVE_PRINT__.openControlCenter()` / `openOdooOrigin()`** -> toggles between the Odoo webview and the built-in Control Center (`Ctrl+Shift+Y`).
+- **`window.__NATIVE_PRINT__.reportEnvironment(report)`** -> `Promise<void>` — the bridge's own environment probe (JS level, storage, cookies, WebSocket, secure context) reported on every Odoo page load; surfaced in `appOverview().environment` and in the diagnostics bundle. Not called by addon code directly.
+- **`window.__NATIVE_PRINT__.clearWebData()`** -> `Promise<void>` — wipes the app's whole browsing profile (cache, cookies, storage, service workers) and reloads the configured origin. The self-heal for a poisoned profile / white-page failures; the user signs in again afterwards.
+
+Submission guarantees (desktop queue): a job, its payload and its
+options are written in a single SQLite transaction; a duplicate
+idempotency key returns the original job and writes nothing. Queue
+backpressure: 500 active jobs per printer and 2000 globally —
+beyond that, submission is refused instead of consuming unbounded
+disk. Jobs carry a diagnostics id (`np-...`, a stable fingerprint of
+the idempotency key) shown in job details and the diagnostics
+bundle, whose `recent_jobs` summaries and `recent_events` log are
+metadata-only by construction.
 
 ## Desktop printer discovery and routing (live model)
 
@@ -70,5 +82,5 @@ form. Unsupported roll widths are rejected rather than guessed as 58mm/80mm.
 
 ## Server Endpoints (Odoo Addon Controllers)
 
-- **`POST /native_print/job_status`** (`type="jsonrpc"`, `auth="user"`): creates or updates the company-scoped, owner-scoped `native.print.job` audit log row by `idempotency_key`. Terminal states are final.
+- **`POST /native_print/job_status`** (`type="jsonrpc"`, `auth="user"`): creates or updates the company-scoped, owner-scoped `native.print.job` audit log row by `idempotency_key`. A formal state machine governs updates: states only move forward (`queued -> rendering -> spooling -> printing -> terminal`; forward skips are legal, backward moves are answered `ignored: "illegal_transition"`, a printing job cannot be canceled), terminal states are final (`ignored: "terminal_state_is_final"`), and `attempts` never regresses.
 - **`POST /native_print/overview`** (`type="jsonrpc"`, `auth="user"`): returns job counters for the OWL Systray widget.

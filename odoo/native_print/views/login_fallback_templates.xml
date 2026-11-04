@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!--
+        Odoo 19 renders the login form hidden (class "d-none") and the
+        web.user_switch OWL component is what reveals it. If that
+        component's JS does not initialize (observed inside embedded
+        WebView2 windows), the user is stuck on a blank login page.
+
+        Safety net: this dependency-free inline script waits a grace
+        period, then — only if the form is still hidden AND no
+        user-switch chooser is on screen — reveals the plain
+        server-rendered form, which posts to /web/login exactly as
+        usual. When OWL works, the script exits without touching
+        anything.
+    -->
+    <template id="login_form_fallback" inherit_id="web.login"
+              name="Native Print: login form fallback">
+        <!-- Root fix: render the form VISIBLE. Login must not depend
+             on any JavaScript initializing. When the OWL user switch
+             does run, its setup() re-applies d-none itself whenever
+             more than one remembered user exists, so the chooser
+             behaviour is unchanged. -->
+        <xpath expr="//form[contains(@t-attf-class, 'oe_login_form')]" position="attributes">
+            <attribute name="t-attf-class">oe_login_form</attribute>
+        </xpath>
+        <xpath expr="//form[contains(@t-attf-class, 'oe_login_form')]" position="after">
+            <script>
+(function () {
+    var attempts = 0;
+    function check() {
+        attempts += 1;
+        var form = document.querySelector("form.oe_login_form");
+        if (form &amp;&amp; !form.classList.contains("d-none")) {
+            return;
+        }
+        var switcher = document.querySelector(".o_user_switch");
+        if (switcher &amp;&amp; switcher.offsetParent !== null) {
+            return;
+        }
+        if (attempts !== 40) {
+            setTimeout(check, 100);
+            return;
+        }
+        if (form) {
+            form.classList.remove("d-none");
+        }
+    }
+    setTimeout(check, 100);
+})();
+            </script>
+        </xpath>
+    </template>
+</odoo>

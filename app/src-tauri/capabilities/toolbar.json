@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "description": "Toolbar webview capability (local, app-bundled toolbar.html): browser-style navigation, app identity, and view switching only. No print submission, no queue admin, no settings, no diagnostics.",
+  "identifier": "toolbar",
+  "local": true,
+  "permissions": [
+    "allow-toolbar"
+  ],
+  "windows": [
+    "toolbar"
+  ]
+}

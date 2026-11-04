@@ -6,9 +6,12 @@ use crate::mono::MonoBitmap;
 /// Long receipt safety: `GS v 0` (`1D 76 30 m xL xH yL yH`) takes a 16-bit height (`y`),
 /// and many thermal printer firmwares have a 4–64 KB receive/raster buffer limit per
 /// `GS v 0` command. `raster()` therefore emits horizontal slices of at most
-/// `MAX_RASTER_SLICE_HEIGHT` (1024 dots, ~127 mm at 203 dpi) so arbitrarily long
-/// receipts print without buffer overflow or u16 truncation.
-pub const MAX_RASTER_SLICE_HEIGHT: u32 = 1024;
+/// `MAX_RASTER_SLICE_HEIGHT` (512 dots, ~64 mm at 203 dpi) so arbitrarily long
+/// receipts print without buffer overflow or u16 truncation. 512 is a
+/// deliberately conservative band: cheap thermal clones have small
+/// receive buffers (a 1024-row band at 576 dots is ~74 KB in a single
+/// command), and halving the band costs nothing measurable.
+pub const MAX_RASTER_SLICE_HEIGHT: u32 = 512;
 
 pub struct EscPos {
     buf: Vec<u8>,

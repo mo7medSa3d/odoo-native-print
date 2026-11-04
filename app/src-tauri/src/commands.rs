@@ -21,8 +21,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, RwLock};
-use std::time::Duration;
-use tauri::State;
+use std::time::{Duration, Instant};
+use tauri::{Manager, State};
 
 pub struct AppState {
     pub queue: Arc<Mutex<Queue>>,
@@ -31,6 +31,53 @@ pub struct AppState {
     pub locked_by_policy: bool,
     pub auto_reprint: RwLock<bool>,
     pub worker_wake: Arc<(Mutex<bool>, Condvar)>,
+    /// Latest environment probe report from the page (JSON string):
+    /// the JavaScript feature/storage facts the Odoo frontend depends
+    /// on, surfaced in the overview and the diagnostics bundle so a
+    /// broken webview environment is a fact, not a guess.
+    pub environment: RwLock<Option<String>>,
+    /// Short-lived cache of the last printer enumeration. Windows
+    /// printer discovery can take seconds (offline network printers),
+    /// and the Control Center polls the overview every few seconds;
+    /// enumerating on every call made the whole app feel heavy and
+    /// blocked the UI thread. 20s is fresh enough for a settings page.
+    pub printer_cache: RwLock<Option<PrinterCache>>,
+}
+
+/// One cached printer enumeration (see `AppState::printer_cache`).
+pub struct PrinterCache {
+    pub at: Instant,
+    pub printers: Vec<PrinterInfo>,
+    pub default: Option<String>,
+}
+
+/// Printer enumeration through the 20s cache (see `PrinterCache`).
+fn cached_printers(state: &AppState) -> Result<(Vec<PrinterInfo>, Option<String>), String> {
+    const TTL: Duration = Duration::from_secs(20);
+    if let Ok(guard) = state.printer_cache.read() {
+        if let Some(cache) = &*guard {
+            if cache.at.elapsed() < TTL {
+                return Ok((cache.printers.clone(), cache.default.clone()));
+            }
+        }
+    }
+    let printers = print_win::discover_printers().map_err(|e| e.to_string())?;
+    let default = print_win::default_printer_name().ok();
+    if let Ok(mut guard) = state.printer_cache.write() {
+        *guard = Some(PrinterCache {
+            at: Instant::now(),
+            printers: printers.clone(),
+            default: default.clone(),
+        });
+    }
+    Ok((printers, default))
+}
+
+/// PDFium availability is a process-lifetime fact; probing it used to
+/// load the 7.5 MB DLL on every overview call.
+fn pdfium_ready() -> bool {
+    static READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *READY.get_or_init(|| print_render::Pdfium::load().is_ok())
 }
 
 impl AppState {
@@ -177,6 +224,13 @@ pub fn print_pdf(
     req: PrintPdfRequest,
 ) -> Result<String, String> {
     check_origin(&webview, &state)?;
+    // Validate everything that does not need the document BEFORE any
+    // parser touches untrusted bytes (size, copies, key shape).
+    if !print_core::security::valid_idempotency_key(&req.idempotency_key) {
+        return Err("bad_idempotency_key".to_string());
+    }
+    print_core::security::validate_payload_limits(req.bytes.len(), req.copies)
+        .map_err(|e| format!("{e:?}"))?;
     let info = print_render::parse_pdf_info(&req.bytes).map_err(|e| e.to_string())?;
     let pages = info.pages.len() as u32;
     if pages == 0 {
@@ -216,16 +270,14 @@ pub fn print_pdf(
             .map_err(|_| "queue_poisoned".to_string())?;
         // Duplicate submissions (same idempotency key) return the
         // original job untouched: never overwrite its payload/options.
-        match queue.enqueue_new(&job).map_err(|e| e.to_string())? {
-            Some(new_id) => {
-                queue
-                    .store_payload(&new_id, "pdf", &req.bytes)
-                    .map_err(|e| e.to_string())?;
-                queue
-                    .store_options(&new_id, &opts)
-                    .map_err(|e| e.to_string())?;
-                new_id
-            }
+        // Job + payload + options land in ONE SQLite transaction:
+        // a crash mid-submission leaves nothing behind, and a
+        // duplicate returns the original job untouched.
+        match queue
+            .enqueue_with_payload(&job, "pdf", &req.bytes, &opts)
+            .map_err(|e| e.to_string())?
+        {
+            Some(new_id) => new_id,
             None => queue
                 .job_id_for_key(&job.idempotency_key)
                 .map_err(|e| e.to_string())?
@@ -305,16 +357,14 @@ pub fn print_text(
             .map_err(|_| "queue_poisoned".to_string())?;
         // Duplicate submissions (same idempotency key) return the
         // original job untouched: never overwrite its payload/options.
-        match queue.enqueue_new(&job).map_err(|e| e.to_string())? {
-            Some(new_id) => {
-                queue
-                    .store_payload(&new_id, "escpos", &bytes)
-                    .map_err(|e| e.to_string())?;
-                queue
-                    .store_options(&new_id, &opts)
-                    .map_err(|e| e.to_string())?;
-                new_id
-            }
+        // Job + payload + options land in ONE SQLite transaction:
+        // a crash mid-submission leaves nothing behind, and a
+        // duplicate returns the original job untouched.
+        match queue
+            .enqueue_with_payload(&job, "escpos", &bytes, &opts)
+            .map_err(|e| e.to_string())?
+        {
+            Some(new_id) => new_id,
             None => queue
                 .job_id_for_key(&job.idempotency_key)
                 .map_err(|e| e.to_string())?
@@ -349,8 +399,14 @@ pub fn print_image(
     req: PrintImageRequest,
 ) -> Result<String, String> {
     check_origin(&webview, &state)?;
-    let _img = print_render::decode_png(&req.bytes).map_err(|e| e.to_string())?;
     let copies = req.copies.unwrap_or(1);
+    // Validate BEFORE decoding untrusted image bytes (see print_pdf).
+    if !print_core::security::valid_idempotency_key(&req.idempotency_key) {
+        return Err("bad_idempotency_key".to_string());
+    }
+    print_core::security::validate_payload_limits(req.bytes.len(), copies)
+        .map_err(|e| format!("{e:?}"))?;
+    let _img = print_render::decode_png(&req.bytes).map_err(|e| e.to_string())?;
     validate_job_input(
         req.bytes.len(),
         1,
@@ -388,16 +444,14 @@ pub fn print_image(
             .map_err(|_| "queue_poisoned".to_string())?;
         // Duplicate submissions (same idempotency key) return the
         // original job untouched: never overwrite its payload/options.
-        match queue.enqueue_new(&job).map_err(|e| e.to_string())? {
-            Some(new_id) => {
-                queue
-                    .store_payload(&new_id, "image-png", &req.bytes)
-                    .map_err(|e| e.to_string())?;
-                queue
-                    .store_options(&new_id, &opts)
-                    .map_err(|e| e.to_string())?;
-                new_id
-            }
+        // Job + payload + options land in ONE SQLite transaction:
+        // a crash mid-submission leaves nothing behind, and a
+        // duplicate returns the original job untouched.
+        match queue
+            .enqueue_with_payload(&job, "image-png", &req.bytes, &opts)
+            .map_err(|e| e.to_string())?
+        {
+            Some(new_id) => new_id,
             None => queue
                 .job_id_for_key(&job.idempotency_key)
                 .map_err(|e| e.to_string())?
@@ -469,6 +523,8 @@ pub struct AppOverviewResponse {
     pub locked_by_policy: bool,
     pub auto_reprint: bool,
     pub pdfium_ready: bool,
+    pub webview_version: String,
+    pub environment: Option<serde_json::Value>,
     pub printers: Vec<PrinterInfo>,
     pub default_printer: Option<String>,
     pub state_counts: Vec<(String, u64)>,
@@ -476,14 +532,13 @@ pub struct AppOverviewResponse {
 }
 
 #[tauri::command]
-pub fn app_overview(
+pub async fn app_overview(
     webview: tauri::Webview,
     state: State<'_, AppState>,
 ) -> Result<AppOverviewResponse, String> {
     check_origin(&webview, &state)?;
-    let pdfium_ready = print_render::Pdfium::load().is_ok();
-    let printers = print_win::discover_printers().map_err(|e| e.to_string())?;
-    let default_printer = print_win::default_printer_name().ok();
+    let pdfium_ready = pdfium_ready();
+    let (printers, default_printer) = cached_printers(&state)?;
     let origin = state
         .configured_origin
         .read()
@@ -507,6 +562,13 @@ pub fn app_overview(
         locked_by_policy: state.locked_by_policy,
         auto_reprint,
         pdfium_ready,
+        webview_version: tauri::webview_version().unwrap_or_else(|_| "unknown".to_string()),
+        environment: state
+            .environment
+            .read()
+            .ok()
+            .and_then(|g| g.clone())
+            .and_then(|raw| serde_json::from_str(&raw).ok()),
         printers,
         default_printer,
         state_counts: bundle.state_counts,
@@ -515,16 +577,17 @@ pub fn app_overview(
 }
 
 #[tauri::command]
-pub fn list_printers(
+pub async fn list_printers(
     webview: tauri::Webview,
     state: State<'_, AppState>,
 ) -> Result<Vec<PrinterInfo>, String> {
     check_origin(&webview, &state)?;
-    print_win::discover_printers().map_err(|e| e.to_string())
+    let (printers, _default) = cached_printers(&state)?;
+    Ok(printers)
 }
 
 #[tauri::command]
-pub fn printer_forms(
+pub async fn printer_forms(
     webview: tauri::Webview,
     state: State<'_, AppState>,
     printer: String,
@@ -533,7 +596,7 @@ pub fn printer_forms(
     print_win::paper_forms(&printer).map_err(|e| e.to_string())
 }
 #[tauri::command]
-pub fn printer_capabilities(
+pub async fn printer_capabilities(
     webview: tauri::Webview,
     state: State<'_, AppState>,
     printer: String,
@@ -623,7 +686,7 @@ pub fn run_test_print(
             let bm = print_render::calibration::calibration_thermal_80mm();
             let tspl = print_raw::tspl::TsplLabel::new(100, 150, 3)
                 .bitmap(0, 0, &bm)
-                .text(40, 20, "Odoo Native Print TSPL Calibration")
+                .text(40, 20, "Yaseir Print TSPL Calibration")
                 .print(1, 1);
             (
                 "tspl",
@@ -680,12 +743,16 @@ pub fn run_test_print(
             .queue
             .lock()
             .map_err(|_| "queue_poisoned".to_string())?;
-        let id = queue.enqueue(&job).map_err(|e| e.to_string())?;
-        queue
-            .store_payload(&id, payload_kind, &payload_bytes)
-            .map_err(|e| e.to_string())?;
-        queue.store_options(&id, &opts).map_err(|e| e.to_string())?;
-        id
+        match queue
+            .enqueue_with_payload(&job, payload_kind, &payload_bytes, &opts)
+            .map_err(|e| e.to_string())?
+        {
+            Some(id) => id,
+            None => queue
+                .job_id_for_key(&job.idempotency_key)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "queue_inconsistent".to_string())?,
+        }
     };
     state.notify_worker();
     Ok(id)
@@ -747,7 +814,166 @@ pub fn export_diagnostics(
         .lock()
         .map_err(|_| "queue_poisoned".to_string())?;
     let bundle = build_bundle_from_queue(&queue).map_err(|e| e.to_string())?;
-    Ok(bundle_to_json(&bundle))
+    let mut value: serde_json::Value =
+        serde_json::from_str(&bundle_to_json(&bundle)).unwrap_or(serde_json::json!({}));
+    value["webview_version"] =
+        serde_json::json!(tauri::webview_version().unwrap_or_else(|_| "unknown".to_string()));
+    if let Some(raw) = state.environment.read().ok().and_then(|g| g.clone()) {
+        if let Ok(env) = serde_json::from_str::<serde_json::Value>(&raw) {
+            value["environment"] = env;
+        }
+    }
+    Ok(value.to_string())
+}
+
+/// Keep the signed-in Odoo session across app restarts. Odoo's
+/// `session_id` cookie is a session cookie, which WebView2 discards
+/// when the app closes, so the user had to sign in again on every
+/// launch. After a page on the configured origin reports in (which
+/// happens right after the post-login redirect), rewrite the cookie
+/// in the webview's own cookie store with a long expiry. The value
+/// never leaves the webview store; nothing is persisted by Rust.
+/// Best-effort by design: any failure just keeps the old behaviour.
+fn persist_session_cookie(webview: &tauri::Webview, state: &AppState) {
+    let origin = match state.configured_origin.read() {
+        Ok(guard) => guard.clone(),
+        Err(_) => None,
+    };
+    let Some(origin) = origin else { return };
+    let Ok(url) = origin.parse::<tauri::Url>() else {
+        return;
+    };
+    let Ok(cookies) = webview.cookies_for_url(url) else {
+        return;
+    };
+    for cookie in cookies {
+        if cookie.name() != "session_id" {
+            continue;
+        }
+        // A cookie with neither an expiry nor a max-age is a session
+        // cookie: make it permanent in place and write it back.
+        if cookie.expires().is_none() && cookie.max_age().is_none() {
+            let mut persistent = cookie;
+            persistent.make_permanent();
+            let _ = webview.set_cookie(persistent);
+        }
+    }
+}
+
+/// Identity for lightweight chrome (the toolbar webview): app version
+/// and the configured origin, without the heavyweight overview data
+/// (no printer enumeration, no queue bundle).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppIdentity {
+    pub app_version: String,
+    pub odoo_origin: Option<String>,
+}
+
+#[tauri::command]
+pub fn app_identity(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<AppIdentity, String> {
+    check_origin(&webview, &state)?;
+    let origin = state
+        .configured_origin
+        .read()
+        .map_err(|_| "config_lock_poisoned".to_string())?
+        .clone();
+    Ok(AppIdentity {
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        odoo_origin: origin,
+    })
+}
+
+/// Browser-style navigation for the toolbar webview: history back on
+/// the main webview. Odoo is an SPA whose screens stack routes with no
+/// visible way back; these give the user the browser controls back.
+#[tauri::command]
+pub fn nav_back(app: tauri::AppHandle, webview: tauri::Webview) -> Result<(), String> {
+    check_local_only(&webview)?;
+    let main = app
+        .get_webview("main")
+        .ok_or_else(|| "main_webview_missing".to_string())?;
+    main.eval("history.back()").map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn nav_forward(app: tauri::AppHandle, webview: tauri::Webview) -> Result<(), String> {
+    check_local_only(&webview)?;
+    let main = app
+        .get_webview("main")
+        .ok_or_else(|| "main_webview_missing".to_string())?;
+    main.eval("history.forward()").map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn nav_reload(app: tauri::AppHandle, webview: tauri::Webview) -> Result<(), String> {
+    check_local_only(&webview)?;
+    let main = app
+        .get_webview("main")
+        .ok_or_else(|| "main_webview_missing".to_string())?;
+    main.reload().map_err(|e| e.to_string())
+}
+
+/// Store the page's environment probe report (JS features, storage,
+/// secure-context facts). Reported by the injected bridge on Odoo
+/// pages and by the Control Center; shown in the overview and folded
+/// into the diagnostics bundle.
+#[tauri::command]
+pub async fn report_environment(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    report: String,
+) -> Result<(), String> {
+    check_origin(&webview, &state)?;
+    if report.len() > 8192 {
+        return Err("environment_report_too_large".to_string());
+    }
+    {
+        let mut guard = state
+            .environment
+            .write()
+            .map_err(|_| "environment_lock_poisoned".to_string())?;
+        *guard = Some(report);
+    }
+    // A page on the configured origin just loaded: if the user is
+    // signed in, keep that session alive across restarts.
+    if !is_local_app_url(&webview.url().map_err(|e| e.to_string())?) {
+        persist_session_cookie(&webview, &state);
+    }
+    Ok(())
+}
+
+/// Self-heal for a poisoned webview profile: wipe ALL browsing data
+/// (cache, cookies, storage, service workers) for this app, then
+/// reload the configured Odoo origin with a clean slate. The user
+/// signs in again afterwards. This is the one-click cure for the
+/// "white page after login" class of failures.
+#[tauri::command]
+pub fn clear_web_data_cmd(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    check_origin(&webview, &state)?;
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main_window_missing".to_string())?;
+    window
+        .clear_all_browsing_data()
+        .map_err(|e| e.to_string())?;
+    let origin = state
+        .configured_origin
+        .read()
+        .map_err(|_| "config_lock_poisoned".to_string())?
+        .clone();
+    if let Some(origin) = origin {
+        let url = origin.parse::<tauri::Url>().map_err(|e| e.to_string())?;
+        window.navigate(url).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1147,7 +1373,7 @@ impl PrintBackend for NativePrintBackend {
             .ok_or_else(|| BackendError::fatal("MISSING_PAYLOAD", "job payload not found"))?;
         let opts = q.options(&job.id).unwrap_or_default();
         let paper = opts.paper.as_deref();
-        let title = job.report.as_deref().unwrap_or("Odoo Native Print Job");
+        let title = job.report.as_deref().unwrap_or("Yaseir Print Job");
 
         // 1. Direct TCP 9100 transport (tcp://host:port or raw://host:port)
         if job.printer.starts_with("tcp://") || job.printer.starts_with("raw://") {
@@ -1395,6 +1621,10 @@ pub fn spawn_worker_loop(db_path: String, wake: Arc<(Mutex<bool>, Condvar)>) {
         loop {
             let mut did_work = false;
             if let Ok(mut worker_queue) = Queue::open(&db_path) {
+                // Fail jobs wedged in a working state by a dead or
+                // stuck worker (RECONCILED_STALE) instead of letting
+                // them hang forever; fresh jobs are never touched.
+                let _ = worker_queue.reconcile_stale();
                 let printers = worker_queue.queued_printers().unwrap_or_default();
                 for printer in printers {
                     entropy = entropy.wrapping_mul(6364136223846793005).wrapping_add(1);

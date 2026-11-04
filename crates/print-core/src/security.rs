@@ -97,6 +97,24 @@ pub enum LimitError {
     Empty,
 }
 
+/// The parse-independent part of job validation: payload size and
+/// copy count. MUST run before any PDF/PNG parsing of untrusted bytes
+/// so a hostile or corrupt document is rejected by size before a
+/// parser ever touches it (the full check, including page count and
+/// dimensions, still runs after parsing).
+pub fn validate_payload_limits(bytes_len: usize, copies: u16) -> Result<(), LimitError> {
+    if bytes_len == 0 {
+        return Err(LimitError::Empty);
+    }
+    if bytes_len > MAX_JOB_BYTES {
+        return Err(LimitError::TooLarge);
+    }
+    if copies == 0 || copies > MAX_COPIES {
+        return Err(LimitError::TooManyCopies);
+    }
+    Ok(())
+}
+
 pub fn validate_job_input(
     bytes_len: usize,
     pages: u32,

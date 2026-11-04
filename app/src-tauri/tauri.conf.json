@@ -4,7 +4,7 @@
     "security": {
       "csp": null,
       "devCsp": null,
-      "freezePrototype": true
+      "freezePrototype": false
     },
     "windows": [],
     "withGlobalTauri": false
@@ -25,7 +25,13 @@
     },
     "windows": {
       "webviewInstallMode": {
-        "type": "skip"
+        "type": "embedBootstrapper"
+      },
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "nsis": {
+        "installerIcon": "icons/icon.ico"
       }
     },
     "icon": [
@@ -37,6 +43,6 @@
     ]
   },
   "identifier": "com.company.odoo-native-print",
-  "productName": "Odoo Native Print",
-  "version": "1.1.1"
+  "productName": "Yaseir Print",
+  "version": "1.4.1"
 }

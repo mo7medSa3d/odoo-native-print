@@ -12,7 +12,7 @@ A production-grade native client (**Tauri 2**, **Rust** core, embedded **PDFium*
 - **`app/`** — Tauri v2 desktop application with:
   - Background print worker thread (`spawn_worker_loop` + `NativePrintBackend`) connecting the durable SQLite queue to Win32 GDI, Win32 RAW spooler, TCP 9100, and IPP printers.
   - Windows Group Policy (`HKLM\Software\Policies\OdooNativePrint` via `advapi32.dll` `RegGetValueW`) and `config.json` origin resolution.
-  - Built-in bilingual (Arabic RTL / English LTR) **Enterprise Control Center & Calibration Lab** (`app/dist/index.html`, accessible anytime via `Ctrl+Shift+P` or when no origin is configured yet).
+  - Built-in bilingual (Arabic RTL / English LTR) **Enterprise Control Center & Calibration Lab** (`app/dist/index.html`, accessible anytime via `Ctrl+Shift+Y` or when no origin is configured yet).
 - **`odoo/native_print`** — Odoo 19 addon (`19.0.1.2.0`):
   - Printer Profiles, Routing Rules, and Print Jobs log with Odoo 19 Kanban (`<t t-name="card">`), List, Form, Search, Graph, and Pivot views.
   - OWL 2 Navbar **Systray Widget** (`NativePrintSystray`) showing live bridge connection state, local printer count, job counters, one-click calibration print, and quick navigation.

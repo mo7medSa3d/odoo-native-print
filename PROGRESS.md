@@ -1,9 +1,51 @@
 # PROGRESS
 
-Last updated: 2026-11-03 (Africa/Cairo)
+Last updated: 2026-11-03 (Africa/Cairo) — v1.3.0 hardening
 Owner spec: Master Build Prompt — Odoo Native Print Client (Windows, then Android, then iOS)
 
-## Status: v1.1.1 — Yaseir design system + HTTP origins on private IPs + picker-first UX
+## Status: v1.3.0 — full hardening pass (21-point plan, all four phases)
+
+App 1.3.0 / addon 19.0.2.3.0. Detail: docs/engineering-hardening-2026-11-03.md.
+Headlines: the Tauri command surface is now consistent across
+lib.rs, build.rs, permissions and capabilities — guarded by
+tools/check_command_surface.py in CI (v1.2.0's two new commands were
+missing from build.rs and a permission group, which would have
+denied them at runtime). Submission validates before parsing and
+enqueues job+payload+options in ONE SQLite transaction (proven
+under a two-connection race). Global queue cap (2000) joins the
+per-printer cap (500). Wedged jobs are reconciled
+(RECONCILED_STALE); every job has a diagnostics id and a structured
+event log folded into the diagnostics bundle. The Odoo job_status
+endpoint enforces a formal forward-only state machine. POS receipts
+use attempt-based idempotency keys (double-fire dedupes, deliberate
+reprint is a new attempt) and watch for ~5 minutes like reports;
+report submissions have an in-flight double-click guard. HTTP
+origins show a per-session unencrypted warning strip. Control
+Center has a real CSP. POS receipt banding/downscale covered by
+tests. Version metadata is gated (tools/check_versions.py) and
+release signing is wired: configuring the WINDOWS_CERTIFICATE_*
+secrets turns signed installers on with no code change — the
+certificate purchase remains the only blocker there, together with
+the printer-lab hardware matrix (docs/hardware-test-matrix.md).
+
+Whole-system audit (2026-11-03, docs/system-audit-2026-11-03.md):
+every cross-surface contract mechanically compared (bridge, ACL,
+states, endpoints, manifest, DOM ids, i18n, origin policy) — all
+consistent; zero unwrap() in production Rust. Audit fixes: queue
+synchronous=FULL (power-loss durability), ESC/POS band 1024→512
+(small printer buffers), duplicate-conflict event log, two Control
+Center display nits. External best-practice cross-check (Tauri,
+WebView2, Odoo, SQLite, ESC/POS docs + QZ/OCA/Ventor) confirms the
+architecture on all six axes, with the divergences deliberate and
+documented.
+
+### v1.2.0 (2026-11-03): self-diagnosing webview
+- Environment probes on every Odoo page, a boot watchdog that
+  replaces silent white pages with a diagnostic panel, one-click
+  Clear web data, WebView2 bootstrapper installers, diagnostics
+  showing the runtime version. See MEMORY/project history.
+
+## Status (previous): v1.1.1 — Yaseir design system + HTTP origins on private IPs + picker-first UX
 
 
 ### v1.1.0 (2026-11-03): Yaseir identity + LAN HTTP origins

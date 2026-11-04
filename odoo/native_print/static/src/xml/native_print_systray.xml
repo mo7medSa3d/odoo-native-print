@@ -4,9 +4,9 @@
         <div class="o_mail_systray_item dropdown o_native_print_systray" t-att-class="{'show': state.isOpen}">
             <button type="button"
                     class="dropdown-toggle o-no-caret btn d-flex align-items-center px-2"
-                    title="Native Print Status &amp; Control"
+                    title="Yaseir Print Status &amp; Control"
                     t-on-click.stop="toggleMenu">
-                <i class="fa fa-print fa-lg" role="img" aria-label="Native Print"/>
+                <i class="fa fa-print fa-lg" role="img" aria-label="Yaseir Print"/>
                 <span t-if="state.failedJobs &gt; 0"
                       class="badge rounded-pill text-bg-danger ms-1"
                       t-esc="state.failedJobs"/>
@@ -24,7 +24,7 @@
                 <div class="d-flex justify-content-between align-items-center pb-2 mb-2 border-bottom">
                     <div class="fw-bold d-flex align-items-center gap-2">
                         <i class="fa fa-print text-primary" title="Printer"/>
-                        <span>Native Print</span>
+                        <span>Yaseir Print</span>
                     </div>
                     <span t-if="state.bridgeActive" class="badge text-bg-success">
                         <i class="fa fa-check-circle me-1" title="Connected"/>App Active

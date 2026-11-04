@@ -307,6 +307,63 @@ mod tests {
         let bpr58 = u16::from_le_bytes([stream58[pos58 + 4], stream58[pos58 + 5]]);
         assert_eq!(bpr58, 384 / 8);
     }
+    /// Parse every GS v 0 raster header in a stream: (bytes_per_row,
+    /// rows) per band, in order.
+    fn raster_bands(stream: &[u8]) -> Vec<(u16, u16)> {
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i + 8 <= stream.len() {
+            if stream[i..].starts_with(&[0x1D, 0x76, 0x30, 0x00]) {
+                let x = u16::from_le_bytes([stream[i + 4], stream[i + 5]]);
+                let y = u16::from_le_bytes([stream[i + 6], stream[i + 7]]);
+                out.push((x, y));
+                i += 8 + (x as usize) * (y as usize);
+            } else {
+                i += 1;
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn tall_receipt_is_banded_and_complete() {
+        // A long receipt (576 x 2000 dots at scale 1) must arrive as
+        // several raster bands whose heights sum to the full image:
+        // nothing truncated, nothing duplicated, then feed + cut.
+        let bytes = half_black_rgba_png(576, 2000);
+        let stream = receipt_png_to_escpos_width(&bytes, 576).unwrap();
+        let bands = raster_bands(&stream);
+        assert!(bands.len() > 1, "tall receipt must be banded: {bands:?}");
+        assert!(bands.iter().all(|&(x, _)| x == 576 / 8));
+        let total: u32 = bands.iter().map(|&(_, y)| u32::from(y)).sum();
+        assert_eq!(total, 2000);
+        assert!(stream.ends_with(&[0x1B, 0x64, 3, 0x1D, 0x56, 0x01]));
+    }
+
+    #[test]
+    fn wide_receipt_downscales_proportionally_to_roll() {
+        // 1152x24 source onto a 58mm (384-dot) head: width 384 and
+        // height scaled by the same ratio (24 * 384/1152 = 8).
+        let bytes = half_black_rgba_png(1152, 24);
+        let stream = receipt_png_to_escpos_width(&bytes, 384).unwrap();
+        let bands = raster_bands(&stream);
+        assert_eq!(bands, vec![(384 / 8, 8)]);
+    }
+
+    #[test]
+    fn receipt_112mm_head_and_bad_targets() {
+        let bytes = half_black_rgba_png(832, 8);
+        let stream = receipt_png_to_escpos_width(&bytes, 832).unwrap();
+        assert_eq!(raster_bands(&stream), vec![(832 / 8, 8)]);
+        // Not a multiple of 8, below the floor, above the ceiling.
+        for bad in [100u32, 128, 1600] {
+            assert!(
+                receipt_png_to_escpos_width(&bytes, bad).is_err(),
+                "target {bad} must be rejected"
+            );
+        }
+    }
+
     #[test]
     fn paper_widths() {
         assert_eq!(receipt_dots_for_paper("80mm"), 576);

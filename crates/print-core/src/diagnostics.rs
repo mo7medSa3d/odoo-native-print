@@ -12,11 +12,19 @@ pub struct DiagnosticsBundle {
     pub os: String,
     pub state_counts: Vec<(String, u64)>,
     pub recent_jobs: Vec<JobSummary>,
+    /// Structured job events (the durable diagnostics log): state
+    /// transitions, recoveries, reconciliations — metadata only,
+    /// never document content.
+    #[serde(default)]
+    pub recent_events: Vec<crate::queue::JobEvent>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct JobSummary {
     pub id: String,
+    /// Diagnostics correlation id (stable fingerprint of the job's
+    /// idempotency key): quote it in support reports.
+    pub diag_id: String,
     pub printer: String,
     pub report: Option<String>,
     pub pages: u32,
@@ -30,6 +38,7 @@ impl From<&Job> for JobSummary {
     fn from(j: &Job) -> Self {
         Self {
             id: j.id.clone(),
+            diag_id: crate::queue::diag_id_for_key(&j.idempotency_key),
             printer: j.printer.clone(),
             report: j.report.clone(),
             pages: j.pages,
@@ -64,6 +73,7 @@ pub fn build_bundle(queue: &Queue, recent: &[JobSummary]) -> Result<DiagnosticsB
         os: std::env::consts::OS.to_string(),
         state_counts: counts,
         recent_jobs: recent.iter().take(200).cloned().collect(),
+        recent_events: queue.recent_events(100).unwrap_or_default(),
     })
 }
 

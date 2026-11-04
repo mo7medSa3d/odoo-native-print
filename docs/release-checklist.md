@@ -21,3 +21,26 @@
 - [ ] Spikes S1 (live Tauri WebView2 IPC negative origin tests), S2/S2b (live Odoo 19 report & POS flows), S4 (50 MB PDF transfer timing), S5 (`Microsoft Print to PDF` at A4/A5/80mm/100x150mm)
 - [ ] Hardware validation kit (`docs/hardware/validation-kit.md`): one signed PASS sheet per physical printer class
 - [ ] Production code-signing certificate wired into `.github/workflows/release.yml` for MSI/NSIS installers
+
+## Code signing (wired, awaiting the certificate)
+
+Signing turns on by configuration only — no code change:
+
+1. Buy an OV (or EV) code-signing certificate for the company from
+   any public CA (e.g. DigiCert, Sectigo, SSL.com). EV also clears
+   SmartScreen reputation fastest; OV builds reputation over time.
+2. Export the certificate as a password-protected `.pfx`.
+3. In the GitHub repo settings → Secrets → Actions, add:
+   - `WINDOWS_CERTIFICATE_BASE64` — base64 of the `.pfx`
+     (`[Convert]::ToBase64String([IO.File]::ReadAllBytes("cert.pfx"))`)
+   - `WINDOWS_CERTIFICATE_PASSWORD` — the `.pfx` password
+4. Push the next release tag. The release workflow imports the
+   certificate, injects its thumbprint into `tauri.conf.json`
+   (sha256 + DigiCert timestamp), and Tauri signs the MSI and NSIS
+   installers during the build.
+5. Verify on a Windows machine: right-click the installer →
+   Properties → Digital Signatures shows the company name, and
+   `Get-AuthenticodeSignature` reports `Valid`.
+
+Until the certificate exists, releases are explicitly labelled
+unsigned and Windows SmartScreen will warn on first install.

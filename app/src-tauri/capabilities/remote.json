@@ -4,7 +4,8 @@
   "identifier": "remote-odoo-origin",
   "permissions": [
     "allow-print-pdf",
-    "allow-print-status"
+    "allow-print-status",
+    "allow-app-shell"
   ],
   "remote": {
     "urls": [

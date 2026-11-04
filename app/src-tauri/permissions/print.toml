@@ -18,6 +18,7 @@ commands.allow = [
     "list_printers",
     "printer_forms",
     "printer_capabilities",
+    "report_environment",
 ]
 
 [[permission]]
@@ -29,6 +30,25 @@ commands.allow = [
     "clear_finished_cmd",
     "export_diagnostics",
     "save_origin_cmd",
+    "open_odoo_origin",
+]
+
+[[permission]]
+identifier = "allow-app-shell"
+description = "App-shell actions initiated by a user click, granted to the configured Odoo origin and the local Control Center: switch to the Control Center, and reset this app's own browsing data (cache, cookies, storage) as a self-heal for a broken webview environment. Affects only this app; never exposes print data or settings."
+commands.allow = [
+    "open_control_center",
+    "clear_web_data_cmd",
+]
+
+[[permission]]
+identifier = "allow-toolbar"
+description = "Toolbar webview only (local, app-bundled page): browser-style navigation of the main webview, the lightweight app identity, and switching between Odoo and the Control Center. Never granted to the remote Odoo origin."
+commands.allow = [
+    "nav_back",
+    "nav_forward",
+    "nav_reload",
+    "app_identity",
     "open_control_center",
     "open_odoo_origin",
 ]

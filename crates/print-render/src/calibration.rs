@@ -181,12 +181,7 @@ pub fn calibration_pdf() -> Vec<u8> {
             pdf_escape(s)
         )
     };
-    c.push_str(&text(
-        40.0,
-        270.0,
-        16,
-        "Odoo Native Print - Calibration Page",
-    ));
+    c.push_str(&text(40.0, 270.0, 16, "Yaseir Print - Calibration Page"));
     c.push_str(&text(
         40.0,
         150.0,

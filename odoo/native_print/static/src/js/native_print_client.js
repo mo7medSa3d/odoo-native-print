@@ -105,6 +105,13 @@ export async function resolveBridgeTarget(bridge, options = {}) {
     const classOf = (p) => detectPrinterType(p).printerClass;
     const selected = printers.find((p) => p.name === getSelectedPrinter()) || null;
     let printer = null;
+    // A reprint from the job log names the printer the job originally
+    // ran on: when that printer is connected to this PC right now it
+    // wins over every other preference; when it is not, resolution
+    // falls through to the normal order below.
+    if (options.preferPrinterName) {
+        printer = printers.find((p) => p.name === options.preferPrinterName) || null;
+    }
     if (selected && prefer.includes(classOf(selected))) {
         printer = selected;
     }
@@ -141,4 +148,51 @@ export async function resolveBridgeTarget(bridge, options = {}) {
             media: { roll_width_mm: rollWidthMm(capabilities) },
         },
     };
+}
+
+// ---------------------------------------------------------------------
+// User notifications: one helper for every Native Print message, so
+// report prints and POS receipts behave identically.
+// - Success/info stay quiet: short-lived and auto-dismissed.
+// - Warnings and failures are sticky: a print that did not happen
+//   (or silently turned into a download) must stay on screen until
+//   the user has actually read it.
+// - The same message is never stacked twice: an identical repeat
+//   within a few seconds (double-fire, or a watcher and a fallback
+//   reporting the same failure) is shown only once.
+// Notification problems must never block printing, so every failure
+// inside this helper is swallowed.
+// ---------------------------------------------------------------------
+
+const NOTIFICATION_DEDUPE_MS = 4000;
+const shownNotifications = new Map();
+
+export function notifyUser(env, message, type = "info", title = "Native Print") {
+    try {
+        const notification =
+            env && env.services && env.services.notification;
+        if (!notification || typeof notification.add !== "function") {
+            return;
+        }
+        const key = `${type}|${title}|${message}`;
+        const now = Date.now();
+        if (now - (shownNotifications.get(key) || 0) < NOTIFICATION_DEDUPE_MS) {
+            return;
+        }
+        shownNotifications.set(key, now);
+        if (shownNotifications.size > 50) {
+            for (const [k, ts] of shownNotifications) {
+                if (now - ts >= NOTIFICATION_DEDUPE_MS) {
+                    shownNotifications.delete(k);
+                }
+            }
+        }
+        notification.add(message, {
+            title,
+            type,
+            sticky: type === "danger" || type === "warning",
+        });
+    } catch (_err) {
+        // Informational only; never block printing.
+    }
 }

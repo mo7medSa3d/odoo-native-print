@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Odoo Native Print — Control Center</title>
+<title>Yaseir Print — Control Center</title>
 <style>
   /* Thmanyah Sans - the Yaseir family typeface (files in dist/fonts/). */
   @font-face { font-family: "Thmanyah Sans"; src: url("fonts/thmanyahsans-Light.otf") format("opentype"); font-weight: 300; font-style: normal; font-display: swap; }
@@ -359,10 +359,16 @@
 
   .card-title {
     font-size: 1.05rem;
-    font-weight: 500;
+    font-weight: 600;
+    letter-spacing: -0.01em;
     display: flex;
     align-items: center;
     gap: 0.5rem;
+  }
+
+  /* Consistent vertical rhythm between the blocks of every tab. */
+  .tab-pane > * + * {
+    margin-top: 1.25rem;
   }
 
   .card-body {
@@ -593,7 +599,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
-    max-width: 380px;
+    width: min(380px, calc(100vw - 2rem));
   }
 
   .toast {
@@ -606,9 +612,57 @@
     box-shadow: var(--shadow-md);
     font-size: 0.84rem;
     display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    animation: toast-in 0.18s ease-out;
+  }
+
+  .toast-success { border-inline-start-color: var(--status-ok-fg); }
+  .toast-error { border-inline-start-color: var(--status-err-fg); }
+  .toast-info { border-inline-start-color: var(--brand-plum); }
+
+  .toast-icon {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: inline-flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
+    justify-content: center;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1;
+    margin-top: 0.15rem;
+  }
+  .toast-success .toast-icon { background: var(--status-ok-bg); color: var(--status-ok-fg); }
+  .toast-error .toast-icon { background: var(--status-err-bg); color: var(--status-err-fg); }
+  .toast-info .toast-icon { background: var(--status-info-bg); color: var(--status-info-fg); }
+
+  .toast-msg {
+    flex: 1;
+    word-break: break-word;
+  }
+
+  .toast-close {
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.05rem;
+    line-height: 1;
+    padding: 0.1rem 0.3rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .toast-close:hover {
+    color: var(--text-primary);
+    background: var(--bg-subtle);
+  }
+
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
   .input.invalid {
@@ -640,17 +694,12 @@
   <header class="topbar">
     <div class="brand">
       <div class="brand-logo" aria-hidden="true">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M8 3h8v5H8z" fill="#ffffff" opacity="0.92"/>
-          <path d="M4 8h16a1.5 1.5 0 0 1 1.5 1.5V16a1.5 1.5 0 0 1-1.5 1.5h-2.2V21H6.2v-3.5H4A1.5 1.5 0 0 1 2.5 16V9.5A1.5 1.5 0 0 1 4 8z" fill="#ffffff"/>
-          <path d="M8.6 15.6l2 2 3.8-4" stroke="#0953de" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <circle cx="18.4" cy="10.6" r="1.1" fill="#00c7fc"/>
-        </svg>
+        <img src="app-icon.png" alt="" width="42" height="42" style="border-radius: 12px; display: block;"/>
       </div>
       <div>
         <div class="brand-title">
-          <span data-i18n="app_title">بوابة الطباعة</span>
-          <span class="version-pill" id="appVersionBadge">v1.1.1</span>
+          <span data-i18n="app_title">يسير برنت</span>
+          <span class="version-pill" id="appVersionBadge">—</span>
         </div>
         <div class="brand-subtitle" data-i18n="app_subtitle">
           طباعة محلية من Odoo — بدون خادم وسيط
@@ -771,7 +820,7 @@
       </div>
 
       <!-- Queue Table Card -->
-      <div class="card" style="margin-top:1.25rem;">
+      <div class="card">
         <div class="card-header">
           <div class="card-title">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
@@ -814,7 +863,7 @@
 
     <!-- TAB 2: PRINTERS & CALIBRATION LAB -->
     <section id="tab-printers" class="tab-pane hidden">
-      <div class="card" style="margin-bottom:1.25rem;">
+      <div class="card">
         <div class="card-header">
           <div class="card-title">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
@@ -904,6 +953,23 @@
       <div class="card">
         <div class="card-header">
           <div class="card-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+            <span data-i18n="env_title">بيئة العرض (WebView2)</span>
+          </div>
+          <div style="display:flex;gap:0.5rem;">
+            <button class="btn btn-sm btn-secondary" id="btnClearWebData" onclick="clearWebData()" data-i18n="btn_clear_web">مسح بيانات التصفح</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.85rem;" data-i18n="env_desc">
+            فحص حي لبيئة عرض صفحات Odoo على هذا الجهاز. إذا ظهرت شاشة بيضاء بعد تسجيل الدخول، فالمسح يعيد البيئة نظيفة (كاش وملفات ارتباط وتخزين) ويحل المشكلة غالبًا.
+          </p>
+          <div id="envSummary"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
             <span data-i18n="diag_title">حزمة التشخيص الآمنة (Redacted Diagnostics Bundle)</span>
           </div>
@@ -929,7 +995,7 @@
 <script>
   const I18N = {
     ar: {
-      app_title: "بوابة الطباعة",
+      app_title: "يسير برنت",
       app_subtitle: "طباعة مباشرة من Odoo إلى الطابعة المحلية",
       btn_open_odoo: "فتح نظام Odoo",
       btn_refresh: "تحديث",
@@ -938,6 +1004,9 @@
       tab_printers: "الطابعات ومعمل المعايرة",
       tab_settings: "إعدادات اتصال Odoo والأمان",
       tab_diagnostics: "حزمة التشخيص والدعم الفني",
+      env_title: "بيئة العرض (WebView2)",
+      btn_clear_web: "مسح بيانات التصفح",
+      env_desc: "فحص حي لبيئة عرض صفحات Odoo على هذا الجهاز. إذا ظهرت شاشة بيضاء بعد تسجيل الدخول، فالمسح يعيد البيئة نظيفة (كاش وملفات ارتباط وتخزين) ويحل المشكلة غالبًا.",
       btn_configure_now: "ضبط الرابط الآن",
       kpi_printers: "الطابعات المكتشفة",
       kpi_active_jobs: "المهام النشطة / بالانتظار",
@@ -959,6 +1028,8 @@
       col_error: "رمز الخطأ",
       col_actions: "إجراءات",
       no_jobs: "لا توجد مهام مطابقة في الطابور حالياً.",
+      no_printers: "لم يتم العثور على طابعات مثبتة في Windows Spooler على هذا الجهاز حالياً. يمكنك استخدام مربع الاختبار المباشر أعلاه للطباعة عبر TCP 9100 أو IPP.",
+      toast_close: "إغلاق التنبيه",
       direct_test_title: "اختبار ومعايرة الطابعة",
       lbl_target_printer: "اختر الطابعة",
       lbl_test_type: "نوع صفحة المعايرة والاختبار",
@@ -989,7 +1060,7 @@
       diag_desc: "إصدار التطبيق وآخر 200 مهمة — بدون بيانات سرية.",
     },
     en: {
-      app_title: "Print Gateway — Odoo",
+      app_title: "Yaseir Print",
       app_subtitle: "Direct local printing from Odoo to your printers.",
       btn_open_odoo: "Open Odoo",
       btn_refresh: "Refresh",
@@ -998,6 +1069,9 @@
       tab_printers: "Printers & Calibration Lab",
       tab_settings: "Odoo Connection & Security",
       tab_diagnostics: "Diagnostics & Support Bundle",
+      env_title: "WebView2 Environment",
+      btn_clear_web: "Clear Web Data",
+      env_desc: "Live check of the environment that renders Odoo pages on this PC. If a white page appears after sign-in, clearing returns a clean environment (cache, cookies, storage) and usually fixes it.",
       btn_configure_now: "Configure Now",
       kpi_printers: "Discovered Printers",
       kpi_active_jobs: "Active / Queued Jobs",
@@ -1019,6 +1093,8 @@
       col_error: "Error Code",
       col_actions: "Actions",
       no_jobs: "No matching print jobs in the queue.",
+      no_printers: "No Windows Spooler printers discovered on this host. Use the Direct Calibration box above to test TCP 9100 or IPP printers.",
+      toast_close: "Dismiss notification",
       direct_test_title: "Printer test & calibration",
       lbl_target_printer: "Choose a printer",
       lbl_test_type: "Calibration Test Page Type",
@@ -1054,8 +1130,37 @@
   let currentFilter = "all";
   let overviewState = null;
 
+  // Transactional form state: once the user edits a form, background
+  // refreshes must never write into its controls again. Settings values
+  // load once on start and re-sync once after a successful save; the
+  // test lab keeps the user's choices until the page is reloaded.
+  const formState = {
+    settingsDirty: false,
+    testDirty: false,
+  };
+
+  // Rendered-output signatures: when a poll returns data that would
+  // render identically, the DOM is left completely untouched.
+  let lastJobsSignature = null;
+  let lastPrintersSignature = null;
+  let lastEnvSignature = null;
+
   function bridge() {
     return window.__NATIVE_PRINT__ || null;
+  }
+
+  // textContent write that is a no-op when the value is unchanged,
+  // so polling does not churn layout for static-looking numbers.
+  function setText(id, value) {
+    const el = document.getElementById(id);
+    if (el && el.textContent !== value) el.textContent = value;
+  }
+
+  // True while the user is interacting with any form control (a select
+  // shows its dropdown only while focused, so focus is the open test).
+  function anyFormControlFocused() {
+    const el = document.activeElement;
+    return !!el && (el.tagName === "SELECT" || el.tagName === "INPUT" || el.tagName === "TEXTAREA");
   }
 
   function setNativeControlsEnabled(enabled) {
@@ -1065,14 +1170,73 @@
     }
   }
 
-  function showToast(msg, isError = false) {
+  // Toast stack: at most 3 visible, newest on top. Errors stay 8s,
+  // success/info 4.2s; hovering pauses the countdown, and identical
+  // messages shown within 2s are deduped. Callers keep using
+  // showToast(message, isError); the optional third argument picks an
+  // explicit type ("success" | "error" | "info").
+  const toastState = {
+    entries: [],
+    recent: new Map(),
+  };
+  const TOAST_ICONS = { success: "✓", error: "✕", info: "ℹ" };
+  const TOAST_MAX_VISIBLE = 3;
+
+  function dismissToast(entry) {
+    if (entry.timer) {
+      window.clearTimeout(entry.timer);
+      entry.timer = null;
+    }
+    entry.el.remove();
+    const idx = toastState.entries.indexOf(entry);
+    if (idx >= 0) toastState.entries.splice(idx, 1);
+  }
+
+  function armToastTimer(entry, delay) {
+    entry.remaining = delay;
+    entry.expiresAt = Date.now() + delay;
+    entry.timer = window.setTimeout(() => dismissToast(entry), delay);
+  }
+
+  function showToast(msg, isError = false, type) {
+    const kind = type || (isError ? "error" : "success");
+    const text = String(msg == null ? "" : msg);
+    const now = Date.now();
+    const dedupeKey = kind + "|" + text;
+    if (now - (toastState.recent.get(dedupeKey) || 0) < 2000) return;
+    toastState.recent.set(dedupeKey, now);
+    for (const [key, at] of toastState.recent) {
+      if (now - at > 10000) toastState.recent.delete(key);
+    }
+
     const container = document.getElementById("toastContainer");
+    if (!container) return;
     const el = document.createElement("div");
-    el.className = "toast";
-    if (isError) el.style.borderInlineStartColor = "#dc2626";
-    el.innerHTML = `<span>${escapeHtml(msg)}</span>`;
-    container.appendChild(el);
-    setTimeout(() => el.remove(), 4200);
+    el.className = `toast toast-${kind}`;
+    el.setAttribute("role", kind === "error" ? "alert" : "status");
+    el.innerHTML =
+      `<span class="toast-icon" aria-hidden="true">${TOAST_ICONS[kind] || TOAST_ICONS.info}</span>` +
+      `<span class="toast-msg">${escapeHtml(text)}</span>` +
+      `<button type="button" class="toast-close" aria-label="${escapeHtml(I18N[currentLang].toast_close)}">×</button>`;
+    container.prepend(el);
+
+    const entry = { el, timer: null, remaining: 0, expiresAt: 0 };
+    toastState.entries.unshift(entry);
+    el.querySelector(".toast-close").addEventListener("click", () => dismissToast(entry));
+    el.addEventListener("mouseenter", () => {
+      if (!entry.timer) return;
+      window.clearTimeout(entry.timer);
+      entry.timer = null;
+      entry.remaining = Math.max(0, entry.expiresAt - Date.now());
+    });
+    el.addEventListener("mouseleave", () => {
+      if (!entry.timer) armToastTimer(entry, entry.remaining);
+    });
+    armToastTimer(entry, kind === "error" ? 8000 : 4200);
+
+    while (toastState.entries.length > TOAST_MAX_VISIBLE) {
+      dismissToast(toastState.entries[toastState.entries.length - 1]);
+    }
   }
 
   function escapeHtml(s) {
@@ -1110,7 +1274,7 @@
     if (s === "failed" || s === "dead_letter") {
       return `<span class="badge badge-err"><span class="dot"></span>${escapeHtml(s.toUpperCase())}</span>`;
     }
-    return `<span class="badge badge-neutral">${escapeHtml(s)}</span>`;
+    return `<span class="badge badge-neutral">${escapeHtml(s.toUpperCase())}</span>`;
   }
 
   function printerStatusBadge(status) {
@@ -1192,49 +1356,97 @@
     }
   }
 
+  async function clearWebData() {
+    const api = window.__NATIVE_PRINT__;
+    if (!api || typeof api.clearWebData !== "function") {
+      showToast(currentLang === "ar" ? "الجسر المحلي غير متاح." : "Local bridge unavailable.", true);
+      return;
+    }
+    const sure = window.confirm(currentLang === "ar"
+      ? "سيتم مسح الكاش وملفات الارتباط والتخزين المحلي للتطبيق وتسجيل الخروج. متابعة؟"
+      : "This clears the app cache, cookies and local storage and signs you out. Continue?");
+    if (!sure) return;
+    try {
+      await api.clearWebData();
+      showToast(currentLang === "ar" ? "تم المسح. أعد تسجيل الدخول." : "Web data cleared. Sign in again.");
+    } catch (error) {
+      showToast(String(error), true);
+    }
+  }
+
   function renderOverview(data) {
-    document.getElementById("appVersionBadge").textContent = `v${data.appVersion || "1.1.1"}`;
+    setText("appVersionBadge", data.appVersion ? `v${data.appVersion}` : "—");
     const printers = data.printers || [];
-    document.getElementById("kpiPrintersCount").textContent = String(printers.length);
-    document.getElementById("kpiDefaultPrinter").textContent = data.defaultPrinter
+    setText("kpiPrintersCount", String(printers.length));
+    setText("kpiDefaultPrinter", data.defaultPrinter
       ? (currentLang === "ar" ? `الافتراضية: ${data.defaultPrinter}` : `Default: ${data.defaultPrinter}`)
-      : (currentLang === "ar" ? "لا توجد طابعة افتراضية" : "No default printer");
+      : (currentLang === "ar" ? "لا توجد طابعة افتراضية" : "No default printer"));
 
     const counts = Object.fromEntries(data.stateCounts || []);
     const active = (counts.queued || 0) + (counts.rendering || 0) + (counts.spooling || 0) + (counts.printing || 0);
     const done = counts.done || 0;
     const attention = (counts.failed || 0) + (counts.dead_letter || 0);
 
-    document.getElementById("kpiActiveCount").textContent = String(active);
-    document.getElementById("kpiDoneCount").textContent = String(done);
-    document.getElementById("kpiFailedCount").textContent = String(attention);
-    document.getElementById("kpiPdfiumStatus").textContent = data.pdfiumReady
+    setText("kpiActiveCount", String(active));
+    setText("kpiDoneCount", String(done));
+    setText("kpiFailedCount", String(attention));
+    setText("kpiPdfiumStatus", data.pdfiumReady
       ? I18N[currentLang].kpi_pdf_ready
-      : I18N[currentLang].kpi_pdf_unavailable;
+      : I18N[currentLang].kpi_pdf_unavailable);
+
+    const envEl = document.getElementById("envSummary");
+    if (envEl) {
+      const env = data.environment || {};
+      const envSignature = JSON.stringify([data.webviewVersion || "", env, currentLang]);
+      if (envSignature !== lastEnvSignature) {
+        lastEnvSignature = envSignature;
+        const fact = (label, ok, value) =>
+          `<div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid var(--border-color,#eef1f6);font-size:0.85rem;"><span style="color:var(--text-secondary);">${label}</span><strong style="color:${ok ? "#12713f" : "#b3261e"};">${value}</strong></div>`;
+        envEl.innerHTML =
+          fact("WebView2 Runtime", !!data.webviewVersion, data.webviewVersion || "—") +
+          fact("ES2022", !!env.es2022, env.es2022 ? "OK" : "غير متاح") +
+          fact(currentLang === "ar" ? "التخزين المحلي" : "Local storage", !!env.localStorage, env.localStorage ? "OK" : "غير متاح") +
+          fact(currentLang === "ar" ? "ملفات الارتباط" : "Cookies", !!env.cookies, env.cookies ? "OK" : "غير متاح") +
+          fact("WebSocket", !!env.webSocket, env.webSocket ? "OK" : "غير متاح") +
+          fact(currentLang === "ar" ? "سياق آمن" : "Secure context", !!env.secureContext, env.secureContext ? "OK" : "HTTP");
+        if (Array.isArray(env.errors) && env.errors.length) {
+          const esc = (x) => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+          envEl.innerHTML += env.errors.slice(0, 5).map((e) =>
+            `<div style="padding:0.3rem 0;border-bottom:1px solid var(--border-color,#eef1f6);font-size:0.8rem;color:#b3261e;word-break:break-word;">${esc(e)}</div>`).join("");
+        }
+      }
+    }
 
     const alertBanner = document.getElementById("originAlertBanner");
     if (!data.odooOrigin) {
       alertBanner.classList.remove("hidden");
-      document.getElementById("originAlertText").textContent = I18N[currentLang].origin_not_configured;
-      document.getElementById("kpiOriginMeta").textContent = currentLang === "ar" ? "غير مضبوط" : "Not configured";
+      setText("originAlertText", I18N[currentLang].origin_not_configured);
+      setText("kpiOriginMeta", currentLang === "ar" ? "غير مضبوط" : "Not configured");
       document.getElementById("btnOpenOdoo").disabled = true;
     } else {
       alertBanner.classList.add("hidden");
-      document.getElementById("kpiOriginMeta").textContent = data.odooOrigin;
+      setText("kpiOriginMeta", data.odooOrigin);
       document.getElementById("btnOpenOdoo").disabled = false;
     }
 
-    // Populate settings inputs
+    // Settings are transactional: saved values are written into the
+    // form only while the user has not edited it and is not interacting
+    // with any control. From the first edit on, only the Save button
+    // applies changes (and a successful save re-syncs the form once).
+    const formLocked = !!data.lockedByPolicy;
     const originInput = document.getElementById("inputOdooOrigin");
-    if (document.activeElement !== originInput) {
-      originInput.value = data.odooOrigin || "";
+    const autoReprintInput = document.getElementById("inputAutoReprint");
+    if (!formState.settingsDirty && !anyFormControlFocused()) {
+      const savedOrigin = data.odooOrigin || "";
+      if (originInput.value !== savedOrigin) originInput.value = savedOrigin;
+      const savedAutoReprint = data.autoReprint ? "true" : "false";
+      if (autoReprintInput.value !== savedAutoReprint) autoReprintInput.value = savedAutoReprint;
     }
-    originInput.disabled = !!data.lockedByPolicy;
-    document.getElementById("inputAutoReprint").value = data.autoReprint ? "true" : "false";
-    document.getElementById("inputAutoReprint").disabled = !!data.lockedByPolicy;
-    document.getElementById("policyStatusBadge").textContent = data.lockedByPolicy
+    if (originInput.disabled !== formLocked) originInput.disabled = formLocked;
+    if (autoReprintInput.disabled !== formLocked) autoReprintInput.disabled = formLocked;
+    setText("policyStatusBadge", formLocked
       ? (currentLang === "ar" ? "مقفل بواسطة مسؤول النظام" : "Managed by administrator")
-      : (currentLang === "ar" ? "قابل للتعديل على هذا الجهاز" : "Editable on this device");
+      : (currentLang === "ar" ? "قابل للتعديل على هذا الجهاز" : "Editable on this device"));
 
     populatePrinterSelect(printers, data.defaultPrinter);
     validateOriginField();
@@ -1253,8 +1465,18 @@
       return true;
     });
 
+    // Skip the rebuild entirely when the rows that would be painted are
+    // identical to the last render; this keeps hover, scroll and any
+    // in-flight click intact across silent polls.
+    const signature = currentFilter + "|" + currentLang + "|" + JSON.stringify(filtered.map((j) =>
+      [j.id, j.report, j.printer, j.pages, j.bytes, j.state, j.attempts, j.error_code]));
+    if (signature === lastJobsSignature) return;
+    lastJobsSignature = signature;
+    const scrollY = window.scrollY;
+
     if (!filtered.length) {
       tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-muted);">${escapeHtml(I18N[currentLang].no_jobs)}</td></tr>`;
+      if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
       return;
     }
 
@@ -1281,17 +1503,25 @@
         </tr>
       `;
     }).join("");
+    if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
   }
 
   function renderPrintersGrid(printers) {
     const grid = document.getElementById("printersGrid");
+    // Same skip-if-identical guard as the jobs table: an unchanged
+    // printer set leaves the cards (and any open paper-forms box) alone.
+    const signature = currentLang + "|" + JSON.stringify(printers.map((p) =>
+      [p.name, p.kind, p.is_default, p.status, p.port, p.driver]));
+    if (signature === lastPrintersSignature) return;
+    lastPrintersSignature = signature;
+    const scrollY = window.scrollY;
+
     if (!printers.length) {
       grid.innerHTML = `
         <div class="card" style="grid-column:1/-1;padding:2rem;text-align:center;color:var(--text-muted);">
-          ${currentLang === "ar"
-            ? "لم يتم العثور على طابعات مثبتة في Windows Spooler على هذا الجهاز حالياً. يمكنك استخدام مربع الاختبار المباشر أعلاه للطباعة عبر TCP 9100 أو IPP."
-            : "No Windows Spooler printers discovered on this host. Use the Direct Calibration box above to test TCP 9100 or IPP printers."}
+          ${escapeHtml(I18N[currentLang].no_printers)}
         </div>`;
+      if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
       return;
     }
 
@@ -1342,6 +1572,7 @@
         </div>
       </div>
     `).join("");
+    if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
   }
 
   async function runPrinterTest(printerName, kind) {
@@ -1362,6 +1593,11 @@
   function populatePrinterSelect(printers, defaultPrinter) {
     const sel = document.getElementById("customPrinterSelect");
     if (!sel) return;
+    // The test lab is transactional too: once the user has picked a
+    // printer (or is interacting with any control), a background
+    // refresh must not touch the select. Rebuilding its options would
+    // close an open dropdown and discard the user's choice.
+    if (formState.testDirty || anyFormControlFocused()) return;
     const previous = sel.value;
     const options = [];
     for (const p of printers) {
@@ -1375,10 +1611,15 @@
       }
     }
     options.push({ value: "__uri__", label: currentLang === "ar" ? "عنوان مخصص (URI)…" : "Custom address (URI)…" });
+    const wanted = [previous, defaultPrinter].find((v) => v && options.some((o) => o.value === v));
+    // Skip the rebuild when the option set and the resulting selection
+    // are unchanged; an innerHTML swap is what closed open dropdowns.
+    const signature = JSON.stringify(options) + "|" + (wanted || "");
+    if (sel.dataset.optionsSignature === signature) return;
+    sel.dataset.optionsSignature = signature;
     sel.innerHTML = options
       .map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`)
       .join("");
-    const wanted = [previous, defaultPrinter].find((v) => v && options.some((o) => o.value === v));
     if (wanted) sel.value = wanted;
     onTestPrinterChange();
   }
@@ -1590,6 +1831,10 @@
     if (button) button.disabled = true;
     try {
       const saved = await api.saveOrigin(origin, autoReprint);
+      // The save is the one moment the form re-syncs from the server:
+      // clearing the dirty flag lets the refresh below write the saved
+      // (normalized) values back into the fields exactly once.
+      formState.settingsDirty = false;
       showToast(currentLang === "ar" ? `تم حفظ العنوان: ${saved}` : `Saved address: ${saved}`);
       await refreshAll({ silent: true });
       return true;
@@ -1709,8 +1954,17 @@
 
   document.getElementById("inputOdooOrigin").addEventListener("input", validateOriginField);
   document.getElementById("customPrinterUri").addEventListener("input", validateCustomPrinterUriField);
+  // From the first user edit on, a form belongs to the user: these
+  // listeners arm the transactional guards used by renderOverview and
+  // populatePrinterSelect. Genuine DOM change/input events only fire
+  // for user interaction, never for programmatic value writes.
+  document.getElementById("inputOdooOrigin").addEventListener("input", () => { formState.settingsDirty = true; });
+  document.getElementById("inputAutoReprint").addEventListener("change", () => { formState.settingsDirty = true; });
+  document.getElementById("customPrinterSelect").addEventListener("change", () => { formState.testDirty = true; });
+  document.getElementById("customPrinterUri").addEventListener("input", () => { formState.testDirty = true; });
+  document.getElementById("customTestKind").addEventListener("change", () => { formState.testDirty = true; });
   refreshAll();
-  setInterval(() => refreshAll({ silent: true }), 3000);
+  setInterval(() => refreshAll({ silent: true }), 5000);
 
 </script>
 </body>

@@ -1,15 +1,16 @@
 {
-    "name": "Native Print",
-    "version": "19.0.2.0.0",
+    "name": "Yaseir Print",
+    "version": "19.0.2.7.0",
     "category": "Productivity",
     "summary": "Zero-gateway local printing for Odoo reports, labels, and POS receipts",
-    "author": "Odoo Native Print Team",
+    "author": "Yaseir",
     "depends": ["web"],
     "data": [
         "security/native_print_groups.xml",
         "security/ir.model.access.csv",
         "security/native_print_rules.xml",
         "views/native_print_views.xml",
+        "views/login_fallback_templates.xml",
     ],
     "assets": {
         "web.assets_backend": [

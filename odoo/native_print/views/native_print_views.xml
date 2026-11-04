@@ -1,10 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
+    <!-- The job log is a READ-ONLY record of jobs that actually ran:
+         records are created only by the desktop status sync, never by
+         hand, so every view disables create/edit/delete. The one
+         action offered is Reprint, which re-runs the original report
+         for the original records. -->
     <record id="view_job_list" model="ir.ui.view">
         <field name="name">native.print.job.list</field>
         <field name="model">native.print.job</field>
         <field name="arch" type="xml">
-            <list decoration-success="state == 'done'"
+            <list create="0" edit="0" delete="0"
+                  decoration-success="state == 'done'"
                   decoration-danger="state in ('failed', 'dead_letter')"
                   decoration-info="state in ('queued', 'rendering', 'spooling', 'printing')"
                   decoration-muted="state == 'canceled'"
@@ -12,8 +18,12 @@
                 <field name="create_date" string="Created"/>
                 <field name="name" class="font-monospace"/>
                 <field name="report_id"/>
-                <field name="report_name" optional="show"/>
-                <field name="device" class="font-monospace"/>
+                <field name="source_type" widget="badge"
+                       decoration-info="source_type == 'report'"
+                       decoration-warning="source_type == 'pos_receipt'"
+                       decoration-muted="source_type == 'test'"/>
+                <field name="report_name" optional="hide"/>
+                <field name="device_id"/>
                 <field name="pages" sum="Total Pages"/>
                 <field name="byte_size" optional="hide"/>
                 <field name="attempts" optional="show"/>
@@ -24,6 +34,10 @@
                        decoration-muted="state == 'canceled'"/>
                 <field name="error_code" class="font-monospace text-danger" optional="show"/>
                 <field name="user_id" widget="many2one_avatar_user"/>
+                <button name="action_reprint" type="object" string="Reprint"
+                        icon="fa-print" class="btn-link"
+                        invisible="not report_id or not source_ids"
+                        confirm="Reprint this document now? It will be sent to the printer selected in the desktop app."/>
             </list>
         </field>
     </record>
@@ -32,13 +46,15 @@
         <field name="name">native.print.job.kanban</field>
         <field name="model">native.print.job</field>
         <field name="arch" type="xml">
-            <kanban default_group_by="state" sample="1">
+            <kanban default_group_by="state" create="0" sample="1">
                 <field name="name"/>
                 <field name="state"/>
                 <field name="error_code"/>
                 <field name="report_id"/>
                 <field name="report_name"/>
-                <field name="device"/>
+                <field name="source_type"/>
+                <field name="device_id"/>
+                <field name="source_ids"/>
                 <field name="pages"/>
                 <field name="user_id"/>
                 <field name="create_date"/>
@@ -61,9 +77,9 @@
                                 <field name="report_name"/>
                             </span>
                         </div>
-                        <div t-if="record.device.raw_value" class="small font-monospace text-muted mb-1">
+                        <div t-if="record.device_id.raw_value" class="small text-muted mb-1">
                             <i class="fa fa-print me-1" title="Printer"/>
-                            <field name="device"/>
+                            <field name="device_id"/>
                         </div>
                         <div t-if="record.error_code.raw_value" class="badge text-bg-danger font-monospace mb-2">
                             <i class="fa fa-warning me-1" title="Error"/>
@@ -83,8 +99,12 @@
         <field name="name">native.print.job.form</field>
         <field name="model">native.print.job</field>
         <field name="arch" type="xml">
-            <form>
+            <form create="0" edit="0" delete="0">
                 <header>
+                    <button name="action_reprint" type="object" string="Reprint"
+                            class="btn-primary"
+                            invisible="not report_id or not source_ids"
+                            confirm="Reprint this document now? It will be sent to the printer selected in the desktop app."/>
                     <field name="state" widget="statusbar"
                            statusbar_visible="queued,rendering,spooling,printing,done,failed"/>
                 </header>
@@ -94,25 +114,32 @@
                         <i class="fa fa-exclamation-triangle fa-lg" title="Error"/>
                         <div>
                             <strong>Diagnostic Error Code: </strong>
-                            <field name="error_code" class="font-monospace fw-bold" readonly="True"/>
+                            <field name="error_code" class="font-monospace fw-bold"/>
                         </div>
                     </div>
                     <div class="oe_title">
                         <label for="name" string="Idempotency Key"/>
                         <h1>
-                            <field name="name" class="font-monospace" readonly="True"/>
+                            <field name="name" class="font-monospace"/>
                         </h1>
                     </div>
                     <group>
                         <group string="Print Source &amp; Routing">
                             <field name="report_id"/>
-                            <field name="report_name" class="font-monospace"/>
-                            <field name="device" class="font-monospace"/>
+                            <field name="report_name" string="Source Name"/>
+                            <field name="source_type" widget="badge"
+                                   decoration-info="source_type == 'report'"
+                                   decoration-warning="source_type == 'pos_receipt'"
+                                   decoration-muted="source_type == 'test'"/>
+                            <field name="device_id"/>
                         </group>
                         <group string="Document Metrics &amp; Audit">
                             <field name="pages"/>
                             <field name="byte_size"/>
                             <field name="attempts"/>
+                            <field name="copies"/>
+                            <field name="paper"/>
+                            <field name="mode"/>
                             <field name="user_id" widget="many2one_avatar_user"/>
                             <field name="company_id"/>
                         </group>
@@ -129,20 +156,25 @@
             <search>
                 <field name="name"/>
                 <field name="report_id"/>
-                <field name="report_name"/>
-                <field name="device"/>
+                <field name="device_id"/>
+                <field name="source_type"/>
                 <field name="error_code"/>
+                <filter name="f_executed" string="Executed"
+                        domain="[('state', 'in', ('done', 'failed', 'canceled', 'dead_letter'))]"/>
                 <filter name="f_active" string="Active / Queued"
                         domain="[('state', 'in', ('queued', 'rendering', 'spooling', 'printing'))]"/>
                 <filter name="f_failed" string="Failed" domain="[('state', '=', 'failed')]"/>
                 <filter name="f_dead" string="Dead letter" domain="[('state', '=', 'dead_letter')]"/>
                 <filter name="f_done" string="Done" domain="[('state', '=', 'done')]"/>
                 <separator/>
+                <filter name="f_reports" string="Reports" domain="[('source_type', '=', 'report')]"/>
+                <filter name="f_pos" string="POS Receipts" domain="[('source_type', '=', 'pos_receipt')]"/>
                 <filter name="f_my_jobs" string="My Print Jobs" domain="[('user_id', '=', uid)]"/>
                 <group>
                     <filter name="g_state" string="State" context="{'group_by': 'state'}"/>
                     <filter name="g_report" string="Report" context="{'group_by': 'report_id'}"/>
-                    <filter name="g_device" string="Printer / Device" context="{'group_by': 'device'}"/>
+                    <filter name="g_source_type" string="Source Type" context="{'group_by': 'source_type'}"/>
+                    <filter name="g_device" string="Printer" context="{'group_by': 'device_id'}"/>
                     <filter name="g_user" string="User" context="{'group_by': 'user_id'}"/>
                 </group>
             </search>
@@ -178,6 +210,7 @@
         <field name="view_mode">list,kanban,form,graph,pivot</field>
         <field name="search_view_id" ref="view_job_search"/>
         <field name="domain">[('company_id', 'in', allowed_company_ids)]</field>
+        <field name="context">{'create': False, 'search_default_f_executed': 1}</field>
     </record>
 
     <menuitem id="menu_native_print_root"

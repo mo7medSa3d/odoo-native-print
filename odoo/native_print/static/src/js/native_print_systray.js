@@ -59,7 +59,7 @@ export class NativePrintSystray extends Component {
         const bridge = window.__NATIVE_PRINT__ || null;
         if (!bridge || typeof bridge.appOverview !== "function") {
             if (showNotice) this.notification.add(
-                "Open Odoo inside the Native Print desktop app to see this PC's printers.",
+                "Open Odoo inside the Yaseir Print desktop app to see this PC's printers.",
                 { title: "Desktop App Required", type: "warning" },
             );
             return;
@@ -123,7 +123,7 @@ export class NativePrintSystray extends Component {
             await bridge.openControlCenter();
         } else {
             this.notification.add(
-                "Native Control Center is available when running inside the Odoo Native Print desktop app (Ctrl+Shift+P).",
+                "The Control Center is available when running inside the Yaseir Print desktop app (Ctrl+Shift+Y).",
                 { title: "Browser Fallback Mode", type: "info" },
             );
         }
@@ -148,7 +148,7 @@ export class NativePrintSystray extends Component {
         const bridge = window.__NATIVE_PRINT__ || null;
         if (!bridge || typeof bridge.runTestPrint !== "function") {
             this.notification.add(
-                "Open Odoo inside the Native Print app to send hardware calibration prints.",
+                "Open Odoo inside the Yaseir Print app to send hardware calibration prints.",
                 { title: "Native App Required", type: "warning" },
             );
             return;

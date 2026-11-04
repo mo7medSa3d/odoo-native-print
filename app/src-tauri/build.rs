@@ -15,9 +15,15 @@ fn main() {
             "cancel_job_cmd",
             "clear_finished_cmd",
             "export_diagnostics",
+            "report_environment",
+            "clear_web_data_cmd",
             "save_origin_cmd",
             "open_control_center",
             "open_odoo_origin",
+            "app_identity",
+            "nav_back",
+            "nav_forward",
+            "nav_reload",
         ]));
     tauri_build::try_build(attributes).expect("failed to run tauri-build");
 }

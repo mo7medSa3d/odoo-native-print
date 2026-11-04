@@ -6,7 +6,9 @@
   "permissions": [
     "allow-print-pdf",
     "allow-print-status",
-    "allow-queue-admin"
+    "allow-queue-admin",
+    "allow-app-shell",
+    "allow-toolbar"
   ],
   "windows": [
     "main"

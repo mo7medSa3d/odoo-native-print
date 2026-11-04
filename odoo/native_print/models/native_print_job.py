@@ -28,7 +28,39 @@ class NativePrintJob(models.Model):
         index=True,
     )
     error_code = fields.Char(string="Error Code")
-    device = fields.Char(string="Printer / Device")
+    # The printer as a pickable registry entry (auto-synced from real
+    # jobs - see native.print.device). `device` below keeps the raw
+    # name snapshot exactly as the desktop reported it.
+    device_id = fields.Many2one(
+        "native.print.device",
+        string="Printer",
+        index=True,
+        ondelete="set null",
+    )
+    device = fields.Char(string="Printer (as reported)")
+    source_type = fields.Selection(
+        [
+            ("report", "Report"),
+            ("pos_receipt", "POS Receipt"),
+            ("test", "Test Print"),
+        ],
+        default="report",
+        required=True,
+        index=True,
+        string="Source Type",
+    )
+    # What the report was printed for, so the job can be reprinted:
+    # the source model and the record ids captured at print time.
+    source_model = fields.Char(string="Source Model", index=True)
+    source_ids = fields.Char(string="Source Records")
+    # The print settings the job actually ran with, captured at print
+    # time so a reprint comes prefilled with the same choices instead
+    # of whatever happens to be selected today.
+    copies = fields.Integer(default=1, string="Copies")
+    paper = fields.Char(string="Paper")
+    duplex = fields.Boolean(string="Duplex")
+    color = fields.Boolean(default=True, string="Color")
+    mode = fields.Char(string="Print Mode")
     user_id = fields.Many2one(
         "res.users",
         default=lambda s: s.env.user,
@@ -51,6 +83,55 @@ class NativePrintJob(models.Model):
         default=lambda s: s.env.company,
         string="Company",
     )
+
+    def action_reprint(self):
+        """Re-print this job's document.
+
+        Returns the original report action for the original records,
+        so the report is rendered again and - inside the desktop
+        app - intercepted and printed exactly like the first time.
+        (A fresh render of the document as it stands now, which is
+        what "print again" means everywhere in Odoo; the log stores
+        no payload copies by design.)
+        """
+        self.ensure_one()
+        ids = []
+        if self.source_ids:
+            ids = [int(x) for x in self.source_ids.split(",")
+                   if x.strip().isdigit()]
+        if not self.report_id or not ids:
+            raise UserError(_(
+                "This job cannot be reprinted: the original report "
+                "or its records were not recorded for it (for "
+                "example, POS receipts are reprinted from the POS)."
+            ))
+        settings = {}
+        if self.copies:
+            settings["copies"] = self.copies
+        if self.paper:
+            settings["paper"] = self.paper
+        settings["duplex"] = bool(self.duplex)
+        settings["color"] = bool(self.color)
+        printer_name = (self.device_id.name if self.device_id
+                        else self.device)
+        return {
+            "type": "ir.actions.report",
+            "report_name": self.report_id.report_name,
+            "report_type": self.report_id.report_type,
+            "ids": ids,
+            "context": {
+                "active_ids": ids,
+                "active_id": ids[0],
+                "active_model": self.source_model or self.report_id.model,
+                # Prefill for the print handler: reprint on the job's
+                # own printer (when it is connected to this PC) with
+                # the job's own settings, not today's selections.
+                "native_print_prefill": {
+                    "printer": printer_name or None,
+                    "settings": settings,
+                },
+            },
+        }
 
     _idempotency_key_company_uniq = models.Constraint(
         "unique(name, company_id)",

@@ -31,6 +31,52 @@ class TestNativePrintJobLog(TransactionCase):
             {"state": "done"})
         self.assertEqual(job.state, "done")
 
+    def test_action_reprint_returns_report_action(self):
+        report = self.env["ir.actions.report"].search(
+            [("report_name", "=", "account.report_invoice")], limit=1)
+        if not report:
+            self.skipTest("account reports not installed")
+        job = self._job()
+        job.with_context(native_print_status_sync=True).write({
+            "report_id": report.id,
+            "source_model": "account.move",
+            "source_ids": "41,42",
+        })
+        action = job.action_reprint()
+        self.assertEqual(action["type"], "ir.actions.report")
+        self.assertEqual(action["report_name"], "account.report_invoice")
+        self.assertEqual(action["ids"], [41, 42])
+        self.assertEqual(action["context"]["active_model"], "account.move")
+
+    def test_action_reprint_carries_prefill(self):
+        report = self.env["ir.actions.report"].search(
+            [("report_name", "=", "account.report_invoice")], limit=1)
+        if not report:
+            self.skipTest("account reports not installed")
+        job = self._job()
+        printer = self.env["native.print.device"].create({
+            "name": "EPSON TM-T88VII",
+            "company_id": job.company_id.id,
+        })
+        job.with_context(native_print_status_sync=True).write({
+            "report_id": report.id,
+            "source_model": "account.move",
+            "source_ids": "41",
+            "device_id": printer.id,
+            "copies": 2,
+            "paper": "A5",
+        })
+        prefill = job.action_reprint()["context"]["native_print_prefill"]
+        self.assertEqual(prefill["printer"], "EPSON TM-T88VII")
+        self.assertEqual(prefill["settings"]["copies"], 2)
+        self.assertEqual(prefill["settings"]["paper"], "A5")
+
+    def test_action_reprint_without_source_fails_loudly(self):
+        from odoo.exceptions import UserError
+        job = self._job()
+        with self.assertRaises(UserError):
+            job.action_reprint()
+
     def test_job_defaults_to_session_company_and_user(self):
         job = self._job("job-key-2")
         self.assertEqual(job.company_id, self.env.company)
