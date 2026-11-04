@@ -12,8 +12,206 @@
     .o_native_print_dot_browser {
         background-color: #94a3b8;
     }
+
     .o_native_print_dropdown {
-        min-width: 280px;
+        min-width: 320px;
+        max-width: min(92vw, 360px);
         z-index: 1055;
+        padding: 14px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 16px;
+        box-shadow: 0 18px 44px -12px rgba(15, 23, 42, 0.28);
+    }
+
+    /* Header */
+    .np-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding-bottom: 10px;
+        margin-bottom: 10px;
+        border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    }
+    .np-brand-tile {
+        width: 36px;
+        height: 36px;
+        flex: 0 0 36px;
+        border-radius: 10px;
+        background: #0953de;
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        box-shadow: 0 6px 14px -6px rgba(9, 83, 222, 0.65);
+    }
+    .np-head-text {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+    .np-brand-name {
+        font-weight: 700;
+        font-size: 0.95rem;
+        line-height: 1.15;
+    }
+    .np-head-sub {
+        font-size: 0.72rem;
+        color: #64748b;
+    }
+    .np-mode-pill {
+        flex: 0 0 auto;
+        font-weight: 600;
+    }
+
+    /* Info boxes */
+    .np-info-box {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        background: #f2f6ff;
+        border: 1px solid #dbe7fd;
+        border-radius: 12px;
+        padding: 9px 11px;
+        font-size: 0.8rem;
+        line-height: 1.5;
+        color: #334155;
+        margin-bottom: 10px;
+    }
+    .np-info-rows {
+        flex-direction: column;
+        gap: 5px;
+    }
+    .np-info-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+    }
+    .np-info-icon {
+        color: #0953de;
+        margin-top: 2px;
+    }
+    .np-info-row .np-info-icon {
+        margin-top: 0;
+    }
+    .np-info-label {
+        color: #64748b;
+    }
+    .np-info-value {
+        margin-inline-start: auto;
+        font-weight: 600;
+        max-width: 55%;
+    }
+
+    /* Printer picker */
+    .np-printer-list {
+        margin-bottom: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .np-printer-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px;
+        border-radius: 9px;
+    }
+    .np-printer-row:hover {
+        background: #f2f6ff;
+    }
+    .np-printer-name {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 0.8rem;
+        font-family: monospace;
+    }
+    .np-inuse-pill {
+        flex: 0 0 auto;
+    }
+    .np-use-btn {
+        flex: 0 0 auto;
+        padding: 0;
+        font-size: 0.78rem;
+        text-decoration: none;
+    }
+
+    .np-refresh-btn {
+        margin-bottom: 10px;
+        border-radius: 9px;
+    }
+
+    /* Job counters */
+    .np-stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+    .np-stat {
+        background: #f8fafc;
+        border: 1px solid #e6eaf2;
+        border-radius: 12px;
+        padding: 8px 4px 7px;
+        text-align: center;
+    }
+    .np-stat-alert {
+        background: #fef2f2;
+        border-color: #fecaca;
+    }
+    .np-stat-num {
+        font-size: 1.08rem;
+        font-weight: 700;
+        line-height: 1.2;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+    }
+    .np-stat-label {
+        font-size: 0.68rem;
+        color: #64748b;
+        margin-top: 1px;
+    }
+    .np-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    .np-dot-active {
+        background: #0953de;
+    }
+    .np-dot-done {
+        background: #10b981;
+    }
+    .np-dot-failed {
+        background: #dc2626;
+    }
+
+    /* Actions */
+    .np-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .np-primary-action {
+        border-radius: 9px;
+        font-weight: 600;
+        padding-top: 7px;
+        padding-bottom: 7px;
+    }
+    .np-action-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+    .np-action-row .btn {
+        border-radius: 9px;
+        white-space: normal;
+        line-height: 1.3;
     }
 }

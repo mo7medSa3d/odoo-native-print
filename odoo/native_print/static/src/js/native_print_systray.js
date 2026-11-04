@@ -25,6 +25,27 @@ export class NativePrintSystray extends Component {
             doneJobs: 0,
             failedJobs: 0,
         });
+        // Every visible panel string comes from here so the whole
+        // dropdown speaks one language: full, unambiguous phrases
+        // (one-word labels collide with other modules' catalog terms).
+        this.labels = {
+            title: _t("Yaseir Print Status & Control"),
+            appActive: _t("App Active"),
+            browserMode: _t("Browser Mode"),
+            localPrinters: _t("Local Printers"),
+            defaultPrinter: _t("Default Printer"),
+            browserNote: _t("Standard browser session: reports download normally unless opened inside the Yaseir Print app."),
+            inUse: _t("In use"),
+            usePrinter: _t("Use this printer"),
+            discovering: _t("Discovering printers…"),
+            refreshPrinters: _t("Refresh desktop printers"),
+            activeJobs: _t("Active jobs"),
+            doneJobs: _t("Done jobs"),
+            failedJobs: _t("Failed jobs"),
+            jobsLog: _t("Print Jobs Log"),
+            testPrint: _t("Send Compatible Printer Test"),
+            controlCenter: _t("Open Native Control Center"),
+        };
 
         this._onOutsideClick = () => {
             if (this.state.isOpen) {

@@ -561,3 +561,103 @@ msgstr "هذه الطابعة مسجلة بالفعل لهذه الشركة."
 #. module: native_print
 msgid "A print job with this idempotency key already exists for this company."
 msgstr "توجد بالفعل مهمة طباعة بمفتاح عدم التكرار هذا لهذه الشركة."
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Yaseir Print Status & Control"
+msgstr "حالة الطباعة من Yaseir والتحكم بها"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "App Active"
+msgstr "التطبيق نشط"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Browser Mode"
+msgstr "وضع المتصفح"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Local Printers"
+msgstr "الطابعات المحلية"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Default Printer"
+msgstr "الطابعة الافتراضية"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid ""
+"Standard browser session: reports download normally unless opened inside the"
+" Yaseir Print app."
+msgstr ""
+"جلسة متصفح عادية: تُنزَّل التقارير كالمعتاد ما لم تُفتح داخل تطبيق الطباعة "
+"من Yaseir."
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "In use"
+msgstr "قيد الاستخدام"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Use this printer"
+msgstr "استخدم هذه الطابعة"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Discovering printers…"
+msgstr "جارٍ اكتشاف الطابعات…"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Refresh desktop printers"
+msgstr "تحديث طابعات سطح المكتب"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Active jobs"
+msgstr "مهام نشطة"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Done jobs"
+msgstr "مهام منتهية"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Failed jobs"
+msgstr "مهام فاشلة"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Print Jobs Log"
+msgstr "سجل مهام الطباعة"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Send Compatible Printer Test"
+msgstr "إرسال طبعة اختبار متوافقة"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Open Native Control Center"
+msgstr "فتح مركز تحكم الطباعة"

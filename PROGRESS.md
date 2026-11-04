@@ -277,3 +277,18 @@ Full report: `docs/engineering-mission-2026-11-03.md`. Headlines:
   1360px content column, and the tabs are centered (owner request).
 - Diagnostics/card button rows wrap instead of clipping off-card.
 - Verified: jsdom DOM suite 0 script errors, behavior 14/14, gates.
+
+## 2026-11-04 — Systray panel redesign (addon 19.0.2.10.0)
+- The Odoo systray dropdown mixed languages (Failed in English beside
+  Arabic counters): its labels were raw template text with no catalog
+  entries of their own, so one-word labels collided with other
+  modules' terms. Every panel string now comes from a labels object
+  in the component (full unambiguous phrases via _t), with 16 new
+  Arabic catalog entries (verified served: 40 web messages).
+- Panel redesigned (template + SCSS): brand icon tile + mode pill,
+  info box for browser mode / printer summary, cleaner printer
+  picker rows, color-dotted job counters with an alert tile for
+  failures, one primary action + paired secondary actions, 320px
+  rounded card; dir=auto on user-language text.
+- Verified: Odoo suite 17/17 fresh; translations endpoint 200 with
+  the new labels in Arabic.

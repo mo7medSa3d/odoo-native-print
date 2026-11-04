@@ -1,6 +1,6 @@
 {
     "name": "Yaseir Print",
-    "version": "19.0.2.9.0",
+    "version": "19.0.2.10.0",
     "category": "Productivity",
     "summary": "Zero-gateway local printing for Odoo reports, labels, and POS receipts",
     "author": "Yaseir",

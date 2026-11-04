@@ -4,103 +4,109 @@
         <div class="o_mail_systray_item dropdown o_native_print_systray" t-att-class="{'show': state.isOpen}">
             <button type="button"
                     class="dropdown-toggle o-no-caret btn d-flex align-items-center px-2"
-                    title="Yaseir Print Status &amp; Control"
+                    t-att-title="labels.title"
                     t-on-click.stop="toggleMenu">
                 <i class="fa fa-print fa-lg" role="img" aria-label="Yaseir Print"/>
                 <span t-if="state.failedJobs &gt; 0"
                       class="badge rounded-pill text-bg-danger ms-1"
                       t-esc="state.failedJobs"/>
                 <span t-elif="state.bridgeActive"
-                      class="o_native_print_dot o_native_print_dot_online ms-1"
-                      title="Native Print Bridge Connected"/>
+                      class="o_native_print_dot o_native_print_dot_online ms-1"/>
                 <span t-else=""
-                      class="o_native_print_dot o_native_print_dot_browser ms-1"
-                      title="Browser Fallback Mode"/>
+                      class="o_native_print_dot o_native_print_dot_browser ms-1"/>
             </button>
 
             <div t-if="state.isOpen"
-                 class="dropdown-menu dropdown-menu-end show p-3 shadow o_native_print_dropdown"
+                 class="dropdown-menu dropdown-menu-end show shadow o_native_print_dropdown"
                  t-on-click.stop="">
-                <div class="d-flex justify-content-between align-items-center pb-2 mb-2 border-bottom">
-                    <div class="fw-bold d-flex align-items-center gap-2">
-                        <i class="fa fa-print text-primary" title="Printer"/>
-                        <span>Yaseir Print</span>
+                <!-- Header: brand tile + name + mode pill -->
+                <div class="np-head">
+                    <div class="np-brand-tile"><i class="fa fa-print"/></div>
+                    <div class="np-head-text">
+                        <div class="np-brand-name">Yaseir Print</div>
+                        <div class="np-head-sub" t-esc="state.bridgeActive ? labels.appActive : labels.browserMode"/>
                     </div>
-                    <span t-if="state.bridgeActive" class="badge text-bg-success">
-                        <i class="fa fa-check-circle me-1" title="Connected"/>App Active
+                    <span t-if="state.bridgeActive" class="badge rounded-pill text-bg-success np-mode-pill">
+                        <i class="fa fa-check-circle me-1"/><t t-esc="labels.appActive"/>
                     </span>
-                    <span t-else="" class="badge text-bg-secondary">
-                        <i class="fa fa-globe me-1" title="Browser"/>Browser Mode
+                    <span t-else="" class="badge rounded-pill text-bg-secondary np-mode-pill">
+                        <i class="fa fa-globe me-1"/><t t-esc="labels.browserMode"/>
                     </span>
                 </div>
 
-                <div class="small text-muted mb-2" t-if="state.bridgeActive">
-                    <div>
-                        <strong>Local Printers: </strong>
-                        <t t-esc="state.printersCount"/>
+                <!-- Browser mode explainer -->
+                <div t-if="!state.bridgeActive" class="np-info-box" dir="auto">
+                    <i class="fa fa-info-circle np-info-icon"/>
+                    <span t-esc="labels.browserNote"/>
+                </div>
+
+                <!-- App mode: this PC's printers summary -->
+                <div t-if="state.bridgeActive" class="np-info-box np-info-rows">
+                    <div class="np-info-row">
+                        <i class="fa fa-print np-info-icon"/>
+                        <span class="np-info-label" t-esc="labels.localPrinters"/>
+                        <strong class="np-info-value" t-esc="state.printersCount"/>
                     </div>
-                    <div t-if="state.defaultPrinter" class="text-truncate">
-                        <strong>Default: </strong>
-                        <span class="font-monospace" t-esc="state.defaultPrinter"/>
+                    <div t-if="state.defaultPrinter" class="np-info-row">
+                        <i class="fa fa-star np-info-icon"/>
+                        <span class="np-info-label" t-esc="labels.defaultPrinter"/>
+                        <strong class="np-info-value text-truncate" dir="auto" t-esc="state.defaultPrinter"/>
                     </div>
                 </div>
-                <div class="small text-muted mb-2" t-else="">
-                    Standard browser session: reports download normally unless opened inside the Native Print app.
-                </div>
-                <div t-if="state.bridgeActive and state.discoveredPrinters.length" class="mb-3">
+
+                <!-- App mode: live printer picker -->
+                <div t-if="state.bridgeActive and state.discoveredPrinters.length" class="np-printer-list">
                     <t t-foreach="state.discoveredPrinters" t-as="printer" t-key="printer.name">
-                        <div class="d-flex justify-content-between align-items-center py-1 border-bottom">
-                            <span class="small text-truncate font-monospace" t-esc="printer.name"/>
-                            <span t-if="state.selectedPrinter === printer.name || (!state.selectedPrinter &amp;&amp; state.defaultPrinter === printer.name)" class="badge text-bg-primary ms-2">
-                                <i class="fa fa-star me-1"/>In use
+                        <div class="np-printer-row">
+                            <span class="np-printer-name" dir="auto" t-esc="printer.name"/>
+                            <span t-if="state.selectedPrinter === printer.name || (!state.selectedPrinter &amp;&amp; state.defaultPrinter === printer.name)" class="badge rounded-pill text-bg-primary np-inuse-pill">
+                                <i class="fa fa-star me-1"/><t t-esc="labels.inUse"/>
                             </span>
-                            <button t-else="" type="button" class="btn btn-sm btn-link py-0 ms-2"
+                            <button t-else="" type="button" class="btn btn-sm btn-link np-use-btn"
                                     t-on-click="() => this.selectPrinter(printer)">
-                                Use this printer
+                                <t t-esc="labels.usePrinter"/>
                             </button>
                         </div>
                     </t>
                 </div>
 
                 <button t-if="state.bridgeActive" type="button"
-                        class="btn btn-sm btn-outline-secondary w-100 mb-3"
+                        class="btn btn-sm btn-outline-secondary w-100 np-refresh-btn"
                         t-on-click="refreshPrinters" t-att-disabled="state.syncingPrinters">
                     <i t-att-class="state.syncingPrinters ? 'fa fa-spinner fa-spin me-2' : 'fa fa-refresh me-2'"/>
-                    <t t-if="state.syncingPrinters">Discovering printers…</t>
-                    <t t-else="">Refresh desktop printers (<t t-esc="state.printersCount"/>)</t>
+                    <t t-if="state.syncingPrinters"><t t-esc="labels.discovering"/></t>
+                    <t t-else=""><t t-esc="labels.refreshPrinters"/> (<t t-esc="state.printersCount"/>)</t>
                 </button>
 
-                <div class="row g-2 text-center mb-3">
-                    <div class="col-4">
-                        <div class="p-2 rounded bg-light border">
-                            <div class="fw-bold fs-6" t-esc="state.activeJobs"/>
-                            <div class="text-muted" style="font-size:0.7rem;">Active</div>
-                        </div>
+                <!-- Job counters -->
+                <div class="np-stats">
+                    <div class="np-stat">
+                        <div class="np-stat-num"><span class="np-dot np-dot-active"/><t t-esc="state.activeJobs"/></div>
+                        <div class="np-stat-label" t-esc="labels.activeJobs"/>
                     </div>
-                    <div class="col-4">
-                        <div class="p-2 rounded bg-light border">
-                            <div class="fw-bold fs-6 text-success" t-esc="state.doneJobs"/>
-                            <div class="text-muted" style="font-size:0.7rem;">Done</div>
-                        </div>
+                    <div class="np-stat">
+                        <div class="np-stat-num"><span class="np-dot np-dot-done"/><t t-esc="state.doneJobs"/></div>
+                        <div class="np-stat-label" t-esc="labels.doneJobs"/>
                     </div>
-                    <div class="col-4">
-                        <div class="p-2 rounded bg-light border">
-                            <div class="fw-bold fs-6 text-danger" t-esc="state.failedJobs"/>
-                            <div class="text-muted" style="font-size:0.7rem;">Failed</div>
-                        </div>
+                    <div class="np-stat" t-att-class="{'np-stat-alert': state.failedJobs &gt; 0}">
+                        <div class="np-stat-num"><span class="np-dot np-dot-failed"/><t t-esc="state.failedJobs"/></div>
+                        <div class="np-stat-label" t-esc="labels.failedJobs"/>
                     </div>
                 </div>
 
-                <div class="d-grid gap-1">
-                    <button type="button" class="btn btn-sm btn-primary text-start" t-on-click="openJobs">
-                        <i class="fa fa-list-ul me-2" title="Jobs"/>Print Jobs Log
+                <!-- Actions -->
+                <div class="np-actions">
+                    <button type="button" class="btn btn-sm btn-primary w-100 np-primary-action" t-on-click="openJobs">
+                        <i class="fa fa-list-ul me-2"/><t t-esc="labels.jobsLog"/>
                     </button>
-                    <button t-if="state.bridgeActive" type="button" class="btn btn-sm btn-outline-primary text-start mt-1" t-on-click="runQuickTestPrint">
-                        <i class="fa fa-check-square-o me-2" title="Test"/>Send Compatible Printer Test
-                    </button>
-                    <button t-if="state.bridgeActive" type="button" class="btn btn-sm btn-outline-secondary text-start" t-on-click="openControlCenter">
-                        <i class="fa fa-sliders me-2" title="Control Center"/>Open Native Control Center
-                    </button>
+                    <div t-if="state.bridgeActive" class="np-action-row">
+                        <button type="button" class="btn btn-sm btn-outline-primary" t-on-click="runQuickTestPrint">
+                            <i class="fa fa-check-square-o me-1"/><t t-esc="labels.testPrint"/>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" t-on-click="openControlCenter">
+                            <i class="fa fa-sliders me-1"/><t t-esc="labels.controlCenter"/>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
