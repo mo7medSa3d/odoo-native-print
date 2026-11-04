@@ -190,3 +190,29 @@ suites.
   Cargo.toml, app Cargo.lock — `check_versions.py` green).
 - Addon 19.0.2.7.0 → **19.0.2.8.0** (manifest; fresh-install and
   upgrade suites green).
+
+## Hotfix 1.4.3 / addon 19.0.2.9.0 (2026-11-04, field report)
+
+- **White page after login (Arabic) — root cause + fix.** The
+  mission-rebuilt `i18n/ar.po` had 51 entries missing the
+  `#. module:` comment that Odoo's PO reader unconditionally matches;
+  the reader raised, `/web/webclient/translations` returned 500 for
+  ar_001, and the web client's localization service rejected during
+  boot (no IndexedDB cache on a fresh registry) — login worked, the
+  backend never mounted. Reproduced locally end-to-end (500 with an
+  authenticated ar_001 session, identical 265-byte body to the
+  production server), fixed by completing every entry's comment, and
+  verified: endpoint 200 with all 24 web messages served in Arabic.
+  The same pass added the missing `#. odoo-javascript` /
+  `#. odoo-python` markers and `code:` occurrences — without them the
+  catalog parsed but served zero code translations. A regression test
+  (`TestTranslationFiles`) now loads the catalog in the addon suite.
+- **Control Center.** Refresh gives feedback (spinner + disabled
+  state + completion toast); native `window.confirm` replaced by a
+  styled in-app modal everywhere; topbar/nav modernized (sticky
+  glass, pill tabs); Paper Forms toggles per printer without
+  stretching sibling cards.
+- **Diagnostics.** The exported bundle reported `app_version: 0.1.0`
+  (the print-core crate version); it now stamps the app version.
+- **Brand.** Arabic product name changed to "الطباعة من Yaseir"
+  (owner request) in the Control Center, toolbar, and Arabic strings.

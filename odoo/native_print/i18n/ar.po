@@ -198,12 +198,20 @@ msgid "Automatic media configuration."
 msgstr "إعداد الورق تلقائيًا."
 
 #. module: native_print
-msgid "Native Print reads paper sizes, roll width, trays, resolution and print capabilities from the installed Windows driver."
-msgstr "يقرأ Native Print مقاسات الورق وعرض الرول والأدراج والدقة وإمكانيات الطباعة من تعريف الطابعة المثبت في Windows."
+msgid ""
+"Native Print reads paper sizes, roll width, trays, resolution and print "
+"capabilities from the installed Windows driver."
+msgstr ""
+"يقرأ Native Print مقاسات الورق وعرض الرول والأدراج والدقة وإمكانيات الطباعة "
+"من تعريف الطابعة المثبت في Windows."
 
 #. module: native_print
-msgid "Each document or kitchen receipt is matched to supported media automatically. No paper size or protocol selection is required."
-msgstr "يتم اختيار وسيط الطباعة المناسب تلقائيًا لكل مستند أو إيصال مطبخ وفقًا للمقاسات المدعومة. لا تحتاج إلى تحديد مقاس الورق أو بروتوكول الطباعة."
+msgid ""
+"Each document or kitchen receipt is matched to supported media "
+"automatically. No paper size or protocol selection is required."
+msgstr ""
+"يتم اختيار وسيط الطباعة المناسب تلقائيًا لكل مستند أو إيصال مطبخ وفقًا "
+"للمقاسات المدعومة. لا تحتاج إلى تحديد مقاس الورق أو بروتوكول الطباعة."
 
 #. module: native_print
 msgid "Detected Media & Trays"
@@ -239,7 +247,8 @@ msgstr "اختيار وسيط الطباعة تلقائيًا"
 
 #. module: native_print
 msgid "No raw-language signature detected; use the installed Windows driver."
-msgstr "لم يتم التعرف على بروتوكول خام معروف؛ سيتم استخدام تعريف Windows المثبت."
+msgstr ""
+"لم يتم التعرف على بروتوكول خام معروف؛ سيتم استخدام تعريف Windows المثبت."
 
 #. module: native_print
 msgid "No paper forms reported by the driver."
@@ -254,159 +263,301 @@ msgid "Resolution not reported by the driver."
 msgstr "لم يُبلّغ تعريف الطابعة عن دقة الطباعة."
 
 #. module: native_print
-msgid "IPP/AirPrint-capable network queue; print through the installed Windows driver."
+msgid ""
+"IPP/AirPrint-capable network queue; print through the installed Windows "
+"driver."
 msgstr "طابعة شبكة تدعم IPP/AirPrint؛ تتم الطباعة عبر تعريف Windows المثبت."
 
-
+#. module: native_print
 msgid "Reprint"
 msgstr "إعادة الطباعة"
 
+#. module: native_print
 msgid "Executed"
 msgstr "المنفذة"
 
+#. module: native_print
 msgid "Active / Queued"
 msgstr "نشطة / في الانتظار"
 
+#. module: native_print
 msgid "My Print Jobs"
 msgstr "مهام الطباعة الخاصة بي"
 
+#. module: native_print
 msgid "Source Type"
 msgstr "نوع المصدر"
 
+#. module: native_print
 msgid "Source Model"
 msgstr "موديل المصدر"
 
+#. module: native_print
 msgid "Source Records"
 msgstr "سجلات المصدر"
 
+#. module: native_print
 msgid "Source Name"
 msgstr "اسم المصدر"
 
+#. module: native_print
 msgid "POS Receipt"
 msgstr "إيصال نقطة البيع"
 
+#. module: native_print
 msgid "Test Print"
 msgstr "طباعة تجريبية"
 
+#. module: native_print
 msgid "Copies"
 msgstr "النسخ"
 
+#. module: native_print
 msgid "Printer"
 msgstr "الطابعة"
 
+#. module: native_print
 msgid "Printer (as reported)"
 msgstr "الطابعة (كما تم الإبلاغ عنها)"
 
+#. module: native_print
 msgid "Report"
 msgstr "التقرير"
 
+#. module: native_print
 msgid "Color"
 msgstr "الألوان"
 
+#. module: native_print
 msgid "Company"
 msgstr "الشركة"
 
+#. module: native_print
 msgid "Duplex"
 msgstr "الطباعة على الوجهين"
 
+#. module: native_print
 msgid "Paper"
 msgstr "الورق"
 
+#. module: native_print
 msgid "Print Mode"
 msgstr "وضع الطباعة"
 
+#. module: native_print
 msgid "User"
 msgstr "المستخدم"
 
+#. module: native_print
 msgid "Native Print / User"
 msgstr "الطباعة الأصلية / مستخدم"
 
+#. module: native_print
 msgid "Native Print / Manager"
 msgstr "الطباعة الأصلية / مدير"
 
-msgid "This job cannot be reprinted: the original report or its records were not recorded for it (for example, POS receipts are reprinted from the POS)."
-msgstr "لا يمكن إعادة طباعة هذه المهمة: لم يتم تسجيل التقرير الأصلي أو سجلاته لها (على سبيل المثال، تتم إعادة طباعة إيصالات نقطة البيع من نقطة البيع نفسها)."
+#. module: native_print
+#. odoo-python
+#: code:addons/native_print/models/native_print_job.py:0
+msgid ""
+"This job cannot be reprinted: the original report or its records were not "
+"recorded for it (for example, POS receipts are reprinted from the POS)."
+msgstr ""
+"لا يمكن إعادة طباعة هذه المهمة: لم يتم تسجيل التقرير الأصلي أو سجلاته لها "
+"(على سبيل المثال، تتم إعادة طباعة إيصالات نقطة البيع من نقطة البيع نفسها)."
 
-msgid "Print job status is reported by the desktop app and cannot be changed manually. To print again, print the document again from Odoo."
-msgstr "يتم إبلاغ حالة مهمة الطباعة بواسطة تطبيق سطح المكتب ولا يمكن تغييرها يدويًا. للطباعة مرة أخرى، اطبع المستند من جديد من Odoo."
+#. module: native_print
+#. odoo-python
+#: code:addons/native_print/models/native_print_job.py:0
+msgid ""
+"Print job status is reported by the desktop app and cannot be changed "
+"manually. To print again, print the document again from Odoo."
+msgstr ""
+"يتم إبلاغ حالة مهمة الطباعة بواسطة تطبيق سطح المكتب ولا يمكن تغييرها يدويًا."
+" للطباعة مرة أخرى، اطبع المستند من جديد من Odoo."
 
-msgid "Reprint this document now? The original printer and print settings are restored when that printer is connected to this PC."
-msgstr "إعادة طباعة هذا المستند الآن؟ ستتم استعادة الطابعة الأصلية وإعدادات الطباعة عندما تكون تلك الطابعة متصلة بهذا الكمبيوتر."
+#. module: native_print
+msgid ""
+"Reprint this document now? The original printer and print settings are "
+"restored when that printer is connected to this PC."
+msgstr ""
+"إعادة طباعة هذا المستند الآن؟ ستتم استعادة الطابعة الأصلية وإعدادات الطباعة "
+"عندما تكون تلك الطابعة متصلة بهذا الكمبيوتر."
 
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_handler.js:0
 msgid "Sent \"%s\" to %s"
 msgstr "تم إرسال \"%s\" إلى %s"
 
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_handler.js:0
 msgid "Printing failed on \"%s\" (%s). Check the printer before reprinting."
 msgstr "فشلت الطباعة على \"%s\" (%s). افحص الطابعة قبل إعادة الطباعة."
 
-msgid "Print job \"%s\" is still %s; its final outcome is unconfirmed. Check Print Jobs later."
-msgstr "مهمة الطباعة \"%s\" ما زالت %s؛ نتيجتها النهائية غير مؤكدة. راجع مهام الطباعة لاحقًا."
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_handler.js:0
+msgid ""
+"Print job \"%s\" is still %s; its final outcome is unconfirmed. Check Print "
+"Jobs later."
+msgstr ""
+"مهمة الطباعة \"%s\" ما زالت %s؛ نتيجتها النهائية غير مؤكدة. راجع مهام "
+"الطباعة لاحقًا."
 
-msgid "Native Print could not print on \"%s\": %s. The file was downloaded instead."
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_handler.js:0
+msgid ""
+"Native Print could not print on \"%s\": %s. The file was downloaded instead."
 msgstr "تعذرت الطباعة الأصلية على \"%s\": %s. تم تنزيل الملف بدلاً من ذلك."
 
-msgid "Native Print could not print on \"%s\": %s. The PDF was downloaded instead."
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_handler.js:0
+msgid ""
+"Native Print could not print on \"%s\": %s. The PDF was downloaded instead."
 msgstr "تعذرت الطباعة الأصلية على \"%s\": %s. تم تنزيل ملف PDF بدلاً من ذلك."
 
-msgid "Native Print could not print this receipt. The standard POS printing was used instead."
-msgstr "تعذرت طباعة هذا الإيصال أصليًا. تم استخدام طباعة نقطة البيع القياسية بدلاً من ذلك."
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/pos_native_print.js:0
+msgid ""
+"Native Print could not print this receipt. The standard POS printing was "
+"used instead."
+msgstr ""
+"تعذرت طباعة هذا الإيصال أصليًا. تم استخدام طباعة نقطة البيع القياسية بدلاً "
+"من ذلك."
 
-msgid "Receipt printing failed on \"%s\" (%s). Check the printer before reprinting."
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/pos_native_print.js:0
+msgid ""
+"Receipt printing failed on \"%s\" (%s). Check the printer before reprinting."
 msgstr "فشلت طباعة الإيصال على \"%s\" (%s). افحص الطابعة قبل إعادة الطباعة."
 
-msgid "Receipt job on \"%s\" is taking long; its final outcome is unconfirmed. Check Print Jobs later."
-msgstr "مهمة الإيصال على \"%s\" تستغرق وقتًا طويلاً؛ نتيجتها النهائية غير مؤكدة. راجع مهام الطباعة لاحقًا."
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/pos_native_print.js:0
+msgid ""
+"Receipt job on \"%s\" is taking long; its final outcome is unconfirmed. "
+"Check Print Jobs later."
+msgstr ""
+"مهمة الإيصال على \"%s\" تستغرق وقتًا طويلاً؛ نتيجتها النهائية غير مؤكدة. "
+"راجع مهام الطباعة لاحقًا."
 
-msgid "Open Odoo inside the Yaseir Print desktop app to see this PC's printers."
-msgstr "افتح Odoo داخل تطبيق يسير برنت لسطح المكتب لعرض طابعات هذا الكمبيوتر."
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid ""
+"Open Odoo inside the Yaseir Print desktop app to see this PC's printers."
+msgstr ""
+"افتح Odoo داخل تطبيق الطباعة من Yaseir لسطح المكتب لعرض طابعات هذا "
+"الكمبيوتر."
 
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "Desktop App Required"
 msgstr "تطبيق سطح المكتب مطلوب"
 
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "%s printer(s) found on this PC."
 msgstr "تم العثور على %s طابعة على هذا الكمبيوتر."
 
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "Printers Refreshed"
 msgstr "تم تحديث الطابعات"
 
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "Printer Refresh Failed"
 msgstr "فشل تحديث الطابعات"
 
-msgid "The Control Center is available when running inside the Yaseir Print desktop app (Ctrl+Shift+Y)."
-msgstr "مركز التحكم متاح عند التشغيل داخل تطبيق يسير برنت لسطح المكتب (Ctrl+Shift+Y)."
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid ""
+"The Control Center is available when running inside the Yaseir Print desktop"
+" app (Ctrl+Shift+Y)."
+msgstr ""
+"مركز التحكم متاح عند التشغيل داخل تطبيق الطباعة من Yaseir لسطح المكتب "
+"(Ctrl+Shift+Y)."
 
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "Browser Fallback Mode"
 msgstr "وضع المتصفح الاحتياطي"
 
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "%s will be used for printing from this PC."
 msgstr "سيتم استخدام %s للطباعة من هذا الكمبيوتر."
 
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "Printer Selected"
 msgstr "تم اختيار الطابعة"
 
-msgid "Open Odoo inside the Yaseir Print app to send hardware calibration prints."
-msgstr "افتح Odoo داخل تطبيق يسير برنت لإرسال مطبوعات معايرة العتاد."
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid ""
+"Open Odoo inside the Yaseir Print app to send hardware calibration prints."
+msgstr "افتح Odoo داخل تطبيق الطباعة من Yaseir لإرسال مطبوعات معايرة العتاد."
 
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "Native App Required"
 msgstr "التطبيق الأصلي مطلوب"
 
-msgid "No physical printer was discovered. Connect or install a printer, then refresh the printer list."
-msgstr "لم يتم اكتشاف أي طابعة فعلية. وصّل طابعة أو ثبّتها ثم حدّث قائمة الطابعات."
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid ""
+"No physical printer was discovered. Connect or install a printer, then "
+"refresh the printer list."
+msgstr ""
+"لم يتم اكتشاف أي طابعة فعلية. وصّل طابعة أو ثبّتها ثم حدّث قائمة الطابعات."
 
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "No Printer Available"
 msgstr "لا توجد طابعة متاحة"
 
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "Queued %s calibration test (%s) on %s"
 msgstr "تمت جدولة اختبار معايرة %s (%s) على %s"
 
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "Calibration Queued"
 msgstr "تمت جدولة المعايرة"
 
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "Calibration Failed"
 msgstr "فشلت المعايرة"
 
+#. module: native_print
 msgid "This printer is already registered for this company."
 msgstr "هذه الطابعة مسجلة بالفعل لهذه الشركة."
 
+#. module: native_print
 msgid "A print job with this idempotency key already exists for this company."
 msgstr "توجد بالفعل مهمة طباعة بمفتاح عدم التكرار هذا لهذه الشركة."

@@ -97,3 +97,22 @@ class TestNativePrintJobLog(TransactionCase):
             self.assertFalse(rule.perm_create, rule.name)
             self.assertFalse(rule.perm_write, rule.name)
             self.assertFalse(rule.perm_unlink, rule.name)
+
+
+class TestTranslationFiles(TransactionCase):
+    """Regression guard for the Arabic catalog: Odoo's PO reader
+    requires a `module:` comment on every entry — a single entry
+    without one crashes /web/webclient/translations with a 500,
+    which blocks the web client boot (white page) for Arabic users.
+    The web catalog must also actually serve the JS terms."""
+
+    def test_arabic_catalog_loads_and_serves_web_terms(self):
+        from odoo.tools.translate import code_translations
+
+        web = code_translations.get_web_translations("native_print", "ar_001")
+        messages = web.get("messages", ())
+        self.assertGreaterEqual(len(messages), 20)
+        python_terms = code_translations.get_python_translations(
+            "native_print", "ar_001"
+        )
+        self.assertTrue(python_terms)

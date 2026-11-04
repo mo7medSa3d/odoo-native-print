@@ -831,6 +831,9 @@ pub fn export_diagnostics(
     let bundle = build_bundle_from_queue(&queue).map_err(|e| e.to_string())?;
     let mut value: serde_json::Value =
         serde_json::from_str(&bundle_to_json(&bundle)).unwrap_or(serde_json::json!({}));
+    // The bundle is built by print-core and stamps its own crate
+    // version; report the desktop app's version instead.
+    value["app_version"] = serde_json::json!(env!("CARGO_PKG_VERSION"));
     value["webview_version"] =
         serde_json::json!(tauri::webview_version().unwrap_or_else(|_| "unknown".to_string()));
     if let Some(raw) = state.environment.read().ok().and_then(|g| g.clone()) {

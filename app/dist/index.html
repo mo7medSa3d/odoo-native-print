@@ -440,6 +440,7 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
     gap: 1.1rem;
+    align-items: start;
   }
 
   .printer-card {
@@ -686,6 +687,72 @@
     display: none !important;
   }
 
+
+  /* Modern topbar + navigation refresh (2026-11) */
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+    box-shadow: 0 1px 0 var(--border-color), 0 10px 30px -18px rgba(30, 10, 60, 0.35);
+  }
+  .nav-tabs {
+    position: sticky;
+    top: 76px;
+    z-index: 39;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    background: color-mix(in srgb, var(--bg-main) 85%, transparent);
+    gap: 0.5rem;
+    padding-top: 0.55rem;
+    padding-bottom: 0.55rem;
+  }
+  .nav-tab {
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 0.55rem 1.05rem;
+  }
+  .nav-tab:hover {
+    background: var(--bg-subtle);
+  }
+  .nav-tab.active {
+    background: var(--brand-plum);
+    color: #fff;
+    border-bottom-color: transparent;
+    box-shadow: 0 6px 16px -8px rgba(80, 30, 140, 0.55);
+  }
+  .btn:disabled { opacity: 0.55; cursor: wait; }
+  @keyframes np-spin { to { transform: rotate(360deg); } }
+  .is-refreshing svg { animation: np-spin 0.8s linear infinite; }
+
+  /* In-app confirmation dialog */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(18, 8, 38, 0.55);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+  .modal-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 18px;
+    box-shadow: 0 24px 60px -12px rgba(20, 5, 50, 0.5);
+    max-width: 430px;
+    width: 100%;
+    padding: 1.35rem 1.4rem 1.2rem;
+  }
+  .modal-head { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.7rem; }
+  .modal-title { font-size: 1.02rem; font-weight: 700; color: var(--text-primary); }
+  .modal-message { font-size: 0.9rem; line-height: 1.65; color: var(--text-secondary); margin: 0 0 1.15rem; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 0.55rem; }
 </style>
 </head>
 <body>
@@ -698,7 +765,7 @@
       </div>
       <div>
         <div class="brand-title">
-          <span data-i18n="app_title">يسير برنت</span>
+          <span data-i18n="app_title">الطباعة من Yaseir</span>
           <span class="version-pill" id="appVersionBadge">—</span>
         </div>
         <div class="brand-subtitle" data-i18n="app_subtitle">
@@ -717,7 +784,7 @@
         <span data-i18n="btn_open_odoo">فتح نظام Odoo</span>
       </button>
 
-      <button class="btn btn-glass" onclick="refreshAll()" title="Refresh">
+      <button class="btn btn-glass" id="btnRefresh" onclick="manualRefresh()" title="Refresh">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="23 4 23 10 17 10"></polyline>
           <polyline points="1 20 1 14 7 14"></polyline>
@@ -995,10 +1062,15 @@
 <script>
   const I18N = {
     ar: {
-      app_title: "يسير برنت",
+      app_title: "الطباعة من Yaseir",
       app_subtitle: "طباعة مباشرة من Odoo إلى الطابعة المحلية",
       btn_open_odoo: "فتح نظام Odoo",
       btn_refresh: "تحديث",
+      refreshed: "تم التحديث",
+      dialog_title: "تأكيد الإجراء",
+      dialog_confirm: "تأكيد",
+      dialog_cancel: "إلغاء",
+      confirm_clear_web_data: "سيتم مسح الكاش وملفات الارتباط والتخزين المحلي للتطبيق وتسجيل الخروج. متابعة؟",
       btn_theme: "المظهر",
       tab_dashboard: "لوحة المراقبة وطابور الطباعة",
       tab_printers: "الطابعات ومعمل المعايرة",
@@ -1065,6 +1137,11 @@
       app_subtitle: "Direct local printing from Odoo to your printers.",
       btn_open_odoo: "Open Odoo",
       btn_refresh: "Refresh",
+      refreshed: "Refreshed",
+      dialog_title: "Please confirm",
+      dialog_confirm: "Confirm",
+      dialog_cancel: "Cancel",
+      confirm_clear_web_data: "This clears the app cache, cookies and local storage and signs you out. Continue?",
       btn_theme: "Theme",
       tab_dashboard: "Dashboard & Print Queue",
       tab_printers: "Printers & Calibration Lab",
@@ -1322,6 +1399,44 @@
   }
 
   let refreshInFlight = false;
+
+  // Styled in-app confirmation dialog (replaces window.confirm):
+  // a promise that resolves true on confirm, false on cancel,
+  // backdrop click or Escape. One instance, reused for every prompt.
+  let confirmResolver = null;
+  function confirmDialog(message, options = {}) {
+    const overlay = document.getElementById("confirmOverlay");
+    document.getElementById("confirmTitle").textContent = I18N[currentLang].dialog_title;
+    document.getElementById("confirmMessage").textContent = message;
+    const okBtn = document.getElementById("confirmOkBtn");
+    okBtn.textContent = I18N[currentLang].dialog_confirm;
+    okBtn.className = options.danger ? "btn btn-danger" : "btn btn-primary";
+    document.getElementById("confirmCancelBtn").textContent = I18N[currentLang].dialog_cancel;
+    overlay.classList.remove("hidden");
+    document.getElementById("confirmCancelBtn").focus();
+    return new Promise((resolve) => { confirmResolver = resolve; });
+  }
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && confirmResolver) settleConfirm(false);
+  });
+  function settleConfirm(result) {
+    document.getElementById("confirmOverlay").classList.add("hidden");
+    if (confirmResolver) { const r = confirmResolver; confirmResolver = null; r(result); }
+  }
+
+  // Topbar Refresh: visible feedback (spinning icon + disabled state
+  // while the refresh runs, a toast when it lands).
+  async function manualRefresh() {
+    const btn = document.getElementById("btnRefresh");
+    if (btn) { btn.disabled = true; btn.classList.add("is-refreshing"); }
+    try {
+      const ok = await refreshAll();
+      if (ok) showToast(I18N[currentLang].refreshed);
+    } finally {
+      if (btn) { btn.disabled = false; btn.classList.remove("is-refreshing"); }
+    }
+  }
+
   async function refreshAll(options = {}) {
     // A slow overview (cold printer discovery takes seconds) must not
     // stack overlapping polls on the 5 s interval.
@@ -1368,9 +1483,7 @@
       showToast(currentLang === "ar" ? "الجسر المحلي غير متاح." : "Local bridge unavailable.", true);
       return;
     }
-    const sure = window.confirm(currentLang === "ar"
-      ? "سيتم مسح الكاش وملفات الارتباط والتخزين المحلي للتطبيق وتسجيل الخروج. متابعة؟"
-      : "This clears the app cache, cookies and local storage and signs you out. Continue?");
+    const sure = await confirmDialog(I18N[currentLang].confirm_clear_web_data, { danger: true });
     if (!sure) return;
     try {
       await api.clearWebData();
@@ -1678,6 +1791,11 @@
   async function inspectForms(printerName, idx) {
     const box = document.getElementById(`forms-box-${idx}`);
     if (!box) return;
+    if (!box.classList.contains("hidden")) {
+      box.classList.add("hidden");
+      return;
+    }
+    document.querySelectorAll('[id^="forms-box-"]').forEach((b) => b.classList.add("hidden"));
     box.classList.remove("hidden");
     const b = bridge();
     if (!b || typeof b.printerForms !== "function") {
@@ -1714,7 +1832,7 @@
   }
 
   async function cancelJob(id) {
-    if (!window.confirm(I18N[currentLang].confirm_cancel_job)) return;
+    if (!(await confirmDialog(I18N[currentLang].confirm_cancel_job, { danger: true }))) return;
     const b = bridge();
     if (!b || typeof b.cancelJob !== "function") {
       showToast(I18N[currentLang].native_bridge_unavailable, true);
@@ -1735,7 +1853,7 @@
       showToast(I18N[currentLang].native_bridge_unavailable, true);
       return;
     }
-    if (!window.confirm(I18N[currentLang].confirm_clear_done)) return;
+    if (!(await confirmDialog(I18N[currentLang].confirm_clear_done, { danger: true }))) return;
     try {
       const n = await b.clearFinished();
       showToast(currentLang === "ar" ? `تم مسح ${n} مهمة مكتملة` : `Cleared ${n} finished job(s)`);
@@ -1995,5 +2113,20 @@
   setInterval(() => refreshAll({ silent: true }), 5000);
 
 </script>
+
+  <!-- In-app confirmation dialog -->
+  <div id="confirmOverlay" class="modal-overlay hidden" onclick="if (event.target === this) settleConfirm(false)">
+    <div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <div class="modal-head">
+        <img src="app-icon.png" alt="" width="34" height="34" style="border-radius: 9px; display: block;"/>
+        <div id="confirmTitle" class="modal-title">تأكيد الإجراء</div>
+      </div>
+      <p id="confirmMessage" class="modal-message"></p>
+      <div class="modal-actions">
+        <button class="btn btn-glass" id="confirmCancelBtn" onclick="settleConfirm(false)">إلغاء</button>
+        <button class="btn btn-danger" id="confirmOkBtn" onclick="settleConfirm(true)">تأكيد</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

@@ -238,3 +238,33 @@ Full report: `docs/engineering-mission-2026-11-03.md`. Headlines:
   jsdom suites green, Odoo scoped suite 16/16 fresh AND on upgrade
   from 19.0.2.7.0. Windows CI + real-printer gates remain open
   (unchanged from the standing gate list below).
+
+## 2026-11-04 — Field hotfix (app 1.4.3, addon 19.0.2.9.0)
+- POST-LOGIN WHITE PAGE root-caused from the owner's diagnostics dump
+  ("promise: Error while fetching translations") and REPRODUCED
+  locally: the rebuilt i18n/ar.po had 51 entries without the
+  `#. module:` comment Odoo's PO reader requires — its webclient
+  translations endpoint crashed with a 500 for Arabic (ar_001),
+  the localization service start() rejected with no IndexedDB cache,
+  and the web client never booted. Fixed the catalog (module comment
+  on every entry) and completed it properly: JS terms now carry
+  `#. odoo-javascript` + code occurrences, the two UserError terms
+  carry `#. odoo-python` + code occurrences, so Arabic strings
+  actually serve (endpoint verified: 200, 24 native_print web
+  messages in Arabic, on fresh install AND on upgrade). New addon
+  regression test TestTranslationFiles guards the catalog.
+- Control Center: topbar Refresh now shows a spinning/disabled state
+  and a "Refreshed" toast (manualRefresh); all native window.confirm
+  prompts replaced by a styled in-app modal (confirmDialog, danger
+  variant, Escape/backdrop cancel); topbar + nav tabs modernized
+  (sticky glass, pill tabs); Paper Forms box toggles per printer,
+  closes siblings, and printer cards no longer stretch each other
+  (grid align-items:start).
+- Diagnostics bundle now reports the real app version (was stamping
+  the print-core crate version 0.1.0).
+- Rebrand per owner: Arabic name is now "الطباعة من Yaseir"
+  (Control Center, toolbar, Arabic catalog strings).
+- Verified: workspace 110/110, print-win 10/10, clippy/fmt clean,
+  gates green, jsdom CC suites pass, Odoo 17/17 fresh AND upgrade
+  from 19.0.2.7.0. Windows CI remains the compile gate for the
+  one-line app-crate change.
