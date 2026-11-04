@@ -316,17 +316,6 @@ msgstr ""
 "الطابعة وحاول مرة أخرى."
 
 #. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/pos_native_print.js:0
-msgid ""
-"The current printer \"%s\" is a virtual printer: it asks where to save "
-"instead of printing silently. For silent receipt printing, pick a physical "
-"printer in the Yaseir Print panel."
-msgstr ""
-"الطابعة الحالية \"%s\" طابعة افتراضية: بتسأل تحفظ فين بدل ما تطبع بصمت. "
-"للطباعة الصامتة للإيصالات، اختر طابعة حقيقية من لوحة Yaseir Print."
-
-#. module: native_print
 #: model:ir.model,name:native_print.model_native_print_job
 msgid "Native Print: job log"
 msgstr "الطباعة من Yaseir: سجل المهام"

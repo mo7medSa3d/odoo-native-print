@@ -1637,15 +1637,18 @@ impl PrintBackend for NativePrintBackend {
         // applies instead of being skipped (fail-open edge).
         let target_kind = target_kind.or_else(|| Some(PrinterInfo::classify(&target_name, "")));
 
-        // An image in a raw-language mode addressed to a virtual
-        // writer is re-routed to GDI printing (the bitmap renders
-        // faithfully at the paper size) instead of failing the job:
-        // failing a POS receipt this way made the POS offer the
-        // browser print dialog in the field (2026-11-04). Raw
-        // payloads keep the hard block below.
+        // A document (PDF or image) in a raw-language mode
+        // addressed to a virtual writer is re-routed to GDI
+        // printing — the pages render faithfully at the printer's
+        // paper size — instead of failing the job: virtual printers
+        // are first-class silent targets in this product (the owner
+        // prints receipts and reports to OneNote and PDF writers;
+        // failing such a job in the field made the POS offer the
+        // browser print dialog, 2026-11-04). Raw payloads — actual
+        // printer-language bytes — keep the hard block below.
         if let Some(pk) = target_kind {
             if let Some(downgraded) =
-                print_core::printer::image_mode_downgrade(&kind, &opts.mode, pk)
+                print_core::printer::document_mode_downgrade(&kind, &opts.mode, pk)
             {
                 opts.mode = downgraded.to_string();
             }

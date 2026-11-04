@@ -65,6 +65,15 @@ eq(t.rule.printer_pattern, "tcp://192.168.1.50:9100", "selected tcp");
 eq(t.rule.media.roll_width_mm, 80, "selected roll");
 t = await m.resolveBridgeTarget(bridge, { preferClasses: ["thermal", "label"] });
 eq(t.printer.name, "EPSON TM-T88VII", "pos prefers thermal");
+// Owner's selection model (2026-11-04): an explicit panel
+// selection wins even over the POS class preference — the owner
+// picks the printer in the panel and everything goes there.
+m.setSelectedPrinter("HP LaserJet");
+t = await m.resolveBridgeTarget(bridge, { preferClasses: ["thermal", "label"] });
+eq(t.printer.name, "HP LaserJet", "selected office wins over pos class preference");
+m.setSelectedPrinter(null);
+t = await m.resolveBridgeTarget(bridge, { preferClasses: ["thermal", "label"] });
+eq(t.printer.name, "EPSON TM-T88VII", "no selection -> class preference applies");
 m.setSelectedPrinter("Gone Printer");
 t = await m.resolveBridgeTarget(bridge);
 eq(t.printer.name, "HP LaserJet", "stale selection falls back to default");

@@ -133,7 +133,12 @@ export async function resolveBridgeTarget(bridge, options = {}) {
     if (options.preferPrinterName) {
         printer = printers.find((p) => p.name === options.preferPrinterName) || null;
     }
-    if (!printer && selected && prefer.includes(classOf(selected))) {
+    // The owner's model (2026-11-04): the printer picked in the
+    // panel is THE printer — for reports and receipts alike, real
+    // or virtual. An explicit selection therefore wins over the
+    // class preference; the preference only breaks the tie when
+    // nothing is selected.
+    if (!printer && selected) {
         printer = selected;
     }
     if (!printer && prefer.length) {

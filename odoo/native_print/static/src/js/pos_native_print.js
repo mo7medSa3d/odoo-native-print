@@ -27,9 +27,6 @@ import { notifyUser, resolveBridgeTarget } from "./native_print_client";
 
 const POS_RECEIPT_SOURCE = "point_of_sale.receipt";
 const TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);
-// The virtual-printer warning is shown once per POS session, not
-// once per receipt.
-let virtualPrinterNoticeShown = false;
 
 function nativeBridge() {
     return window.__NATIVE_PRINT__ || null;
@@ -364,20 +361,12 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
     if (!target) {
         return false; // No printer on this PC right now.
     }
-    // A virtual printer (Print to PDF, OneNote, ...) cannot print
-    // silently: its driver asks the user where to save the output.
-    // Say so once per session, up front, instead of letting the job
-    // fail later with a cryptic spooler error. The attempt itself
-    // still runs — a virtual printer configured with a fixed output
-    // path can accept it without asking.
-    if (target.printer && target.printer.kind === "virtual" && !virtualPrinterNoticeShown) {
-        virtualPrinterNoticeShown = true;
-        notifyUser(
-            notificationEnv(contextObj),
-            _t('The current printer "%s" is a virtual printer: it asks where to save instead of printing silently. For silent receipt printing, pick a physical printer in the Yaseir Print panel.', target.printer.name),
-            "warning",
-        );
-    }
+    // Virtual printers are first-class targets (owner,
+    // 2026-11-04): the receipt renders through GDI exactly like an
+    // office printer — OneNote opens with the printed receipt, a
+    // PDF writer produces the page — with no warning and no
+    // printer-choice prompt. The detection in
+    // native_print_client.js already routes them to gdi mode.
     const order =
         explicitOrder ||
         (contextObj && contextObj.currentOrder) ||
@@ -406,12 +395,21 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
     const bytes = await elementToPngBytes(element, 2);
     const idempotencyKey = posReceiptKey(safeRef, userId);
     const rule = target.rule;
+    // The mode comes from the TARGET printer's detection (thermal
+    // -> escpos, label languages, office/virtual -> gdi). The
+    // fallback for a missing mode is gdi — never a raw language: a
+    // document must not turn into raw bytes for a printer nobody
+    // identified as a raw printer (that default is what killed
+    // receipts sent to virtual printers before the owner caught
+    // it). One variable so the job log records the mode that
+    // actually ran.
+    const effectiveMode = rule.mode || "gdi";
     try {
         await bridge.printImage({
             idempotencyKey,
             reportName: POS_RECEIPT_SOURCE,
             printerPattern: rule.printer_pattern,
-            mode: rule.mode || "escpos",
+            mode: effectiveMode,
             // The driver-reported roll width is resolved by the native worker.
             // Never guess 58mm or 80mm for a kitchen/POS receipt.
             mediaRollWidthMm:
@@ -435,7 +433,7 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
             report_name: POS_RECEIPT_SOURCE,
             source_type: "pos_receipt",
             copies: rule.copies || 1,
-            mode: rule.mode || undefined,
+            mode: effectiveMode,
             pages: 1,
             byte_size: bytes.length,
         },

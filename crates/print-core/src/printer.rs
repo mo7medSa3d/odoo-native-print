@@ -200,15 +200,17 @@ pub fn raw_delivery_blocked(payload_kind: &str, mode: &str, printer: PrinterKind
 }
 
 /// Whether a job should be re-routed to GDI printing instead of
-/// being rejected by `raw_delivery_blocked`. An IMAGE addressed to
-/// a virtual printer in a raw-language mode (a POS receipt whose
-/// target resolved to a PDF writer, say) still has a faithful
-/// rendering: the same bitmap, printed through GDI at the paper
-/// size, like any office image. Failing the job instead made the
-/// POS fall back to the browser print dialog in the field
-/// (2026-11-04). Raw payloads — actual printer-language bytes —
-/// have no GDI rendering and stay hard-blocked.
-pub fn image_mode_downgrade(
+/// being rejected by `raw_delivery_blocked`. A DOCUMENT (PDF or
+/// image) addressed to a virtual printer in a raw-language mode
+/// still has a faithful rendering: the same pages, printed through
+/// GDI at the printer's paper size — which is how virtual printers
+/// always worked in this product (OneNote opens with the printed
+/// page, a PDF writer produces the document). The owner ruled
+/// virtual printers first-class silent targets (2026-11-04): a
+/// document job must never die just because its target is virtual.
+/// Raw payloads — actual printer-language bytes — have no GDI
+/// rendering and stay hard-blocked by `raw_delivery_blocked`.
+pub fn document_mode_downgrade(
     payload_kind: &str,
     mode: &str,
     printer: PrinterKind,
@@ -216,7 +218,7 @@ pub fn image_mode_downgrade(
     if printer != PrinterKind::Virtual {
         return None;
     }
-    if payload_kind != "image-png" {
+    if !matches!(payload_kind, "pdf" | "image-png") {
         return None;
     }
     match mode {
@@ -325,41 +327,49 @@ mod tests {
     }
 
     #[test]
-    fn image_mode_downgrade_only_for_images_to_virtual_printers() {
-        use super::image_mode_downgrade;
-        // A receipt image in a raw mode to a virtual writer re-routes
-        // to GDI instead of failing.
+    fn document_mode_downgrade_only_for_documents_to_virtual_printers() {
+        use super::document_mode_downgrade;
+        // A receipt image or a report PDF in a raw mode to a virtual
+        // writer re-routes to GDI instead of failing: the owner
+        // ruled virtual printers first-class silent targets.
         assert_eq!(
-            image_mode_downgrade("image-png", "escpos", PrinterKind::Virtual),
+            document_mode_downgrade("image-png", "escpos", PrinterKind::Virtual),
             Some("gdi")
         );
         assert_eq!(
-            image_mode_downgrade("image-png", "zpl", PrinterKind::Virtual),
+            document_mode_downgrade("pdf", "escpos", PrinterKind::Virtual),
             Some("gdi")
         );
-        // Already-GDI images need nothing.
         assert_eq!(
-            image_mode_downgrade("image-png", "gdi", PrinterKind::Virtual),
-            None
+            document_mode_downgrade("pdf", "zpl", PrinterKind::Virtual),
+            Some("gdi")
         );
-        // Documents and raw payloads are NOT downgraded: reports keep
-        // their loud block, and printer-language bytes have no GDI
-        // rendering at all.
+        // Already-GDI documents need nothing.
         assert_eq!(
-            image_mode_downgrade("pdf", "escpos", PrinterKind::Virtual),
+            document_mode_downgrade("image-png", "gdi", PrinterKind::Virtual),
             None
         );
         assert_eq!(
-            image_mode_downgrade("zpl", "zpl", PrinterKind::Virtual),
+            document_mode_downgrade("pdf", "gdi", PrinterKind::Virtual),
+            None
+        );
+        // Raw payloads are NOT downgraded: printer-language bytes
+        // have no GDI rendering at all and stay hard-blocked.
+        assert_eq!(
+            document_mode_downgrade("zpl", "zpl", PrinterKind::Virtual),
+            None
+        );
+        assert_eq!(
+            document_mode_downgrade("escpos", "escpos", PrinterKind::Virtual),
             None
         );
         // Physical printers are never re-routed.
         assert_eq!(
-            image_mode_downgrade("image-png", "escpos", PrinterKind::Local),
+            document_mode_downgrade("image-png", "escpos", PrinterKind::Local),
             None
         );
         assert_eq!(
-            image_mode_downgrade("image-png", "escpos", PrinterKind::Network),
+            document_mode_downgrade("pdf", "escpos", PrinterKind::Network),
             None
         );
     }
