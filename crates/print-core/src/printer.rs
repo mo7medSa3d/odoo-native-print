@@ -199,6 +199,32 @@ pub fn raw_delivery_blocked(payload_kind: &str, mode: &str, printer: PrinterKind
     raw(payload_kind) || raw(mode)
 }
 
+/// Whether a job should be re-routed to GDI printing instead of
+/// being rejected by `raw_delivery_blocked`. An IMAGE addressed to
+/// a virtual printer in a raw-language mode (a POS receipt whose
+/// target resolved to a PDF writer, say) still has a faithful
+/// rendering: the same bitmap, printed through GDI at the paper
+/// size, like any office image. Failing the job instead made the
+/// POS fall back to the browser print dialog in the field
+/// (2026-11-04). Raw payloads — actual printer-language bytes —
+/// have no GDI rendering and stay hard-blocked.
+pub fn image_mode_downgrade(
+    payload_kind: &str,
+    mode: &str,
+    printer: PrinterKind,
+) -> Option<&'static str> {
+    if printer != PrinterKind::Virtual {
+        return None;
+    }
+    if payload_kind != "image-png" {
+        return None;
+    }
+    match mode {
+        "escpos" | "zpl" | "tspl" | "epl" => Some("gdi"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,6 +322,46 @@ mod tests {
         assert!(caps.custom_size_ok(crate::PageSize::label_100x150()));
         assert!(!caps.custom_size_ok(crate::PageSize::new(300.0, 300.0)));
         assert!(!caps.custom_size_ok(crate::PageSize::new(10.0, 100.0)));
+    }
+
+    #[test]
+    fn image_mode_downgrade_only_for_images_to_virtual_printers() {
+        use super::image_mode_downgrade;
+        // A receipt image in a raw mode to a virtual writer re-routes
+        // to GDI instead of failing.
+        assert_eq!(
+            image_mode_downgrade("image-png", "escpos", PrinterKind::Virtual),
+            Some("gdi")
+        );
+        assert_eq!(
+            image_mode_downgrade("image-png", "zpl", PrinterKind::Virtual),
+            Some("gdi")
+        );
+        // Already-GDI images need nothing.
+        assert_eq!(
+            image_mode_downgrade("image-png", "gdi", PrinterKind::Virtual),
+            None
+        );
+        // Documents and raw payloads are NOT downgraded: reports keep
+        // their loud block, and printer-language bytes have no GDI
+        // rendering at all.
+        assert_eq!(
+            image_mode_downgrade("pdf", "escpos", PrinterKind::Virtual),
+            None
+        );
+        assert_eq!(
+            image_mode_downgrade("zpl", "zpl", PrinterKind::Virtual),
+            None
+        );
+        // Physical printers are never re-routed.
+        assert_eq!(
+            image_mode_downgrade("image-png", "escpos", PrinterKind::Local),
+            None
+        );
+        assert_eq!(
+            image_mode_downgrade("image-png", "escpos", PrinterKind::Network),
+            None
+        );
     }
 
     #[test]

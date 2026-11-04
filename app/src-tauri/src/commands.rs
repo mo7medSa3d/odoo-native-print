@@ -1460,7 +1460,7 @@ impl PrintBackend for NativePrintBackend {
             .payload(&job.id)
             .map_err(|e| BackendError::retryable("QUEUE_DB_ERROR", &e.to_string()))?
             .ok_or_else(|| BackendError::fatal("MISSING_PAYLOAD", "job payload not found"))?;
-        let opts = q.options(&job.id).map_err(|e| {
+        let mut opts = q.options(&job.id).map_err(|e| {
             BackendError::retryable(
                 "QUEUE_DB_ERROR",
                 &format!("stored job options unreadable: {e}"),
@@ -1636,6 +1636,20 @@ impl PrintBackend for NativePrintBackend {
         // from the name so the raw-to-virtual guard below still
         // applies instead of being skipped (fail-open edge).
         let target_kind = target_kind.or_else(|| Some(PrinterInfo::classify(&target_name, "")));
+
+        // An image in a raw-language mode addressed to a virtual
+        // writer is re-routed to GDI printing (the bitmap renders
+        // faithfully at the paper size) instead of failing the job:
+        // failing a POS receipt this way made the POS offer the
+        // browser print dialog in the field (2026-11-04). Raw
+        // payloads keep the hard block below.
+        if let Some(pk) = target_kind {
+            if let Some(downgraded) =
+                print_core::printer::image_mode_downgrade(&kind, &opts.mode, pk)
+            {
+                opts.mode = downgraded.to_string();
+            }
+        }
 
         // Raw printer language can never go to a virtual PDF/XPS
         // writer: the spooler would write the raw bytes into a

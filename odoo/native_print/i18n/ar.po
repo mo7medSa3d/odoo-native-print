@@ -309,11 +309,22 @@ msgstr "تعذرت الطباعة الأصلية على \"%s\": %s. تم تنز�
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/pos_native_print.js:0
 msgid ""
-"Native Print could not print this receipt. The standard POS printing was "
-"used instead."
+"Native Print could not print this receipt, and nothing was printed. Check "
+"the printer and try again."
 msgstr ""
-"تعذرت طباعة هذا الإيصال أصليًا. تم استخدام طباعة نقطة البيع القياسية بدلاً "
-"من ذلك."
+"تعذرت طباعة هذا الإيصال عبر الطباعة الأصلية، ولم يُطبع شيء. تحقق من "
+"الطابعة وحاول مرة أخرى."
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/pos_native_print.js:0
+msgid ""
+"The current printer \"%s\" is a virtual printer: it asks where to save "
+"instead of printing silently. For silent receipt printing, pick a physical "
+"printer in the Yaseir Print panel."
+msgstr ""
+"الطابعة الحالية \"%s\" طابعة افتراضية: بتسأل تحفظ فين بدل ما تطبع بصمت. "
+"للطباعة الصامتة للإيصالات، اختر طابعة حقيقية من لوحة Yaseir Print."
 
 #. module: native_print
 #: model:ir.model,name:native_print.model_native_print_job

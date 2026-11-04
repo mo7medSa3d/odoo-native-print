@@ -27,6 +27,9 @@ import { notifyUser, resolveBridgeTarget } from "./native_print_client";
 
 const POS_RECEIPT_SOURCE = "point_of_sale.receipt";
 const TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);
+// The virtual-printer warning is shown once per POS session, not
+// once per receipt.
+let virtualPrinterNoticeShown = false;
 
 function nativeBridge() {
     return window.__NATIVE_PRINT__ || null;
@@ -43,14 +46,15 @@ function notificationEnv(contextObj) {
     );
 }
 
-function notifyPosFallback(contextObj) {
-    // One clear message when native receipt printing gives up and
-    // the standard POS printing takes over. Identical repeats are
-    // deduped inside notifyUser, so the two wrapper layers below can
-    // never stack this toast.
+function notifyPosNativeFailure(contextObj) {
+    // One clear message when native receipt printing gives up
+    // inside the desktop app. Nothing was printed: the receipt
+    // stays on screen and the cashier can fix the cause and click
+    // Print again. Identical repeats are deduped inside notifyUser,
+    // so the two wrapper layers below can never stack this toast.
     notifyUser(
         notificationEnv(contextObj),
-        _t("Native Print could not print this receipt. The standard POS printing was used instead."),
+        _t("Native Print could not print this receipt, and nothing was printed. Check the printer and try again."),
         "warning",
     );
 }
@@ -360,6 +364,20 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
     if (!target) {
         return false; // No printer on this PC right now.
     }
+    // A virtual printer (Print to PDF, OneNote, ...) cannot print
+    // silently: its driver asks the user where to save the output.
+    // Say so once per session, up front, instead of letting the job
+    // fail later with a cryptic spooler error. The attempt itself
+    // still runs — a virtual printer configured with a fixed output
+    // path can accept it without asking.
+    if (target.printer && target.printer.kind === "virtual" && !virtualPrinterNoticeShown) {
+        virtualPrinterNoticeShown = true;
+        notifyUser(
+            notificationEnv(contextObj),
+            _t('The current printer "%s" is a virtual printer: it asks where to save instead of printing silently. For silent receipt printing, pick a physical printer in the Yaseir Print panel.', target.printer.name),
+            "warning",
+        );
+    }
     const order =
         explicitOrder ||
         (contextObj && contextObj.currentOrder) ||
@@ -441,27 +459,32 @@ function wrapPosStorePrintReceipt(posStore) {
         return;
     }
     const originalPrintReceipt = posStore.printReceipt.bind(posStore);
-    // Kept reachable for the ReceiptScreen patch: after a native
-    // attempt there, the standard fallback must call the ORIGINAL
-    // store method — calling the wrapped one would run the whole
-    // native capture a second time for the same click (audit JS-L8).
-    posStore.__npOriginalPrintReceipt = originalPrintReceipt;
     posStore.printReceipt = async function (opts = {}) {
-        const isBasic = !!(opts && (opts.basic || opts.basicReceipt));
-        if (!isBasic) {
-            try {
-                if (await printPosReceiptNatively(posStore, opts && opts.order)) {
-                    return true;
-                }
-            } catch (error) {
-                console.warn(
-                    "Native Print: POS receipt capture failed; falling back to default POS printing.",
-                    error,
-                );
-                notifyPosFallback(posStore);
-            }
+        if (!nativeBridge()) {
+            // Plain browser: Odoo's standard printing is the only
+            // printing there is (owner's standing rule for browsers).
+            return await originalPrintReceipt(opts);
         }
-        return await originalPrintReceipt(opts);
+        // Inside the desktop app a receipt prints silently through
+        // the bridge — or not at all. Odoo's standard flow ends in
+        // the browser print dialog (PosStore.printReceipt passes
+        // webPrintFallback: true), which the owner banned from the
+        // app after it reappeared in the field (2026-11-04): a
+        // declined or failed native attempt reports its reason and
+        // leaves the receipt on screen for another click instead of
+        // opening that dialog. Basic receipts are captured the same
+        // way; the on-screen receipt is rasterized either way, so
+        // the basic/full distinction does not change the output.
+        try {
+            if (await printPosReceiptNatively(posStore, opts && opts.order)) {
+                return true;
+            }
+            notifyPosNativeFailure(posStore);
+        } catch (error) {
+            console.warn("Native Print: POS receipt capture failed.", error);
+            notifyPosNativeFailure(posStore);
+        }
+        return true;
     };
     posStore.__nativePrintWrapped = true;
 }
@@ -476,34 +499,32 @@ patch(ReceiptScreen.prototype, {
 
     async printReceipt() {
         const opts = arguments[0];
-        const isBasic = !!(opts && (opts.basic || opts.basicReceipt));
-        if (!isBasic) {
-            try {
-                if (await printPosReceiptNatively(this, opts && opts.order)) {
-                    return true;
-                }
-            } catch (error) {
-                console.warn(
-                    "Native Print: POS receipt capture failed; falling back to default POS printing.",
-                    error,
-                );
-                notifyPosFallback(this);
+        if (!nativeBridge()) {
+            // Plain browser: keep Odoo's standard flow untouched.
+            if (super.printReceipt) {
+                return await super.printReceipt(...arguments);
             }
-            // Native printing was attempted for this click and
-            // declined or failed. The standard screen flow would now
-            // call the (wrapped) store method and capture the
-            // receipt a second time; go straight to the store's
-            // original implementation instead (audit JS-L8).
-            if (this.pos && typeof this.pos.__npOriginalPrintReceipt === "function") {
-                return await this.pos.__npOriginalPrintReceipt(opts);
+            if (this.pos && typeof this.pos.printReceipt === "function") {
+                return await this.pos.printReceipt(...arguments);
             }
+            return false;
         }
-        if (super.printReceipt) {
-            return await super.printReceipt(...arguments);
+        // Desktop app: the same rule as the store wrapper — silent
+        // native printing or a clear failure message, never the
+        // browser print dialog. (Before this fix, a declined or
+        // failed attempt continued into the store's original method
+        // and that dialog; audit JS-L8's double-capture concern is
+        // moot now that the original is never called after an
+        // attempt.)
+        try {
+            if (await printPosReceiptNatively(this, opts && opts.order)) {
+                return true;
+            }
+            notifyPosNativeFailure(this);
+        } catch (error) {
+            console.warn("Native Print: POS receipt capture failed.", error);
+            notifyPosNativeFailure(this);
         }
-        if (this.pos && typeof this.pos.printReceipt === "function") {
-            return await this.pos.printReceipt(...arguments);
-        }
-        return false;
+        return true;
     },
 });

@@ -378,7 +378,7 @@ const BRIDGE_JS: &str = r#"
       var rtl = false;
       try { rtl = (document.documentElement.getAttribute("dir") || document.dir) === "rtl"; } catch (e) {}
       var style = document.createElement("style");
-      style.textContent = '#np-nav-pill{position:fixed;top:54px;inset-inline-start:10px;z-index:2147483000;display:flex;gap:2px;padding:3px;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid rgba(15,23,42,.09);border-radius:999px;box-shadow:0 6px 20px rgba(16,18,25,.14);opacity:.92;transition:opacity .15s} #np-nav-pill:hover{opacity:1} #np-nav-pill button{width:30px;height:30px;border:0;border-radius:50%;background:transparent;color:#23272f;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0} #np-nav-pill button:hover{background:#eef1f6} #np-nav-pill svg{width:17px;height:17px}';
+      style.textContent = '#np-nav-pill{position:fixed;top:54px;inset-inline-start:10px;z-index:2147483000;display:flex;gap:2px;padding:3px;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid rgba(15,23,42,.09);border-radius:999px;box-shadow:0 6px 20px rgba(16,18,25,.14);opacity:.92;transition:opacity .15s;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none} #np-nav-pill:hover{opacity:1} #np-nav-pill.np-dragging{cursor:grabbing;opacity:1;transition:none} #np-nav-pill .np-pill-grip{display:flex;align-items:center;padding:0 1px 0 4px;color:#9aa3b2;font-size:10px;letter-spacing:-3px;cursor:grab} #np-nav-pill button{width:30px;height:30px;border:0;border-radius:50%;background:transparent;color:#23272f;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0} #np-nav-pill button:hover{background:#eef1f6} #np-nav-pill svg{width:17px;height:17px}';
       document.head.appendChild(style);
       var pill = document.createElement("div");
       pill.id = "np-nav-pill";
@@ -391,10 +391,106 @@ const BRIDGE_JS: &str = r#"
         b.addEventListener("click", fn);
         return b;
       }
+      var grip = document.createElement("span");
+      grip.className = "np-pill-grip";
+      grip.title = "اسحب لنقل الأزرار — نقرة مزدوجة للإرجاع";
+      grip.setAttribute("aria-hidden", "true");
+      grip.textContent = "⋮⋮";
+      pill.appendChild(grip);
       pill.appendChild(btn("رجوع", "M15 5 L8 12 L15 19", rtl, function () { window.history.back(); }));
       pill.appendChild(btn("تقدم", "M9 5 L16 12 L9 19", rtl, function () { window.history.forward(); }));
       pill.appendChild(btn("إعادة تحميل", "M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6", false, function () { window.location.reload(); }));
       document.body.appendChild(pill);
+      // The owner parks the pill wherever it hides nothing on his
+      // screens: drag by the grip or the pill body and the position
+      // is remembered (per origin, in localStorage); a double-click
+      // on the grip returns it to the default corner. Buttons keep
+      // working as plain clicks — a drag only starts after a few
+      // pixels of movement, and the click that ends a drag is
+      // swallowed so it can never also press a button.
+      var NP_PILL_POS_KEY = "npNavPillPos";
+      function npPillClamp(x, y) {
+        var w = pill.offsetWidth || 116;
+        var h = pill.offsetHeight || 38;
+        var maxX = Math.max(2, (window.innerWidth || 320) - w - 2);
+        var maxY = Math.max(2, (window.innerHeight || 320) - h - 2);
+        return {
+          x: Math.min(Math.max(2, x), maxX),
+          y: Math.min(Math.max(2, y), maxY),
+        };
+      }
+      function npPillApply(x, y) {
+        var p = npPillClamp(x, y);
+        pill.style.left = p.x + "px";
+        pill.style.top = p.y + "px";
+        pill.style.insetInlineStart = "auto";
+        return p;
+      }
+      try {
+        var npSaved = JSON.parse(window.localStorage.getItem(NP_PILL_POS_KEY) || "null");
+        if (npSaved && isFinite(npSaved.x) && isFinite(npSaved.y)) {
+          npPillApply(npSaved.x, npSaved.y);
+        }
+      } catch (e) {}
+      var npDrag = null;
+      var npSuppressClick = false;
+      pill.addEventListener("pointerdown", function (ev) {
+        if (ev.button !== undefined && ev.button !== 0) return;
+        var r = pill.getBoundingClientRect();
+        npDrag = { dx: ev.clientX - r.left, dy: ev.clientY - r.top, moved: false, id: ev.pointerId };
+      });
+      pill.addEventListener("pointermove", function (ev) {
+        if (!npDrag) return;
+        var nx = ev.clientX - npDrag.dx;
+        var ny = ev.clientY - npDrag.dy;
+        if (!npDrag.moved) {
+          var r0 = pill.getBoundingClientRect();
+          if (Math.abs(nx - r0.left) + Math.abs(ny - r0.top) < 4) return;
+          npDrag.moved = true;
+          pill.classList.add("np-dragging");
+          try { pill.setPointerCapture(npDrag.id); } catch (e) {}
+        }
+        npPillApply(nx, ny);
+      });
+      function npEndDrag() {
+        if (!npDrag) return;
+        var wasDrag = npDrag.moved;
+        npDrag = null;
+        pill.classList.remove("np-dragging");
+        if (wasDrag) {
+          npSuppressClick = true;
+          window.setTimeout(function () { npSuppressClick = false; }, 80);
+          var r = pill.getBoundingClientRect();
+          try {
+            window.localStorage.setItem(
+              NP_PILL_POS_KEY,
+              JSON.stringify({ x: Math.round(r.left), y: Math.round(r.top) })
+            );
+          } catch (e) {}
+        }
+      }
+      pill.addEventListener("pointerup", npEndDrag);
+      pill.addEventListener("pointercancel", npEndDrag);
+      pill.addEventListener("click", function (ev) {
+        if (npSuppressClick) {
+          ev.stopPropagation();
+          ev.preventDefault();
+          npSuppressClick = false;
+        }
+      }, true);
+      pill.addEventListener("dblclick", function (ev) {
+        if (ev.target !== pill && ev.target !== grip) return;
+        try { window.localStorage.removeItem(NP_PILL_POS_KEY); } catch (e) {}
+        pill.style.left = "";
+        pill.style.top = "";
+        pill.style.insetInlineStart = "";
+      });
+      window.addEventListener("resize", function () {
+        if (pill.style.left) {
+          var r = pill.getBoundingClientRect();
+          npPillApply(r.left, r.top);
+        }
+      });
     };
     if (document.body) { build(); }
     else { document.addEventListener("DOMContentLoaded", build); }

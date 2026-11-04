@@ -14,6 +14,21 @@
     }
 
     .o_native_print_dropdown {
+        // Anchor the panel to the INLINE-END edge of the systray
+        // item so it always grows INTO the screen: in LTR the
+        // systray sits at the right and the panel extends left from
+        // the button; in RTL the systray sits at the left and the
+        // panel extends right. Bootstrap's dropdown-menu-end class
+        // cannot do this for us — in the compiled bundle it only
+        // sets a --bs-position variable, and the end alignment is
+        // applied solely to Popper-managed menus (data-bs-popper),
+        // which this OWL-toggled panel is not. Without an explicit
+        // anchor the panel used the base left:0 rule and ran off
+        // the screen edge in both directions (field report,
+        // 2026-11-04). Logical properties keep one rule correct
+        // for both directions.
+        inset-inline-start: auto;
+        inset-inline-end: 0;
         width: 320px;
         max-width: 92vw;
         z-index: 1055;
