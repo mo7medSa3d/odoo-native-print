@@ -7,8 +7,12 @@ name: Odoo Addon Tests
 on:
   workflow_dispatch:
   push:
+    branches: ["main"]
+    paths: ["odoo/**"]
     tags:
       - "v*"
+  pull_request:
+    paths: ["odoo/**"]
 
 jobs:
   addon-tests:
