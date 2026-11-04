@@ -690,6 +690,7 @@
 
   /* Modern topbar + navigation refresh (2026-11) */
   .topbar {
+    padding-inline: calc(max(0px, (100% - 1360px) / 2) + 1.5rem);
     position: sticky;
     top: 0;
     z-index: 40;
@@ -699,6 +700,8 @@
     box-shadow: 0 1px 0 var(--border-color), 0 10px 30px -18px rgba(30, 10, 60, 0.35);
   }
   .nav-tabs {
+    justify-content: center;
+    padding-inline: calc(max(0px, (100% - 1360px) / 2) + 1.5rem);
     position: sticky;
     top: 76px;
     z-index: 39;
@@ -949,7 +952,7 @@
             <div class="form-group">
               <label class="form-label" data-i18n="lbl_test_type">نوع صفحة المعايرة والاختبار</label>
               <select id="customTestKind" class="select">
-                <option value="pdf-a4">A4 Calibration PDF (GDI + PDFium • مساطر + مربع 100×100مم + باركود)</option>
+                <option value="pdf-a4" data-i18n="opt_calibration_pdf">A4 Calibration PDF (GDI + PDFium • rulers + 100×100 mm square + barcode)</option>
                 <option value="thermal-80mm">Thermal 80mm Receipt Calibration (ESC/POS Raster • 576 dots)</option>
                 <option value="thermal-58mm">Thermal 58mm Receipt Calibration (ESC/POS Raster • 384 dots)</option>
                 <option value="zpl-label">Label 100×150mm ZPL II Calibration (^XA^FO0,0^GFA...^FS^XZ)</option>
@@ -992,8 +995,8 @@
             <div class="form-group">
               <label class="form-label" data-i18n="lbl_recovery_mode">عند توقف مفاجئ</label>
               <select id="inputAutoReprint" class="select">
-                <option value="false">آمن (افتراضي): عدم إعادة طباعة المهام الغامضة تلقائياً (RECOVERY_AMBIGUOUS)</option>
-                <option value="true">إعادة الطباعة التلقائية للمهام قيد التنفيذ عند بدء التشغيل</option>
+                <option value="false" data-i18n="opt_recovery_safe">آمن (افتراضي): عدم إعادة طباعة المهام الغامضة تلقائيًا</option>
+                <option value="true" data-i18n="opt_recovery_auto">إعادة الطباعة التلقائية للمهام قيد التنفيذ عند بدء التشغيل</option>
               </select>
               <div class="form-help" data-i18n="help_recovery_mode">
                 المهام التي لم تُرسل للطابعة تُستأنف دائمًا. المهام المُرسلة يحددها هذا الخيار.
@@ -1023,7 +1026,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
             <span data-i18n="env_title">بيئة العرض (WebView2)</span>
           </div>
-          <div style="display:flex;gap:0.5rem;">
+          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:flex-end;">
             <button class="btn btn-sm btn-secondary" id="btnClearWebData" onclick="clearWebData()" data-i18n="btn_clear_web">مسح بيانات التصفح</button>
           </div>
         </div>
@@ -1040,7 +1043,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
             <span data-i18n="diag_title">حزمة التشخيص الآمنة (Redacted Diagnostics Bundle)</span>
           </div>
-          <div style="display:flex;gap:0.5rem;">
+          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:flex-end;">
             <button class="btn btn-sm btn-secondary" id="btnGenerateDiagnostics" onclick="loadDiagnosticsBundle()" data-i18n="btn_generate_diag">توليد الحزمة</button>
             <button class="btn btn-sm btn-secondary" id="btnCopyDiagnostics" onclick="copyDiagnosticsBundle()" data-i18n="btn_copy_diag">نسخ JSON</button>
             <button class="btn btn-sm btn-primary" id="btnDownloadDiagnostics" onclick="downloadDiagnosticsBundle()" data-i18n="btn_download_diag">تنزيل ملف JSON</button>
@@ -1123,6 +1126,9 @@
       diagnostics_downloaded: "تم تنزيل تقرير التشخيص",
       diagnostics_failed: "تعذر إنشاء تقرير التشخيص. راجع الخطأ وحاول مجدداً.",
       lbl_recovery_mode: "عند توقف مفاجئ",
+      opt_recovery_safe: "آمن (افتراضي): عدم إعادة طباعة المهام الغامضة تلقائيًا",
+      opt_recovery_auto: "إعادة الطباعة التلقائية للمهام قيد التنفيذ عند بدء التشغيل",
+      opt_calibration_pdf: "PDF معايرة A4 (GDI + PDFium • مساطر + مربع 100×100مم + باركود)",
       help_recovery_mode: "المهام التي لم تُرسل للطابعة تُستأنف دائمًا. المهام المُرسلة يحددها هذا الخيار.",
       btn_save_origin: "حفظ الإعدادات",
       btn_save_and_launch: "حفظ وفتح Odoo",
@@ -1194,6 +1200,9 @@
       diagnostics_downloaded: "Diagnostics report downloaded",
       diagnostics_failed: "Could not generate diagnostics. Check the error and try again.",
       lbl_recovery_mode: "After a sudden stop",
+      opt_recovery_safe: "Safe (default): never auto-reprint ambiguous jobs",
+      opt_recovery_auto: "Auto-reprint in-flight jobs at startup",
+      opt_calibration_pdf: "A4 Calibration PDF (GDI + PDFium • rulers + 100×100 mm square + barcode)",
       help_recovery_mode: "Jobs not yet sent to the printer always resume. Jobs already sent follow this choice.",
       btn_save_origin: "Save Settings",
       btn_save_and_launch: "Save & open Odoo",

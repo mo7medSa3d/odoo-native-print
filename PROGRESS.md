@@ -268,3 +268,12 @@ Full report: `docs/engineering-mission-2026-11-03.md`. Headlines:
   gates green, jsdom CC suites pass, Odoo 17/17 fresh AND upgrade
   from 19.0.2.7.0. Windows CI remains the compile gate for the
   one-line app-crate change.
+
+## 2026-11-04 — CC polish (app 1.4.4; addon unchanged 19.0.2.9.0)
+- Language consistency: the sudden-stop (recovery) select options and
+  the calibration-PDF option were hardcoded Arabic in the HTML; they
+  are now dict-driven (data-i18n) in both languages.
+- Header/nav: topbar and nav tabs are constrained to the centered
+  1360px content column, and the tabs are centered (owner request).
+- Diagnostics/card button rows wrap instead of clipping off-card.
+- Verified: jsdom DOM suite 0 script errors, behavior 14/14, gates.
