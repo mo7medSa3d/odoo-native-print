@@ -1,7 +1,7 @@
 name: Odoo Addon Tests
 
 # Installs the native_print addon on a real Odoo (Docker) with Postgres
-# and runs the addon's test suite (--test-enable). This is the CI form
+# and runs only this addon's suite via --test-tags /native_print. This is the CI form
 # of spike S2; the interactive parts of S2/S2b (clicking through the UI
 # inside the app, POS receipts) still run at the client's site.
 on:
@@ -61,7 +61,7 @@ jobs:
             -e HOST=db -e USER=odoo -e PASSWORD=odoo \
             "$ODOO_IMAGE" \
             -d native_print_test -i native_print \
-            --test-enable --stop-after-init --without-demo=all \
+            --test-tags /native_print --stop-after-init --without-demo=all \
             2>&1 | tee odoo-test.log
           ODOO_EXIT=${PIPESTATUS[0]}
           set -e
@@ -73,11 +73,14 @@ jobs:
           if [ "$ODOO_EXIT" -ne 0 ]; then
             echo "::error::Odoo run failed (exit $ODOO_EXIT)"; exit 1
           fi
-          if grep -E "odoo.tests.result: [1-9][0-9]* failed" odoo-test.log; then
-            echo "::error::Addon tests failed"; exit 1
+          if grep -E "odoo.tests.result: .*([1-9][0-9]* failed|[1-9][0-9]* error)" odoo-test.log; then
+            echo "::error::Odoo test failures or errors were reported"; exit 1
+          fi
+          if ! grep -E "odoo.tests.stats: native_print: [1-9][0-9]* tests" odoo-test.log; then
+            echo "::error::The native_print test suite did not execute"; exit 1
           fi
           grep -E "native_print" odoo-test.log | tail -20 || true
-          echo "Addon install + tests finished."
+          echo "native_print install + tests finished."
       - name: Upload the Odoo log (always)
         if: always()
         uses: actions/upload-artifact@v7
