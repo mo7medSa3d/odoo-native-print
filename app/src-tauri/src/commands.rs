@@ -688,8 +688,7 @@ pub fn run_test_print(
         // target's kind cannot be positively verified as physical.
         let discovered = print_win::discover_printers().unwrap_or_default();
         let found = discovered.iter().find(|p| p.name == printer.trim());
-        let verified_physical =
-            matches!(found, Some(f) if f.kind != PrinterKind::Virtual);
+        let verified_physical = matches!(found, Some(f) if f.kind != PrinterKind::Virtual);
         if !verified_physical {
             return Err(
                 "This calibration sends raw printer language (ESC/POS / ZPL / TSPL). It was refused because the target printer could not be verified as a physical printer (a virtual PDF/XPS writer would turn it into a corrupt file). Choose a physical printer from the discovered list."
