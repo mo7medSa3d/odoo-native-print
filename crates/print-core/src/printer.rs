@@ -154,13 +154,100 @@ pub struct PrinterInfo {
     pub kind: PrinterKind,
     pub status: PrinterStatus,
     pub is_default: bool,
+    /// Detected print protocol and device class from the driver
+    /// identity (`detect_protocol`): "gdi"/"escpos"/"zpl"/"tspl"/
+    /// "epl" and "office"/"thermal"/"label"/"virtual". Additive
+    /// bridge fields so every consumer (Control Center cards, test
+    /// lab, Odoo pages) offers only what the printer actually
+    /// speaks (owner, 2026-11-04).
+    #[serde(default)]
+    pub protocol: String,
+    #[serde(default)]
+    pub printer_class: String,
+}
+
+/// Conservative protocol inference from the installed driver
+/// identity — the Rust twin of the addon JS `detectPrinterType`
+/// (native_print_client.js); the two tables must stay in step.
+/// Short protocol tokens match on word boundaries only: a bare
+/// substring search classifies any name containing "epl"
+/// ("Repl…") as a raw label printer.
+pub fn detect_protocol(
+    name: &str,
+    driver: &str,
+    kind: PrinterKind,
+) -> (&'static str, &'static str) {
+    if kind == PrinterKind::Virtual {
+        return ("gdi", "virtual");
+    }
+    let signature = format!("{} {}", name, driver).to_lowercase();
+    let has_word = |tok: &str| -> bool {
+        let bytes = signature.as_bytes();
+        let t = tok.as_bytes();
+        if t.is_empty() || bytes.len() < t.len() {
+            return false;
+        }
+        (0..=bytes.len() - t.len()).any(|i| {
+            bytes[i..i + t.len()] == *t
+                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
+                && (i + t.len() == bytes.len() || !bytes[i + t.len()].is_ascii_alphanumeric())
+        })
+    };
+    if signature.contains("zdesigner") || signature.contains("zebra") || has_word("zpl") {
+        return ("zpl", "label");
+    }
+    if has_word("tsc") || has_word("tspl") {
+        return ("tspl", "label");
+    }
+    if has_word("epl") {
+        return ("epl", "label");
+    }
+    const THERMAL_TOKENS: [&str; 12] = [
+        "epson tm-",
+        "epson tm ",
+        "xprinter",
+        "rongta",
+        "bixolon",
+        "star tsp",
+        "citizen ct-",
+        "sewoo",
+        "esc/pos",
+        "escpos",
+        "thermal receipt",
+        "receipt printer",
+    ];
+    if THERMAL_TOKENS.iter().any(|t| signature.contains(t)) {
+        return ("escpos", "thermal");
+    }
+    // "pos-58"/"pos-80" from the JS table are substring tokens for
+    // generic receipt printers; they stay substring matches there,
+    // so they stay substring matches here.
+    if signature.contains("pos-58") || signature.contains("pos-80") {
+        return ("escpos", "thermal");
+    }
+    if kind == PrinterKind::Network && (signature.contains("ipp") || signature.contains("airprint"))
+    {
+        return ("gdi", "office");
+    }
+    ("gdi", "office")
 }
 
 impl PrinterInfo {
     pub fn classify(name: &str, port: &str) -> PrinterKind {
         let p = port.to_ascii_uppercase();
         let n = name.to_ascii_lowercase();
-        if n.contains("print to pdf") || n.contains("xps") || p.starts_with("PORTPROMPT") {
+        // Virtual writers render into a file or another app instead
+        // of paper: PDF/XPS writers, the save-prompt port, OneNote
+        // (its port is literally "nul:" — the 2026-11-04 field
+        // screenshot showed OneNote classified as NETWORK, which
+        // offered it raw test prints it cannot accept), and any
+        // other printer parked on the NUL discard port.
+        if n.contains("print to pdf")
+            || n.contains("xps")
+            || n.contains("onenote")
+            || p.starts_with("PORTPROMPT")
+            || p.starts_with("NUL:")
+        {
             PrinterKind::Virtual
         } else if name.starts_with("\\\\") {
             PrinterKind::Shared
@@ -324,6 +411,86 @@ mod tests {
         assert!(caps.custom_size_ok(crate::PageSize::label_100x150()));
         assert!(!caps.custom_size_ok(crate::PageSize::new(300.0, 300.0)));
         assert!(!caps.custom_size_ok(crate::PageSize::new(10.0, 100.0)));
+    }
+
+    #[test]
+    fn classify_treats_onenote_and_nul_port_as_virtual() {
+        // Field screenshot, 2026-11-04: OneNote (Desktop) on port
+        // "nul:" was classified Network, so its Control Center card
+        // offered raw ESC/POS and ZPL test prints it cannot accept.
+        assert_eq!(
+            PrinterInfo::classify("OneNote (Desktop)", "nul:"),
+            PrinterKind::Virtual
+        );
+        assert_eq!(
+            PrinterInfo::classify("OneNote for Windows 10", "SHARING:"),
+            PrinterKind::Virtual
+        );
+        assert_eq!(
+            PrinterInfo::classify("Discard Queue", "NUL:"),
+            PrinterKind::Virtual
+        );
+        // The established cases keep their kinds.
+        assert_eq!(
+            PrinterInfo::classify("Microsoft Print to PDF", "PORTPROMPT:"),
+            PrinterKind::Virtual
+        );
+        assert_eq!(
+            PrinterInfo::classify("HP LaserJet", "USB001"),
+            PrinterKind::Local
+        );
+        assert_eq!(
+            PrinterInfo::classify("EPSON TM-T88VII", "192.168.1.50"),
+            PrinterKind::Network
+        );
+    }
+
+    #[test]
+    fn detect_protocol_mirrors_the_driver_identity_table() {
+        use super::detect_protocol;
+        // Virtual writers are GDI targets whatever their names say.
+        assert_eq!(
+            detect_protocol(
+                "OneNote (Desktop)",
+                "Send to Microsoft OneNote 16 Driver",
+                PrinterKind::Virtual
+            ),
+            ("gdi", "virtual")
+        );
+        assert_eq!(
+            detect_protocol(
+                "Microsoft Print to PDF",
+                "Microsoft Print To PDF",
+                PrinterKind::Virtual
+            ),
+            ("gdi", "virtual")
+        );
+        // Raw languages by driver identity (word boundaries: the
+        // "Replit" office printer must not read as EPL).
+        assert_eq!(
+            detect_protocol("EPSON TM-T88VII", "EPSON", PrinterKind::Network),
+            ("escpos", "thermal")
+        );
+        assert_eq!(
+            detect_protocol("Zebra ZPL Label", "Zebra", PrinterKind::Local),
+            ("zpl", "label")
+        );
+        assert_eq!(
+            detect_protocol("TSC TTP-244", "TSC", PrinterKind::Local),
+            ("tspl", "label")
+        );
+        assert_eq!(
+            detect_protocol("Replit OfficeJet", "HP", PrinterKind::Local),
+            ("gdi", "office")
+        );
+        assert_eq!(
+            detect_protocol("HP LaserJet", "HP PCL", PrinterKind::Local),
+            ("gdi", "office")
+        );
+        assert_eq!(
+            detect_protocol("POS-80 Receipt", "Generic", PrinterKind::Local),
+            ("escpos", "thermal")
+        );
     }
 
     #[test]

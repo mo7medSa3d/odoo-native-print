@@ -36,13 +36,18 @@ pub fn convert(raw: &RawPrinterInfo2) -> PrinterInfo {
     {
         status = print_core::PrinterStatus::Offline;
     }
+    let kind = PrinterInfo::classify(&raw.printer_name, &raw.port_name);
+    let (protocol, printer_class) =
+        print_core::printer::detect_protocol(&raw.printer_name, &raw.driver_name, kind);
     PrinterInfo {
-        kind: PrinterInfo::classify(&raw.printer_name, &raw.port_name),
+        kind,
         name: raw.printer_name.clone(),
         driver: raw.driver_name.clone(),
         port: raw.port_name.clone(),
         status,
         is_default: raw.attributes & PRINTER_ATTRIBUTE_DEFAULT != 0,
+        protocol: protocol.to_string(),
+        printer_class: printer_class.to_string(),
     }
 }
 
@@ -172,6 +177,8 @@ mod tests {
                     kind: print_core::PrinterKind::Local,
                     status: print_core::PrinterStatus::Ready,
                     is_default: true,
+                    protocol: "gdi".into(),
+                    printer_class: "office".into(),
                 }])
             })
         };

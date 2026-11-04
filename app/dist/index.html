@@ -1083,6 +1083,14 @@
       qt_pdf: "PDF مكتبية (A4)",
       qt_escpos: "حراري ESC/POS 80مم",
       qt_zpl: "ملصق ZPL",
+      qt_tspl: "ملصق TSPL",
+      cls_thermal: "حرارية · ESC/POS",
+      cls_label: "ملصقات",
+      cls_office: "مكتبية · GDI",
+      cls_virtual: "افتراضية · GDI",
+      cap_duplex: "وجهان (Duplex)",
+      cap_color: "ألوان",
+      cap_more_forms: "مقاسات إضافية",
       diag_placeholder: "لسه ما اتولّدتش حزمة تشخيص. اضغط «توليد الحزمة».",
       dialog_confirm: "تأكيد",
       dialog_cancel: "إلغاء",
@@ -1190,6 +1198,14 @@
       qt_pdf: "A4 PDF (GDI)",
       qt_escpos: "80mm ESC/POS",
       qt_zpl: "ZPL Label",
+      qt_tspl: "TSPL Label",
+      cls_thermal: "Thermal · ESC/POS",
+      cls_label: "Label",
+      cls_office: "Office · GDI",
+      cls_virtual: "Virtual · GDI",
+      cap_duplex: "Duplex",
+      cap_color: "Color",
+      cap_more_forms: "more sizes",
       diag_placeholder: "No diagnostics bundle yet. Press Generate.",
       dialog_confirm: "Confirm",
       dialog_cancel: "Cancel",
@@ -1489,6 +1505,7 @@
     // the custom-URI error line and the calibration warning.
     validateCustomPrinterUriField();
     updateCalWarning();
+    rebuildTestKindOptions();
     if (overviewState) renderOverview(overviewState);
   }
   function toggleLang() {
@@ -1767,12 +1784,87 @@
     if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
   }
 
+  // ---- Capability truth (owner, 2026-11-04) --------------------
+  // A printer card and the calibration lab offer ONLY what the
+  // printer actually speaks and supports: no RAW test on a card
+  // whose printer cannot accept raw, no calibration kind the
+  // selected printer does not speak. Protocol and class come from
+  // the bridge (Rust detect_protocol over the driver identity);
+  // the fallback mirrors the same table for older payloads.
+  function ccProtocol(p) {
+    if (!p) return "gdi";
+    if (p.protocol) return p.protocol;
+    if (p.kind === "virtual") return "gdi";
+    const sig = `${p.name || ""} ${p.driver || ""}`.toLowerCase();
+    const hasWord = (tok) => new RegExp(`(^|[^a-z0-9])${tok}([^a-z0-9]|$)`).test(sig);
+    if (sig.includes("zdesigner") || sig.includes("zebra") || hasWord("zpl")) return "zpl";
+    if (hasWord("tsc") || hasWord("tspl")) return "tspl";
+    if (hasWord("epl")) return "epl";
+    const thermal = ["epson tm-", "epson tm ", "xprinter", "rongta", "bixolon", "star tsp", "citizen ct-", "sewoo", "esc/pos", "escpos", "thermal receipt", "receipt printer", "pos-58", "pos-80"];
+    if (thermal.some((t) => sig.includes(t))) return "escpos";
+    return "gdi";
+  }
+  function ccClass(p) {
+    if (p && p.printer_class) return p.printer_class;
+    const proto = ccProtocol(p);
+    if (p && p.kind === "virtual") return "virtual";
+    if (proto === "escpos") return "thermal";
+    if (proto === "zpl" || proto === "tspl" || proto === "epl") return "label";
+    return "office";
+  }
+  function ccClassLabel(p) {
+    const cls = ccClass(p);
+    const d = I18N[currentLang];
+    if (cls === "thermal") return d.cls_thermal;
+    if (cls === "label") return `${d.cls_label} · ${ccProtocol(p).toUpperCase()}`;
+    if (cls === "virtual") return d.cls_virtual;
+    return d.cls_office;
+  }
+  // Driver-reported capabilities per printer, fetched once and
+  // cached; the chips on a card show only what the driver reports
+  // (forms, duplex, color) — never a feature the printer lacks.
+  const capsCache = new Map();
+  let capsVersion = 0;
+  let lastGridPrinters = [];
+  function capsChipsHtml(p) {
+    const caps = capsCache.get(p.name);
+    if (!caps || caps === "loading") return "";
+    const d = I18N[currentLang];
+    const chips = [];
+    const forms = Array.isArray(caps.forms) ? caps.forms : [];
+    const seen = new Set();
+    for (const f of forms) {
+      if (!f || !f.name || seen.has(f.name)) continue;
+      seen.add(f.name);
+      if (seen.size <= 4) chips.push(`<span class="badge badge-neutral">${escapeHtml(f.name)}${f.roll ? " • ROLL" : ""}</span>`);
+    }
+    if (seen.size > 4) chips.push(`<span class="badge badge-neutral">+${seen.size - 4} ${escapeHtml(d.cap_more_forms)}</span>`);
+    if (caps.duplex) chips.push(`<span class="badge badge-info">${escapeHtml(d.cap_duplex)}</span>`);
+    if (caps.color) chips.push(`<span class="badge badge-info">${escapeHtml(d.cap_color)}</span>`);
+    if (!chips.length) return "";
+    return `<div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-top:0.5rem;">${chips.join("")}</div>`;
+  }
+  function ensureCaps(printers) {
+    const b = bridge();
+    if (!b || typeof b.printerCapabilities !== "function") return;
+    for (const p of printers) {
+      if (capsCache.has(p.name)) continue;
+      capsCache.set(p.name, "loading");
+      b.printerCapabilities(p.name).then((caps) => {
+        capsCache.set(p.name, caps || {});
+        capsVersion++;
+        renderPrintersGrid(lastGridPrinters);
+      }).catch(() => { capsCache.set(p.name, {}); });
+    }
+  }
+
   function renderPrintersGrid(printers) {
     const grid = document.getElementById("printersGrid");
+    lastGridPrinters = printers;
     // Same skip-if-identical guard as the jobs table: an unchanged
     // printer set leaves the cards (and any open paper-forms box) alone.
-    const signature = currentLang + "|" + JSON.stringify(printers.map((p) =>
-      [p.name, p.kind, p.is_default, p.status, p.port, p.driver]));
+    const signature = currentLang + "|" + capsVersion + "|" + JSON.stringify(printers.map((p) =>
+      [p.name, p.kind, p.is_default, p.status, p.port, p.driver, p.protocol, p.printer_class]));
     if (signature === lastPrintersSignature) return;
     lastPrintersSignature = signature;
     const scrollY = window.scrollY;
@@ -1796,8 +1888,8 @@
             <div>
               <div class="printer-name">${escapeHtml(p.name)}</div>
               <div style="display:flex;gap:0.35rem;margin-top:0.25rem;flex-wrap:wrap;">
-                <span class="badge badge-neutral">${escapeHtml(String(p.kind || "local").toUpperCase())}</span>
-                ${p.is_default ? `<span class="badge badge-info">${currentLang === "ar" ? "افتراضية" : "DEFAULT"}</span>` : ""}
+                <span class="badge badge-info">${escapeHtml(ccClassLabel(p))}</span>
+                ${p.is_default ? `<span class="badge badge-neutral">${currentLang === "ar" ? "الأساسية" : "DEFAULT"}</span>` : ""}
               </div>
             </div>
           </div>
@@ -1815,17 +1907,22 @@
           </div>
         </div>
 
+        ${capsChipsHtml(p)}
+
         <div id="forms-box-${idx}" class="hidden" style="font-size:0.76rem;background:var(--bg-subtle);padding:0.6rem;border-radius:8px;max-height:110px;overflow:auto;"></div>
 
         <div class="printer-actions">
           <button class="btn btn-sm btn-primary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="pdf-a4">
             ${I18N[currentLang].qt_pdf}
           </button>
-          ${p.kind !== "virtual" ? `<button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="thermal-80mm">
+          ${ccProtocol(p) === "escpos" ? `<button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="thermal-80mm">
             ${I18N[currentLang].qt_escpos}
           </button>` : ""}
-          ${p.kind !== "virtual" ? `<button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="zpl-label">
+          ${ccProtocol(p) === "zpl" ? `<button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="zpl-label">
             ${I18N[currentLang].qt_zpl}
+          </button>` : ""}
+          ${ccProtocol(p) === "tspl" ? `<button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="tspl-label">
+            ${I18N[currentLang].qt_tspl}
           </button>` : ""}
           <button class="btn btn-sm btn-secondary" data-action="inspect-forms" data-printer="${escapeHtml(p.name)}" data-idx="${idx}">
             ${currentLang === "ar" ? "مقاسات الورق" : "Paper Forms"}
@@ -1833,6 +1930,7 @@
         </div>
       </div>
     `).join("");
+    ensureCaps(printers);
     if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
   }
 
@@ -1929,12 +2027,53 @@
     onTestPrinterChange();
   }
 
+  // The calibration lab offers only the kinds the SELECTED printer
+  // actually speaks (owner, 2026-11-04): a document calibration for
+  // everyone, raw calibrations strictly for the matching protocol.
+  // Direct network/URI targets keep the full list — a raw endpoint
+  // is the operator's explicit choice and cannot be probed here.
+  const TEST_KIND_I18N = {
+    "pdf-a4": "opt_calibration_pdf",
+    "thermal-80mm": "opt_cal_thermal80",
+    "thermal-58mm": "opt_cal_thermal58",
+    "zpl-label": "opt_cal_zpl",
+    "tspl-label": "opt_cal_tspl",
+  };
+  function allowedTestKinds() {
+    const all = Object.keys(TEST_KIND_I18N);
+    const sel = document.getElementById("customPrinterSelect");
+    if (!sel || !sel.value || sel.value === "__uri__" || sel.value.includes("://")) return all;
+    const list = (overviewState && overviewState.printers) || [];
+    const p = list.find((x) => x.name === sel.value);
+    if (!p) return all;
+    const proto = ccProtocol(p);
+    const kinds = ["pdf-a4"];
+    if (proto === "escpos") kinds.push("thermal-80mm", "thermal-58mm");
+    else if (proto === "zpl") kinds.push("zpl-label");
+    else if (proto === "tspl") kinds.push("tspl-label");
+    return kinds;
+  }
+  function rebuildTestKindOptions() {
+    const kindSel = document.getElementById("customTestKind");
+    if (!kindSel) return;
+    const allowed = allowedTestKinds();
+    const sig = allowed.join(",") + "|" + currentLang;
+    if (kindSel.dataset.kindsSignature === sig) { updateCalWarning(); return; }
+    kindSel.dataset.kindsSignature = sig;
+    const prev = kindSel.value;
+    kindSel.innerHTML = allowed
+      .map((k) => `<option value="${k}">${escapeHtml(I18N[currentLang][TEST_KIND_I18N[k]] || k)}</option>`)
+      .join("");
+    kindSel.value = allowed.includes(prev) ? prev : "pdf-a4";
+    updateCalWarning();
+  }
+
   function onTestPrinterChange() {
     const sel = document.getElementById("customPrinterSelect");
     const uri = document.getElementById("customPrinterUri");
     if (sel && uri) uri.classList.toggle("hidden", sel.value !== "__uri__");
     validateCustomPrinterUriField();
-    updateCalWarning();
+    rebuildTestKindOptions();
   }
 
   function selectedTestPrinter() {

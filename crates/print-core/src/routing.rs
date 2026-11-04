@@ -75,6 +75,8 @@ mod tests {
             kind: PrinterKind::Local,
             status,
             is_default: false,
+            protocol: "gdi".into(),
+            printer_class: "office".into(),
         }
     }
 

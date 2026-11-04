@@ -686,18 +686,38 @@ pub fn run_test_print(
     if raw_kind && !printer.contains("://") {
         // Fail closed: a raw calibration is refused whenever the
         // target's kind cannot be positively verified as physical.
-        let verified_physical = match print_win::discover_printers() {
-            Ok(printers) => match printers.iter().find(|p| p.name == printer.trim()) {
-                Some(found) => found.kind != PrinterKind::Virtual,
-                None => false,
-            },
-            Err(_) => false,
-        };
+        let discovered = print_win::discover_printers().unwrap_or_default();
+        let found = discovered.iter().find(|p| p.name == printer.trim());
+        let verified_physical =
+            matches!(found, Some(f) if f.kind != PrinterKind::Virtual);
         if !verified_physical {
             return Err(
                 "This calibration sends raw printer language (ESC/POS / ZPL / TSPL). It was refused because the target printer could not be verified as a physical printer (a virtual PDF/XPS writer would turn it into a corrupt file). Choose a physical printer from the discovered list."
                     .to_string(),
             );
+        }
+        // The language must be the one this printer actually
+        // speaks (owner, 2026-11-04): an ESC/POS calibration to a
+        // ZPL label printer, or a ZPL label to an office printer,
+        // is refused up front instead of printing garbage. The
+        // Control Center never offers the mismatch; this is the
+        // same rule enforced at the command for stale pages.
+        if let Some(f) = found {
+            let wanted = match kind.as_str() {
+                "thermal-80mm" | "thermal-58mm" | "escpos" => "escpos",
+                "zpl-label" | "zpl" => "zpl",
+                "tspl-label" | "tspl" => "tspl",
+                _ => "",
+            };
+            if !wanted.is_empty() && f.protocol != wanted {
+                return Err(format!(
+                    "This calibration sends {} printer language, but \"{}\" is a {} printer ({}). It was refused so the printer never receives a language it cannot print. Choose the calibration that matches this printer.",
+                    wanted.to_uppercase(),
+                    f.name,
+                    f.printer_class,
+                    f.protocol.to_uppercase()
+                ));
+            }
         }
     }
     let key = format!(
