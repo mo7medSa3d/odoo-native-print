@@ -37,16 +37,26 @@ pub enum ImageError {
 /// Printable width in dots at the standard 203 dpi receipt density:
 /// - `58mm` (or `57mm`/`58 mm` roll) -> 48 mm printable = 384 dots
 /// - `80mm` (or `72mm`/`80 mm` roll) -> 72 mm printable = 576 dots
-pub fn receipt_dots_for_paper(paper: &str) -> u32 {
+pub fn receipt_dots_for_paper(paper: &str) -> Option<u32> {
     let lower = paper.trim().to_ascii_lowercase();
     if lower.starts_with("58")
         || lower.contains("58mm")
         || lower.contains("58 mm")
         || lower.starts_with("57")
     {
-        384
+        Some(384)
+    } else if lower.starts_with("112") || lower.contains("112mm") || lower.contains("112 mm") {
+        Some(832)
+    } else if lower.starts_with("80")
+        || lower.contains("80mm")
+        || lower.contains("80 mm")
+        || lower.starts_with("72")
+    {
+        Some(576)
     } else {
-        576 // Legacy fallback for old queued jobs only.
+        // Unknown paper names are refused, never silently treated as
+        // 80 mm (a wrong-width receipt is clipped or scaled).
+        None
     }
 }
 
@@ -209,7 +219,9 @@ pub fn scale_to_width(img: &Canvas, target_width: u32) -> Canvas {
 /// (raster + feed + partial cut), sized for the profile's paper.
 pub fn receipt_png_to_escpos(png_bytes: &[u8], paper: &str) -> Result<Vec<u8>, ImageError> {
     let img = decode_png(png_bytes)?;
-    let scaled = scale_to_width(&img, receipt_dots_for_paper(paper));
+    let dots = receipt_dots_for_paper(paper)
+        .ok_or_else(|| ImageError::Decode(format!("unknown receipt paper {paper:?}")))?;
+    let scaled = scale_to_width(&img, dots);
     let mono = scaled.to_mono(RECEIPT_THRESHOLD);
     let stream = EscPos::new().raster(&mono).feed_lines(3).cut_partial();
     Ok(stream.bytes().to_vec())
@@ -366,11 +378,12 @@ mod tests {
 
     #[test]
     fn paper_widths() {
-        assert_eq!(receipt_dots_for_paper("80mm"), 576);
-        assert_eq!(receipt_dots_for_paper("80mm Roll"), 576);
-        assert_eq!(receipt_dots_for_paper("58mm"), 384);
-        assert_eq!(receipt_dots_for_paper("58 mm Roll"), 384);
-        assert_eq!(receipt_dots_for_paper("58x3276mm"), 384);
-        assert_eq!(receipt_dots_for_paper(""), 576);
+        assert_eq!(receipt_dots_for_paper("80mm"), Some(576));
+        assert_eq!(receipt_dots_for_paper("80mm Roll"), Some(576));
+        assert_eq!(receipt_dots_for_paper("58mm"), Some(384));
+        assert_eq!(receipt_dots_for_paper("58 mm Roll"), Some(384));
+        assert_eq!(receipt_dots_for_paper("58x3276mm"), Some(384));
+        assert_eq!(receipt_dots_for_paper(""), None);
+        assert_eq!(receipt_dots_for_paper("112mm"), Some(832));
     }
 }

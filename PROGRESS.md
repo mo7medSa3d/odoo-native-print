@@ -319,3 +319,77 @@ Full report: `docs/engineering-mission-2026-11-03.md`. Headlines:
   (IPP_REQUIRES_PDF) and preflights with is_blocked() +
   blocking_reasons() (media-empty/jam/door/toner-empty/...), the
   swap deferred from the engineering mission.
+
+## 2026-11-04 — Root-cause sweep (app 1.4.7, addon 19.0.2.11.0)
+- Trigger: owner field reports on 1.4.6/.10.0 — mangled systray panel,
+  red "A css error occured" banner, remaining white-page fear. Four
+  parallel read-only audits (Rust core, bridge/watchdog, Control
+  Center JS, addon) + live reproduction before any fix.
+- ROOT CAUSE of the CSS banner + mangled UI: the .10.0 systray SCSS
+  used `max-width: min(92vw, 360px)`; Odoo's libsass rejects mixed
+  units in min() and fails the ENTIRE backend CSS bundle, so Odoo
+  serves fallback error CSS. Reproduced locally (error bundle fetched
+  from a fresh install, our file named in it). Fixed libsass-safe
+  (width: 320px; max-width: 92vw). Verified live after the fix: the
+  compiled bundle is 856 KB of real CSS, zero error text, our
+  selectors present. Lesson recorded: Odoo suites never compile asset
+  bundles — bundle fetches are now a release gate.
+- Arabic catalog rebuilt from a real Odoo POT export (was: 60 of 124
+  entries readable, 65 occurrence-less entries silently dropped by
+  the importer). Now 109 entries, 100% translated, every entry with
+  occurrences; webclient translations 200; job-log model terms
+  (groups, filters, field labels, sums) render in Arabic after a
+  proper upgrade. TestTranslationFiles extended: module comment +
+  occurrence per entry + every JS/Python literal covered.
+- App hardening from the audits: crafted-PDF page-count OOM capped
+  before allocation; worker loop panic-isolated with visible stderr
+  logging + 30-day failed-payload retention purge; IPP honours
+  duplex/paper/color or fails loudly (IPP_OPTION_UNSUPPORTED), IPP
+  response read capped at 1 MiB; run_test_print is local-only
+  (Rust check + new allow-local-tools permission + facade gate) and
+  fails closed when a calibration target can't be verified physical;
+  stored job-options corruption is a loud error, not silent GDI
+  defaults; unknown receipt paper and capability failures during
+  media verification fail loudly; empty-discovery fallback targets
+  are name-classified so the raw-to-virtual guard always applies;
+  dead server-side printer-profile code removed from print-core.
+- White-page class: new local boot page probes the origin
+  (probe_origin, TCP) and only then navigates — a down server shows
+  a styled Arabic retry screen instead of a WebView2 error page.
+  Watchdog arms immediately at init (not DOMContentLoaded), checks
+  content (not just the shell), re-arms on SPA route changes, stays
+  silent over the login page after session expiry, and its card
+  explains the server-translations failure in Arabic when tapped.
+  HTTP warning strip docked at the bottom (no longer covers Odoo's
+  menu bar). Bridge installs no facade in subframes.
+- Owner request: browser-style back/forward/reload pill injected
+  into Odoo pages (pure bridge script — the native child-webview
+  toolbar stays removed per the earlier CI decision).
+- Control Center per owner layout spec: app bar full viewport width
+  (surface, ink text; the layered gradient+glass overrides and the
+  nonexistent --bg-main reference are gone), section tabs in their
+  own separate full-width strip with the tab row centered in the
+  1360px column, content column unchanged. One color system (brand
+  #0953de primary; purple-tinted shadows/overlays normalized).
+  Plus the CC audit fixes: confirm dialog settles orphaned prompts,
+  focus trap + restore, localized failure toasts (raw errors to
+  console only), env-check explains page errors (translations ->
+  server remedy), state/printer badges localized, save buttons lock
+  together, test buttons lock in flight, calibration kind no longer
+  freezes printer refreshes, diagnostics generates once per visit
+  and locks copy/download while generating, Enter submits settings,
+  language/theme persist, stale data dims on failed polls, jobs
+  signature includes diag_id.
+- Addon small fixes: _safe_int clamped (int4 overflow -> 500);
+  watcher calls all .catch-guarded; report handler verifies %PDF
+  magic before queueing (session-expiry HTML falls back to the
+  standard download); POS reprint rotates the idempotency record
+  when the enqueue itself fails; systray shows an update notice
+  when the desktop bridge is older than 1.4.7.
+- Verification: workspace 111/111, print-win 10/10, gates green
+  (24 commands, remote reaches 12, admin local), fmt clean, bridge
+  jsdom 14/14 + tap 7/7, CC jsdom DOM clean + behavior 14/14, repo
+  node tests 9/9 + live-target + pos-keys pass, Odoo suite 18/18 on
+  fresh install AND on upgrade from 19.0.2.10.0, live bundle +
+  translations + model-term checks above. Windows CI + real-printer
+  gates remain owner-side as before.

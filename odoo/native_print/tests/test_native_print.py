@@ -116,3 +116,82 @@ class TestTranslationFiles(TransactionCase):
             "native_print", "ar_001"
         )
         self.assertTrue(python_terms)
+
+    def test_arabic_catalog_hygiene_and_code_coverage(self):
+        """Every catalog entry must be importable (module comment +
+        at least one occurrence: entries without occurrences are
+        silently dropped by Odoo's importer and their strings fall
+        back to English), and every translatable literal in the
+        module's JS/Python sources must exist in the catalog."""
+        import ast
+        import os
+        import re
+
+        from odoo.modules.module import get_module_path
+
+        root = get_module_path("native_print")
+        po_path = os.path.join(root, "i18n", "ar.po")
+        with open(po_path, encoding="utf-8") as fh:
+            text = fh.read()
+
+        def po_strings(block, keyword):
+            parts = []
+            lines = block.splitlines()
+            for idx, line in enumerate(lines):
+                if line.startswith(keyword + " "):
+                    parts.append(ast.literal_eval(line[len(keyword) + 1:].strip()))
+                    for nxt in lines[idx + 1:]:
+                        if nxt.startswith('"'):
+                            parts.append(ast.literal_eval(nxt.strip()))
+                        else:
+                            break
+                    break
+            return "".join(parts)
+
+        msgids = set()
+        for block in text.split("\n\n"):
+            if 'msgid "' not in block:
+                continue
+            msgid = po_strings(block, "msgid")
+            if not msgid:
+                continue  # header
+            self.assertIn(
+                "#. module: native_print", block,
+                f"catalog entry without module comment: {msgid!r}",
+            )
+            self.assertTrue(
+                any(l.startswith("#:") for l in block.splitlines()),
+                f"catalog entry without occurrences (importer drops it): {msgid!r}",
+            )
+            msgids.add(msgid)
+        self.assertGreaterEqual(len(msgids), 100)
+
+        # One call may span several adjacent literals (implicit
+        # concatenation in Python): capture the whole argument and
+        # join its fragments, like Odoo's own extractor does.
+        call_re = re.compile(r"_t?\(\s*((?:(['\"])((?:\\.|(?!\2).)*)\2\s*)+)")
+        frag_re = re.compile(r"(['\"])((?:\\.|(?!\1).)*)\1")
+        for sub, pattern in (
+            (os.path.join("static", "src", "js"), "*.js"),
+            ("controllers", "*.py"),
+            ("models", "*.py"),
+        ):
+            folder = os.path.join(root, sub)
+            if not os.path.isdir(folder):
+                continue
+            for name in sorted(os.listdir(folder)):
+                if not name.endswith(pattern[1:]):
+                    continue
+                with open(os.path.join(folder, name), encoding="utf-8") as fh:
+                    src = fh.read()
+                for call in call_re.finditer(src):
+                    # ast.literal_eval on each re-quoted fragment
+                    # decodes the escapes without mangling UTF-8 text.
+                    literal = "".join(
+                        ast.literal_eval(q + raw + q)
+                        for q, raw in frag_re.findall(call.group(1))
+                    )
+                    self.assertIn(
+                        literal, msgids,
+                        f"{name}: translatable literal missing from ar.po: {literal!r}",
+                    )

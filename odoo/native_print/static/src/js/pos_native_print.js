@@ -162,6 +162,10 @@ async function elementToPngBytes(element, scale = 2) {
     return Array.from(new Uint8Array(await blob.arrayBuffer()));
 }
 
+function clearPosReceiptKey(safeRef) {
+    try { sessionStorage.removeItem(`np.pos.key.${safeRef}`); } catch (_err) { /* ignore */ }
+}
+
 function posReceiptKey(safeRef) {
     // Idempotency with intent: resubmitting the SAME order within a
     // few seconds is the same print (double-fire, POS retry) and must
@@ -323,18 +327,26 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
     const bytes = await elementToPngBytes(element, 2);
     const idempotencyKey = posReceiptKey(safeRef);
     const rule = target.rule;
-    await bridge.printImage({
-        idempotencyKey,
-        reportName: POS_RECEIPT_SOURCE,
-        printerPattern: rule.printer_pattern,
-        mode: rule.mode || "escpos",
-        // The driver-reported roll width is resolved by the native worker.
-        // Never guess 58mm or 80mm for a kitchen/POS receipt.
-        mediaRollWidthMm:
-            (rule.media && rule.media.roll_width_mm) || undefined,
-        copies: rule.copies || 1,
-        bytes,
-    });
+    try {
+        await bridge.printImage({
+            idempotencyKey,
+            reportName: POS_RECEIPT_SOURCE,
+            printerPattern: rule.printer_pattern,
+            mode: rule.mode || "escpos",
+            // The driver-reported roll width is resolved by the native worker.
+            // Never guess 58mm or 80mm for a kitchen/POS receipt.
+            mediaRollWidthMm:
+                (rule.media && rule.media.roll_width_mm) || undefined,
+            copies: rule.copies || 1,
+            bytes,
+        });
+    } catch (err) {
+        // The enqueue itself failed: rotate the idempotency record so
+        // an immediate deliberate reprint is a fresh attempt instead
+        // of deduping into the dead job inside the 15 s window.
+        clearPosReceiptKey(safeRef);
+        throw err;
+    }
     rpc(
         "/native_print/job_status",
         {
@@ -353,7 +365,7 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
     watchPosJob(
         bridge, idempotencyKey, rule, bytes.length, safeRef,
         target.printer.name, notificationEnv(contextObj),
-    );
+    ).catch(() => {});
     if (order) {
         order._printed = true;
     }

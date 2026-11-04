@@ -1,57 +1,10 @@
-//! Job routing: given the server's rules and the printers actually
-//! present on this device, decide where a job goes. This mirrors the
-//! addon's server-side resolution (the server is the authority); the
-//! client-side copy exists so the app can also route locally queued
-//! jobs (attachments, reprints) with the same semantics.
+//! Job routing helpers: printer-pattern matching and picking the
+//! live target printer from the ones actually present on this
+//! device. (The earlier server-side rule system was removed with
+//! the live-printer model: printing resolves on this PC at click
+//! time; the server keeps only the job log.)
 
 use crate::printer::{needs_intervention, PrinterInfo, PrinterStatus};
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PrintRule {
-    /// None means "any report".
-    pub report_name: Option<String>,
-    /// None means "any user".
-    pub group: Option<String>,
-    pub company: String,
-    pub profile_name: String,
-    pub printer_pattern: String,
-    pub priority: i64,
-}
-
-/// Resolve the winning rule with the same semantics as the server
-/// resolver (the server is the authority): an exact report match
-/// outranks the catch-all regardless of priority; priority decides
-/// within a tier; ties keep the earlier rule (stable). Company must
-/// match; a group-scoped rule applies only to group members.
-pub fn resolve_rule<'a>(
-    rules: &'a [PrintRule],
-    report_name: &str,
-    user_groups: &[String],
-    company: &str,
-) -> Option<&'a PrintRule> {
-    rules
-        .iter()
-        .filter(|r| r.company == company)
-        .filter(|r| r.report_name.as_deref().is_none_or(|n| n == report_name))
-        .filter(|r| {
-            r.group
-                .as_deref()
-                .is_none_or(|g| user_groups.iter().any(|u| u == g))
-        })
-        .enumerate()
-        .max_by(|(ia, a), (ib, b)| {
-            let tier = |r: &PrintRule| if r.report_name.is_some() { 1 } else { 0 };
-            tier(a)
-                .cmp(&tier(b))
-                .then(a.priority.cmp(&b.priority))
-                // Stable ties: the earlier rule wins, so on equal keys
-                // the element with the smaller index must compare
-                // greater for max_by to keep it.
-                .then(ib.cmp(ia))
-        })
-        .map(|(_, r)| r)
-}
 
 /// Printer pattern matching: `*` is the only wildcard (any run of
 /// characters). Without `*` the match is exact. Case-insensitive.
@@ -114,16 +67,6 @@ mod tests {
     use super::*;
     use crate::printer::PrinterKind;
 
-    fn rule(report: Option<&str>, group: Option<&str>, prio: i64, profile: &str) -> PrintRule {
-        PrintRule {
-            report_name: report.map(|s| s.to_string()),
-            group: group.map(|s| s.to_string()),
-            company: "Acme".into(),
-            profile_name: profile.into(),
-            printer_pattern: "HP*".into(),
-            priority: prio,
-        }
-    }
     fn printer(name: &str, status: PrinterStatus) -> PrinterInfo {
         PrinterInfo {
             name: name.into(),
@@ -135,40 +78,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn rule_resolution_priority_and_filters() {
-        let rules = vec![
-            rule(None, None, 1, "catch-all"),
-            rule(Some("sale.report"), None, 5, "sales"),
-            rule(Some("sale.report"), Some("sales_team"), 50, "sales-vip"),
-            rule(Some("stock.label"), None, 99, "labels"),
-        ];
-        let groups = vec!["sales_team".to_string()];
-        // VIP rule wins for a sales team member printing a sale report.
-        let r = resolve_rule(&rules, "sale.report", &groups, "Acme").unwrap();
-        assert_eq!(r.profile_name, "sales-vip");
-        // Without the group, the plain sales rule wins.
-        let r = resolve_rule(&rules, "sale.report", &[], "Acme").unwrap();
-        assert_eq!(r.profile_name, "sales");
-        // Unknown report falls to the catch-all; wrong company gets nothing.
-        let r = resolve_rule(&rules, "account.move", &groups, "Acme").unwrap();
-        assert_eq!(r.profile_name, "catch-all");
-        assert!(resolve_rule(&rules, "sale.report", &groups, "Other").is_none());
-    }
-    #[test]
-    fn exact_report_beats_catch_all_priority_and_ties_are_stable() {
-        // A high-priority catch-all must not shadow an exact rule
-        // (server semantics), and equal keys keep the earlier rule.
-        let rules = vec![
-            rule(None, None, 100, "greedy-catch-all"),
-            rule(Some("sale.report"), None, 1, "exact"),
-            rule(Some("sale.report"), None, 1, "exact-later"),
-        ];
-        let r = resolve_rule(&rules, "sale.report", &[], "Acme").unwrap();
-        assert_eq!(r.profile_name, "exact");
-        let r = resolve_rule(&rules, "other.report", &[], "Acme").unwrap();
-        assert_eq!(r.profile_name, "greedy-catch-all");
-    }
     #[test]
     fn pattern_matching() {
         assert!(printer_pattern_matches("HP LaserJet", "hp laserjet"));

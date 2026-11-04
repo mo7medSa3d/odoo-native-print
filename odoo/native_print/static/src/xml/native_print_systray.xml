@@ -40,6 +40,12 @@
                     <span t-esc="labels.browserNote"/>
                 </div>
 
+                <!-- Desktop app update notice (bridge older than this panel) -->
+                <div t-if="state.appOutdated" class="np-info-box" dir="auto">
+                    <i class="fa fa-arrow-circle-up np-info-icon"/>
+                    <span t-esc="labels.updateApp"/>
+                </div>
+
                 <!-- App mode: this PC's printers summary -->
                 <div t-if="state.bridgeActive" class="np-info-box np-info-rows">
                     <div class="np-info-row">

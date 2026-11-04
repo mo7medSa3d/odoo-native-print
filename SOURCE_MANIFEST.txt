@@ -1,6 +1,5 @@
 Yaseir Print — source manifest
-App 1.4.2 / Odoo addon 19.0.2.8.0 — engineering audit repair cycle, 2026-11-04
-Files (excluding target/, node_modules/, __pycache__/):
+App 1.4.7 / Odoo addon 19.0.2.11.0 — root-cause sweep (CSS bundle fix, catalog rebuild, hardening, CC redesign), 2026-11-04
 
 .github/workflows/ci.yml
 .github/workflows/odoo.yml
@@ -19,6 +18,7 @@ app/README.md
 app/deploy/admx/OdooNativePrint.admx
 app/deploy/admx/en-US/OdooNativePrint.adml
 app/dist/app-icon.png
+app/dist/boot.html
 app/dist/fonts/thmanyahsans-Black.otf
 app/dist/fonts/thmanyahsans-Bold.otf
 app/dist/fonts/thmanyahsans-Light.otf
@@ -54,7 +54,6 @@ crates/print-core/src/lib.rs
 crates/print-core/src/page.rs
 crates/print-core/src/paper.rs
 crates/print-core/src/printer.rs
-crates/print-core/src/profiles.rs
 crates/print-core/src/queue.rs
 crates/print-core/src/routing.rs
 crates/print-core/src/security.rs

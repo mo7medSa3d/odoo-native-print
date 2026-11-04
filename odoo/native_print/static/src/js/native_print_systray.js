@@ -6,6 +6,23 @@ import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
 import { getSelectedPrinter, setSelectedPrinter } from "./native_print_client";
 
+// The oldest desktop-app (bridge) version this panel is built for.
+// Older apps still print, but the panel asks for an update so field
+// issues fixed in newer apps do not linger unnoticed.
+const MIN_BRIDGE_VERSION = "1.4.7";
+function bridgeIsOutdated(version) {
+    if (!version || typeof version !== "string") return false;
+    const have = version.split(".").map((x) => parseInt(x, 10) || 0);
+    const want = MIN_BRIDGE_VERSION.split(".").map((x) => parseInt(x, 10) || 0);
+    for (let i = 0; i < Math.max(have.length, want.length); i++) {
+        const h = have[i] || 0;
+        const w = want[i] || 0;
+        if (h < w) return true;
+        if (h > w) return false;
+    }
+    return false;
+}
+
 export class NativePrintSystray extends Component {
     static template = "native_print.SystrayItem";
     static props = {};
@@ -16,6 +33,7 @@ export class NativePrintSystray extends Component {
         this.state = useState({
             isOpen: false,
             bridgeActive: Boolean(window.__NATIVE_PRINT__),
+            appOutdated: false,
             printersCount: 0,
             defaultPrinter: null,
             discoveredPrinters: [],
@@ -45,6 +63,7 @@ export class NativePrintSystray extends Component {
             jobsLog: _t("Print Jobs Log"),
             testPrint: _t("Send Compatible Printer Test"),
             controlCenter: _t("Open Native Control Center"),
+            updateApp: _t("A newer desktop app is available. Update Yaseir Print for the latest fixes."),
         };
 
         this._onOutsideClick = () => {
@@ -112,6 +131,7 @@ export class NativePrintSystray extends Component {
     async refreshStats() {
         const bridge = window.__NATIVE_PRINT__ || null;
         this.state.bridgeActive = Boolean(bridge);
+        this.state.appOutdated = bridgeIsOutdated(bridge && bridge.version);
         if (bridge) {
             await this.syncDiscoveredPrinters(false);
         }

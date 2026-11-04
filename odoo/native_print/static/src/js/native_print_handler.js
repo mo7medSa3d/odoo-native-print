@@ -268,7 +268,7 @@ async function handleReportSubmission(action, options, env, bridge) {
                     pages: 1,
                 },
                 env,
-            );
+            ).catch(() => {});
         } catch (error) {
             // Logging the failure is best-effort: if this rpc threw,
             // the exception would escape the fallback path, the user
@@ -302,6 +302,12 @@ async function handleReportSubmission(action, options, env, bridge) {
         bytes = Array.from(new Uint8Array(await response.arrayBuffer()));
     } catch (_fetchError) {
         // Same fallback contract as the text branch. (Audit F1.)
+        return undefined;
+    }
+    // A 200 response is not necessarily a PDF: an expired session
+    // answers with the login page's HTML. Never queue HTML as a
+    // document; fall back to the standard download instead.
+    if (!(bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46)) {
         return undefined;
     }
     const idempotencyKey =
@@ -351,7 +357,7 @@ async function handleReportSubmission(action, options, env, bridge) {
                 pages: 1,
             },
             env,
-        );
+        ).catch(() => {});
     } catch (error) {
         // Best-effort like the text path: never let failure logging
         // break the fallback download (see the qweb-text branch).

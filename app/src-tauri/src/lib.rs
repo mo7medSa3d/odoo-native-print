@@ -47,6 +47,13 @@ const BRIDGE_JS: &str = r#"
         window.__NP_ERROR_TIMER__ = null;
         npReportEnvironment();
       }, 300);
+      // If the boot card is already on screen, re-render it so the
+      // newest (often most diagnostic) error is what the user sees.
+      try {
+        if (document.getElementById("np-boot-overlay")) {
+          npBootOverlay("problem", npProbeEnvironment());
+        }
+      } catch (e) { /* ignore */ }
     } catch (e) { /* the tap must never break the page */ }
   }
   window.addEventListener("error", function (ev) {
@@ -61,6 +68,12 @@ const BRIDGE_JS: &str = r#"
     var r = ev && ev.reason;
     npPushError("promise", (r && (r.message || r)) || "unhandled rejection");
   });
+  // Subframes get no facade and no watchdog: a third-party frame
+  // embedded in the Odoo page must not inherit the top page's print
+  // rights or UI overlays (audit B2). The error tap above stays in
+  // every frame; it is read-only diagnostics.
+  var __npIsTop = false;
+  try { __npIsTop = window === window.top; } catch (e) { __npIsTop = true; }
   const __npFacade = {
     version: "__APP_VERSION__",
     printPdf: function (args) {
@@ -93,6 +106,11 @@ const BRIDGE_JS: &str = r#"
       return invoke("printer_capabilities", { printer: printer });
     },
     runTestPrint: function (printer, kind, paper) {
+      // Test prints are a Control Center feature (Rust enforces
+      // local-only too): never expose them to remote Odoo pages.
+      if (!npIsLocalPage()) {
+        return Promise.reject(new Error("runTestPrint is only available in the Control Center"));
+      }
       return invoke("run_test_print", { printer: printer, kind: kind, paper: paper || null });
     },
     retryJob: function (jobId) {
@@ -131,14 +149,16 @@ const BRIDGE_JS: &str = r#"
   // replace or wrap it to intercept payloads or fake results. The
   // fallback assignment covers a page that somehow pre-defined the
   // name as configurable. (Audit B-6.)
-  try {
-    Object.defineProperty(window, "__NATIVE_PRINT__", {
-      value: __npFacade,
-      writable: false,
-      configurable: false,
-    });
-  } catch (e) {
-    window.__NATIVE_PRINT__ = __npFacade;
+  if (__npIsTop) {
+    try {
+      Object.defineProperty(window, "__NATIVE_PRINT__", {
+        value: __npFacade,
+        writable: false,
+        configurable: false,
+      });
+    } catch (e) {
+      window.__NATIVE_PRINT__ = __npFacade;
+    }
   }
 
   // ------------------------------------------------------------------
@@ -166,7 +186,7 @@ const BRIDGE_JS: &str = r#"
       if (document.getElementById('np-http-warning')) { return; }
       var bar = document.createElement('div');
       bar.id = 'np-http-warning';
-      bar.setAttribute('style', 'position:fixed;top:0;left:0;right:0;z-index:2147483646;background:#8a6d00;color:#fff;font:13px/1.5 system-ui,sans-serif;padding:6px 12px;display:flex;justify-content:space-between;align-items:center;direction:rtl;');
+      bar.setAttribute('style', 'position:fixed;bottom:0;left:0;right:0;z-index:2147483646;background:#8a6d00;color:#fff;font:13px/1.5 system-ui,sans-serif;padding:6px 12px;display:flex;justify-content:space-between;align-items:center;direction:rtl;');
       var text = document.createElement('span');
       text.textContent = 'تنبيه: الاتصال بخادم Odoo غير مشفّر (HTTP) — بيانات الدخول والمستندات تمر دون تشفير على الشبكة.';
       var btn = document.createElement('button');
@@ -266,6 +286,22 @@ const BRIDGE_JS: &str = r#"
       rows.push(row('سياق آمن (HTTPS/IP)', !!env.secureContext));
       return rows.join("");
     }
+    function serverHint() {
+      var errs = [];
+      try { errs = window.__NP_ERRORS__ || []; } catch (e) {}
+      var isTranslations = false;
+      for (var i = 0; i < errs.length; i++) {
+        if (/fetching translations/i.test(errs[i])) { isTranslations = true; break; }
+      }
+      var origin = "";
+      try { origin = window.location.origin; } catch (e) {}
+      var esc = function (x) { return String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;"); };
+      var html = '<div style="font-size:0.85rem;color:#5b6472;margin-bottom:0.8rem;">الخادم المستهدف: <span dir="ltr" style="font-weight:600;">' + esc(origin) + '</span></div>';
+      if (isTranslations) {
+        html += '<div style="background:#fdf3e3;border:1px solid #f0d9a8;border-radius:12px;padding:0.7rem 0.9rem;font-size:0.85rem;color:#6b5410;margin-bottom:0.8rem;">السبب المرجّح: سيرفر Odoo رجّع خطأ في ملف الترجمة — المشكلة في السيرفر مش في الجهاز ده. الحل: حدّث إضافة الطباعة (native_print) على السيرفر لآخر إصدار وأعد تشغيل Odoo.</div>';
+      }
+      return html;
+    }
     function errorRows() {
       var errs = [];
       try { errs = window.__NP_ERRORS__ || []; } catch (e) {}
@@ -281,6 +317,7 @@ const BRIDGE_JS: &str = r#"
     el.innerHTML = '<div style="max-width:460px;width:92vw;padding:1.4rem;background:#ffffff;border:1px solid #e3e8f0;border-radius:20px;box-shadow:0 12px 40px rgba(16,18,25,0.16);">' +
       '<div style="font-size:1.15rem;font-weight:800;color:#101219;margin-bottom:0.4rem;">واجهة Odoo لم تكتمل</div>' +
       '<div style="color:#5b6472;font-size:0.9rem;margin-bottom:1rem;">الصفحة وصلت لكن تطبيق Odoo لم يبدأ. دي نتيجة فحص بيئة العرض على الجهاز ده:</div>' +
+      serverHint() +
       facts() +
       errorRows() +
       '<div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:1.2rem;">' +
@@ -302,6 +339,50 @@ const BRIDGE_JS: &str = r#"
       window.__NATIVE_PRINT__.openControlCenter().catch(function () {});
     });
   }
+  function npContentReady() {
+    // Second stage: the shell alone is not a boot — the initial
+    // action must render content, otherwise the user is staring at
+    // an empty (white) content area under a live shell. POS renders
+    // outside the action manager; its shell is accepted as before.
+    try {
+      if ((window.location.pathname || "").indexOf("/pos/") !== -1) return true;
+    } catch (e) {}
+    var am = document.querySelector(".o_action_manager");
+    if (am && am.children.length > 0) return true;
+    return !!document.querySelector(".o-mail-Discuss, .o_mail_discuss, .o_kanban_view, .o_list_view, .o_form_view, .o_pivot_view, .o_graph_view, .o_calendar_view");
+  }
+  // Browser-style navigation pill (back / forward / reload),
+  // injected into remote Odoo pages: the app window has no browser
+  // chrome, and the owner asked for visible browser-like controls.
+  // Pure page script — no native toolbar webview involved.
+  function npNavPill() {
+    var build = function () {
+      if (!document.body) return;
+      if (document.getElementById("np-nav-pill")) return;
+      var rtl = false;
+      try { rtl = (document.documentElement.getAttribute("dir") || document.dir) === "rtl"; } catch (e) {}
+      var style = document.createElement("style");
+      style.textContent = '#np-nav-pill{position:fixed;top:54px;inset-inline-start:10px;z-index:2147483000;display:flex;gap:2px;padding:3px;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid rgba(15,23,42,.09);border-radius:999px;box-shadow:0 6px 20px rgba(16,18,25,.14);opacity:.92;transition:opacity .15s} #np-nav-pill:hover{opacity:1} #np-nav-pill button{width:30px;height:30px;border:0;border-radius:50%;background:transparent;color:#23272f;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0} #np-nav-pill button:hover{background:#eef1f6} #np-nav-pill svg{width:17px;height:17px}';
+      document.head.appendChild(style);
+      var pill = document.createElement("div");
+      pill.id = "np-nav-pill";
+      function btn(title, path, flip, fn) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.title = title;
+        b.setAttribute("aria-label", title);
+        b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"' + (flip ? ' style="transform:scaleX(-1)"' : '') + '><path d="' + path + '"/></svg>';
+        b.addEventListener("click", fn);
+        return b;
+      }
+      pill.appendChild(btn("رجوع", "M15 5 L8 12 L15 19", rtl, function () { window.history.back(); }));
+      pill.appendChild(btn("تقدم", "M9 5 L16 12 L9 19", rtl, function () { window.history.forward(); }));
+      pill.appendChild(btn("إعادة تحميل", "M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6", false, function () { window.location.reload(); }));
+      document.body.appendChild(pill);
+    };
+    if (document.body) { build(); }
+    else { document.addEventListener("DOMContentLoaded", build); }
+  }
   function npBootWatchdog() {
     if (window.__NP_WATCHDOG_ARMED__) return;
     if (npIsLocalPage() || !npIsBackendPage()) return;
@@ -309,43 +390,70 @@ const BRIDGE_JS: &str = r#"
     var delays = window.__NP_BOOT_DELAYS__ || { tickMs: 1000, failAfter: 30 };
     var env = window.__NATIVE_PRINT_ENV__ || npProbeEnvironment();
     var ticks = 0;
+    var shellAt = 0;
+    var cardShown = false;
     var timer = window.setInterval(function () {
       ticks += 1;
-      if (npBooted()) {
+      // The same document can soft-redirect to the login page
+      // (session expiry): that page is healthy, never flag it.
+      if (!npIsBackendPage()) {
         window.clearInterval(timer);
+        window.__NP_WATCHDOG_ARMED__ = false;
         npBootOverlay("hide", env);
+        return;
+      }
+      if (npBooted()) {
+        if (!shellAt) shellAt = ticks;
+        if (npContentReady()) {
+          window.clearInterval(timer);
+          // Re-armable: later SPA route changes re-run the check
+          // via the pushState/popstate hooks below.
+          window.__NP_WATCHDOG_ARMED__ = false;
+          npBootOverlay("hide", env);
+          return;
+        }
+        // Shell up, content still empty after a further grace
+        // window: the white-content failure mode.
+        if (!cardShown && ticks - shellAt >= 20) {
+          cardShown = true;
+          npReportEnvironment();
+          npBootOverlay("problem", npProbeEnvironment());
+        }
         return;
       }
       // Show the diagnostic card once, then KEEP polling: a late boot
       // removes it automatically. There is deliberately no "loading"
       // cover any more — a slow boot is not a failed boot.
-      if (ticks === delays.failAfter) { npReportEnvironment(); npBootOverlay("problem", npProbeEnvironment()); }
+      if (!cardShown && ticks === delays.failAfter) { cardShown = true; npReportEnvironment(); npBootOverlay("problem", npProbeEnvironment()); }
     }, delays.tickMs);
   }
-  if (!npIsLocalPage()) {
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", function () { npReportEnvironment(); npBootWatchdog(); npHttpWarning(); });
-      // Odoo is an SPA: it can soft-navigate from a non-backend
-      // landing page into /odoo or /web without a new document load,
-      // in which case the load-time check above never armed the
-      // watchdog for this session. Re-check on history transitions;
-      // npBootWatchdog self-guards (armed flag + backend path).
-      try {
-        var npPushState = window.history.pushState;
-        window.history.pushState = function () {
-          var r = npPushState.apply(this, arguments);
-          window.setTimeout(npBootWatchdog, 0);
-          return r;
-        };
-        window.addEventListener("popstate", function () { npBootWatchdog(); });
-      } catch (e) { /* history patching is best-effort */ }
-    } else {
-      npReportEnvironment();
-      npBootWatchdog();
-      npHttpWarning();
-    }
+  if (__npIsTop && !npIsLocalPage()) {
+    // Arm IMMEDIATELY at init-script evaluation: a page whose
+    // DOMContentLoaded stalls (a hung render-blocking asset) still
+    // gets its watchdog and environment report. Only the HTTP strip
+    // and the nav pill need document.body, and they wait for it
+    // themselves.
+    npReportEnvironment();
+    npBootWatchdog();
+    npHttpWarning();
+    npNavPill();
+    // Odoo is an SPA: it soft-navigates between actions and can
+    // soft-navigate from a non-backend landing page into /odoo
+    // without a new document load. Re-check on history transitions;
+    // npBootWatchdog self-guards (armed flag, backend path, content
+    // health) and re-arms after each successful boot.
+    try {
+      var npPushState = window.history.pushState;
+      window.history.pushState = function () {
+        var r = npPushState.apply(this, arguments);
+        window.setTimeout(npBootWatchdog, 0);
+        return r;
+      };
+      window.addEventListener("popstate", function () { npBootWatchdog(); });
+    } catch (e) { /* history patching is best-effort */ }
   }
   window.addEventListener("keydown", function (ev) {
+    if (window !== window.top) return;
     if (ev.altKey && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) {
       var t = ev.target;
       var editable = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
@@ -386,7 +494,9 @@ pub fn run() {
             let mut queue =
                 Queue::open(&db_path).map_err(|e| std::io::Error::other(e.to_string()))?;
             // Crash recovery per ADR-0004.
-            let _ = queue.recover_on_startup(resolved.auto_reprint);
+            if let Err(e) = queue.recover_on_startup(resolved.auto_reprint) {
+                eprintln!("Yaseir Print: startup queue recovery failed: {e}");
+            }
 
             let queue_arc = Arc::new(Mutex::new(queue));
             let environment = RwLock::new(None);
@@ -409,11 +519,14 @@ pub fn run() {
             // otherwise open the built-in local Control Center (`index.html`)
             // so the administrator can configure the origin or run printer
             // diagnostics without the app crashing on startup.
+            // With an origin configured, start on the local boot page:
+            // it probes the origin (probe_origin) and only then
+            // navigates the webview to Odoo, so a down or unreachable
+            // server shows a styled local retry screen instead of
+            // stranding the user on a WebView2 navigation-error page
+            // (where no bridge, watchdog or shortcut exists).
             let start_url = match initial_origin.as_deref() {
-                Some(origin) => match origin.parse::<tauri::Url>() {
-                    Ok(u) => WebviewUrl::External(u),
-                    Err(_) => WebviewUrl::App("index.html".into()),
-                },
+                Some(_) => WebviewUrl::App("boot.html".into()),
                 None => WebviewUrl::App("index.html".into()),
             };
 
@@ -431,13 +544,20 @@ pub fn run() {
                     }
                     let state = app_handle.state::<AppState>();
                     let allowed = state.configured_origin.read().ok().and_then(|g| g.clone());
-                    match allowed {
+                    let verdict = match allowed {
                         Some(cfg_origin) => {
                             let o = u.origin().ascii_serialization();
                             origin_is_allowed(&cfg_origin, &o)
                         }
                         None => false,
+                    };
+                    if !verdict {
+                        eprintln!(
+                            "Yaseir Print: blocked navigation to {} (not the configured Odoo origin)",
+                            u.as_str()
+                        );
                     }
+                    verdict
                 })
                 .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
                 .build()?;
@@ -468,6 +588,7 @@ pub fn run() {
             commands::printer_forms,
             commands::printer_capabilities,
             commands::run_test_print,
+            commands::probe_origin,
             commands::retry_job_cmd,
             commands::cancel_job_cmd,
             commands::clear_finished_cmd,

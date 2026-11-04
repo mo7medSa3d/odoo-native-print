@@ -58,7 +58,9 @@ def _safe_int(val, default=None):
     if val is None or val is False or val == "":
         return default
     try:
-        return int(val)
+        # Clamp to a sane range: the job columns are int4, and an
+        # absurd client value must not turn into a database error.
+        return max(0, min(int(val), 10_000_000))
     except (ValueError, TypeError):
         return default
 

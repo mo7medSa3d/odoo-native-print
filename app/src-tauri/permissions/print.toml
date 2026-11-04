@@ -5,7 +5,6 @@ commands.allow = [
     "print_pdf",
     "print_text",
     "print_image",
-    "run_test_print",
 ]
 
 [[permission]]
@@ -50,4 +49,12 @@ commands.allow = [
     "app_identity",
     "open_control_center",
     "open_odoo_origin",
+]
+
+[[permission]]
+identifier = "allow-local-tools"
+description = "Local Control Center and boot page only: printer test prints / calibrations and the origin reachability probe. Never granted to the remote Odoo origin (test prints fire raw printer language at local printers)."
+commands.allow = [
+    "run_test_print",
+    "probe_origin",
 ]

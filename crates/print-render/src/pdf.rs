@@ -9,6 +9,8 @@ pub enum PdfParseError {
     Encrypted,
     #[error("no pages found in PDF")]
     NoPages,
+    #[error("PDF declares {0} pages, above the supported maximum")]
+    TooManyPages(usize),
     #[error("page {0} has no determinable size (no MediaBox on page or inherited)")]
     PageSizeUnknown(usize),
 }
@@ -263,6 +265,13 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
     if pages.is_empty() {
         // No visible page dictionaries: fall back to /Count + tree MediaBox.
         let count = declared_count.ok_or(PdfParseError::NoPages)?;
+        // The count comes straight from the file: cap it before
+        // allocating one entry per page, or a small crafted PDF can
+        // exhaust memory by declaring billions of pages (the caller's
+        // page-limit check runs on the vector built here, too late).
+        if count > 2000 {
+            return Err(PdfParseError::TooManyPages(count));
+        }
         let (w_pt, h_pt) = pages_tree_boxes
             .first()
             .copied()
@@ -283,6 +292,17 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
 mod tests {
     use super::*;
     use crate::calibration::calibration_pdf;
+
+    #[test]
+    fn huge_declared_page_count_is_rejected_before_allocation() {
+        // No /Page dictionaries: the parser falls back to the Pages
+        // tree /Count. A hostile count must be refused, not allocated.
+        let pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Count 4000000000 /MediaBox [0 0 595 842] >>\nendobj\n%%EOF";
+        match parse_pdf_info(pdf) {
+            Err(PdfParseError::TooManyPages(n)) => assert_eq!(n, 4_000_000_000),
+            other => panic!("expected TooManyPages, got {other:?}"),
+        }
+    }
 
     pub fn sample_pdf() -> Vec<u8> {
         // A4 page + a rotated 100x150mm label page (283.46 x 425.20 pt).

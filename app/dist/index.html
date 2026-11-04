@@ -80,18 +80,21 @@
   }
 
   /* Top Navigation Bar */
+  /* App bar: full viewport width, edge to edge (owner spec). One
+     surface, ink text, brand reserved for the primary action. */
   .topbar {
-    background: linear-gradient(135deg, #0059ff 0%, #0953de 58%, #0743b5 100%);
-    color: #ffffff;
-    padding: 0.85rem 1.5rem;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    padding: 0.7rem 1.5rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+    border-bottom: 1px solid var(--border-color);
     position: sticky;
     top: 0;
     z-index: 50;
+    width: 100%;
   }
 
   .brand {
@@ -104,8 +107,8 @@
     width: 42px;
     height: 42px;
     border-radius: 12px;
-    background: rgba(255, 255, 255, 0.14);
-    border: 1px solid rgba(255, 255, 255, 0.24);
+    background: var(--bg-subtle);
+    border: 1px solid var(--border-color);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -123,13 +126,14 @@
 
   .brand-subtitle {
     font-size: 0.78rem;
-    color: rgba(255, 255, 255, 0.82);
+    color: var(--text-muted);
   }
 
   .version-pill {
     font-size: 0.7rem;
     font-weight: 500;
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--bg-subtle);
+    color: var(--text-secondary);
     padding: 0.12rem 0.5rem;
     border-radius: 999px;
   }
@@ -164,22 +168,13 @@
   }
 
   .btn-glass {
-    background: rgba(255, 255, 255, 0.14);
-    color: #ffffff;
-    border-color: rgba(255, 255, 255, 0.25);
+    background: transparent;
+    color: var(--text-secondary);
+    border-color: var(--border-color);
   }
   .btn-glass:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.24);
-  }
-
-  .btn-Launch {
-    background: #ffffff;
-    color: #0953de;
-    border-color: #ffffff;
-    box-shadow: 0 2px 6px rgba(4, 30, 90, 0.25);
-  }
-  .btn-Launch:hover:not(:disabled) {
-    background: #eaf1fe;
+    background: var(--bg-subtle);
+    color: var(--text-primary);
   }
 
   .btn-primary {
@@ -215,13 +210,21 @@
     border-radius: 999px;
   }
 
-  /* Navigation Tabs */
-  .nav-tabs {
-    background: var(--bg-surface);
+  /* Section navigation: its own full-width strip, visually separate
+     from the app bar above it; the tab row inside is centered in the
+     same 1360px column as the page content. */
+  .tabsbar {
+    background: var(--bg-subtle);
     border-bottom: 1px solid var(--border-color);
-    padding: 0 1.5rem;
+    width: 100%;
+  }
+  .nav-tabs {
+    max-width: 1360px;
+    margin: 0 auto;
+    padding: 0.55rem 1.5rem;
     display: flex;
-    gap: 0.35rem;
+    gap: 0.5rem;
+    justify-content: center;
     overflow-x: auto;
   }
 
@@ -262,6 +265,8 @@
     flex-direction: column;
     gap: 1.25rem;
   }
+
+  .main-container.is-stale { opacity: 0.55; }
 
   /* Banner Alert */
   .alert-banner {
@@ -688,43 +693,20 @@
   }
 
 
-  /* Modern topbar + navigation refresh (2026-11) */
-  .topbar {
-    padding-inline: calc(max(0px, (100% - 1360px) / 2) + 1.5rem);
-    position: sticky;
-    top: 0;
-    z-index: 40;
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
-    box-shadow: 0 1px 0 var(--border-color), 0 10px 30px -18px rgba(30, 10, 60, 0.35);
-  }
-  .nav-tabs {
-    justify-content: center;
-    padding-inline: calc(max(0px, (100% - 1360px) / 2) + 1.5rem);
-    position: sticky;
-    top: 76px;
-    z-index: 39;
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    background: color-mix(in srgb, var(--bg-main) 85%, transparent);
-    gap: 0.5rem;
-    padding-top: 0.55rem;
-    padding-bottom: 0.55rem;
-  }
   .nav-tab {
     border: 1px solid transparent;
     border-radius: 999px;
     padding: 0.55rem 1.05rem;
   }
   .nav-tab:hover {
-    background: var(--bg-subtle);
+    background: var(--bg-hover);
+    color: var(--text-primary);
   }
   .nav-tab.active {
     background: var(--brand-plum);
     color: #fff;
     border-bottom-color: transparent;
-    box-shadow: 0 6px 16px -8px rgba(80, 30, 140, 0.55);
+    box-shadow: 0 6px 16px -8px rgba(9, 83, 222, 0.45);
   }
   .btn:disabled { opacity: 0.55; cursor: wait; }
   @keyframes np-spin { to { transform: rotate(360deg); } }
@@ -735,7 +717,7 @@
     position: fixed;
     inset: 0;
     z-index: 200;
-    background: rgba(18, 8, 38, 0.55);
+    background: rgba(16, 18, 25, 0.5);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
     display: flex;
@@ -747,7 +729,7 @@
     background: var(--bg-surface);
     border: 1px solid var(--border-color);
     border-radius: 18px;
-    box-shadow: 0 24px 60px -12px rgba(20, 5, 50, 0.5);
+    box-shadow: 0 24px 60px -12px rgba(16, 18, 25, 0.45);
     max-width: 430px;
     width: 100%;
     padding: 1.35rem 1.4rem 1.2rem;
@@ -778,7 +760,7 @@
     </div>
 
     <div class="topbar-actions">
-      <button class="btn btn-Launch" id="btnOpenOdoo" onclick="openOdooApp()">
+      <button class="btn btn-primary" id="btnOpenOdoo" onclick="openOdooApp()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
           <polyline points="15 3 21 3 21 9"></polyline>
@@ -809,7 +791,8 @@
     </div>
   </header>
 
-  <!-- Navigation Tabs -->
+  <!-- Navigation Tabs (separate strip under the app bar) -->
+  <div class="tabsbar">
   <nav class="nav-tabs" role="tablist">
     <button class="nav-tab active" data-tab="dashboard" onclick="switchTab('dashboard')">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
@@ -828,6 +811,7 @@
       <span data-i18n="tab_diagnostics">حزمة التشخيص والدعم الفني</span>
     </button>
   </nav>
+  </div>
 
   <!-- Main Content Area -->
   <main class="main-container">
@@ -960,7 +944,7 @@
               </select>
             </div>
             <div>
-              <button class="btn btn-primary" onclick="triggerCustomTestPrint()" style="width:100%;">
+              <button class="btn btn-primary" id="btnCustomTestPrint" onclick="triggerCustomTestPrint()" style="width:100%;">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
                 <span data-i18n="btn_send_test">إرسال صفحة المعايرة للطابعة</span>
               </button>
@@ -1010,7 +994,7 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
               <span data-i18n="btn_save_origin">حفظ الإعدادات</span>
             </button>
-            <button class="btn btn-Launch" id="btnSaveAndOpen" onclick="saveAndOpenOdoo()">
+            <button class="btn btn-primary" id="btnSaveAndOpen" onclick="saveAndOpenOdoo()">
               <span data-i18n="btn_save_and_launch">حفظ وفتح Odoo</span>
             </button>
           </div>
@@ -1054,7 +1038,7 @@
           <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.85rem;" data-i18n="diag_desc">
             تحتوي هذه الحزمة على إصدار التطبيق وإحصائيات الحالات وآخر 200 مهمة طباعة بدون أي بيانات سرية أو محتوى مستندات أو رموز جلسات (آمنة تماماً لإرفاقها في تذاكر الدعم الفني).
           </p>
-          <pre class="code-box" id="diagnosticsOutput" aria-live="polite">{ "status": "اضغط على توليد الحزمة لإنشاء تقرير تشخيص حقيقي." }</pre>
+          <pre class="code-box" id="diagnosticsOutput" aria-live="polite" data-i18n="diag_placeholder">لسه ما اتولّدتش حزمة تشخيص. اضغط «توليد الحزمة».</pre>
         </div>
       </div>
     </section>
@@ -1072,6 +1056,34 @@
       btn_refresh: "تحديث",
       refreshed: "تم التحديث",
       dialog_title: "تأكيد الإجراء",
+      env_ok: "OK",
+      env_unavailable: "غير متاح",
+      toast_failed: "ما تمّش تنفيذ الإجراء. حاول مرة أخرى.",
+      env_err_translations_t: "خطأ ترجمة من السيرفر",
+      env_err_translations_b: "سيرفر Odoo رجّع خطأ في ملف الترجمة، فالواجهة مش هتكمل فتح. الحل على السيرفر: حدّث إضافة الطباعة (native_print) لآخر إصدار وأعد تشغيل Odoo.",
+      env_err_generic: "خطأ غير متوقع في الصفحة",
+      state_queued: "في الانتظار",
+      state_rendering: "جارٍ التجهيز",
+      state_spooling: "جارٍ الإرسال للطابعة",
+      state_printing: "جارٍ الطباعة",
+      state_done: "مكتملة",
+      state_failed: "فاشلة",
+      state_dead_letter: "فاشلة نهائيًا",
+      state_canceled: "ملغاة",
+      ps_ready: "جاهزة",
+      ps_printing: "تطبع الآن",
+      ps_offline: "غير متصلة",
+      ps_paper_out: "الورق نفد",
+      ps_paper_jam: "ورق محشور",
+      ps_door_open: "الباب مفتوح",
+      ps_no_toner: "الحبر نفد",
+      ps_error: "خطأ",
+      ps_paused: "إيقاف مؤقت",
+      ps_unknown: "غير معروفة",
+      qt_pdf: "PDF مكتبية (A4)",
+      qt_escpos: "حراري ESC/POS 80مم",
+      qt_zpl: "ملصق ZPL",
+      diag_placeholder: "لسه ما اتولّدتش حزمة تشخيص. اضغط «توليد الحزمة».",
       dialog_confirm: "تأكيد",
       dialog_cancel: "إلغاء",
       confirm_clear_web_data: "سيتم مسح الكاش وملفات الارتباط والتخزين المحلي للتطبيق وتسجيل الخروج. متابعة؟",
@@ -1124,7 +1136,7 @@
       confirm_clear_done: "هل تريد حذف مهام الطباعة المكتملة؟ لا يمكن التراجع.",
       confirm_cancel_job: "إلغاء مهمة الطباعة هذه؟ لن تُطبع.",
       diagnostics_copied: "تم نسخ تقرير التشخيص",
-      diagnostics_downloaded: "تم تنزيل تقرير التشخيص",
+      diagnostics_downloaded: "بدأ تنزيل حزمة التشخيص",
       diagnostics_failed: "تعذر إنشاء تقرير التشخيص. راجع الخطأ وحاول مجدداً.",
       lbl_recovery_mode: "عند توقف مفاجئ",
       opt_recovery_safe: "آمن (افتراضي): عدم إعادة طباعة المهام الغامضة تلقائيًا",
@@ -1151,6 +1163,34 @@
       btn_refresh: "Refresh",
       refreshed: "Refreshed",
       dialog_title: "Please confirm",
+      env_ok: "OK",
+      env_unavailable: "Unavailable",
+      toast_failed: "The action could not be completed. Please try again.",
+      env_err_translations_t: "Server translation error",
+      env_err_translations_b: "The Odoo server returned a translation-file error, so the web client cannot finish loading. Fix on the server: update the print add-on (native_print) to the latest version and restart Odoo.",
+      env_err_generic: "Unexpected page error",
+      state_queued: "Queued",
+      state_rendering: "Rendering",
+      state_spooling: "Spooling",
+      state_printing: "Printing",
+      state_done: "Done",
+      state_failed: "Failed",
+      state_dead_letter: "Dead letter",
+      state_canceled: "Canceled",
+      ps_ready: "Ready",
+      ps_printing: "Printing",
+      ps_offline: "Offline",
+      ps_paper_out: "Paper out",
+      ps_paper_jam: "Paper jam",
+      ps_door_open: "Door open",
+      ps_no_toner: "No toner",
+      ps_error: "Error",
+      ps_paused: "Paused",
+      ps_unknown: "Unknown",
+      qt_pdf: "A4 PDF (GDI)",
+      qt_escpos: "80mm ESC/POS",
+      qt_zpl: "ZPL Label",
+      diag_placeholder: "No diagnostics bundle yet. Press Generate.",
       dialog_confirm: "Confirm",
       dialog_cancel: "Cancel",
       confirm_clear_web_data: "This clears the app cache, cookies and local storage and signs you out. Continue?",
@@ -1203,7 +1243,7 @@
       confirm_clear_done: "Delete completed print jobs? This cannot be undone.",
       confirm_cancel_job: "Cancel this print job? It will not print.",
       diagnostics_copied: "Diagnostics report copied",
-      diagnostics_downloaded: "Diagnostics report downloaded",
+      diagnostics_downloaded: "Diagnostics download started",
       diagnostics_failed: "Could not generate diagnostics. Check the error and try again.",
       lbl_recovery_mode: "After a sudden stop",
       opt_recovery_safe: "Safe (default): never auto-reprint ambiguous jobs",
@@ -1226,6 +1266,15 @@
   };
 
   let currentLang = "ar";
+  // Persisted UI preferences (language + theme) survive reloads.
+  try {
+    const savedLang = localStorage.getItem("np_cc_lang");
+    if (savedLang === "en" || savedLang === "ar") currentLang = savedLang;
+    const savedTheme = localStorage.getItem("np_cc_theme");
+    if (savedTheme === "dark" || savedTheme === "light") {
+      document.documentElement.setAttribute("data-theme", savedTheme);
+    }
+  } catch (e) { /* storage unavailable: defaults apply */ }
   let currentFilter = "all";
   let overviewState = null;
 
@@ -1357,25 +1406,27 @@
 
   function stateBadgeHtml(state) {
     const s = String(state || "unknown").toLowerCase();
-    if (s === "done") return `<span class="badge badge-ok"><span class="dot"></span>Done</span>`;
+    const label = I18N[currentLang]["state_" + s] || s.toUpperCase();
+    if (s === "done") return `<span class="badge badge-ok"><span class="dot"></span>${escapeHtml(label)}</span>`;
     if (["queued", "rendering", "spooling", "printing"].includes(s)) {
-      return `<span class="badge badge-info"><span class="dot"></span>${escapeHtml(s.toUpperCase())}</span>`;
+      return `<span class="badge badge-info"><span class="dot"></span>${escapeHtml(label)}</span>`;
     }
     if (s === "failed" || s === "dead_letter") {
-      return `<span class="badge badge-err"><span class="dot"></span>${escapeHtml(s.toUpperCase())}</span>`;
+      return `<span class="badge badge-err"><span class="dot"></span>${escapeHtml(label)}</span>`;
     }
-    return `<span class="badge badge-neutral">${escapeHtml(s.toUpperCase())}</span>`;
+    return `<span class="badge badge-neutral">${escapeHtml(label)}</span>`;
   }
 
   function printerStatusBadge(status) {
     const s = String(status || "unknown").toLowerCase();
+    const label = I18N[currentLang]["ps_" + s] || s.replace("_", " ").toUpperCase();
     if (s === "ready" || s === "printing") {
-      return `<span class="badge badge-ok"><span class="dot"></span>${escapeHtml(s.toUpperCase())}</span>`;
+      return `<span class="badge badge-ok"><span class="dot"></span>${escapeHtml(label)}</span>`;
     }
     if (["offline", "paper_out", "paper_jam", "door_open", "no_toner", "error"].includes(s)) {
-      return `<span class="badge badge-err"><span class="dot"></span>${escapeHtml(s.replace("_", " ").toUpperCase())}</span>`;
+      return `<span class="badge badge-err"><span class="dot"></span>${escapeHtml(label)}</span>`;
     }
-    return `<span class="badge badge-warn"><span class="dot"></span>${escapeHtml(s.toUpperCase())}</span>`;
+    return `<span class="badge badge-warn"><span class="dot"></span>${escapeHtml(label)}</span>`;
   }
 
   function switchTab(tabId) {
@@ -1385,7 +1436,7 @@
     document.querySelectorAll(".nav-tab").forEach((btn) => {
       btn.classList.toggle("active", btn.getAttribute("data-tab") === tabId);
     });
-    if (tabId === "diagnostics") {
+    if (tabId === "diagnostics" && !diagnosticsGenerated) {
       loadDiagnosticsBundle();
     }
   }
@@ -1394,20 +1445,31 @@
     const html = document.documentElement;
     const next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
     html.setAttribute("data-theme", next);
+    try { localStorage.setItem("np_cc_theme", next); } catch (e) { /* best effort */ }
   }
 
-  function toggleLang() {
-    currentLang = currentLang === "ar" ? "en" : "ar";
+  function applyLanguage() {
     const html = document.documentElement;
     html.setAttribute("lang", currentLang);
     html.setAttribute("dir", currentLang === "ar" ? "rtl" : "ltr");
     document.getElementById("btnLang").innerHTML = `<span>${currentLang === "ar" ? "English" : "العربية"}</span>`;
+    const refreshBtn = document.getElementById("btnRefresh");
+    if (refreshBtn) refreshBtn.title = I18N[currentLang].btn_refresh;
     const dict = I18N[currentLang];
     document.querySelectorAll("[data-i18n]").forEach((el) => {
       const k = el.getAttribute("data-i18n");
       if (dict[k]) el.textContent = dict[k];
     });
+    // Dynamic strings outside the sweep must follow the language too:
+    // the custom-URI error line and the calibration warning.
+    validateCustomPrinterUriField();
+    updateCalWarning();
     if (overviewState) renderOverview(overviewState);
+  }
+  function toggleLang() {
+    currentLang = currentLang === "ar" ? "en" : "ar";
+    try { localStorage.setItem("np_cc_lang", currentLang); } catch (e) { /* best effort */ }
+    applyLanguage();
   }
 
   function setJobFilter(f) {
@@ -1424,7 +1486,12 @@
   // a promise that resolves true on confirm, false on cancel,
   // backdrop click or Escape. One instance, reused for every prompt.
   let confirmResolver = null;
+  let confirmReturnFocus = null;
   function confirmDialog(message, options = {}) {
+    // A second prompt settles the first as cancelled instead of
+    // orphaning its promise (the first caller must not hang silently).
+    if (confirmResolver) { const r = confirmResolver; confirmResolver = null; r(false); }
+    confirmReturnFocus = document.activeElement;
     const overlay = document.getElementById("confirmOverlay");
     document.getElementById("confirmTitle").textContent = I18N[currentLang].dialog_title;
     document.getElementById("confirmMessage").textContent = message;
@@ -1438,10 +1505,24 @@
   }
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape" && confirmResolver) settleConfirm(false);
+    if (ev.key === "Tab" && confirmResolver) {
+      const okB = document.getElementById("confirmOkBtn");
+      const cancelB = document.getElementById("confirmCancelBtn");
+      if (document.activeElement !== okB && document.activeElement !== cancelB) { ev.preventDefault(); cancelB.focus(); }
+      else if (ev.shiftKey && document.activeElement === cancelB) { ev.preventDefault(); okB.focus(); }
+      else if (!ev.shiftKey && document.activeElement === okB) { ev.preventDefault(); cancelB.focus(); }
+    }
   });
+  function confirmOverlayClicked(event) {
+    if (event.target === event.currentTarget) settleConfirm(false);
+  }
   function settleConfirm(result) {
     document.getElementById("confirmOverlay").classList.add("hidden");
     if (confirmResolver) { const r = confirmResolver; confirmResolver = null; r(result); }
+    if (confirmReturnFocus && typeof confirmReturnFocus.focus === "function") {
+      try { confirmReturnFocus.focus(); } catch (e) { /* invoker may be gone */ }
+    }
+    confirmReturnFocus = null;
   }
 
   // Topbar Refresh: visible feedback (spinning icon + disabled state
@@ -1486,13 +1567,16 @@
       if (!data || typeof data !== "object") throw new Error("invalid_app_overview");
       overviewState = data;
       renderOverview(data);
+      document.querySelector(".main-container").classList.remove("is-stale");
       return true;
     } catch (error) {
       document.getElementById("originAlertBanner").classList.remove("hidden");
       document.getElementById("originAlertText").textContent = currentLang === "ar"
         ? "تعذر الاتصال بخدمة الطباعة المحلية. تحقق من تشغيل التطبيق ثم أعد التحديث."
         : "Could not contact the local print service. Check that the desktop app is running, then refresh.";
-      if (!silent) showToast(String(error), true);
+      // The numbers on screen are now stale: say so visually.
+      document.querySelector(".main-container").classList.add("is-stale");
+      if (!silent) console.error(error); showToast(I18N[currentLang].toast_failed, true);
       return false;
     }
   }
@@ -1509,7 +1593,7 @@
       await api.clearWebData();
       showToast(currentLang === "ar" ? "تم المسح. أعد تسجيل الدخول." : "Web data cleared. Sign in again.");
     } catch (error) {
-      showToast(String(error), true);
+      console.error(error); showToast(I18N[currentLang].toast_failed, true);
     }
   }
 
@@ -1543,15 +1627,25 @@
           `<div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid var(--border-color,#eef1f6);font-size:0.85rem;"><span style="color:var(--text-secondary);">${label}</span><strong style="color:${ok ? "#12713f" : "#b3261e"};">${value}</strong></div>`;
         envEl.innerHTML =
           fact("WebView2 Runtime", !!data.webviewVersion, data.webviewVersion || "—") +
-          fact("ES2022", !!env.es2022, env.es2022 ? "OK" : "غير متاح") +
-          fact(currentLang === "ar" ? "التخزين المحلي" : "Local storage", !!env.localStorage, env.localStorage ? "OK" : "غير متاح") +
-          fact(currentLang === "ar" ? "ملفات الارتباط" : "Cookies", !!env.cookies, env.cookies ? "OK" : "غير متاح") +
-          fact("WebSocket", !!env.webSocket, env.webSocket ? "OK" : "غير متاح") +
+          fact("ES2022", !!env.es2022, env.es2022 ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
+          fact(currentLang === "ar" ? "التخزين المحلي" : "Local storage", !!env.localStorage, env.localStorage ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
+          fact(currentLang === "ar" ? "ملفات الارتباط" : "Cookies", !!env.cookies, env.cookies ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
+          fact("WebSocket", !!env.webSocket, env.webSocket ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
           fact(currentLang === "ar" ? "سياق آمن" : "Secure context", !!env.secureContext, env.secureContext ? "OK" : "HTTP");
         if (Array.isArray(env.errors) && env.errors.length) {
           const esc = (x) => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;");
-          envEl.innerHTML += env.errors.slice(0, 5).map((e) =>
-            `<div style="padding:0.3rem 0;border-bottom:1px solid var(--border-color,#eef1f6);font-size:0.8rem;color:#b3261e;word-break:break-word;">${esc(e)}</div>`).join("");
+          const d = I18N[currentLang];
+          envEl.innerHTML += env.errors.slice(0, 5).map((e) => {
+            if (/fetching translations/i.test(e)) {
+              return `<div style="padding:0.45rem 0;border-bottom:1px solid var(--border-color,#eef1f6);font-size:0.82rem;">` +
+                `<div style="color:#b3261e;font-weight:700;">${esc(d.env_err_translations_t)}</div>` +
+                `<div style="color:var(--text-secondary);line-height:1.6;">${esc(d.env_err_translations_b)}</div>` +
+                `<div style="color:var(--text-muted);font-size:0.75rem;word-break:break-word;" dir="ltr">${esc(e)}</div></div>`;
+            }
+            return `<div style="padding:0.3rem 0;border-bottom:1px solid var(--border-color,#eef1f6);font-size:0.8rem;">` +
+              `<span style="color:#b3261e;font-weight:600;">${esc(d.env_err_generic)}:</span> ` +
+              `<span style="color:var(--text-secondary);word-break:break-word;" dir="auto">${esc(e)}</span></div>`;
+          }).join("");
         }
       }
     }
@@ -1608,7 +1702,7 @@
     // identical to the last render; this keeps hover, scroll and any
     // in-flight click intact across silent polls.
     const signature = currentFilter + "|" + currentLang + "|" + JSON.stringify(filtered.map((j) =>
-      [j.id, j.report, j.printer, j.pages, j.bytes, j.state, j.attempts, j.error_code]));
+      [j.id, j.report, j.printer, j.pages, j.bytes, j.state, j.attempts, j.error_code, j.diag_id]));
     if (signature === lastJobsSignature) return;
     lastJobsSignature = signature;
     const scrollY = window.scrollY;
@@ -1697,13 +1791,13 @@
 
         <div class="printer-actions">
           <button class="btn btn-sm btn-primary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="pdf-a4">
-            A4 PDF (GDI)
+            ${I18N[currentLang].qt_pdf}
           </button>
           ${p.kind !== "virtual" ? `<button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="thermal-80mm">
-            80mm ESC/POS
+            ${I18N[currentLang].qt_escpos}
           </button>` : ""}
           ${p.kind !== "virtual" ? `<button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="zpl-label">
-            ZPL Label
+            ${I18N[currentLang].qt_zpl}
           </button>` : ""}
           <button class="btn btn-sm btn-secondary" data-action="inspect-forms" data-printer="${escapeHtml(p.name)}" data-idx="${idx}">
             ${currentLang === "ar" ? "مقاسات الورق" : "Paper Forms"}
@@ -1724,8 +1818,8 @@
     const btn = ev.target && ev.target.closest ? ev.target.closest("[data-action]") : null;
     if (!btn) return;
     const action = btn.getAttribute("data-action");
-    if (action === "retry-job") retryJob(btn.getAttribute("data-job-id"));
-    else if (action === "cancel-job") cancelJob(btn.getAttribute("data-job-id"));
+    if (action === "retry-job") { btn.disabled = true; retryJob(btn.getAttribute("data-job-id")).finally(() => { btn.disabled = false; }); }
+    else if (action === "cancel-job") { btn.disabled = true; cancelJob(btn.getAttribute("data-job-id")).finally(() => { btn.disabled = false; }); }
     else if (action === "test-print") runPrinterTest(btn.getAttribute("data-printer"), btn.getAttribute("data-kind"));
     else if (action === "inspect-forms") inspectForms(btn.getAttribute("data-printer"), Number(btn.getAttribute("data-idx")));
   });
@@ -1758,12 +1852,16 @@
       showToast(I18N[currentLang].native_bridge_unavailable, true);
       return false;
     }
+    const testBtns = document.querySelectorAll('[data-action="test-print"], #btnCustomTestPrint');
+    testBtns.forEach((x) => { x.disabled = true; });
     try {
       const id = await b.runTestPrint(printerName, kind, null);
       showToast(currentLang === "ar" ? `تمت جدولة اختبار الطباعة (${id})` : `Queued test print (${id})`);
       await refreshAll();
     } catch (e) {
-      showToast(String(e), true);
+      console.error(e); showToast(I18N[currentLang].toast_failed, true);
+    } finally {
+      testBtns.forEach((x) => { x.disabled = false; });
     }
   }
 
@@ -1870,7 +1968,7 @@
       showToast(currentLang === "ar" ? `تمت إعادة جدولة المهمة ${id}` : `Re-queued job ${id}`);
       await refreshAll();
     } catch (e) {
-      showToast(String(e), true);
+      console.error(e); showToast(I18N[currentLang].toast_failed, true);
     }
   }
 
@@ -1886,7 +1984,7 @@
       showToast(currentLang === "ar" ? `تم إلغاء المهمة ${id}` : `Canceled job ${id}`);
       await refreshAll();
     } catch (e) {
-      showToast(String(e), true);
+      console.error(e); showToast(I18N[currentLang].toast_failed, true);
     }
   }
 
@@ -1902,7 +2000,7 @@
       showToast(currentLang === "ar" ? `تم مسح ${n} مهمة مكتملة` : `Cleared ${n} finished job(s)`);
       await refreshAll();
     } catch (e) {
-      showToast(String(e), true);
+      console.error(e); showToast(I18N[currentLang].toast_failed, true);
     }
   }
 
@@ -2017,7 +2115,9 @@
       return false;
     }
     const button = document.getElementById("btnSaveOrigin");
+    const button2 = document.getElementById("btnSaveAndOpen");
     if (button) button.disabled = true;
+    if (button2) button2.disabled = true;
     try {
       const saved = await api.saveOrigin(origin, autoReprint);
       // The save is the one moment the form re-syncs from the server:
@@ -2028,10 +2128,11 @@
       await refreshAll({ silent: true });
       return true;
     } catch (error) {
-      showToast(String(error), true);
+      console.error(error); showToast(I18N[currentLang].toast_failed, true);
       return false;
     } finally {
       if (button) button.disabled = !!(overviewState && overviewState.lockedByPolicy);
+      if (button2) button2.disabled = !!(overviewState && overviewState.lockedByPolicy);
       validateOriginField();
     }
   }
@@ -2042,7 +2143,7 @@
       return false;
     }
     try { await api.openOdooOrigin(); return true; }
-    catch (error) { showToast(String(error), true); return false; }
+    catch (error) { console.error(error); showToast(I18N[currentLang].toast_failed, true); return false; }
   }
 
   async function saveAndOpenOdoo() {
@@ -2063,7 +2164,11 @@
       showToast(I18N[currentLang].native_bridge_unavailable, true);
       return false;
     }
+    const copyBtn = document.getElementById("btnCopyDiagnostics");
+    const dlBtn = document.getElementById("btnDownloadDiagnostics");
     if (button) button.disabled = true;
+    if (copyBtn) copyBtn.disabled = true;
+    if (dlBtn) dlBtn.disabled = true;
     try {
       const raw = await api.exportDiagnostics();
       const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
@@ -2074,10 +2179,12 @@
     } catch (error) {
       diagnosticsGenerated = false;
       output.textContent = JSON.stringify({ error: String(error) }, null, 2);
-      showToast(I18N[currentLang].diagnostics_failed + " " + String(error), true);
+      console.error(error); showToast(I18N[currentLang].diagnostics_failed, true);
       return false;
     } finally {
       if (button) button.disabled = false;
+      if (copyBtn) copyBtn.disabled = false;
+      if (dlBtn) dlBtn.disabled = false;
     }
   }
 
@@ -2137,11 +2244,18 @@
     } catch (error) {
       if (anchor.isConnected) anchor.remove();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
-      showToast(String(error), true);
+      console.error(error); showToast(I18N[currentLang].toast_failed, true);
     }
   }
 
   document.getElementById("inputOdooOrigin").addEventListener("input", validateOriginField);
+  document.getElementById("inputOdooOrigin").addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      const saveBtn = document.getElementById("btnSaveOrigin");
+      if (saveBtn && !saveBtn.disabled) saveOriginSettings();
+    }
+  });
   document.getElementById("customPrinterUri").addEventListener("input", validateCustomPrinterUriField);
   // From the first user edit on, a form belongs to the user: these
   // listeners arm the transactional guards used by renderOverview and
@@ -2151,14 +2265,14 @@
   document.getElementById("inputAutoReprint").addEventListener("change", () => { formState.settingsDirty = true; });
   document.getElementById("customPrinterSelect").addEventListener("change", () => { formState.testDirty = true; });
   document.getElementById("customPrinterUri").addEventListener("input", () => { formState.testDirty = true; });
-  document.getElementById("customTestKind").addEventListener("change", () => { formState.testDirty = true; });
+  if (currentLang !== "ar") applyLanguage();
   refreshAll();
   setInterval(() => refreshAll({ silent: true }), 5000);
 
 </script>
 
   <!-- In-app confirmation dialog -->
-  <div id="confirmOverlay" class="modal-overlay hidden" onclick="if (event.target === this) settleConfirm(false)">
+  <div id="confirmOverlay" class="modal-overlay hidden" onclick="confirmOverlayClicked(event)">
     <div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
       <div class="modal-head">
         <img src="app-icon.png" alt="" width="34" height="34" style="border-radius: 9px; display: block;"/>

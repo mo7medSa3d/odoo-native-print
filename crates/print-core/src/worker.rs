@@ -107,9 +107,14 @@ impl<'a, B: PrintBackend, S: FnMut(u64)> Worker<'a, B, S> {
         let Some(job) = self.queue.claim_next(printer)? else {
             return Ok(Outcome::Idle);
         };
-        // Walk the state machine to the spooler step before printing, so a
-        // crash during backend.print() leaves the job in spooling/printing
-        // (the recovery rules in ADR-0004 distinguish exactly this).
+        // Walk the state machine to the spooler step before printing.
+        // Rendering AND transport both happen inside the single
+        // backend.print() call, so a crash anywhere inside it is
+        // indistinguishable from a crash mid-spool: recovery
+        // (ADR-0004) therefore treats every interrupted in-flight job
+        // as ambiguous and never auto-reprints it. That is the safe
+        // direction (no duplicates), at the cost of not separating
+        // "never reached the printer" from "maybe printed".
         self.queue.set_state(&job.id, JobState::Spooling, None)?;
         self.queue.set_state(&job.id, JobState::Printing, None)?;
         match self.backend.print(&job) {

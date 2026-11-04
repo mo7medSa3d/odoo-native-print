@@ -822,8 +822,9 @@ fn discover_printers_uncached() -> Result<Vec<print_core::PrinterInfo>, String> 
 /// Spooler-reported status for one printer: open it and read its
 /// level-2 status via GetPrinter. This is the driver/spooler's view
 /// of the device (it can be delayed or incomplete), NOT a direct
-/// physical sensor read — for supported thermal printers the real
-/// device status path is DLE EOT in print-raw.
+/// physical sensor read. (A DLE EOT status library exists in
+/// print-raw but is not wired into the app, so no physical sensor
+/// state is sensed today.)
 pub fn printer_status(printer: &str) -> Result<print_core::PrinterStatus, String> {
     let name = wide(printer);
     let mut handle: Handle = std::ptr::null_mut();
@@ -969,7 +970,7 @@ pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
 /// Query capabilities reported by the installed Windows printer driver.
 pub fn printer_capabilities(printer: &str) -> Result<print_core::PrinterCapabilities, String> {
     let name = wide(printer);
-    let forms = paper_forms(printer).unwrap_or_default();
+    let forms = paper_forms(printer)?;
     let count = |capability: u16| unsafe {
         DeviceCapabilitiesW(
             name.as_ptr(),

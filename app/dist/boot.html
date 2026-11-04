@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Yaseir Print — جارٍ الاتصال</title>
+<style>
+  :root { --brand: #0953de; --ink: #101219; --muted: #5b6472; --line: #e3e8f0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         font-family: "Segoe UI", system-ui, -apple-system, sans-serif; background: #f6f8fc; color: var(--ink); }
+  .card { width: min(92vw, 430px); background: #fff; border: 1px solid var(--line); border-radius: 20px;
+          box-shadow: 0 18px 50px rgba(16,18,25,.10); padding: 2rem 1.8rem; text-align: center; }
+  .logo { width: 64px; height: 64px; border-radius: 16px; margin-bottom: 1rem; }
+  h1 { font-size: 1.25rem; margin: 0 0 .4rem; }
+  p { color: var(--muted); font-size: .95rem; line-height: 1.7; margin: 0 0 1.2rem; }
+  .spinner { width: 38px; height: 38px; margin: 0 auto 1.1rem; border-radius: 50%;
+             border: 4px solid #dbe6fb; border-top-color: var(--brand); animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .origin { direction: ltr; font-weight: 600; color: var(--ink); word-break: break-all; }
+  .actions { display: none; flex-wrap: wrap; gap: .5rem; justify-content: center; }
+  .actions.show { display: flex; }
+  button { border: 0; border-radius: 999px; padding: .65rem 1.25rem; font: inherit; font-size: .92rem;
+           cursor: pointer; background: #eef1f6; color: var(--ink); }
+  button.primary { background: var(--brand); color: #fff; }
+  .count { font-size: .82rem; color: var(--muted); margin-top: .9rem; min-height: 1.2em; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <img class="logo" src="app-icon.png" alt=""/>
+    <div class="spinner" id="spinner"></div>
+    <h1 id="title">جارٍ الاتصال بسيرفر Odoo</h1>
+    <p id="msg">بنجهّز مساحة العمل… <span class="origin" id="origin"></span></p>
+    <div class="actions" id="actions">
+      <button class="primary" id="retry">حاول الآن</button>
+      <button id="anyway">فتح Odoo على أي حال</button>
+      <button id="cc">مركز التحكم</button>
+    </div>
+    <div class="count" id="count"></div>
+  </div>
+<script>
+  function invoke(cmd, args) { return window.__TAURI_INTERNALS__.invoke(cmd, args || {}); }
+  var origin = null;
+  var timer = null;
+  var left = 0;
+
+  function showDown() {
+    document.getElementById("spinner").style.display = "none";
+    document.getElementById("title").textContent = "سيرفر Odoo لا يستجيب";
+    document.getElementById("msg").innerHTML = "مش قادرين نوصل للسيرفر على <span class='origin'>" +
+      (origin || "") + "</span>. اتأكد إن السيرفر شغال وإن الشبكة واصلة، وهنحاول تاني تلقائيًا.";
+    document.getElementById("actions").classList.add("show");
+    startCountdown();
+  }
+  function startCountdown() {
+    stopCountdown();
+    left = 5;
+    var el = document.getElementById("count");
+    el.textContent = "إعادة المحاولة بعد " + left + " ثوانٍ…";
+    timer = window.setInterval(function () {
+      left -= 1;
+      if (left <= 0) { stopCountdown(); el.textContent = ""; tryProbe(); return; }
+      el.textContent = "إعادة المحاولة بعد " + left + " ثوانٍ…";
+    }, 1000);
+  }
+  function stopCountdown() { if (timer) { window.clearInterval(timer); timer = null; } }
+
+  function tryProbe() {
+    document.getElementById("spinner").style.display = "block";
+    invoke("probe_origin", {}).then(function (ok) {
+      if (ok && origin) { window.location.replace(origin); }
+      else { showDown(); }
+    }).catch(function () { showDown(); });
+  }
+
+  document.getElementById("retry").addEventListener("click", function () {
+    stopCountdown(); document.getElementById("count").textContent = ""; tryProbe();
+  });
+  document.getElementById("anyway").addEventListener("click", function () {
+    if (origin) window.location.replace(origin);
+  });
+  document.getElementById("cc").addEventListener("click", function () {
+    window.location.replace("index.html");
+  });
+
+  invoke("app_overview", {}).then(function (ov) {
+    origin = ov && ov.odoo_origin ? ov.odoo_origin : null;
+    if (!origin) { window.location.replace("index.html"); return; }
+    document.getElementById("origin").textContent = origin;
+    tryProbe();
+  }).catch(function () {
+    document.getElementById("title").textContent = "تعذّر بدء الاتصال";
+    document.getElementById("msg").textContent = "افتح مركز التحكم لمراجعة إعدادات اتصال Odoo.";
+    document.getElementById("spinner").style.display = "none";
+    document.getElementById("actions").classList.add("show");
+    document.getElementById("retry").style.display = "none";
+    document.getElementById("anyway").style.display = "none";
+  });
+</script>
+</body>
+</html>

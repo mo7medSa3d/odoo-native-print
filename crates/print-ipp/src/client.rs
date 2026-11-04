@@ -96,6 +96,35 @@ impl PrinterCaps {
     }
 }
 
+/// Finishing options for an IPP Print-Job request, as IPP keyword
+/// values (RFC 8011): `sides` (one-sided / two-sided-long-edge /
+/// two-sided-short-edge), `media` (e.g. iso_a4_210x297mm) and
+/// `print-color-mode` (color / monochrome).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IppJobOptions {
+    pub sides: Option<String>,
+    pub media: Option<String>,
+    pub color_mode: Option<String>,
+}
+
+/// Build the job-template attributes for a Print-Job request.
+fn job_attributes(job_name: &str, copies: u16, options: &IppJobOptions) -> Vec<Attr> {
+    let mut job_attrs = vec![Attr::name("job-name", job_name)];
+    if copies > 1 {
+        job_attrs.push(Attr::integer("copies", copies as i32));
+    }
+    if let Some(sides) = &options.sides {
+        job_attrs.push(Attr::keyword("sides", sides));
+    }
+    if let Some(media) = &options.media {
+        job_attrs.push(Attr::keyword("media", media));
+    }
+    if let Some(mode) = &options.color_mode {
+        job_attrs.push(Attr::keyword("print-color-mode", mode));
+    }
+    job_attrs
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct JobInfo {
     pub job_id: Option<i32>,
@@ -149,8 +178,21 @@ impl IppClient {
         );
         stream.write_all(request.as_bytes())?;
         stream.write_all(body)?;
+        // IPP attribute responses are small; cap the read so a
+        // broken or hostile endpoint cannot stream forever and grow
+        // memory without bound on the worker thread.
+        const MAX_IPP_RESPONSE_BYTES: u64 = 1 << 20;
         let mut raw = Vec::new();
-        stream.read_to_end(&mut raw)?;
+        std::io::Read::by_ref(&mut stream)
+            .take(MAX_IPP_RESPONSE_BYTES + 1)
+            .read_to_end(&mut raw)?;
+        if raw.len() as u64 > MAX_IPP_RESPONSE_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "IPP response exceeds the 1 MiB safety cap",
+            )
+            .into());
+        }
         parse_http_response(&raw)
     }
 
@@ -218,6 +260,27 @@ impl IppClient {
         job_name: &str,
         copies: u16,
     ) -> Result<JobInfo, IppError> {
+        self.print_job_with_options(
+            document,
+            format,
+            job_name,
+            copies,
+            &IppJobOptions::default(),
+        )
+    }
+
+    /// Submit a document with finishing options (sides / media /
+    /// colour mode as IPP keyword values). The caller validates the
+    /// values against the printer's reported capabilities first;
+    /// `None` fields are simply not sent.
+    pub fn print_job_with_options(
+        &mut self,
+        document: &[u8],
+        format: &str,
+        job_name: &str,
+        copies: u16,
+        options: &IppJobOptions,
+    ) -> Result<JobInfo, IppError> {
         let id = self.next_id();
         let extra = [
             Attr::name("requesting-user-name", "odoo-native-print"),
@@ -226,10 +289,7 @@ impl IppClient {
                 Value::Text(tag::MIME, format.to_string()),
             ),
         ];
-        let mut job_attrs = vec![Attr::name("job-name", job_name)];
-        if copies > 1 {
-            job_attrs.push(Attr::integer("copies", copies as i32));
-        }
+        let mut job_attrs = job_attributes(job_name, copies, options);
         let body = proto::encode_request(
             op::PRINT_JOB,
             id,
@@ -328,6 +388,28 @@ fn dechunk(body: &[u8]) -> Result<Vec<u8>, String> {
         pos = end + 2;
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod job_attribute_tests {
+    use super::*;
+
+    #[test]
+    fn job_attributes_carry_finishing_options() {
+        let opts = IppJobOptions {
+            sides: Some("two-sided-long-edge".to_string()),
+            media: Some("iso_a4_210x297mm".to_string()),
+            color_mode: Some("monochrome".to_string()),
+        };
+        let attrs = job_attributes("Report", 2, &opts);
+        let names: Vec<&str> = attrs.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["job-name", "copies", "sides", "media", "print-color-mode"]
+        );
+        let empty = job_attributes("Report", 1, &IppJobOptions::default());
+        assert_eq!(empty.len(), 1);
+    }
 }
 
 #[cfg(test)]

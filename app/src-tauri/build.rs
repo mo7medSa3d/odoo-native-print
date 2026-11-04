@@ -11,6 +11,7 @@ fn main() {
             "printer_forms",
             "printer_capabilities",
             "run_test_print",
+            "probe_origin",
             "retry_job_cmd",
             "cancel_job_cmd",
             "clear_finished_cmd",

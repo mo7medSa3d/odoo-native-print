@@ -23,7 +23,9 @@ test("inline button and field handlers resolve to functions", () => {
 });
 
 test("static DOM lookups resolve and element IDs are unique", () => {
-  const ids = [...html.matchAll(/\bid=["']([^"']+)["']/g)].map(m => m[1]);
+  // (?<![-\w]) keeps data-* attributes (e.g. data-job-id) out: only
+  // real element id attributes count for uniqueness.
+  const ids = [...html.matchAll(/(?<![-\w])id=["']([^"']+)["']/g)].map(m => m[1]);
   const set = new Set(ids);
   assert.equal(set.size, ids.length);
   const refs = [...script.matchAll(/getElementById\(["']([^"'$]+)["']\)/g)].map(m => m[1]);

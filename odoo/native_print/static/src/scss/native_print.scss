@@ -14,8 +14,8 @@
     }
 
     .o_native_print_dropdown {
-        min-width: 320px;
-        max-width: min(92vw, 360px);
+        width: 320px;
+        max-width: 92vw;
         z-index: 1055;
         padding: 14px;
         border: 1px solid rgba(15, 23, 42, 0.08);

@@ -15,6 +15,8 @@ pub enum QueueError {
     BadKey,
     #[error("queue is full for printer {0} (backpressure limit reached)")]
     QueueFull(String),
+    #[error("stored job options are unreadable: {0}")]
+    BadOptions(String),
 }
 
 /// Default backpressure limit: active (not finished) jobs per printer.
@@ -542,10 +544,32 @@ impl Queue {
         match rows.next()? {
             Some(r) => {
                 let raw: String = r.get(0)?;
-                Ok(serde_json::from_str(&raw).unwrap_or_default())
+                // A stored row that no longer parses is corruption,
+                // not a default: silently substituting GDI defaults
+                // would re-route the job to the wrong print path.
+                serde_json::from_str(&raw).map_err(|e| QueueError::BadOptions(e.to_string()))
             }
             None => Ok(JobOptions::default()),
         }
+    }
+
+    /// Retention bound for terminal failure states: drop the stored
+    /// document bytes of jobs that ended `failed`/`dead_letter` more
+    /// than `max_age_secs` ago (by their latest event timestamp). The
+    /// job rows and events stay, so history and diagnostics survive;
+    /// only the (potentially large) payloads are reclaimed. Returns
+    /// how many payloads were dropped.
+    pub fn purge_stale_failed_payloads(&mut self, max_age_secs: i64) -> Result<usize, QueueError> {
+        let cutoff = now_unix().saturating_sub(max_age_secs);
+        let n = self.conn.execute(
+            "DELETE FROM payloads WHERE job_id IN (
+               SELECT j.id FROM jobs j
+               WHERE j.state IN ('failed','dead_letter')
+                 AND (SELECT MAX(e.ts) FROM job_events e WHERE e.job_id = j.id) < ?1
+             )",
+            params![cutoff],
+        )?;
+        Ok(n)
     }
 
     /// Drop a job's payload (called when the job reaches a terminal
@@ -741,6 +765,29 @@ mod tests {
             error_code: None,
         }
     }
+    #[test]
+    fn stale_failed_payloads_are_purged_but_rows_stay() {
+        let mut q = Queue::in_memory().unwrap();
+        let old = job("job-old-fail", "key-old", "P1", 0);
+        q.enqueue_with_payload(&old, "pdf", b"%PDF-old", &JobOptions::default())
+            .unwrap();
+        q.set_state(&old.id, JobState::Failed, Some("BOOM"))
+            .unwrap();
+        // A far-future cutoff treats the just-failed job as stale.
+        let dropped = q.purge_stale_failed_payloads(-31_557_600_000).unwrap();
+        assert_eq!(dropped, 1);
+        assert!(q.payload(&old.id).unwrap().is_none());
+        assert_eq!(q.get(&old.id).unwrap().state, JobState::Failed);
+        // A freshly failed job keeps its payload inside the window.
+        let fresh = job("job-new-fail", "key-new", "P1", 0);
+        q.enqueue_with_payload(&fresh, "pdf", b"%PDF-new", &JobOptions::default())
+            .unwrap();
+        q.set_state(&fresh.id, JobState::Failed, Some("BOOM"))
+            .unwrap();
+        assert_eq!(q.purge_stale_failed_payloads(86_400).unwrap(), 0);
+        assert!(q.payload(&fresh.id).unwrap().is_some());
+    }
+
     #[test]
     fn idempotent_enqueue_no_duplicate() {
         let mut q = Queue::in_memory().unwrap();

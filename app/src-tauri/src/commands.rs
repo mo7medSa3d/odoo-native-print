@@ -19,6 +19,7 @@ use print_raw::MonoBitmap;
 use print_render::RenderMode;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
+use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -619,6 +620,58 @@ pub async fn printer_capabilities(
     print_win::printer_capabilities(printer.trim()).map_err(|e| e.to_string())
 }
 
+/// Parse `scheme://host[:port]` (with `[ipv6]` support) for the
+/// boot-page reachability probe.
+fn parse_origin_host_port(origin: &str) -> Option<(String, u16)> {
+    let (scheme, rest) = origin.split_once("://")?;
+    let default_port = if scheme.eq_ignore_ascii_case("https") {
+        443
+    } else {
+        80
+    };
+    if let Some(after_open) = rest.strip_prefix('[') {
+        let (ipv6, after_close) = after_open.split_once(']')?;
+        let port = match after_close.strip_prefix(':') {
+            Some(p) => p.parse::<u16>().ok()?,
+            None => default_port,
+        };
+        return Some((ipv6.to_string(), port));
+    }
+    match rest.rsplit_once(':') {
+        Some((h, p)) if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) => {
+            Some((h.to_string(), p.parse::<u16>().ok()?))
+        }
+        _ => Some((rest.to_string(), default_port)),
+    }
+}
+
+/// Local boot-page probe: is the configured Odoo origin reachable at
+/// the TCP level? boot.html only navigates the webview to Odoo after
+/// this succeeds, so a down server shows a styled local retry screen
+/// instead of stranding the user on a WebView2 error page.
+#[tauri::command]
+pub fn probe_origin(webview: tauri::Webview, state: State<'_, AppState>) -> Result<bool, String> {
+    check_local_only(&webview)?;
+    let origin = match state.configured_origin.read() {
+        Ok(guard) => guard.clone(),
+        Err(_) => None,
+    };
+    let Some(origin) = origin else {
+        return Ok(false);
+    };
+    let Some((host, port)) = parse_origin_host_port(&origin) else {
+        return Ok(false);
+    };
+    let mut addrs = match (host.as_str(), port).to_socket_addrs() {
+        Ok(a) => a,
+        Err(_) => return Ok(false),
+    };
+    let Some(sock) = addrs.next() else {
+        return Ok(false);
+    };
+    Ok(std::net::TcpStream::connect_timeout(&sock, Duration::from_secs(3)).is_ok())
+}
+
 #[tauri::command]
 pub fn run_test_print(
     webview: tauri::Webview,
@@ -628,6 +681,9 @@ pub fn run_test_print(
     paper: Option<String>,
 ) -> Result<String, String> {
     check_origin(&webview, &state)?;
+    // Test prints are a Control Center feature: the Odoo page must
+    // never fire raw calibrations at local printers (audit B1).
+    check_local_only(&webview)?;
     if printer.trim().is_empty() {
         return Err("printer_required".to_string());
     }
@@ -639,15 +695,20 @@ pub fn run_test_print(
         "thermal-80mm" | "thermal-58mm" | "escpos" | "zpl-label" | "zpl" | "tspl-label" | "tspl"
     );
     if raw_kind && !printer.contains("://") {
-        if let Ok(printers) = print_win::discover_printers() {
-            if let Some(found) = printers.iter().find(|p| p.name == printer.trim()) {
-                if found.kind == PrinterKind::Virtual {
-                    return Err(
-                        "This calibration sends raw printer language (ESC/POS / ZPL / TSPL) and cannot go to a virtual PDF/XPS printer - it would create a corrupt file. Choose a physical printer."
-                            .to_string(),
-                    );
-                }
-            }
+        // Fail closed: a raw calibration is refused whenever the
+        // target's kind cannot be positively verified as physical.
+        let verified_physical = match print_win::discover_printers() {
+            Ok(printers) => match printers.iter().find(|p| p.name == printer.trim()) {
+                Some(found) => found.kind != PrinterKind::Virtual,
+                None => false,
+            },
+            Err(_) => false,
+        };
+        if !verified_physical {
+            return Err(
+                "This calibration sends raw printer language (ESC/POS / ZPL / TSPL). It was refused because the target printer could not be verified as a physical printer (a virtual PDF/XPS writer would turn it into a corrupt file). Choose a physical printer from the discovered list."
+                    .to_string(),
+            );
         }
     }
     let key = format!(
@@ -663,7 +724,7 @@ pub fn run_test_print(
             let is_58 = kind == "thermal-58mm"
                 || paper
                     .as_deref()
-                    .map(|p| print_render::receipt_dots_for_paper(p) == 384)
+                    .map(|p| print_render::receipt_dots_for_paper(p) == Some(384))
                     .unwrap_or(false);
             let bm = if is_58 {
                 print_render::calibration::calibration_thermal_58mm()
@@ -1103,12 +1164,23 @@ impl NativePrintBackend {
         paper_override: Option<&str>,
     ) -> Result<u32, BackendError> {
         if let Some(paper) = paper_override {
-            let dots = print_render::receipt_dots_for_paper(paper);
+            let dots = print_render::receipt_dots_for_paper(paper).ok_or_else(|| {
+                BackendError::fatal(
+                    "AUTO_MEDIA_UNAVAILABLE",
+                    &format!("unknown receipt paper {paper:?}; cannot derive a print width"),
+                )
+            })?;
             // An explicit paper choice is verified against the driver's
             // reported roll forms when they are available: rendering an
             // 80mm receipt for a 58mm roll (or the reverse) clips or
             // scales the customer's receipt.
-            if let Ok(caps) = print_win::printer_capabilities(printer) {
+            let caps = print_win::printer_capabilities(printer).map_err(|error| {
+                BackendError::fatal(
+                    "PRINTER_CAPABILITIES_UNAVAILABLE",
+                    &format!("The Windows driver did not expose printer capabilities: {error}"),
+                )
+            })?;
+            {
                 let rolls: Vec<f64> = caps
                     .forms
                     .iter()
@@ -1236,7 +1308,7 @@ impl NativePrintBackend {
         match mode {
             "escpos" => {
                 let target_w = target_width_dots
-                    .or_else(|| paper.map(print_render::receipt_dots_for_paper))
+                    .or_else(|| paper.and_then(print_render::receipt_dots_for_paper))
                     .ok_or_else(|| {
                         BackendError::fatal(
                             "AUTO_MEDIA_UNAVAILABLE",
@@ -1376,7 +1448,7 @@ impl NativePrintBackend {
             }
             "escpos" => {
                 let target_width_dots = target_width_dots
-                    .or_else(|| paper.map(print_render::receipt_dots_for_paper))
+                    .or_else(|| paper.and_then(print_render::receipt_dots_for_paper))
                     .ok_or_else(|| {
                         BackendError::fatal(
                             "AUTO_MEDIA_UNAVAILABLE",
@@ -1408,7 +1480,12 @@ impl PrintBackend for NativePrintBackend {
             .payload(&job.id)
             .map_err(|e| BackendError::retryable("QUEUE_DB_ERROR", &e.to_string()))?
             .ok_or_else(|| BackendError::fatal("MISSING_PAYLOAD", "job payload not found"))?;
-        let opts = q.options(&job.id).unwrap_or_default();
+        let opts = q.options(&job.id).map_err(|e| {
+            BackendError::retryable(
+                "QUEUE_DB_ERROR",
+                &format!("stored job options unreadable: {e}"),
+            )
+        })?;
         let paper = opts.paper.as_deref();
         let title = job.report.as_deref().unwrap_or("Yaseir Print Job");
 
@@ -1489,8 +1566,64 @@ impl PrintBackend for NativePrintBackend {
             let fmt = caps
                 .choose_format()
                 .map_err(|e| BackendError::fatal("IPP_FORMAT_UNSUPPORTED", &e.to_string()))?;
+            // Honour the job's finishing options over IPP, validated
+            // against the printer's reported capabilities: anything
+            // requested that IPP cannot honour fails loudly instead
+            // of being silently dropped.
+            if opts.tray.is_some() {
+                return Err(BackendError::fatal(
+                    "IPP_OPTION_UNSUPPORTED",
+                    "tray selection is not supported over IPP in this client",
+                ));
+            }
+            let mut ipp_options = print_ipp::IppJobOptions::default();
+            if opts.duplex {
+                let sides = "two-sided-long-edge";
+                if !caps.sides_supported.is_empty()
+                    && !caps.sides_supported.iter().any(|x| x == sides)
+                {
+                    return Err(BackendError::fatal(
+                        "IPP_OPTION_UNSUPPORTED",
+                        "the IPP printer does not report duplex (two-sided) support",
+                    ));
+                }
+                ipp_options.sides = Some(sides.to_string());
+            }
+            if let Some(paper_name) = opts.paper.as_deref() {
+                let media = match paper_name.trim().to_ascii_lowercase().as_str() {
+                    "a4" => Some("iso_a4_210x297mm"),
+                    "a5" => Some("iso_a5_148x210mm"),
+                    "letter" => Some("na_letter_8.5x11in"),
+                    "legal" => Some("na_legal_8.5x14in"),
+                    _ => None,
+                };
+                match media {
+                    Some(m)
+                        if caps.media_supported.is_empty()
+                            || caps.media_supported.iter().any(|x| x == m) =>
+                    {
+                        ipp_options.media = Some(m.to_string());
+                    }
+                    _ => {
+                        return Err(BackendError::fatal(
+                            "IPP_OPTION_UNSUPPORTED",
+                            &format!(
+                                "paper {paper_name:?} cannot be mapped to a media size the IPP printer reports"
+                            ),
+                        ));
+                    }
+                }
+            }
+            if opts.color && !caps.color_supported {
+                return Err(BackendError::fatal(
+                    "IPP_OPTION_UNSUPPORTED",
+                    "the IPP printer does not report colour support",
+                ));
+            }
+            ipp_options.color_mode =
+                Some(if opts.color { "color" } else { "monochrome" }.to_string());
             client
-                .print_job(&data, fmt, title, opts.copies.max(1))
+                .print_job_with_options(&data, fmt, title, opts.copies.max(1), &ipp_options)
                 .map_err(|e| BackendError::ambiguous("IPP_PRINT_ERROR", &e.to_string()))?;
             return Ok(());
         }
@@ -1517,6 +1650,12 @@ impl PrintBackend for NativePrintBackend {
         } else {
             job.printer.clone()
         };
+
+        // When discovery returned an empty list the pattern is used
+        // verbatim as the queue name and no kind was resolved: classify
+        // from the name so the raw-to-virtual guard below still
+        // applies instead of being skipped (fail-open edge).
+        let target_kind = target_kind.or_else(|| Some(PrinterKind::classify(&target_name, "")));
 
         // Raw printer language can never go to a virtual PDF/XPS
         // writer: the spooler would write the raw bytes into a
@@ -1618,6 +1757,14 @@ impl PrintBackend for NativePrintBackend {
                         result
                             .map_err(|e| BackendError::fatal("PAPER_MISMATCH", &e.to_string()))?;
                     }
+                } else if policy != ScalePolicy::CustomAllowed {
+                    // The lightweight parser could not read this PDF:
+                    // a strict paper policy must not silently skip the
+                    // media validation this block exists to provide.
+                    return Err(BackendError::fatal(
+                        "PAPER_VALIDATION_UNAVAILABLE",
+                        "the document's page sizes could not be verified against the printer's paper forms",
+                    ));
                 }
                 let render_mode = if opts.color {
                     RenderMode::Color
@@ -1681,31 +1828,66 @@ impl PrintBackend for NativePrintBackend {
 /// printer patterns using `print_core::Worker`.
 pub fn spawn_worker_loop(db_path: String, wake: Arc<(Mutex<bool>, Condvar)>) {
     std::thread::spawn(move || {
+        // Retention bound: drop stored document bytes of jobs that
+        // failed long ago (rows and events stay for diagnostics).
+        if let Ok(mut retention_queue) = Queue::open(&db_path) {
+            if let Err(e) = retention_queue.purge_stale_failed_payloads(30 * 86_400) {
+                eprintln!("Yaseir Print: failed-payload retention purge failed: {e}");
+            }
+        }
         let mut entropy: u64 = 0x5EED_2026;
         loop {
             let mut did_work = false;
-            if let Ok(mut worker_queue) = Queue::open(&db_path) {
-                // Fail jobs wedged in a working state by a dead or
-                // stuck worker (RECONCILED_STALE) instead of letting
-                // them hang forever; fresh jobs are never touched.
-                let _ = worker_queue.reconcile_stale();
-                let printers = worker_queue.queued_printers().unwrap_or_default();
-                for printer in printers {
-                    entropy = entropy.wrapping_mul(6364136223846793005).wrapping_add(1);
-                    let mut worker = Worker {
-                        queue: &mut worker_queue,
-                        backend: NativePrintBackend {
-                            db_path: db_path.clone(),
-                        },
-                        cfg: WorkerConfig::default(),
-                        sleep: |ms| std::thread::sleep(Duration::from_millis(ms)),
-                        entropy,
+            match Queue::open(&db_path) {
+                Ok(mut worker_queue) => {
+                    // Fail jobs wedged in a working state by a dead or
+                    // stuck worker (RECONCILED_STALE) instead of letting
+                    // them hang forever; fresh jobs are never touched.
+                    if let Err(e) = worker_queue.reconcile_stale() {
+                        eprintln!("Yaseir Print: stale-job reconciliation failed: {e}");
+                    }
+                    let printers = match worker_queue.queued_printers() {
+                        Ok(p) => p,
+                        Err(e) => {
+                            eprintln!("Yaseir Print: queued_printers failed: {e}");
+                            Vec::new()
+                        }
                     };
-                    if let Ok(outcome) = worker.run_once(&printer) {
-                        if outcome != Outcome::Idle {
-                            did_work = true;
+                    for printer in printers {
+                        entropy = entropy.wrapping_mul(6364136223846793005).wrapping_add(1);
+                        let mut worker = Worker {
+                            queue: &mut worker_queue,
+                            backend: NativePrintBackend {
+                                db_path: db_path.clone(),
+                            },
+                            cfg: WorkerConfig::default(),
+                            sleep: |ms| std::thread::sleep(Duration::from_millis(ms)),
+                            entropy,
+                        };
+                        // Panic isolation: one bad job or backend panic
+                        // must never kill the only worker thread and
+                        // silently stop all printing for the session.
+                        let outcome =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                worker.run_once(&printer)
+                            }));
+                        match outcome {
+                            Ok(Ok(o)) => {
+                                if o != Outcome::Idle {
+                                    did_work = true;
+                                }
+                            }
+                            Ok(Err(e)) => {
+                                eprintln!("Yaseir Print: worker error on {printer}: {e}");
+                            }
+                            Err(_) => {
+                                eprintln!("Yaseir Print: worker panicked on {printer}; continuing");
+                            }
                         }
                     }
+                }
+                Err(e) => {
+                    eprintln!("Yaseir Print: cannot open the print queue: {e}");
                 }
             }
             if !did_work {

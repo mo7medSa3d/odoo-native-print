@@ -1,56 +1,84 @@
-# Arabic translation for Native Print (complete set for Odoo 19).
+#
 msgid ""
 msgstr ""
 "Project-Id-Version: Odoo Server 19.0\n"
-"Language: ar\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-11-04 04:44+0000\n"
+"PO-Revision-Date: 2026-11-04 04:44+0000\n"
+"Last-Translator: \n"
+"Language-Team: \n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
-"Content-Transfer-Encoding: 8bit\n"
+"Content-Transfer-Encoding: \n"
+"Plural-Forms: \n"
 
 #. module: native_print
-#: model:ir.ui.menu,name:native_print.menu_native_print_root
-msgid "Native Print"
-msgstr "الطباعة المحلية"
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "%s printer(s) found on this PC."
+msgstr "تم العثور على %s طابعة على هذا الكمبيوتر."
 
 #. module: native_print
-#: model:ir.ui.menu,name:native_print.menu_jobs
-msgid "Jobs"
-msgstr "سجل مهام الطباعة"
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "%s will be used for printing from this PC."
+msgstr "سيتم استخدام %s للطباعة من هذا الكمبيوتر."
 
 #. module: native_print
-#: model:ir.actions.act_window,name:native_print.action_jobs
-msgid "Print Jobs"
-msgstr "مهام الطباعة"
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_form
+msgid "<i class=\"fa fa-exclamation-triangle fa-lg\" title=\"Error\"/>"
+msgstr "<i class=\"fa fa-exclamation-triangle fa-lg\" title=\"خطأ\"/>"
 
 #. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_job__name
-msgid "Idempotency key"
-msgstr "مفتاح عدم التكرار (Idempotency Key)"
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_kanban
+msgid "<i class=\"fa fa-file-text-o me-1\" title=\"Report\"/>"
+msgstr "<i class=\"fa fa-file-text-o me-1\" title=\"تقرير\"/>"
 
 #. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_job__state
-msgid "State"
-msgstr "الحالة"
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_kanban
+msgid "<i class=\"fa fa-print me-1\" title=\"Printer\"/>"
+msgstr "<i class=\"fa fa-print me-1\" title=\"الطابعة\"/>"
 
 #. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_job__error_code
-msgid "Error Code"
-msgstr "رمز الخطأ"
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_kanban
+msgid "<i class=\"fa fa-warning me-1\" title=\"Error\"/>"
+msgstr "<i class=\"fa fa-warning me-1\" title=\"خطأ\"/>"
 
 #. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_job__device
-msgid "Printer / Device"
-msgstr "الطابعة / الجهاز"
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_form
+msgid "<strong>Diagnostic Error Code: </strong>"
+msgstr "<strong>كود خطأ التشخيص: </strong>"
 
 #. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_job__pages
-msgid "Pages"
-msgstr "عدد الصفحات"
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid ""
+"A newer desktop app is available. Update Yaseir Print for the latest fixes."
+msgstr ""
+"يوجد إصدار أحدث من تطبيق سطح المكتب. حدّث Yaseir Print عشان توصلك آخر "
+"الإصلاحات."
 
 #. module: native_print
-#: model:ir.model.fields,field_description:native_print.field_native_print_job__byte_size
-msgid "Bytes"
-msgstr "الحجم (بايت)"
+#: model:ir.model.constraint,message:native_print.constraint_native_print_job_idempotency_key_company_uniq
+msgid "A print job with this idempotency key already exists for this company."
+msgstr "توجد بالفعل مهمة طباعة بمفتاح عدم التكرار هذا لهذه الشركة."
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_search
+msgid "Active / Queued"
+msgstr "نشطة / في الانتظار"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Active jobs"
+msgstr "مهام نشطة"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "App Active"
+msgstr "التطبيق نشط"
 
 #. module: native_print
 #: model:ir.model.fields,field_description:native_print.field_native_print_job__attempts
@@ -58,34 +86,33 @@ msgid "Attempts"
 msgstr "المحاولات"
 
 #. module: native_print
-#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__queued
-msgid "Queued"
-msgstr "في الطابور"
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Browser Fallback Mode"
+msgstr "وضع المتصفح الاحتياطي"
 
 #. module: native_print
-#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__rendering
-msgid "Rendering"
-msgstr "جاري التصيير"
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Browser Mode"
+msgstr "وضع المتصفح"
 
 #. module: native_print
-#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__spooling
-msgid "Spooling"
-msgstr "جاري الإرسال للـ Spooler"
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__byte_size
+msgid "Bytes"
+msgstr "الحجم (بايت)"
 
 #. module: native_print
-#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__printing
-msgid "Printing"
-msgstr "جاري الطباعة"
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Calibration Failed"
+msgstr "فشلت المعايرة"
 
 #. module: native_print
-#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__done
-msgid "Done"
-msgstr "مكتملة"
-
-#. module: native_print
-#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__failed
-msgid "Failed"
-msgstr "فشلت"
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Calibration Queued"
+msgstr "تمت جدولة المعايرة"
 
 #. module: native_print
 #: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__canceled
@@ -93,325 +120,182 @@ msgid "Canceled"
 msgstr "ملغاة"
 
 #. module: native_print
-#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__dead_letter
-msgid "Dead letter"
-msgstr "تحتاج لتدخل (Dead Letter)"
-
-#. module: native_print
-msgid "Printer Class"
-msgstr "فئة الطابعة"
-
-#. module: native_print
-msgid "Detected Mode"
-msgstr "بروتوكول الطباعة المكتشف"
-
-#. module: native_print
-msgid "Detection Reason"
-msgstr "سبب اكتشاف البروتوكول"
-
-#. module: native_print
-msgid "Detected Printer"
-msgstr "الطابعة المكتشفة"
-
-#. module: native_print
-msgid "Automatically Detected Capabilities"
-msgstr "الإمكانيات المكتشفة تلقائيًا"
-
-#. module: native_print
-msgid "Supported Papers"
-msgstr "مقاسات الورق المدعومة"
-
-#. module: native_print
-msgid "Forms Data"
-msgstr "نماذج الورق"
-
-#. module: native_print
-msgid "Bins Data"
-msgstr "أدراج ومصادر الورق"
-
-#. module: native_print
-msgid "Resolutions Data"
-msgstr "دقة الطباعة"
-
-#. module: native_print
-msgid "Supports Duplex"
-msgstr "يدعم الطباعة على الوجهين"
-
-#. module: native_print
-msgid "Supports Color"
-msgstr "يدعم الطباعة الملونة"
-
-#. module: native_print
-msgid "Supports Custom Size"
-msgstr "يدعم المقاسات المخصصة"
-
-#. module: native_print
-msgid "Max Copies"
-msgstr "أقصى عدد نسخ"
-
-#. module: native_print
-msgid "Max Copies Allowed"
-msgstr "أقصى عدد نسخ مدعوم"
-
-#. module: native_print
-msgid "Office / Document"
-msgstr "مكتبية / مستندات"
-
-#. module: native_print
-msgid "Thermal Receipt"
-msgstr "حرارية / إيصالات"
-
-#. module: native_print
-msgid "Label Printer"
-msgstr "طابعة ملصقات"
-
-#. module: native_print
-msgid "Virtual Printer"
-msgstr "طابعة افتراضية"
-
-#. module: native_print
-msgid "Windows Driver (GDI)"
-msgstr "تعريف Windows (GDI)"
-
-#. module: native_print
-msgid "ESC/POS Thermal"
-msgstr "حرارية (ESC/POS)"
-
-#. module: native_print
-msgid "ZPL Label"
-msgstr "ملصقات (ZPL)"
-
-#. module: native_print
-msgid "TSPL Label"
-msgstr "ملصقات (TSPL)"
-
-#. module: native_print
-msgid "EPL Label"
-msgstr "ملصقات (EPL)"
-
-#. module: native_print
-msgid "IPP Network"
-msgstr "شبكة (IPP)"
-
-#. module: native_print
-msgid "Automatic media configuration."
-msgstr "إعداد الورق تلقائيًا."
-
-#. module: native_print
-msgid ""
-"Native Print reads paper sizes, roll width, trays, resolution and print "
-"capabilities from the installed Windows driver."
-msgstr ""
-"يقرأ Native Print مقاسات الورق وعرض الرول والأدراج والدقة وإمكانيات الطباعة "
-"من تعريف الطابعة المثبت في Windows."
-
-#. module: native_print
-msgid ""
-"Each document or kitchen receipt is matched to supported media "
-"automatically. No paper size or protocol selection is required."
-msgstr ""
-"يتم اختيار وسيط الطباعة المناسب تلقائيًا لكل مستند أو إيصال مطبخ وفقًا "
-"للمقاسات المدعومة. لا تحتاج إلى تحديد مقاس الورق أو بروتوكول الطباعة."
-
-#. module: native_print
-msgid "Detected Media & Trays"
-msgstr "الورق والأدراج المكتشفة"
-
-#. module: native_print
-msgid "Driver Media Forms"
-msgstr "نماذج الورق من التعريف"
-
-#. module: native_print
-msgid "Input Trays / Bins"
-msgstr "أدراج ومصادر إدخال الورق"
-
-#. module: native_print
-msgid "Detection Details"
-msgstr "تفاصيل الاكتشاف"
-
-#. module: native_print
-msgid "Reliability"
-msgstr "الموثوقية"
-
-#. module: native_print
-msgid "Media from driver: "
-msgstr "الورق من تعريف الطابعة: "
-
-#. module: native_print
-msgid "Select a printer detected by the desktop app..."
-msgstr "اختر طابعة اكتشفها تطبيق سطح المكتب..."
-
-#. module: native_print
-msgid "Automatic media fallback"
-msgstr "اختيار وسيط الطباعة تلقائيًا"
-
-#. module: native_print
-msgid "No raw-language signature detected; use the installed Windows driver."
-msgstr ""
-"لم يتم التعرف على بروتوكول خام معروف؛ سيتم استخدام تعريف Windows المثبت."
-
-#. module: native_print
-msgid "No paper forms reported by the driver."
-msgstr "لم يُبلّغ تعريف الطابعة عن نماذج ورق مدعومة."
-
-#. module: native_print
-msgid "No input trays reported by the driver."
-msgstr "لم يُبلّغ تعريف الطابعة عن أدراج إدخال ورق."
-
-#. module: native_print
-msgid "Resolution not reported by the driver."
-msgstr "لم يُبلّغ تعريف الطابعة عن دقة الطباعة."
-
-#. module: native_print
-msgid ""
-"IPP/AirPrint-capable network queue; print through the installed Windows "
-"driver."
-msgstr "طابعة شبكة تدعم IPP/AirPrint؛ تتم الطباعة عبر تعريف Windows المثبت."
-
-#. module: native_print
-msgid "Reprint"
-msgstr "إعادة الطباعة"
-
-#. module: native_print
-msgid "Executed"
-msgstr "المنفذة"
-
-#. module: native_print
-msgid "Active / Queued"
-msgstr "نشطة / في الانتظار"
-
-#. module: native_print
-msgid "My Print Jobs"
-msgstr "مهام الطباعة الخاصة بي"
-
-#. module: native_print
-msgid "Source Type"
-msgstr "نوع المصدر"
-
-#. module: native_print
-msgid "Source Model"
-msgstr "موديل المصدر"
-
-#. module: native_print
-msgid "Source Records"
-msgstr "سجلات المصدر"
-
-#. module: native_print
-msgid "Source Name"
-msgstr "اسم المصدر"
-
-#. module: native_print
-msgid "POS Receipt"
-msgstr "إيصال نقطة البيع"
-
-#. module: native_print
-msgid "Test Print"
-msgstr "طباعة تجريبية"
-
-#. module: native_print
-msgid "Copies"
-msgstr "النسخ"
-
-#. module: native_print
-msgid "Printer"
-msgstr "الطابعة"
-
-#. module: native_print
-msgid "Printer (as reported)"
-msgstr "الطابعة (كما تم الإبلاغ عنها)"
-
-#. module: native_print
-msgid "Report"
-msgstr "التقرير"
-
-#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__color
 msgid "Color"
 msgstr "الألوان"
 
 #. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_device__company_id
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__company_id
 msgid "Company"
 msgstr "الشركة"
 
 #. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__copies
+msgid "Copies"
+msgstr "النسخ"
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_list
+msgid "Created"
+msgstr "الإنشاء"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_device__create_uid
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__create_uid
+msgid "Created by"
+msgstr "أنشئ بواسطة"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_device__create_date
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__create_date
+msgid "Created on"
+msgstr "تاريخ الإنشاء"
+
+#. module: native_print
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__dead_letter
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_search
+msgid "Dead letter"
+msgstr "تحتاج لتدخل (Dead Letter)"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Default Printer"
+msgstr "الطابعة الافتراضية"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Desktop App Required"
+msgstr "تطبيق سطح المكتب مطلوب"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Discovering printers…"
+msgstr "جارٍ اكتشاف الطابعات…"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_device__display_name
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__display_name
+msgid "Display Name"
+msgstr "اسم العرض"
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_form
+msgid "Document Metrics & Audit"
+msgstr "مقاييس المستند والتدقيق"
+
+#. module: native_print
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__done
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_search
+msgid "Done"
+msgstr "مكتملة"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Done jobs"
+msgstr "مهام منتهية"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__duplex
 msgid "Duplex"
 msgstr "الطباعة على الوجهين"
 
 #. module: native_print
-msgid "Paper"
-msgstr "الورق"
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__error_code
+msgid "Error Code"
+msgstr "رمز الخطأ"
 
 #. module: native_print
-msgid "Print Mode"
-msgstr "وضع الطباعة"
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_search
+msgid "Executed"
+msgstr "المنفذة"
 
 #. module: native_print
-msgid "User"
-msgstr "المستخدم"
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__failed
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_search
+msgid "Failed"
+msgstr "فشلت"
 
 #. module: native_print
-msgid "Native Print / User"
-msgstr "الطباعة الأصلية / مستخدم"
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Failed jobs"
+msgstr "مهام فاشلة"
 
 #. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_device__id
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__id
+msgid "ID"
+msgstr "المعرّف"
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_form
+msgid "Idempotency Key"
+msgstr "مفتاح منع التكرار"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__name
+msgid "Idempotency key"
+msgstr "مفتاح عدم التكرار (Idempotency Key)"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "In use"
+msgstr "قيد الاستخدام"
+
+#. module: native_print
+#: model:ir.ui.menu,name:native_print.menu_jobs
+msgid "Jobs"
+msgstr "سجل مهام الطباعة"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_device__write_uid
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__write_uid
+msgid "Last Updated by"
+msgstr "آخر تحديث بواسطة"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_device__write_date
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__write_date
+msgid "Last Updated on"
+msgstr "تاريخ آخر تحديث"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Local Printers"
+msgstr "الطابعات المحلية"
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_search
+msgid "My Print Jobs"
+msgstr "مهام الطباعة الخاصة بي"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Native App Required"
+msgstr "التطبيق الأصلي مطلوب"
+
+#. module: native_print
+#: model:ir.ui.menu,name:native_print.menu_native_print_root
+msgid "Native Print"
+msgstr "الطباعة المحلية"
+
+#. module: native_print
+#: model:res.groups,name:native_print.group_native_print_manager
 msgid "Native Print / Manager"
 msgstr "الطباعة الأصلية / مدير"
 
 #. module: native_print
-#. odoo-python
-#: code:addons/native_print/models/native_print_job.py:0
-msgid ""
-"This job cannot be reprinted: the original report or its records were not "
-"recorded for it (for example, POS receipts are reprinted from the POS)."
-msgstr ""
-"لا يمكن إعادة طباعة هذه المهمة: لم يتم تسجيل التقرير الأصلي أو سجلاته لها "
-"(على سبيل المثال، تتم إعادة طباعة إيصالات نقطة البيع من نقطة البيع نفسها)."
-
-#. module: native_print
-#. odoo-python
-#: code:addons/native_print/models/native_print_job.py:0
-msgid ""
-"Print job status is reported by the desktop app and cannot be changed "
-"manually. To print again, print the document again from Odoo."
-msgstr ""
-"يتم إبلاغ حالة مهمة الطباعة بواسطة تطبيق سطح المكتب ولا يمكن تغييرها يدويًا."
-" للطباعة مرة أخرى، اطبع المستند من جديد من Odoo."
-
-#. module: native_print
-msgid ""
-"Reprint this document now? The original printer and print settings are "
-"restored when that printer is connected to this PC."
-msgstr ""
-"إعادة طباعة هذا المستند الآن؟ ستتم استعادة الطابعة الأصلية وإعدادات الطباعة "
-"عندما تكون تلك الطابعة متصلة بهذا الكمبيوتر."
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_handler.js:0
-msgid "Sent \"%s\" to %s"
-msgstr "تم إرسال \"%s\" إلى %s"
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_handler.js:0
-msgid "Printing failed on \"%s\" (%s). Check the printer before reprinting."
-msgstr "فشلت الطباعة على \"%s\" (%s). افحص الطابعة قبل إعادة الطباعة."
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_handler.js:0
-msgid ""
-"Print job \"%s\" is still %s; its final outcome is unconfirmed. Check Print "
-"Jobs later."
-msgstr ""
-"مهمة الطباعة \"%s\" ما زالت %s؛ نتيجتها النهائية غير مؤكدة. راجع مهام "
-"الطباعة لاحقًا."
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_handler.js:0
-msgid ""
-"Native Print could not print on \"%s\": %s. The file was downloaded instead."
-msgstr "تعذرت الطباعة الأصلية على \"%s\": %s. تم تنزيل الملف بدلاً من ذلك."
+#: model:res.groups,name:native_print.group_native_print_user
+msgid "Native Print / User"
+msgstr "الطباعة الأصلية / مستخدم"
 
 #. module: native_print
 #. odoo-javascript
@@ -419,6 +303,13 @@ msgstr "تعذرت الطباعة الأصلية على \"%s\": %s. تم تنز�
 msgid ""
 "Native Print could not print on \"%s\": %s. The PDF was downloaded instead."
 msgstr "تعذرت الطباعة الأصلية على \"%s\": %s. تم تنزيل ملف PDF بدلاً من ذلك."
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_handler.js:0
+msgid ""
+"Native Print could not print on \"%s\": %s. The file was downloaded instead."
+msgstr "تعذرت الطباعة الأصلية على \"%s\": %s. تم تنزيل الملف بدلاً من ذلك."
 
 #. module: native_print
 #. odoo-javascript
@@ -431,95 +322,20 @@ msgstr ""
 "من ذلك."
 
 #. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/pos_native_print.js:0
-msgid ""
-"Receipt printing failed on \"%s\" (%s). Check the printer before reprinting."
-msgstr "فشلت طباعة الإيصال على \"%s\" (%s). افحص الطابعة قبل إعادة الطباعة."
+#: model:ir.model,name:native_print.model_native_print_job
+msgid "Native Print: job log"
+msgstr "الطباعة من Yaseir: سجل المهام"
 
 #. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/pos_native_print.js:0
-msgid ""
-"Receipt job on \"%s\" is taking long; its final outcome is unconfirmed. "
-"Check Print Jobs later."
-msgstr ""
-"مهمة الإيصال على \"%s\" تستغرق وقتًا طويلاً؛ نتيجتها النهائية غير مؤكدة. "
-"راجع مهام الطباعة لاحقًا."
+#: model:ir.model,name:native_print.model_native_print_device
+msgid "Native Print: printer seen in the job log"
+msgstr "الطباعة من Yaseir: طابعة ظاهرة في سجل المهام"
 
 #. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid ""
-"Open Odoo inside the Yaseir Print desktop app to see this PC's printers."
-msgstr ""
-"افتح Odoo داخل تطبيق الطباعة من Yaseir لسطح المكتب لعرض طابعات هذا "
-"الكمبيوتر."
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Desktop App Required"
-msgstr "تطبيق سطح المكتب مطلوب"
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "%s printer(s) found on this PC."
-msgstr "تم العثور على %s طابعة على هذا الكمبيوتر."
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Printers Refreshed"
-msgstr "تم تحديث الطابعات"
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Printer Refresh Failed"
-msgstr "فشل تحديث الطابعات"
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid ""
-"The Control Center is available when running inside the Yaseir Print desktop"
-" app (Ctrl+Shift+Y)."
-msgstr ""
-"مركز التحكم متاح عند التشغيل داخل تطبيق الطباعة من Yaseir لسطح المكتب "
-"(Ctrl+Shift+Y)."
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Browser Fallback Mode"
-msgstr "وضع المتصفح الاحتياطي"
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "%s will be used for printing from this PC."
-msgstr "سيتم استخدام %s للطباعة من هذا الكمبيوتر."
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Printer Selected"
-msgstr "تم اختيار الطابعة"
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid ""
-"Open Odoo inside the Yaseir Print app to send hardware calibration prints."
-msgstr "افتح Odoo داخل تطبيق الطباعة من Yaseir لإرسال مطبوعات معايرة العتاد."
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Native App Required"
-msgstr "التطبيق الأصلي مطلوب"
+msgid "No Printer Available"
+msgstr "لا توجد طابعة متاحة"
 
 #. module: native_print
 #. odoo-javascript
@@ -533,8 +349,141 @@ msgstr ""
 #. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "No Printer Available"
-msgstr "لا توجد طابعة متاحة"
+msgid "Open Native Control Center"
+msgstr "فتح مركز تحكم الطباعة"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid ""
+"Open Odoo inside the Yaseir Print app to send hardware calibration prints."
+msgstr "افتح Odoo داخل تطبيق الطباعة من Yaseir لإرسال مطبوعات معايرة العتاد."
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid ""
+"Open Odoo inside the Yaseir Print desktop app to see this PC's printers."
+msgstr ""
+"افتح Odoo داخل تطبيق الطباعة من Yaseir لسطح المكتب لعرض طابعات هذا "
+"الكمبيوتر."
+
+#. module: native_print
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__source_type__pos_receipt
+msgid "POS Receipt"
+msgstr "إيصال نقطة البيع"
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_search
+msgid "POS Receipts"
+msgstr "إيصالات نقاط البيع"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__pages
+msgid "Pages"
+msgstr "عدد الصفحات"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__paper
+msgid "Paper"
+msgstr "الورق"
+
+#. module: native_print
+#: model:ir.actions.act_window,name:native_print.action_jobs
+msgid "Print Jobs"
+msgstr "مهام الطباعة"
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_graph
+msgid "Print Jobs Analysis"
+msgstr "تحليل مهام الطباعة"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Print Jobs Log"
+msgstr "سجل مهام الطباعة"
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_pivot
+msgid "Print Jobs Pivot"
+msgstr "مهام الطباعة (محوري)"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__mode
+msgid "Print Mode"
+msgstr "وضع الطباعة"
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_form
+msgid "Print Source & Routing"
+msgstr "مصدر الطباعة والتوجيه"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_handler.js:0
+msgid ""
+"Print job \"%s\" is still %s; its final outcome is unconfirmed. Check Print "
+"Jobs later."
+msgstr ""
+"مهمة الطباعة \"%s\" ما زالت %s؛ نتيجتها النهائية غير مؤكدة. راجع مهام "
+"الطباعة لاحقًا."
+
+#. module: native_print
+#. odoo-python
+#: code:addons/native_print/models/native_print_job.py:0
+msgid ""
+"Print job status is reported by the desktop app and cannot be changed "
+"manually. To print again, print the document again from Odoo."
+msgstr ""
+"يتم إبلاغ حالة مهمة الطباعة بواسطة تطبيق سطح المكتب ولا يمكن تغييرها يدويًا."
+" للطباعة مرة أخرى، اطبع المستند من جديد من Odoo."
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_device__name
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__device_id
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_search
+msgid "Printer"
+msgstr "الطابعة"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__device
+msgid "Printer (as reported)"
+msgstr "الطابعة (كما تم الإبلاغ عنها)"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Printer Refresh Failed"
+msgstr "فشل تحديث الطابعات"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Printer Selected"
+msgstr "تم اختيار الطابعة"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Printers Refreshed"
+msgstr "تم تحديث الطابعات"
+
+#. module: native_print
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__printing
+msgid "Printing"
+msgstr "جاري الطباعة"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_handler.js:0
+msgid "Printing failed on \"%s\" (%s). Check the printer before reprinting."
+msgstr "فشلت الطباعة على \"%s\" (%s). افحص الطابعة قبل إعادة الطباعة."
+
+#. module: native_print
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__queued
+msgid "Queued"
+msgstr "في الطابور"
 
 #. module: native_print
 #. odoo-javascript
@@ -544,53 +493,98 @@ msgstr "تمت جدولة اختبار معايرة %s (%s) على %s"
 
 #. module: native_print
 #. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Calibration Queued"
-msgstr "تمت جدولة المعايرة"
+#: code:addons/native_print/static/src/js/pos_native_print.js:0
+msgid ""
+"Receipt job on \"%s\" is taking long; its final outcome is unconfirmed. "
+"Check Print Jobs later."
+msgstr ""
+"مهمة الإيصال على \"%s\" تستغرق وقتًا طويلاً؛ نتيجتها النهائية غير مؤكدة. "
+"راجع مهام الطباعة لاحقًا."
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/pos_native_print.js:0
+msgid ""
+"Receipt printing failed on \"%s\" (%s). Check the printer before reprinting."
+msgstr "فشلت طباعة الإيصال على \"%s\" (%s). افحص الطابعة قبل إعادة الطباعة."
 
 #. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Calibration Failed"
-msgstr "فشلت المعايرة"
+msgid "Refresh desktop printers"
+msgstr "تحديث طابعات سطح المكتب"
 
 #. module: native_print
-msgid "This printer is already registered for this company."
-msgstr "هذه الطابعة مسجلة بالفعل لهذه الشركة."
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__rendering
+msgid "Rendering"
+msgstr "جاري التصيير"
 
 #. module: native_print
-msgid "A print job with this idempotency key already exists for this company."
-msgstr "توجد بالفعل مهمة طباعة بمفتاح عدم التكرار هذا لهذه الشركة."
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__report_id
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__source_type__report
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_search
+msgid "Report"
+msgstr "التقرير"
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_search
+msgid "Reports"
+msgstr "التقارير"
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_form
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_list
+msgid "Reprint"
+msgstr "إعادة الطباعة"
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_form
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_list
+msgid ""
+"Reprint this document now? The original printer and print settings are "
+"restored when that printer is connected to this PC."
+msgstr ""
+"إعادة طباعة هذا المستند الآن؟ ستتم استعادة الطابعة الأصلية وإعدادات الطباعة "
+"عندما تكون تلك الطابعة متصلة بهذا الكمبيوتر."
 
 #. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Yaseir Print Status & Control"
-msgstr "حالة الطباعة من Yaseir والتحكم بها"
+msgid "Send Compatible Printer Test"
+msgstr "إرسال طبعة اختبار متوافقة"
 
 #. module: native_print
 #. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "App Active"
-msgstr "التطبيق نشط"
+#: code:addons/native_print/static/src/js/native_print_handler.js:0
+msgid "Sent \"%s\" to %s"
+msgstr "تم إرسال \"%s\" إلى %s"
 
 #. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Browser Mode"
-msgstr "وضع المتصفح"
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__source_model
+msgid "Source Model"
+msgstr "موديل المصدر"
 
 #. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Local Printers"
-msgstr "الطابعات المحلية"
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__report_name
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_form
+msgid "Source Name"
+msgstr "اسم المصدر"
 
 #. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Default Printer"
-msgstr "الطابعة الافتراضية"
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__source_ids
+msgid "Source Records"
+msgstr "سجلات المصدر"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__source_type
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_search
+msgid "Source Type"
+msgstr "نوع المصدر"
+
+#. module: native_print
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__spooling
+msgid "Spooling"
+msgstr "جاري الإرسال للـ Spooler"
 
 #. module: native_print
 #. odoo-javascript
@@ -603,10 +597,45 @@ msgstr ""
 "من Yaseir."
 
 #. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__state
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_search
+msgid "State"
+msgstr "الحالة"
+
+#. module: native_print
+#: model:ir.model.fields.selection,name:native_print.selection__native_print_job__source_type__test
+msgid "Test Print"
+msgstr "طباعة تجريبية"
+
+#. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "In use"
-msgstr "قيد الاستخدام"
+msgid ""
+"The Control Center is available when running inside the Yaseir Print desktop"
+" app (Ctrl+Shift+Y)."
+msgstr ""
+"مركز التحكم متاح عند التشغيل داخل تطبيق الطباعة من Yaseir لسطح المكتب "
+"(Ctrl+Shift+Y)."
+
+#. module: native_print
+#. odoo-python
+#: code:addons/native_print/models/native_print_job.py:0
+msgid ""
+"This job cannot be reprinted: the original report or its records were not "
+"recorded for it (for example, POS receipts are reprinted from the POS)."
+msgstr ""
+"لا يمكن إعادة طباعة هذه المهمة: لم يتم تسجيل التقرير الأصلي أو سجلاته لها "
+"(على سبيل المثال، تتم إعادة طباعة إيصالات نقطة البيع من نقطة البيع نفسها)."
+
+#. module: native_print
+#: model:ir.model.constraint,message:native_print.constraint_native_print_device_name_company_uniq
+msgid "This printer is already registered for this company."
+msgstr "هذه الطابعة مسجلة بالفعل لهذه الشركة."
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_list
+msgid "Total Pages"
+msgstr "إجمالي الصفحات"
 
 #. module: native_print
 #. odoo-javascript
@@ -615,49 +644,24 @@ msgid "Use this printer"
 msgstr "استخدم هذه الطابعة"
 
 #. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_job__user_id
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_search
+msgid "User"
+msgstr "المستخدم"
+
+#. module: native_print
 #. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Discovering printers…"
-msgstr "جارٍ اكتشاف الطابعات…"
+#: code:addons/native_print/static/src/xml/native_print_systray.xml:0
+msgid "Yaseir Print"
+msgstr "Yaseir Print"
 
 #. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Refresh desktop printers"
-msgstr "تحديث طابعات سطح المكتب"
+msgid "Yaseir Print Status & Control"
+msgstr "حالة الطباعة من Yaseir والتحكم بها"
 
 #. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Active jobs"
-msgstr "مهام نشطة"
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Done jobs"
-msgstr "مهام منتهية"
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Failed jobs"
-msgstr "مهام فاشلة"
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Print Jobs Log"
-msgstr "سجل مهام الطباعة"
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Send Compatible Printer Test"
-msgstr "إرسال طبعة اختبار متوافقة"
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Open Native Control Center"
-msgstr "فتح مركز تحكم الطباعة"
+#: model_terms:ir.ui.view,arch_db:native_print.view_job_kanban
+msgid "page(s)"
+msgstr "صفحة"
