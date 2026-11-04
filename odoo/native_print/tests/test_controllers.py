@@ -190,3 +190,104 @@ class TestNativePrintControllers(HttpCase):
         self.assertEqual(overview["active_jobs"], 1)
         self.assertEqual(overview["done_jobs"], 0)
         self.assertEqual(overview["failed_jobs"], 0)
+
+
+@tagged("post_install", "-at_install")
+class TestNativePrintMultiUser(HttpCase):
+    """The same guarantees for NON-admin users (audit L14), including
+    the audit H1 scenario: two cashiers in one company printing the
+    same POS order must never collide, and users of another company
+    stay fully isolated. The client now sends per-user keys; these
+    tests pin the server-side guards that back that up."""
+
+    def _rpc(self, path, params):
+        res = self.url_open(path, data=self._json(params),
+                            headers={"Content-Type": "application/json"}).json()
+        self.assertNotIn("error", res, res)
+        return res["result"]
+
+    def _json(self, params):
+        import json as _json
+
+        return _json.dumps({"jsonrpc": "2.0", "method": "call",
+                            "params": params})
+
+    def _make_user(self, login, company):
+        group = self.env.ref("native_print.group_native_print_user")
+        user = self.env["res.users"].sudo().create({
+            "name": login,
+            "login": login,
+            "password": "np-test-password",
+            "company_id": company.id,
+            "company_ids": [company.id],
+            "group_ids": [(4, group.id), (4, self.env.ref("base.group_user").id)],
+        })
+        return user
+
+    def setUp(self):
+        super().setUp()
+        self.company = self.env.company
+        self.other_company = self.env["res.company"].sudo().create({
+            "name": "NP Other Company",
+        })
+        self.cashier_a = self._make_user("np_cashier_a", self.company)
+        self.cashier_b = self._make_user("np_cashier_b", self.company)
+        self.outsider = self._make_user("np_outsider", self.other_company)
+
+    def test_second_cashier_cannot_touch_first_cashiers_job(self):
+        key = "pos-Order_1-20261104-u1-a1"
+        self.authenticate("np_cashier_a", "np-test-password")
+        res = self._rpc("/native_print/job_status", {
+            "idempotency_key": key, "state": "queued",
+            "source_type": "pos_receipt",
+        })
+        self.assertTrue(res["ok"], res)
+        self.authenticate("np_cashier_b", "np-test-password")
+        res = self._rpc("/native_print/job_status", {
+            "idempotency_key": key, "state": "done",
+        })
+        self.assertEqual(res, {"ok": False, "error": "forbidden"})
+        job = self.env["native.print.job"].sudo().search(
+            [("name", "=", key)])
+        self.assertEqual(job.state, "queued")
+        self.assertEqual(job.user_id, self.cashier_a)
+        # Her own key for the same order is a separate, working job.
+        own_key = "pos-Order_1-20261104-u2-a1"
+        res = self._rpc("/native_print/job_status", {
+            "idempotency_key": own_key, "state": "done",
+            "source_type": "pos_receipt",
+        })
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["state"], "done")
+
+    def test_overview_is_company_wide_for_cashiers(self):
+        self.authenticate("np_cashier_a", "np-test-password")
+        self._rpc("/native_print/job_status", {
+            "idempotency_key": "k-cashier-a", "state": "done",
+        })
+        self.authenticate("np_cashier_b", "np-test-password")
+        overview = self._rpc("/native_print/overview", {})
+        self.assertTrue(overview["ok"])
+        # Company-wide counters (audit L1): B sees the company's
+        # totals, matching the systray labels, not just his own jobs.
+        self.assertEqual(overview["done_jobs"], 1)
+
+    def test_other_company_is_isolated(self):
+        key = "shared-key-name"
+        self.authenticate("np_cashier_a", "np-test-password")
+        self._rpc("/native_print/job_status", {
+            "idempotency_key": key, "state": "done",
+        })
+        self.authenticate("np_outsider", "np-test-password")
+        # The same key in another company is a different job.
+        res = self._rpc("/native_print/job_status", {
+            "idempotency_key": key, "state": "queued",
+        })
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["state"], "queued")
+        jobs = self.env["native.print.job"].sudo().search(
+            [("name", "=", key)])
+        self.assertEqual(len(jobs), 2)
+        overview = self._rpc("/native_print/overview", {})
+        self.assertEqual(overview["active_jobs"], 1)
+        self.assertEqual(overview["done_jobs"], 0)

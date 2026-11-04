@@ -14,7 +14,7 @@
                   decoration-danger="state in ('failed', 'dead_letter')"
                   decoration-info="state in ('queued', 'rendering', 'spooling', 'printing')"
                   decoration-muted="state == 'canceled'"
-                  sample="1">
+                 >
                 <field name="create_date" string="Created"/>
                 <field name="name" class="font-monospace"/>
                 <field name="report_id"/>
@@ -46,7 +46,7 @@
         <field name="name">native.print.job.kanban</field>
         <field name="model">native.print.job</field>
         <field name="arch" type="xml">
-            <kanban default_group_by="state" create="0" sample="1">
+            <kanban default_group_by="state" create="0">
                 <field name="name"/>
                 <field name="state"/>
                 <field name="error_code"/>
@@ -106,7 +106,7 @@
                             invisible="not report_id or not source_ids"
                             confirm="Reprint this document now? The original printer and print settings are restored when that printer is connected to this PC."/>
                     <field name="state" widget="statusbar"
-                           statusbar_visible="queued,rendering,spooling,printing,done,failed"/>
+                           statusbar_visible="queued,rendering,spooling,printing,done,failed,canceled,dead_letter"/>
                 </header>
                 <sheet>
                     <div class="alert alert-danger d-flex align-items-center gap-2" role="alert"
@@ -185,7 +185,7 @@
         <field name="name">native.print.job.graph</field>
         <field name="model">native.print.job</field>
         <field name="arch" type="xml">
-            <graph string="Print Jobs Analysis" type="bar" sample="1">
+            <graph string="Print Jobs Analysis" type="bar">
                 <field name="state"/>
                 <field name="pages" type="measure"/>
             </graph>
@@ -196,7 +196,7 @@
         <field name="name">native.print.job.pivot</field>
         <field name="model">native.print.job</field>
         <field name="arch" type="xml">
-            <pivot string="Print Jobs Pivot" display_quantity="1" sample="1">
+            <pivot string="Print Jobs Pivot" display_quantity="1">
                 <field name="state" type="col"/>
                 <field name="report_id" type="row"/>
                 <field name="pages" type="measure"/>
@@ -213,6 +213,31 @@
         <field name="context">{'create': False, 'search_default_f_executed': 1}</field>
     </record>
 
+    <!-- Printer registry maintenance (managers only): rows are
+         auto-created by the job sync; this list exists so a stale
+         row (renamed/retired printer) can be removed. Deleting a row
+         never deletes jobs - their printer field just empties
+         (ondelete set null) and the raw reported name stays on the
+         job. Create/edit stay off: the registry mirrors reality. -->
+    <record id="view_device_list" model="ir.ui.view">
+        <field name="name">native.print.device.list</field>
+        <field name="model">native.print.device</field>
+        <field name="arch" type="xml">
+            <list create="0" edit="0">
+                <field name="name"/>
+                <field name="company_id"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_devices" model="ir.actions.act_window">
+        <field name="name">Printers</field>
+        <field name="res_model">native.print.device</field>
+        <field name="view_mode">list</field>
+        <field name="domain">[('company_id', 'in', allowed_company_ids)]</field>
+        <field name="context">{'create': False}</field>
+    </record>
+
     <menuitem id="menu_native_print_root"
               name="Native Print"
               web_icon="native_print,static/description/icon.png"
@@ -223,4 +248,10 @@
               parent="menu_native_print_root"
               action="action_jobs"
               sequence="10"/>
+    <menuitem id="menu_devices"
+              name="Printers"
+              parent="menu_native_print_root"
+              action="action_devices"
+              groups="native_print.group_native_print_manager"
+              sequence="20"/>
 </odoo>

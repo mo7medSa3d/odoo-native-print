@@ -25,6 +25,22 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tauri::{Manager, State};
 
+/// Lock the shared queue, recovering from mutex poisoning. A panic
+/// inside print-core while the lock was held used to turn every later
+/// command into `queue_poisoned` until restart (audit M3) — printing
+/// dead for the session from one fault. The queue's data lives in
+/// transactional SQLite, so the recovered guard is safe to keep
+/// using; the poison event is logged to stderr.
+fn lock_queue(queue: &Mutex<Queue>) -> std::sync::MutexGuard<'_, Queue> {
+    match queue.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            eprintln!("Yaseir Print: queue mutex was poisoned; recovering the guard");
+            poisoned.into_inner()
+        }
+    }
+}
+
 pub struct AppState {
     pub queue: Arc<Mutex<Queue>>,
     pub configured_origin: RwLock<Option<String>>,
@@ -276,10 +292,7 @@ pub async fn print_pdf(
         media_roll_width_mm: req.media_roll_width_mm,
     };
     let id = {
-        let mut queue = state
-            .queue
-            .lock()
-            .map_err(|_| "queue_poisoned".to_string())?;
+        let mut queue = lock_queue(&state.queue);
         // Duplicate submissions (same idempotency key) return the
         // original job untouched: never overwrite its payload/options.
         // Job + payload + options land in ONE SQLite transaction:
@@ -319,6 +332,13 @@ pub fn print_text(
     req: PrintTextRequest,
 ) -> Result<String, String> {
     check_origin(&webview, &state)?;
+    // Same key validation as print_pdf/print_image (audit M1): an
+    // unvalidated key becomes the job id verbatim, so an empty or
+    // colliding key would silently dedupe two different documents
+    // into one job.
+    if !print_core::security::valid_idempotency_key(&req.idempotency_key) {
+        return Err("bad_idempotency_key".to_string());
+    }
     if req.text.is_empty() || req.text.len() > 1_048_576 {
         return Err("bad_text_size".to_string());
     }
@@ -363,10 +383,7 @@ pub fn print_text(
         media_roll_width_mm: None,
     };
     let id = {
-        let mut queue = state
-            .queue
-            .lock()
-            .map_err(|_| "queue_poisoned".to_string())?;
+        let mut queue = lock_queue(&state.queue);
         // Duplicate submissions (same idempotency key) return the
         // original job untouched: never overwrite its payload/options.
         // Job + payload + options land in ONE SQLite transaction:
@@ -450,10 +467,7 @@ pub async fn print_image(
         media_roll_width_mm: req.media_roll_width_mm,
     };
     let id = {
-        let mut queue = state
-            .queue
-            .lock()
-            .map_err(|_| "queue_poisoned".to_string())?;
+        let mut queue = lock_queue(&state.queue);
         // Duplicate submissions (same idempotency key) return the
         // original job untouched: never overwrite its payload/options.
         // Job + payload + options land in ONE SQLite transaction:
@@ -481,10 +495,7 @@ pub fn print_status(
     job_id: String,
 ) -> Result<String, String> {
     check_origin(&webview, &state)?;
-    let queue = state
-        .queue
-        .lock()
-        .map_err(|_| "queue_poisoned".to_string())?;
+    let queue = lock_queue(&state.queue);
     let job = queue.get(&job_id).map_err(|e| e.to_string())?;
     Ok(job.state.as_str().to_string())
 }
@@ -509,10 +520,7 @@ pub fn job_detail(
     job_id: String,
 ) -> Result<JobDetailResponse, String> {
     check_origin(&webview, &state)?;
-    let queue = state
-        .queue
-        .lock()
-        .map_err(|_| "queue_poisoned".to_string())?;
+    let queue = lock_queue(&state.queue);
     let job = queue.get(&job_id).map_err(|e| e.to_string())?;
     Ok(JobDetailResponse {
         id: job.id,
@@ -561,10 +569,7 @@ pub async fn app_overview(
         .read()
         .map_err(|_| "config_lock_poisoned".to_string())?;
     let bundle = {
-        let queue = state
-            .queue
-            .lock()
-            .map_err(|_| "queue_poisoned".to_string())?;
+        let queue = lock_queue(&state.queue);
         build_bundle_from_queue(&queue).map_err(|e| e.to_string())?
     };
     Ok(AppOverviewResponse {
@@ -620,35 +625,12 @@ pub async fn printer_capabilities(
     print_win::printer_capabilities(printer.trim()).map_err(|e| e.to_string())
 }
 
-/// Parse `scheme://host[:port]` (with `[ipv6]` support) for the
-/// boot-page reachability probe.
-fn parse_origin_host_port(origin: &str) -> Option<(String, u16)> {
-    let (scheme, rest) = origin.split_once("://")?;
-    let default_port = if scheme.eq_ignore_ascii_case("https") {
-        443
-    } else {
-        80
-    };
-    if let Some(after_open) = rest.strip_prefix('[') {
-        let (ipv6, after_close) = after_open.split_once(']')?;
-        let port = match after_close.strip_prefix(':') {
-            Some(p) => p.parse::<u16>().ok()?,
-            None => default_port,
-        };
-        return Some((ipv6.to_string(), port));
-    }
-    match rest.rsplit_once(':') {
-        Some((h, p)) if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) => {
-            Some((h.to_string(), p.parse::<u16>().ok()?))
-        }
-        _ => Some((rest.to_string(), default_port)),
-    }
-}
-
-/// Local boot-page probe: is the configured Odoo origin reachable at
-/// the TCP level? boot.html only navigates the webview to Odoo after
-/// this succeeds, so a down server shows a styled local retry screen
-/// instead of stranding the user on a WebView2 error page.
+/// Boot-page reachability probe: TCP-connect to the configured
+/// origin. Host/port come from print-core's security parser (the
+/// one parser for this value — audit L5), and every resolved
+/// address is tried under one shared 3 s deadline: a dual-stack
+/// server whose first family is dead must not read as "down" when
+/// the webview itself would connect via the other family.
 #[tauri::command]
 pub fn probe_origin(webview: tauri::Webview, state: State<'_, AppState>) -> Result<bool, String> {
     check_local_only(&webview)?;
@@ -659,17 +641,24 @@ pub fn probe_origin(webview: tauri::Webview, state: State<'_, AppState>) -> Resu
     let Some(origin) = origin else {
         return Ok(false);
     };
-    let Some((host, port)) = parse_origin_host_port(&origin) else {
+    let Some((host, port)) = print_core::security::origin_host_port(&origin) else {
         return Ok(false);
     };
-    let mut addrs = match (host.as_str(), port).to_socket_addrs() {
+    let addrs = match (host.as_str(), port).to_socket_addrs() {
         Ok(a) => a,
         Err(_) => return Ok(false),
     };
-    let Some(sock) = addrs.next() else {
-        return Ok(false);
-    };
-    Ok(std::net::TcpStream::connect_timeout(&sock, Duration::from_secs(3)).is_ok())
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    for sock in addrs {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        if std::net::TcpStream::connect_timeout(&sock, remaining).is_ok() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[tauri::command]
@@ -830,10 +819,7 @@ pub fn run_test_print(
         error_code: None,
     };
     let id = {
-        let mut queue = state
-            .queue
-            .lock()
-            .map_err(|_| "queue_poisoned".to_string())?;
+        let mut queue = lock_queue(&state.queue);
         match queue
             .enqueue_with_payload(&job, payload_kind, &payload_bytes, &opts)
             .map_err(|e| e.to_string())?
@@ -858,10 +844,7 @@ pub fn retry_job_cmd(
     check_origin(&webview, &state)?;
     check_local_only(&webview)?;
     {
-        let mut queue = state
-            .queue
-            .lock()
-            .map_err(|_| "queue_poisoned".to_string())?;
+        let mut queue = lock_queue(&state.queue);
         queue.retry_job(&job_id).map_err(|e| e.to_string())?;
     }
     state.notify_worker();
@@ -876,10 +859,7 @@ pub fn cancel_job_cmd(
 ) -> Result<(), String> {
     check_origin(&webview, &state)?;
     check_local_only(&webview)?;
-    let mut queue = state
-        .queue
-        .lock()
-        .map_err(|_| "queue_poisoned".to_string())?;
+    let mut queue = lock_queue(&state.queue);
     queue.cancel_job(&job_id).map_err(|e| e.to_string())
 }
 
@@ -890,10 +870,7 @@ pub fn clear_finished_cmd(
 ) -> Result<u64, String> {
     check_origin(&webview, &state)?;
     check_local_only(&webview)?;
-    let mut queue = state
-        .queue
-        .lock()
-        .map_err(|_| "queue_poisoned".to_string())?;
+    let mut queue = lock_queue(&state.queue);
     queue.clear_finished().map_err(|e| e.to_string())
 }
 
@@ -904,10 +881,7 @@ pub fn export_diagnostics(
 ) -> Result<String, String> {
     check_origin(&webview, &state)?;
     check_local_only(&webview)?;
-    let queue = state
-        .queue
-        .lock()
-        .map_err(|_| "queue_poisoned".to_string())?;
+    let queue = lock_queue(&state.queue);
     let bundle = build_bundle_from_queue(&queue).map_err(|e| e.to_string())?;
     let mut value: serde_json::Value =
         serde_json::from_str(&bundle_to_json(&bundle)).unwrap_or(serde_json::json!({}));
@@ -1049,13 +1023,19 @@ pub async fn report_environment(
 /// reload the configured Odoo origin with a clean slate. The user
 /// signs in again afterwards. This is the one-click cure for the
 /// "white page after login" class of failures.
+///
+/// Control Center only (audit M2): the wipe logs the user out, so
+/// the capability grant excludes remote pages AND this command
+/// re-checks local-only in Rust — a script on the Odoo origin must
+/// never be able to loop it into a permanent forced logout. The
+/// boot watchdog card points users here instead of invoking it.
 #[tauri::command]
 pub fn clear_web_data_cmd(
     app: tauri::AppHandle,
     webview: tauri::Webview,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    check_origin(&webview, &state)?;
+    check_local_only(&webview)?;
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "main_window_missing".to_string())?;
@@ -1780,8 +1760,20 @@ impl PrintBackend for NativePrintBackend {
                     scale_policy: policy,
                     tray: opts.tray.clone(),
                 };
-                print_win::print_pdf_gdi_with_options(&target_name, title, &data, &gdi_opts)
-                    .map_err(|e| BackendError::ambiguous("GDI_PRINT_ERROR", &e.to_string()))?;
+                print_win::print_pdf_gdi_detailed(&target_name, title, &data, &gdi_opts).map_err(
+                    |e| {
+                        // ADR-0004 classification from the backend
+                        // (audit M5): a failure after pages reached
+                        // paper is ambiguous and must never auto-retry;
+                        // a setup failure printed nothing, so the
+                        // worker may retry it like any transient error.
+                        if e.ambiguous {
+                            BackendError::ambiguous("GDI_PRINT_ERROR", &e.message)
+                        } else {
+                            BackendError::retryable("GDI_SETUP_ERROR", &e.message)
+                        }
+                    },
+                )?;
                 Ok(())
             }
             ("pdf", _) => Err(BackendError::fatal(
@@ -1791,8 +1783,19 @@ impl PrintBackend for NativePrintBackend {
             ("image-png", "gdi") => {
                 let canvas = print_render::decode_png(&data)
                     .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
-                print_win::print_canvas_gdi(&target_name, title, &canvas, opts.copies.max(1))
-                    .map_err(|e| BackendError::ambiguous("GDI_PRINT_ERROR", &e.to_string()))?;
+                print_win::print_canvas_gdi_detailed(
+                    &target_name,
+                    title,
+                    &canvas,
+                    opts.copies.max(1),
+                )
+                .map_err(|e| {
+                    if e.ambiguous {
+                        BackendError::ambiguous("GDI_PRINT_ERROR", &e.message)
+                    } else {
+                        BackendError::retryable("GDI_SETUP_ERROR", &e.message)
+                    }
+                })?;
                 Ok(())
             }
             ("image-png", "escpos" | "zpl" | "tspl" | "epl") => {
@@ -1828,11 +1831,16 @@ impl PrintBackend for NativePrintBackend {
 /// printer patterns using `print_core::Worker`.
 pub fn spawn_worker_loop(db_path: String, wake: Arc<(Mutex<bool>, Condvar)>) {
     std::thread::spawn(move || {
-        // Retention bound: drop stored document bytes of jobs that
-        // failed long ago (rows and events stay for diagnostics).
+        // Retention bounds: drop stored document bytes of jobs that
+        // failed long ago, then — on a much longer window — the
+        // history rows themselves, so the queue database cannot grow
+        // for the life of the install (audit M1).
         if let Ok(mut retention_queue) = Queue::open(&db_path) {
             if let Err(e) = retention_queue.purge_stale_failed_payloads(30 * 86_400) {
                 eprintln!("Yaseir Print: failed-payload retention purge failed: {e}");
+            }
+            if let Err(e) = retention_queue.purge_stale_failed_jobs(90 * 86_400) {
+                eprintln!("Yaseir Print: failed-job row retention purge failed: {e}");
             }
         }
         let mut entropy: u64 = 0x5EED_2026;

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Job-log retention (audit M2): the log otherwise grows
+         forever. Ships INACTIVE on purpose: the log is an audit
+         trail, so deleting history must be an explicit admin choice.
+         To enable: Settings > Technical > Scheduled Actions >
+         "Yaseir Print: prune old print jobs" > Activate. Terminal
+         jobs older than 180 days are removed; active jobs never. -->
+    <record id="cron_prune_job_log" model="ir.cron">
+        <field name="name">Yaseir Print: prune old print jobs</field>
+        <field name="model_id" ref="model_native_print_job"/>
+        <field name="code">model._cron_prune_job_log()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">days</field>
+        <field name="active" eval="False"/>
+    </record>
+</odoo>

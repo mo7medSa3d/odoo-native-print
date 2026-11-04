@@ -1,16 +1,20 @@
+# Translation of Odoo Server.
+# This file contains the translation of the following modules:
+# 	* native_print
 #
 msgid ""
 msgstr ""
 "Project-Id-Version: Odoo Server 19.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-04 04:44+0000\n"
-"PO-Revision-Date: 2026-11-04 04:44+0000\n"
+"POT-Creation-Date: 2026-11-04 08:34+0000\n"
+"PO-Revision-Date: 2026-11-04 08:34+0000\n"
 "Last-Translator: \n"
 "Language-Team: \n"
+"Language: ar_001\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: \n"
-"Plural-Forms: \n"
+"Plural-Forms: nplurals=6; plural=(n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : n%100>=3 && n%100<=10 ? 3 : n%100>=11 && n%100<=99 ? 4 : 5);\n"
 
 #. module: native_print
 #. odoo-javascript
@@ -103,18 +107,6 @@ msgid "Bytes"
 msgstr "الحجم (بايت)"
 
 #. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Calibration Failed"
-msgstr "فشلت المعايرة"
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Calibration Queued"
-msgstr "تمت جدولة المعايرة"
-
-#. module: native_print
 #: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__canceled
 msgid "Canceled"
 msgstr "ملغاة"
@@ -134,6 +126,14 @@ msgstr "الشركة"
 #: model:ir.model.fields,field_description:native_print.field_native_print_job__copies
 msgid "Copies"
 msgstr "النسخ"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid ""
+"Could not read this PC's printers. Check the desktop app and try again."
+msgstr ""
+"تعذّرت قراءة طابعات هذا الجهاز. تأكد إن تطبيق سطح المكتب شغال وحاول تاني."
 
 #. module: native_print
 #: model_terms:ir.ui.view,arch_db:native_print.view_job_list
@@ -277,12 +277,6 @@ msgid "My Print Jobs"
 msgstr "مهام الطباعة الخاصة بي"
 
 #. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Native App Required"
-msgstr "التطبيق الأصلي مطلوب"
-
-#. module: native_print
 #: model:ir.ui.menu,name:native_print.menu_native_print_root
 msgid "Native Print"
 msgstr "الطباعة المحلية"
@@ -334,30 +328,8 @@ msgstr "الطباعة من Yaseir: طابعة ظاهرة في سجل المها
 #. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "No Printer Available"
-msgstr "لا توجد طابعة متاحة"
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid ""
-"No physical printer was discovered. Connect or install a printer, then "
-"refresh the printer list."
-msgstr ""
-"لم يتم اكتشاف أي طابعة فعلية. وصّل طابعة أو ثبّتها ثم حدّث قائمة الطابعات."
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "Open Native Control Center"
 msgstr "فتح مركز تحكم الطباعة"
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid ""
-"Open Odoo inside the Yaseir Print app to send hardware calibration prints."
-msgstr "افتح Odoo داخل تطبيق الطباعة من Yaseir لإرسال مطبوعات معايرة العتاد."
 
 #. module: native_print
 #. odoo-javascript
@@ -464,6 +436,12 @@ msgid "Printer Selected"
 msgstr "تم اختيار الطابعة"
 
 #. module: native_print
+#: model:ir.actions.act_window,name:native_print.action_devices
+#: model:ir.ui.menu,name:native_print.menu_devices
+msgid "Printers"
+msgstr "الطابعات"
+
+#. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "Printers Refreshed"
@@ -484,12 +462,6 @@ msgstr "فشلت الطباعة على \"%s\" (%s). افحص الطابعة قب
 #: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__queued
 msgid "Queued"
 msgstr "في الطابور"
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Queued %s calibration test (%s) on %s"
-msgstr "تمت جدولة اختبار معايرة %s (%s) على %s"
 
 #. module: native_print
 #. odoo-javascript
@@ -546,12 +518,6 @@ msgid ""
 msgstr ""
 "إعادة طباعة هذا المستند الآن؟ ستتم استعادة الطابعة الأصلية وإعدادات الطباعة "
 "عندما تكون تلك الطابعة متصلة بهذا الكمبيوتر."
-
-#. module: native_print
-#. odoo-javascript
-#: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Send Compatible Printer Test"
-msgstr "إرسال طبعة اختبار متوافقة"
 
 #. module: native_print
 #. odoo-javascript
@@ -620,6 +586,23 @@ msgstr ""
 #. module: native_print
 #. odoo-python
 #: code:addons/native_print/models/native_print_job.py:0
+msgid "This job cannot be reprinted: its report has no valid model."
+msgstr ""
+"لا يمكن إعادة طباعة هذه المهمة: التقرير الخاص بها ليس له نموذج بيانات صالح."
+
+#. module: native_print
+#. odoo-python
+#: code:addons/native_print/models/native_print_job.py:0
+msgid ""
+"This job cannot be reprinted: the original records no longer exist or are "
+"not accessible."
+msgstr ""
+"لا يمكن إعادة طباعة هذه المهمة: السجلات الأصلية لم تعد موجودة أو لا يمكن "
+"الوصول إليها."
+
+#. module: native_print
+#. odoo-python
+#: code:addons/native_print/models/native_print_job.py:0
 msgid ""
 "This job cannot be reprinted: the original report or its records were not "
 "recorded for it (for example, POS receipts are reprinted from the POS)."
@@ -651,6 +634,7 @@ msgstr "المستخدم"
 
 #. module: native_print
 #. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_client.js:0
 #: code:addons/native_print/static/src/xml/native_print_systray.xml:0
 msgid "Yaseir Print"
 msgstr "Yaseir Print"
@@ -660,6 +644,17 @@ msgstr "Yaseir Print"
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "Yaseir Print Status & Control"
 msgstr "حالة الطباعة من Yaseir والتحكم بها"
+
+#. module: native_print
+#: model:ir.actions.server,name:native_print.cron_prune_job_log_ir_actions_server
+msgid "Yaseir Print: prune old print jobs"
+msgstr "الطباعة من Yaseir: حذف مهام الطباعة القديمة"
+
+#. module: native_print
+#. odoo-python
+#: code:addons/native_print/models/native_print_job.py:0
+msgid "You do not have access to the report used by this job."
+msgstr "ليس لديك صلاحية الوصول إلى التقرير المستخدم في هذه المهمة."
 
 #. module: native_print
 #: model_terms:ir.ui.view,arch_db:native_print.view_job_kanban

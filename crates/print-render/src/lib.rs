@@ -17,4 +17,4 @@ pub use image::{
 };
 pub use pdf::{parse_pdf_info, PdfInfo, PdfPageInfo, PdfParseError};
 pub use pdfium::{PdfDocument, Pdfium, PdfiumError, RenderedPage};
-pub use plan::{plan_render, split_subjobs, RenderMode, RenderPlan, SubJob};
+pub use plan::{plan_render, split_subjobs, PlanError, RenderMode, RenderPlan, SubJob};

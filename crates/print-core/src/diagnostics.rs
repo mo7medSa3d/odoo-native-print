@@ -17,6 +17,11 @@ pub struct DiagnosticsBundle {
     /// never document content.
     #[serde(default)]
     pub recent_events: Vec<crate::queue::JobEvent>,
+    /// Set when the events query itself failed: support must see
+    /// "events unreadable" instead of a misleading empty list
+    /// (audit L13).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub events_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,13 +72,18 @@ pub fn build_bundle(queue: &Queue, recent: &[JobSummary]) -> Result<DiagnosticsB
     for s in ALL_STATES {
         counts.push((s.as_str().to_string(), queue.count_by_state(s)?));
     }
+    let (recent_events, events_error) = match queue.recent_events(100) {
+        Ok(events) => (events, None),
+        Err(e) => (Vec::new(), Some(e.to_string())),
+    };
     Ok(DiagnosticsBundle {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         core_version: env!("CARGO_PKG_VERSION").to_string(),
         os: std::env::consts::OS.to_string(),
         state_counts: counts,
         recent_jobs: recent.iter().take(200).cloned().collect(),
-        recent_events: queue.recent_events(100).unwrap_or_default(),
+        recent_events,
+        events_error,
     })
 }
 

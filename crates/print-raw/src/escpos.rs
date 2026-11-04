@@ -39,11 +39,23 @@ impl EscPos {
     /// consecutive `GS v 0` slices.
     pub fn raster(mut self, bm: &MonoBitmap) -> Self {
         let bpr = bm.bytes_per_row();
-        let x = bpr as u16;
         let total_h = bm.height_dots;
         if total_h == 0 || bpr == 0 {
             return self;
         }
+        // The GS v 0 header carries bytes-per-row as a u16: a wider
+        // bitmap cannot be represented, and a truncated header would
+        // desync the printer's byte stream. Likewise, a bitmap whose
+        // data buffer disagrees with its dimensions (only possible
+        // for a hand-constructed value — the constructors validate)
+        // must not panic on the slice below. Emit nothing in both
+        // cases (audit L6/L7). In-app widths are ~1200 dots max, so
+        // neither guard can trigger on a real print path.
+        if bpr > u16::MAX as usize || bm.data.len() < total_h as usize * bpr {
+            debug_assert!(false, "bitmap not representable as ESC/POS raster");
+            return self;
+        }
+        let x = bpr as u16;
         let mut row_start = 0u32;
         while row_start < total_h {
             let slice_h = (total_h - row_start).min(MAX_RASTER_SLICE_HEIGHT);

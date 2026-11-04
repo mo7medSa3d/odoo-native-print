@@ -20,6 +20,20 @@ pub fn origin_is_allowed(configured: &str, actual: &str) -> bool {
     c == a && scheme_allowed(&c)
 }
 
+/// Host (IPv6 brackets stripped) and effective port of a valid
+/// origin, for reachability probes. Returns None for anything
+/// `parse_origin` rejects, so probe code never re-implements the
+/// security-critical parser in a second place (audit L5).
+pub fn origin_host_port(origin: &str) -> Option<(String, u16)> {
+    let (_scheme, host, port) = parse_origin(origin)?;
+    let bare = host
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(&host)
+        .to_string();
+    Some((bare, port))
+}
+
 fn scheme_allowed(origin: &(String, String, u16)) -> bool {
     origin.0 == "https" || (origin.0 == "http" && host_is_ip_literal(&origin.1))
 }
@@ -79,7 +93,34 @@ fn parse_origin(s: &str) -> Option<(String, String, u16)> {
     if host.is_empty() || host.contains(char::is_whitespace) || port == 0 {
         return None;
     }
-    Some((scheme.to_ascii_lowercase(), host.to_ascii_lowercase(), port))
+    Some((
+        scheme.to_ascii_lowercase(),
+        canonical_host(&host.to_ascii_lowercase()),
+        port,
+    ))
+}
+
+/// Canonicalize a parsed host the way the webview's URL serializer
+/// reports it, applied to BOTH sides of every origin comparison
+/// (audit L3): an admin who types an uncompressed IPv6 literal
+/// (`[0:0:0:0:0:0:0:1]`) or a trailing-dot hostname otherwise passes
+/// save-time validation (self-comparison) while the webview reports
+/// the canonical form (`[::1]`) — every runtime check then fails and
+/// the app locks itself out with no visible reason. IP literals are
+/// round-tripped through `IpAddr`'s Display; hostnames lose one
+/// trailing dot.
+fn canonical_host(host: &str) -> String {
+    use std::net::IpAddr;
+    if let Some(inner) = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
+        if let Ok(ip) = inner.parse::<IpAddr>() {
+            return format!("[{ip}]");
+        }
+        return host.to_string();
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return ip.to_string();
+    }
+    host.strip_suffix('.').unwrap_or(host).to_string()
 }
 
 /// Hard limits for job input (spec sections 5 and 7).
@@ -253,6 +294,46 @@ mod tests {
             "http://192.168.1.20:80"
         ));
         assert!(origin_is_allowed("http://[::1]:8069", "http://[::1]:8069"));
+    }
+    #[test]
+    fn noncanonical_forms_match_the_webviews_serialization() {
+        // Hand-typed uncompressed IPv6 vs the webview's compressed
+        // serialization (audit L3): both sides canonicalize.
+        assert!(origin_is_allowed(
+            "http://[0:0:0:0:0:0:0:1]:8069",
+            "http://[::1]:8069"
+        ));
+        assert!(origin_is_allowed(
+            "http://[fd00:0:0:0:0:0:0:25]:8069",
+            "http://[fd00::25]:8069"
+        ));
+        // Trailing-dot hostname (HTTPS) vs the bare form.
+        assert!(origin_is_allowed(
+            "https://odoo.company.local.:8069",
+            "https://odoo.company.local:8069"
+        ));
+        // Canonicalization never widens the match to a different host.
+        assert!(!origin_is_allowed(
+            "http://[0:0:0:0:0:0:0:2]:8069",
+            "http://[::1]:8069"
+        ));
+    }
+    #[test]
+    fn host_port_extraction_uses_the_same_parser() {
+        assert_eq!(
+            origin_host_port("http://192.168.1.20:8069"),
+            Some(("192.168.1.20".to_string(), 8069))
+        );
+        assert_eq!(
+            origin_host_port("http://[0:0:0:0:0:0:0:1]:8069"),
+            Some(("::1".to_string(), 8069))
+        );
+        assert_eq!(
+            origin_host_port("https://odoo.company.local"),
+            Some(("odoo.company.local".to_string(), 443))
+        );
+        assert_eq!(origin_host_port("http://host/path"), None);
+        assert_eq!(origin_host_port("not a url"), None);
     }
     #[test]
     fn limits() {

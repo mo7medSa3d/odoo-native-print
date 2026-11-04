@@ -7,6 +7,10 @@ import { join } from "path";
 const src = readFileSync(
     new URL("../static/src/js/native_print_client.js", import.meta.url),
     "utf8",
+).replace(
+    // Stub the Odoo translation import for the bare-node harness.
+    'import { _t } from "@web/core/l10n/translation";',
+    "const _t = (s) => s;",
 );
 const tmp = join(tmpdir(), "np_client_test.mjs");
 writeFileSync(tmp, src);
@@ -26,6 +30,13 @@ eq(m.detectPrinterType({ name: "HP LaserJet", driver: "HP PCL" }).mode, "gdi", "
 eq(m.detectPrinterType({ name: "Microsoft Print to PDF", kind: "virtual" }).printerClass, "virtual", "virtual");
 eq(m.printerPatternFor({ name: "EPSON TM-T88VII", port: "192.168.1.50" }, "escpos"), "tcp://192.168.1.50:9100", "tcp pattern");
 eq(m.printerPatternFor({ name: "HP LaserJet", port: "192.168.1.51" }, "gdi"), "HP LaserJet", "spooler pattern");
+// Audit L9/L10 hardening: IPv6 ports are bracketed, invalid IPv4
+// octets are not IPs, and protocol tokens match on word boundaries.
+eq(m.printerPatternFor({ name: "Label", port: "::1" }, "zpl"), "tcp://[::1]:9100", "ipv6 bracketed");
+eq(m.printerPatternFor({ name: "Label", port: "999.1.1.1" }, "zpl"), "Label", "bad octet not an ip");
+eq(m.detectPrinterType({ name: "Replit OfficeJet", driver: "HP" }).mode, "gdi", "epl substring is not epl");
+eq(m.detectPrinterType({ name: "Zebra ZPL Label", driver: "Zebra" }).mode, "zpl", "zpl word");
+eq(m.detectPrinterType({ name: "TSC TTP-244", driver: "TSC" }).mode, "tspl", "tsc word");
 eq(m.rollWidthMm({ forms: [{ roll: true, size: { width_mm: 80 } }] }), 80, "roll width");
 eq(m.rollWidthMm({ forms: [{ roll: false, size: { width_mm: 210 } }] }), null, "no roll");
 

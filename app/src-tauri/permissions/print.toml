@@ -33,9 +33,15 @@ commands.allow = [
 
 [[permission]]
 identifier = "allow-app-shell"
-description = "App-shell actions initiated by a user click, granted to the configured Odoo origin and the local Control Center: switch to the Control Center, and reset this app's own browsing data (cache, cookies, storage) as a self-heal for a broken webview environment. Affects only this app; never exposes print data or settings."
+description = "App-shell action initiated by a user click, granted to the configured Odoo origin and the local Control Center: switch to the Control Center view."
 commands.allow = [
     "open_control_center",
+]
+
+[[permission]]
+identifier = "allow-web-data-reset"
+description = "Local Control Center only: reset this app's own browsing data (cache, cookies, storage) as a self-heal for a broken webview environment. Deliberately NOT granted to the remote Odoo origin: the wipe logs the user out, so a remote page must never be able to trigger it (a script on the origin could otherwise loop it into a permanent forced logout). Never exposes print data or settings."
+commands.allow = [
     "clear_web_data_cmd",
 ]
 

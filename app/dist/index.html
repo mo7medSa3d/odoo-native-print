@@ -794,19 +794,19 @@
   <!-- Navigation Tabs (separate strip under the app bar) -->
   <div class="tabsbar">
   <nav class="nav-tabs" role="tablist">
-    <button class="nav-tab active" data-tab="dashboard" onclick="switchTab('dashboard')">
+    <button class="nav-tab active" role="tab" aria-selected="true" aria-controls="tab-dashboard" data-tab="dashboard" onclick="switchTab('dashboard')">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
       <span data-i18n="tab_dashboard">لوحة المراقبة وطابور الطباعة</span>
     </button>
-    <button class="nav-tab" data-tab="printers" onclick="switchTab('printers')">
+    <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-printers" data-tab="printers" onclick="switchTab('printers')">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
       <span data-i18n="tab_printers">الطابعات ومعمل المعايرة</span>
     </button>
-    <button class="nav-tab" data-tab="settings" onclick="switchTab('settings')">
+    <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-settings" data-tab="settings" onclick="switchTab('settings')">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
       <span data-i18n="tab_settings">إعدادات اتصال Odoo والأمان</span>
     </button>
-    <button class="nav-tab" data-tab="diagnostics" onclick="switchTab('diagnostics')">
+    <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-diagnostics" data-tab="diagnostics" onclick="switchTab('diagnostics')">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
       <span data-i18n="tab_diagnostics">حزمة التشخيص والدعم الفني</span>
     </button>
@@ -927,14 +927,14 @@
         <div class="card-body">
           <div class="form-grid" style="align-items:end;">
             <div class="form-group">
-              <label class="form-label" data-i18n="lbl_target_printer">اختر الطابعة</label>
+              <label class="form-label" for="customPrinterSelect" data-i18n="lbl_target_printer">اختر الطابعة</label>
               <select id="customPrinterSelect" class="select" onchange="onTestPrinterChange()"></select>
               <input type="text" id="customPrinterUri" class="input mono hidden" dir="ltr" placeholder="tcp://192.168.1.200:9100" autocomplete="off" spellcheck="false" aria-describedby="customPrinterUriHelp customPrinterUriError" style="margin-top:0.5rem;" />
               <div class="form-help hidden" id="customPrinterUriHelp" data-i18n="custom_printer_uri_help">TCP/RAW: tcp://IP:9100 أو IPP: ipp://IP:631/ipp/print</div>
               <div class="form-error hidden" id="customPrinterUriError" role="alert"></div>
             </div>
             <div class="form-group">
-              <label class="form-label" data-i18n="lbl_test_type">نوع صفحة المعايرة والاختبار</label>
+              <label class="form-label" for="customTestKind" data-i18n="lbl_test_type">نوع صفحة المعايرة والاختبار</label>
               <select id="customTestKind" class="select" onchange="updateCalWarning()">
                 <option value="pdf-a4" data-i18n="opt_calibration_pdf">A4 Calibration PDF (GDI + PDFium • rulers + 100×100 mm square + barcode)</option>
                 <option value="thermal-80mm" data-i18n="opt_cal_thermal80">Thermal 80mm Receipt Calibration (ESC/POS • 576 dots)</option>
@@ -970,7 +970,7 @@
         <div class="card-body">
           <div class="form-grid">
             <div class="form-group">
-              <label class="form-label" data-i18n="lbl_odoo_origin">رابط Odoo</label>
+              <label class="form-label" for="inputOdooOrigin" data-i18n="lbl_odoo_origin">رابط Odoo</label>
               <input type="url" id="inputOdooOrigin" class="input mono" dir="ltr" placeholder="http://192.168.1.20:8069" autocomplete="url" spellcheck="false" aria-describedby="helpOdooOrigin originHttpWarning originError" />
               <div class="form-help" id="helpOdooOrigin" data-i18n="help_odoo_origin">الرابط كما يظهر في المتصفح. HTTPS لأي عنوان، أو HTTP لأي عنوان IP — مثل http://192.168.1.20:8069</div>
               <div class="form-help hidden" id="originHttpWarning" data-i18n="origin_http_warning" style="color:var(--status-warn-fg);font-weight:600;" role="note">تنبيه: HTTP غير مشفّر. استخدمه للاختبار أو داخل شبكة موثوقة فقط.</div>
@@ -978,7 +978,7 @@
             </div>
 
             <div class="form-group">
-              <label class="form-label" data-i18n="lbl_recovery_mode">عند توقف مفاجئ</label>
+              <label class="form-label" for="inputAutoReprint" data-i18n="lbl_recovery_mode">عند توقف مفاجئ</label>
               <select id="inputAutoReprint" class="select">
                 <option value="false" data-i18n="opt_recovery_safe">آمن (افتراضي): عدم إعادة طباعة المهام الغامضة تلقائيًا</option>
                 <option value="true" data-i18n="opt_recovery_auto">إعادة الطباعة التلقائية للمهام قيد التنفيذ عند بدء التشغيل</option>
@@ -1311,8 +1311,31 @@
     return !!el && (el.tagName === "SELECT" || el.tagName === "INPUT" || el.tagName === "TEXTAREA");
   }
 
+  // In-flight operation locks (audit JS-M3): while a save, a
+  // diagnostics generation or a test print is running, its buttons
+  // are registered here. setNativeControlsEnabled — called by every
+  // 5 s poll — must never re-enable a locked control, or the
+  // double-submit races those operations guard against reopen in
+  // the poll window.
+  const uiLocks = new Set();
+  function lockControls(ids) {
+    for (const id of ids) {
+      uiLocks.add(id);
+      const el = document.getElementById(id);
+      if (el) el.disabled = true;
+    }
+  }
+  function unlockControls(ids) {
+    for (const id of ids) {
+      uiLocks.delete(id);
+      const el = document.getElementById(id);
+      if (el) el.disabled = false;
+    }
+  }
+
   function setNativeControlsEnabled(enabled) {
     for (const id of ["btnOpenOdoo", "btnSaveOrigin", "btnSaveAndOpen", "btnClearFinished", "btnCustomTestPrint", "btnGenerateDiagnostics", "btnCopyDiagnostics", "btnDownloadDiagnostics"]) {
+      if (uiLocks.has(id)) continue;
       const element = document.getElementById(id);
       if (element) element.disabled = !enabled;
     }
@@ -1406,7 +1429,7 @@
 
   function stateBadgeHtml(state) {
     const s = String(state || "unknown").toLowerCase();
-    const label = I18N[currentLang]["state_" + s] || s.toUpperCase();
+    const label = I18N[currentLang]["state_" + s] || s.replace(/_/g, " ").toUpperCase();
     if (s === "done") return `<span class="badge badge-ok"><span class="dot"></span>${escapeHtml(label)}</span>`;
     if (["queued", "rendering", "spooling", "printing"].includes(s)) {
       return `<span class="badge badge-info"><span class="dot"></span>${escapeHtml(label)}</span>`;
@@ -1419,7 +1442,7 @@
 
   function printerStatusBadge(status) {
     const s = String(status || "unknown").toLowerCase();
-    const label = I18N[currentLang]["ps_" + s] || s.replace("_", " ").toUpperCase();
+    const label = I18N[currentLang]["ps_" + s] || s.replace(/_/g, " ").toUpperCase();
     if (s === "ready" || s === "printing") {
       return `<span class="badge badge-ok"><span class="dot"></span>${escapeHtml(label)}</span>`;
     }
@@ -1434,7 +1457,9 @@
     const target = document.getElementById(`tab-${tabId}`);
     if (target) target.classList.remove("hidden");
     document.querySelectorAll(".nav-tab").forEach((btn) => {
-      btn.classList.toggle("active", btn.getAttribute("data-tab") === tabId);
+      const isActive = btn.getAttribute("data-tab") === tabId;
+      btn.classList.toggle("active", isActive);
+      btn.setAttribute("aria-selected", isActive ? "true" : "false");
     });
     if (tabId === "diagnostics" && !diagnosticsGenerated) {
       loadDiagnosticsBundle();
@@ -1576,7 +1601,10 @@
         : "Could not contact the local print service. Check that the desktop app is running, then refresh.";
       // The numbers on screen are now stale: say so visually.
       document.querySelector(".main-container").classList.add("is-stale");
-      if (!silent) console.error(error); showToast(I18N[currentLang].toast_failed, true);
+      // Braces matter: the toast is part of the !silent branch.
+      // Without them a silent 5 s poll raised an error toast on
+      // every cycle during any bridge outage (audit JS-M2).
+      if (!silent) { console.error(error); showToast(I18N[currentLang].toast_failed, true); }
       return false;
     }
   }
@@ -1624,7 +1652,7 @@
       if (envSignature !== lastEnvSignature) {
         lastEnvSignature = envSignature;
         const fact = (label, ok, value) =>
-          `<div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid var(--border-color,#eef1f6);font-size:0.85rem;"><span style="color:var(--text-secondary);">${label}</span><strong style="color:${ok ? "#12713f" : "#b3261e"};">${value}</strong></div>`;
+          `<div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid var(--border-color,#eef1f6);font-size:0.85rem;"><span style="color:var(--text-secondary);">${escapeHtml(label)}</span><strong style="color:${ok ? "#12713f" : "#b3261e"};">${escapeHtml(value)}</strong></div>`;
         envEl.innerHTML =
           fact("WebView2 Runtime", !!data.webviewVersion, data.webviewVersion || "—") +
           fact("ES2022", !!env.es2022, env.es2022 ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
@@ -1854,6 +1882,7 @@
     }
     const testBtns = document.querySelectorAll('[data-action="test-print"], #btnCustomTestPrint');
     testBtns.forEach((x) => { x.disabled = true; });
+    lockControls(["btnCustomTestPrint"]);
     try {
       const id = await b.runTestPrint(printerName, kind, null);
       showToast(currentLang === "ar" ? `تمت جدولة اختبار الطباعة (${id})` : `Queued test print (${id})`);
@@ -1861,6 +1890,7 @@
     } catch (e) {
       console.error(e); showToast(I18N[currentLang].toast_failed, true);
     } finally {
+      unlockControls(["btnCustomTestPrint"]);
       testBtns.forEach((x) => { x.disabled = false; });
     }
   }
@@ -1938,6 +1968,10 @@
     }
     document.querySelectorAll('[id^="forms-box-"]').forEach((b) => b.classList.add("hidden"));
     box.classList.remove("hidden");
+    // Tag the box with its printer: the grid can re-render while the
+    // driver call is in flight, and the result must never land on a
+    // card that now belongs to a different printer (audit JS-L10).
+    box.dataset.printer = printerName;
     const b = bridge();
     if (!b || typeof b.printerForms !== "function") {
       box.textContent = I18N[currentLang].native_bridge_unavailable;
@@ -1945,15 +1979,21 @@
     }
     try {
       const forms = await b.printerForms(printerName);
+      const current = document.getElementById(`forms-box-${idx}`);
+      if (!current || current.dataset.printer !== printerName) return;
       if (!forms || !forms.length) {
-        box.textContent = currentLang === "ar" ? "لا توجد نماذج ورق مسجلة من التعريف." : "No forms reported by driver.";
+        current.textContent = currentLang === "ar" ? "لا توجد نماذج ورق مسجلة من التعريف." : "No forms reported by driver.";
         return;
       }
-      box.innerHTML = forms.map((f) =>
+      current.innerHTML = forms.map((f) =>
         `<span class="badge ${f.roll ? "badge-info" : "badge-neutral"}" style="margin:2px;">${escapeHtml(f.name)} (${Math.round(f.size.width_mm)}×${Math.round(f.size.height_mm)}mm${f.roll ? " • ROLL" : ""})</span>`
       ).join(" ");
     } catch (e) {
-      box.textContent = String(e);
+      console.error(e);
+      const current = document.getElementById(`forms-box-${idx}`);
+      if (current && current.dataset.printer === printerName) {
+        current.textContent = I18N[currentLang].toast_failed;
+      }
     }
   }
 
@@ -2116,8 +2156,7 @@
     }
     const button = document.getElementById("btnSaveOrigin");
     const button2 = document.getElementById("btnSaveAndOpen");
-    if (button) button.disabled = true;
-    if (button2) button2.disabled = true;
+    lockControls(["btnSaveOrigin", "btnSaveAndOpen"]);
     try {
       const saved = await api.saveOrigin(origin, autoReprint);
       // The save is the one moment the form re-syncs from the server:
@@ -2131,6 +2170,7 @@
       console.error(error); showToast(I18N[currentLang].toast_failed, true);
       return false;
     } finally {
+      unlockControls(["btnSaveOrigin", "btnSaveAndOpen"]);
       if (button) button.disabled = !!(overviewState && overviewState.lockedByPolicy);
       if (button2) button2.disabled = !!(overviewState && overviewState.lockedByPolicy);
       validateOriginField();
@@ -2166,9 +2206,7 @@
     }
     const copyBtn = document.getElementById("btnCopyDiagnostics");
     const dlBtn = document.getElementById("btnDownloadDiagnostics");
-    if (button) button.disabled = true;
-    if (copyBtn) copyBtn.disabled = true;
-    if (dlBtn) dlBtn.disabled = true;
+    lockControls(["btnGenerateDiagnostics", "btnCopyDiagnostics", "btnDownloadDiagnostics"]);
     try {
       const raw = await api.exportDiagnostics();
       const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
@@ -2182,9 +2220,7 @@
       console.error(error); showToast(I18N[currentLang].diagnostics_failed, true);
       return false;
     } finally {
-      if (button) button.disabled = false;
-      if (copyBtn) copyBtn.disabled = false;
-      if (dlBtn) dlBtn.disabled = false;
+      unlockControls(["btnGenerateDiagnostics", "btnCopyDiagnostics", "btnDownloadDiagnostics"]);
     }
   }
 
@@ -2266,6 +2302,10 @@
   document.getElementById("customPrinterSelect").addEventListener("change", () => { formState.testDirty = true; });
   document.getElementById("customPrinterUri").addEventListener("input", () => { formState.testDirty = true; });
   if (currentLang !== "ar") applyLanguage();
+  // The refresh tooltip is localized inside applyLanguage, which a
+  // plain Arabic session never calls — set it unconditionally so it
+  // does not stay in English (audit JS-L6).
+  document.getElementById("btnRefresh").title = I18N[currentLang].btn_refresh;
   refreshAll();
   setInterval(() => refreshAll({ silent: true }), 5000);
 

@@ -80,6 +80,12 @@ impl Canvas {
         }
     }
     pub fn rect_outline(&mut self, x: u32, y: u32, w: u32, h: u32, thickness: u32) {
+        // Zero width/height would underflow the `w - 1` / `h - 1`
+        // arithmetic below (debug panic, release wrap) — a degenerate
+        // outline is simply nothing to draw (audit L9).
+        if w == 0 || h == 0 {
+            return;
+        }
         self.hline(x, x + w - 1, y, thickness);
         self.hline(x, x + w - 1, y + h - 1, thickness);
         self.vline(x, y, y + h - 1, thickness);

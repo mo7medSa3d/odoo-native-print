@@ -27,14 +27,22 @@ globalThis.sessionStorage = {
 eval(extract("posReceiptKey") + "\n" + extract("finishPosReceiptAttempt") +
     "\nglobalThis.__k = posReceiptKey; globalThis.__c = finishPosReceiptAttempt;");
 
-const k1 = globalThis.__k("Order_1");
-const k2 = globalThis.__k("Order_1");
+const k1 = globalThis.__k("Order_1", "7");
+const k2 = globalThis.__k("Order_1", "7");
 assert.strictEqual(k1, k2, "double-fire reuses the in-flight key");
-assert.match(k1, /^pos-Order_1-\d{8}-a1$/);
-globalThis.__c("Order_1"); // watcher saw a terminal state
-const k3 = globalThis.__k("Order_1");
+assert.match(k1, /^pos-Order_1-\d{8}-u7-a1$/);
+globalThis.__c("Order_1", "7"); // watcher saw a terminal state
+const k3 = globalThis.__k("Order_1", "7");
 assert.match(k3, /-a2$/, "reprint after terminal is a fresh attempt");
 assert.notStrictEqual(k3, k1);
 // Different orders never share a key.
-assert.notStrictEqual(globalThis.__k("Order_2"), globalThis.__k("Order_1"));
+assert.notStrictEqual(globalThis.__k("Order_2", "7"), globalThis.__k("Order_1", "7"));
+// Audit H1: the SAME order printed by a DIFFERENT cashier is a
+// different job — different key, and its own in-flight record (the
+// first cashier's record must not dedupe or clear it).
+const other = globalThis.__k("Order_1", "9");
+assert.match(other, /^pos-Order_1-\d{8}-u9-a1$/);
+assert.notStrictEqual(other, k3);
+assert.strictEqual(globalThis.__k("Order_1", "9"), other, "second cashier keeps own in-flight key");
+assert.strictEqual(globalThis.__k("Order_1", "7"), k3, "first cashier record untouched");
 console.log("pos key tests: ALL PASS");

@@ -11,11 +11,26 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+print-ipp = { path = "../crates/print-ipp" }
 print-render = { path = "../crates/print-render" }
 
 [[bin]]
 name = "pdf_info"
 path = "fuzz_targets/pdf_info.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ipp_response"
+path = "fuzz_targets/ipp_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "png_decode"
+path = "fuzz_targets/png_decode.rs"
 test = false
 doc = false
 bench = false

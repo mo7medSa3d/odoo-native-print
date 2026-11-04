@@ -1,5 +1,5 @@
 use crate::state::JobState;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -17,6 +17,8 @@ pub enum QueueError {
     QueueFull(String),
     #[error("stored job options are unreadable: {0}")]
     BadOptions(String),
+    #[error("payload exceeds the {0}-byte limit")]
+    PayloadTooLarge(usize),
 }
 
 /// Default backpressure limit: active (not finished) jobs per printer.
@@ -45,6 +47,19 @@ pub fn diag_id_for_key(key: &str) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("np-{hash:016x}")
+}
+
+/// FNV-1a 64-bit fingerprint of a payload, stored beside the blob so
+/// duplicate detection never has to load the stored bytes (audit M3).
+/// A collision only weakens a diagnostic log line, never a decision:
+/// the stored job wins regardless of the comparison outcome.
+fn payload_fingerprint(data: &[u8]) -> i64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in data {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash as i64
 }
 
 fn now_unix() -> i64 {
@@ -132,7 +147,12 @@ impl Queue {
         Self::init(Connection::open_in_memory()?)
     }
     fn init(conn: Connection) -> Result<Self, QueueError> {
-        conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+        // 30 s, not 5: the command path and the worker hold separate
+        // connections to the same database, and a burst (worker
+        // mid-transaction while the user retries/cancels in the
+        // Control Center) must resolve as a wait, not a user-visible
+        // SQLITE_BUSY failure (audit L6).
+        conn.busy_timeout(std::time::Duration::from_millis(30_000))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         // FULL, not NORMAL: with WAL + NORMAL an OS crash or power
         // loss can roll back the last commits — for a print queue that
@@ -184,6 +204,19 @@ impl Queue {
                 [],
             )?;
         }
+        // Migration: payloads.payload_hash (FNV-1a 64 of the stored
+        // bytes) lets duplicate-submission conflict detection compare
+        // a hash instead of loading the whole stored blob (audit M3).
+        // NULL on rows written before this migration: those fall back
+        // to a length-only comparison.
+        let has_payload_hash: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('payloads') WHERE name='payload_hash')",
+            [],
+            |r| r.get::<_, i64>(0),
+        )? == 1;
+        if !has_payload_hash {
+            conn.execute("ALTER TABLE payloads ADD COLUMN payload_hash INTEGER", [])?;
+        }
         Ok(Self {
             conn,
             max_active_per_printer: DEFAULT_MAX_ACTIVE_PER_PRINTER,
@@ -219,6 +252,16 @@ impl Queue {
             params![job_id, now_unix(), event, detail],
         )?;
         Ok(())
+    }
+
+    /// record_event for call sites that cannot fail their caller (state
+    /// transitions, recovery): a dropped event write used to vanish
+    /// silently (audit L3) — exactly when the disk is full and the
+    /// history matters most. Log the failure to stderr instead.
+    fn record_event_best_effort(&self, job_id: &str, event: &str, detail: Option<&str>) {
+        if let Err(e) = self.record_event(job_id, event, detail) {
+            eprintln!("native-print: failed to record job event {event} for {job_id}: {e}");
+        }
     }
 
     /// The most recent structured job events (the diagnostics log).
@@ -346,7 +389,7 @@ impl Queue {
             params![job.id, job.idempotency_key, job.printer, job.report, job.pages, job.bytes, job.priority, now_unix()],
         )?;
         if !is_duplicate {
-            let _ = self.record_event(
+            self.record_event_best_effort(
                 &job.id,
                 "enqueued",
                 Some(&diag_id_for_key(&job.idempotency_key)),
@@ -406,37 +449,46 @@ impl Queue {
             |r| r.get::<_, i64>(0),
         )? == 1;
         if is_duplicate {
-            // Same key, different document size: the first writer
-            // wins (the stored job is NEVER overwritten), but the
-            // conflict is logged — it means a client bug or a key
-            // being reused across different prints.
+            // Same key, different document: the first writer wins
+            // (the stored job is NEVER overwritten), but the conflict
+            // is logged — it means a client bug or a key being reused
+            // across different prints. The comparison uses the stored
+            // payload fingerprint (length + hash), never the whole
+            // blob, and lookup errors propagate: a database that
+            // cannot answer must not silently read as "no conflict"
+            // (audit M3).
             let existing: Option<(String, i64)> = tx
                 .query_row(
                     "SELECT id, bytes FROM jobs WHERE idempotency_key=?1",
                     params![job.idempotency_key],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
-                .ok();
-            // Full-payload comparison, not just size: a same-size but
-            // different document under a reused key is still a conflict
-            // (first writer wins either way; this only drives the log).
+                .optional()?;
             let payload_differs = match &existing {
                 Some((existing_id, _)) => {
-                    let stored: Option<Vec<u8>> = tx
+                    let stored: Option<(i64, Option<i64>)> = tx
                         .query_row(
-                            "SELECT data FROM payloads WHERE job_id=?1",
+                            "SELECT length(data), payload_hash FROM payloads WHERE job_id=?1",
                             params![existing_id],
-                            |r| r.get(0),
+                            |r| Ok((r.get(0)?, r.get(1)?)),
                         )
-                        .ok();
-                    stored.map(|d| d != data).unwrap_or(false)
+                        .optional()?;
+                    match stored {
+                        // Rows written before the hash column existed
+                        // compare by length only.
+                        Some((len, hash)) => {
+                            len as usize != data.len()
+                                || hash.is_some_and(|h| h != payload_fingerprint(data))
+                        }
+                        None => false,
+                    }
                 }
                 None => false,
             };
             drop(tx);
             if let Some((existing_id, existing_bytes)) = existing {
                 if existing_bytes as u64 != job.bytes || payload_differs {
-                    let _ = self.record_event(
+                    self.record_event_best_effort(
                         &existing_id,
                         "duplicate_conflict",
                         Some(&format!(
@@ -470,8 +522,8 @@ impl Queue {
             params![job.id, job.idempotency_key, job.printer, job.report, job.pages, job.bytes, job.priority, now_unix()],
         )?;
         tx.execute(
-            "INSERT INTO payloads(job_id, kind, data) VALUES(?1,?2,?3)",
-            params![job.id, kind, data],
+            "INSERT INTO payloads(job_id, kind, data, payload_hash) VALUES(?1,?2,?3,?4)",
+            params![job.id, kind, data, payload_fingerprint(data)],
         )?;
         let json = serde_json::to_string(opts).unwrap_or_else(|_| "{}".to_string());
         tx.execute(
@@ -507,9 +559,24 @@ impl Queue {
         kind: &str,
         data: &[u8],
     ) -> Result<(), QueueError> {
+        // The queue is the durable layer: enforce the size cap and
+        // job existence here too, not only in the app crate, so an
+        // oversize blob or an orphan payload (no job row — invisible
+        // to every retention path) can never be persisted (audit L5).
+        if data.len() > crate::security::MAX_JOB_BYTES {
+            return Err(QueueError::PayloadTooLarge(crate::security::MAX_JOB_BYTES));
+        }
+        let job_exists: bool = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM jobs WHERE id=?1)",
+            params![job_id],
+            |r| r.get::<_, i64>(0),
+        )? == 1;
+        if !job_exists {
+            return Err(QueueError::NotFound(job_id.to_string()));
+        }
         self.conn.execute(
-            "INSERT OR REPLACE INTO payloads(job_id, kind, data) VALUES(?1,?2,?3)",
-            params![job_id, kind, data],
+            "INSERT OR REPLACE INTO payloads(job_id, kind, data, payload_hash) VALUES(?1,?2,?3,?4)",
+            params![job_id, kind, data, payload_fingerprint(data)],
         )?;
         Ok(())
     }
@@ -556,9 +623,11 @@ impl Queue {
     /// Retention bound for terminal failure states: drop the stored
     /// document bytes of jobs that ended `failed`/`dead_letter` more
     /// than `max_age_secs` ago (by their latest event timestamp). The
-    /// job rows and events stay, so history and diagnostics survive;
-    /// only the (potentially large) payloads are reclaimed. Returns
-    /// how many payloads were dropped.
+    /// job rows and events stay at this stage, so recent history and
+    /// diagnostics survive; only the (potentially large) payloads are
+    /// reclaimed. Rows themselves are reclaimed later by
+    /// `purge_stale_failed_jobs`. Returns how many payloads were
+    /// dropped.
     pub fn purge_stale_failed_payloads(&mut self, max_age_secs: i64) -> Result<usize, QueueError> {
         let cutoff = now_unix().saturating_sub(max_age_secs);
         let n = self.conn.execute(
@@ -569,6 +638,44 @@ impl Queue {
              )",
             params![cutoff],
         )?;
+        Ok(n)
+    }
+
+    /// Second retention stage: delete the `jobs` rows (with their
+    /// events, options and any remaining payload) of
+    /// `failed`/`dead_letter` jobs whose latest event is older than
+    /// `max_age_secs`. Without this the history tables grow for the
+    /// life of the install — the payload purge alone bounds bytes,
+    /// not rows (audit M1). Callers pass a much longer window than
+    /// the payload purge (the app uses 90 days vs 30). Returns how
+    /// many job rows were deleted.
+    pub fn purge_stale_failed_jobs(&mut self, max_age_secs: i64) -> Result<usize, QueueError> {
+        let cutoff = now_unix().saturating_sub(max_age_secs);
+        let ids: Vec<String> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT j.id FROM jobs j
+                 WHERE j.state IN ('failed','dead_letter')
+                   AND (SELECT MAX(e.ts) FROM job_events e WHERE e.job_id = j.id) < ?1",
+            )?;
+            let rows = stmt.query_map(params![cutoff], |r| r.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            out
+        };
+        let mut n = 0usize;
+        for id in &ids {
+            self.conn
+                .execute("DELETE FROM job_events WHERE job_id=?1", params![id])?;
+            self.conn
+                .execute("DELETE FROM job_options WHERE job_id=?1", params![id])?;
+            self.conn
+                .execute("DELETE FROM payloads WHERE job_id=?1", params![id])?;
+            n += self
+                .conn
+                .execute("DELETE FROM jobs WHERE id=?1", params![id])?;
+        }
         Ok(n)
     }
 
@@ -618,7 +725,7 @@ impl Queue {
                 to: next,
             }));
         }
-        let _ = self.record_event(id, &format!("state:{}", next.as_str()), error_code);
+        self.record_event_best_effort(id, &format!("state:{}", next.as_str()), error_code);
         Ok(())
     }
 
@@ -668,7 +775,7 @@ impl Queue {
             "UPDATE jobs SET state=?1, error_code=?2, updated_at=?3 WHERE state='printing'",
             params![state, code, now_unix()],
         )? as u64;
-        let _ = self.record_event(
+        self.record_event_best_effort(
             "__queue__",
             "recovery",
             Some(&format!("requeued={requeued} ambiguous={ambiguous}")),
@@ -707,7 +814,7 @@ impl Queue {
                 params![now_unix(), id],
             )?;
             if changed > 0 {
-                let _ = self.record_event(&id, "reconciled_stale", Some("RECONCILED_STALE"));
+                self.record_event_best_effort(&id, "reconciled_stale", Some("RECONCILED_STALE"));
                 n += 1;
             }
         }
@@ -730,8 +837,11 @@ fn row_to_job(r: &rusqlite::Row) -> rusqlite::Result<Job> {
         idempotency_key: r.get(1)?,
         printer: r.get(2)?,
         report: r.get(3)?,
-        pages: r.get::<_, i64>(4)? as u32,
-        bytes: r.get::<_, i64>(5)? as u64,
+        // Clamp at read: a negative stored value (manual DB edit,
+        // corruption, a future writer bug) must not wrap into a huge
+        // unsigned and poison diagnostics/accounting (audit L4).
+        pages: r.get::<_, i64>(4)?.clamp(0, i64::from(u32::MAX)) as u32,
+        bytes: r.get::<_, i64>(5)?.max(0) as u64,
         priority: r.get(6)?,
         state: JobState::parse(&state_s).ok_or_else(|| {
             rusqlite::Error::FromSqlConversionFailure(
@@ -743,7 +853,7 @@ fn row_to_job(r: &rusqlite::Row) -> rusqlite::Result<Job> {
                 )),
             )
         })?,
-        attempts: r.get::<_, i64>(8)? as u32,
+        attempts: r.get::<_, i64>(8)?.clamp(0, i64::from(u32::MAX)) as u32,
         error_code: r.get(9)?,
     })
 }
@@ -786,6 +896,53 @@ mod tests {
             .unwrap();
         assert_eq!(q.purge_stale_failed_payloads(86_400).unwrap(), 0);
         assert!(q.payload(&fresh.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn stale_failed_job_rows_are_purged_after_long_window() {
+        let mut q = Queue::in_memory().unwrap();
+        let old = job("job-old-row", "key-old-row", "P1", 0);
+        q.enqueue_with_payload(&old, "pdf", b"%PDF-old", &JobOptions::default())
+            .unwrap();
+        q.set_state(&old.id, JobState::Failed, Some("BOOM"))
+            .unwrap();
+        // Inside the window the row (and its events) survive.
+        assert_eq!(q.purge_stale_failed_jobs(86_400).unwrap(), 0);
+        assert!(q.get(&old.id).is_ok());
+        // Past the window the row, its events and its payload all go.
+        assert_eq!(q.purge_stale_failed_jobs(-31_557_600_000).unwrap(), 1);
+        assert!(q.get(&old.id).is_err());
+        assert!(q.payload(&old.id).unwrap().is_none());
+        assert!(q.recent_events(100).unwrap().is_empty());
+        // Done jobs are never touched by the failure retention.
+        let done = job("job-done-row", "key-done-row", "P1", 0);
+        q.enqueue_with_payload(&done, "pdf", b"%PDF-done", &JobOptions::default())
+            .unwrap();
+        for s in [
+            JobState::Rendering,
+            JobState::Spooling,
+            JobState::Printing,
+            JobState::Done,
+        ] {
+            q.set_state(&done.id, s, None).unwrap();
+        }
+        assert_eq!(q.purge_stale_failed_jobs(-31_557_600_000).unwrap(), 0);
+        assert!(q.get(&done.id).is_ok());
+    }
+
+    #[test]
+    fn store_payload_rejects_unknown_job_and_oversize() {
+        let mut q = Queue::in_memory().unwrap();
+        assert!(matches!(
+            q.store_payload("ghost", "pdf", b"%PDF"),
+            Err(QueueError::NotFound(_))
+        ));
+        q.enqueue(&job("1", "k-sp", "p1", 0)).unwrap();
+        let big = vec![0u8; crate::security::MAX_JOB_BYTES + 1];
+        assert!(matches!(
+            q.store_payload("1", "pdf", &big),
+            Err(QueueError::PayloadTooLarge(_))
+        ));
     }
 
     #[test]

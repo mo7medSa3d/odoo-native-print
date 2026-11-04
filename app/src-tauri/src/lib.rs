@@ -5,10 +5,7 @@ use commands::{is_local_app_url, spawn_worker_loop, AppState};
 use print_core::security::origin_is_allowed;
 use print_core::Queue;
 use std::sync::{Arc, Condvar, Mutex, RwLock};
-use tauri::{
-    LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl, WebviewWindowBuilder,
-    WindowEvent,
-};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// Bridge injected into the webview. Maps `window.__NATIVE_PRINT__` calls
 /// onto Tauri IPC commands (which re-validate the caller's origin in Rust
@@ -141,6 +138,13 @@ const BRIDGE_JS: &str = r#"
       return invoke("report_environment", { report: report });
     },
     clearWebData: function () {
+      // Wiping browsing data logs the user out, so it is a Control
+      // Center action only (the capability grant and the Rust check
+      // enforce local-only too): a remote page must never be able to
+      // trigger it, let alone loop it into a forced logout (audit M2).
+      if (!npIsLocalPage()) {
+        return Promise.reject(new Error("clearWebData is only available in the Control Center"));
+      }
       return invoke("clear_web_data_cmd", {});
     },
   };
@@ -260,6 +264,11 @@ const BRIDGE_JS: &str = r#"
       if (existing) existing.remove();
       return;
     }
+    // The user dismissed the card for this page (audit JS-M4): a
+    // healthy-but-unusual view the content check does not recognize
+    // must not be overlaid forever. The watchdog keeps running; a
+    // full navigation re-arms the card on the next page.
+    if (window.__NP_CARD_DISMISSED__) return;
     if (!document.body) return;
     var el = existing;
     if (!el) {
@@ -314,7 +323,8 @@ const BRIDGE_JS: &str = r#"
       return html + "</div>";
     }
     var btnBase = 'border:0;border-radius:999px;padding:0.65rem 1.2rem;font-size:0.9rem;cursor:pointer;background:#eef1f6;color:#101219;';
-    el.innerHTML = '<div style="max-width:460px;width:92vw;padding:1.4rem;background:#ffffff;border:1px solid #e3e8f0;border-radius:20px;box-shadow:0 12px 40px rgba(16,18,25,0.16);">' +
+    el.innerHTML = '<div style="position:relative;max-width:460px;width:92vw;padding:1.4rem;background:#ffffff;border:1px solid #e3e8f0;border-radius:20px;box-shadow:0 12px 40px rgba(16,18,25,0.16);">' +
+      '<button id="np-boot-dismiss" title="إخفاء" style="position:absolute;top:10px;inset-inline-end:12px;border:0;background:transparent;color:#8a93a5;font-size:1.05rem;line-height:1;cursor:pointer;padding:4px 6px;">✕</button>' +
       '<div style="font-size:1.15rem;font-weight:800;color:#101219;margin-bottom:0.4rem;">واجهة Odoo لم تكتمل</div>' +
       '<div style="color:#5b6472;font-size:0.9rem;margin-bottom:1rem;">الصفحة وصلت لكن تطبيق Odoo لم يبدأ. دي نتيجة فحص بيئة العرض على الجهاز ده:</div>' +
       serverHint() +
@@ -322,17 +332,23 @@ const BRIDGE_JS: &str = r#"
       errorRows() +
       '<div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:1.2rem;">' +
       '<button id="np-boot-reload" style="' + btnBase + 'background:#0953DE;color:#fff;">إعادة التحميل</button>' +
-      '<button id="np-boot-clear" style="' + btnBase + '">مسح بيانات التصفح والمحاولة من جديد</button>' +
+      '<button id="np-boot-clear" style="' + btnBase + '">مسح بيانات التصفح من مركز التحكم</button>' +
       '<button id="np-boot-cc" style="' + btnBase + '">مركز التحكم</button>' +
       '</div>' +
-      '<div style="color:#8a93a5;font-size:0.78rem;margin-top:0.9rem;">مسح البيانات بيخرّجك من الحساب ويمسح الكاش والتخزين المحلي للتطبيق فقط.</div></div>';
+      '<div style="color:#8a93a5;font-size:0.78rem;margin-top:0.9rem;">لو إعادة التحميل ما نفعش، امسح بيانات التصفح من مركز التحكم (بيخرّجك من الحساب ويمسح الكاش والتخزين المحلي للتطبيق فقط).</div></div>';
     var reload = document.getElementById("np-boot-reload");
     if (reload) reload.addEventListener("click", function () { window.location.reload(); });
+    var dismiss = document.getElementById("np-boot-dismiss");
+    if (dismiss) dismiss.addEventListener("click", function () {
+      window.__NP_CARD_DISMISSED__ = true;
+      el.remove();
+    });
     var clear = document.getElementById("np-boot-clear");
     if (clear) clear.addEventListener("click", function () {
-      clear.disabled = true;
-      clear.textContent = 'جارٍ المسح…';
-      invoke("clear_web_data_cmd", {}).catch(function () { window.location.reload(); });
+      // The wipe itself is Control-Center-only (it logs the user
+      // out; a remote page must not trigger it — audit M2). The card
+      // takes the user there instead of invoking it directly.
+      window.__NATIVE_PRINT__.openControlCenter().catch(function () {});
     });
     var cc = document.getElementById("np-boot-cc");
     if (cc) cc.addEventListener("click", function () {
@@ -531,7 +547,10 @@ pub fn run() {
             };
 
             let app_handle = app.handle().clone();
-            let window = WebviewWindowBuilder::new(app, "main", start_url)
+            // The handle itself is not used after build (the runtime
+            // owns the window); the binding just keeps it in scope
+            // through setup.
+            let _window = WebviewWindowBuilder::new(app, "main", start_url)
                 .title("Yaseir Print")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(960.0, 640.0)

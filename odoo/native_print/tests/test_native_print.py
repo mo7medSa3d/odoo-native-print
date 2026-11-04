@@ -31,28 +31,40 @@ class TestNativePrintJobLog(TransactionCase):
             {"state": "done"})
         self.assertEqual(job.state, "done")
 
+    def _report_on_partners(self):
+        # A synthetic report on a model that always exists, with
+        # real records: reprint must work without the account module
+        # and must never depend on demo data with fixed ids.
+        report = self.env["ir.actions.report"].create({
+            "name": "NP Test Partner Report",
+            "model": "res.partner",
+            "report_type": "qweb-pdf",
+            "report_name": "native_print.test_partner_report",
+        })
+        partners = self.env["res.partner"].create([
+            {"name": "NP Reprint A"}, {"name": "NP Reprint B"},
+        ])
+        return report, partners
+
     def test_action_reprint_returns_report_action(self):
-        report = self.env["ir.actions.report"].search(
-            [("report_name", "=", "account.report_invoice")], limit=1)
-        if not report:
-            self.skipTest("account reports not installed")
+        report, partners = self._report_on_partners()
         job = self._job()
         job.with_context(native_print_status_sync=True).write({
             "report_id": report.id,
-            "source_model": "account.move",
-            "source_ids": "41,42",
+            # The posted source_model is client data and may lie:
+            # the reprint must still target the REPORT's model
+            # (audit L4).
+            "source_model": "res.users",
+            "source_ids": ",".join(str(i) for i in partners.ids),
         })
         action = job.action_reprint()
         self.assertEqual(action["type"], "ir.actions.report")
-        self.assertEqual(action["report_name"], "account.report_invoice")
-        self.assertEqual(action["ids"], [41, 42])
-        self.assertEqual(action["context"]["active_model"], "account.move")
+        self.assertEqual(action["report_name"], "native_print.test_partner_report")
+        self.assertEqual(action["ids"], partners.ids)
+        self.assertEqual(action["context"]["active_model"], "res.partner")
 
     def test_action_reprint_carries_prefill(self):
-        report = self.env["ir.actions.report"].search(
-            [("report_name", "=", "account.report_invoice")], limit=1)
-        if not report:
-            self.skipTest("account reports not installed")
+        report, partners = self._report_on_partners()
         job = self._job()
         printer = self.env["native.print.device"].create({
             "name": "EPSON TM-T88VII",
@@ -60,8 +72,8 @@ class TestNativePrintJobLog(TransactionCase):
         })
         job.with_context(native_print_status_sync=True).write({
             "report_id": report.id,
-            "source_model": "account.move",
-            "source_ids": "41",
+            "source_model": "res.partner",
+            "source_ids": str(partners[0].id),
             "device_id": printer.id,
             "copies": 2,
             "paper": "A5",
@@ -70,6 +82,29 @@ class TestNativePrintJobLog(TransactionCase):
         self.assertEqual(prefill["printer"], "EPSON TM-T88VII")
         self.assertEqual(prefill["settings"]["copies"], 2)
         self.assertEqual(prefill["settings"]["paper"], "A5")
+
+    def test_action_reprint_rejects_missing_records(self):
+        report, partners = self._report_on_partners()
+        job = self._job()
+        job.with_context(native_print_status_sync=True).write({
+            "report_id": report.id,
+            "source_ids": str(partners.ids[0]),
+        })
+        partners.unlink()
+        with self.assertRaises(UserError):
+            job.action_reprint()
+
+    def test_action_reprint_respects_report_groups(self):
+        report, partners = self._report_on_partners()
+        group = self.env["res.groups"].create({"name": "NP Restricted Reports"})
+        report.group_ids = [(4, group.id)]
+        job = self._job()
+        job.with_context(native_print_status_sync=True).write({
+            "report_id": report.id,
+            "source_ids": str(partners.ids[0]),
+        })
+        with self.assertRaises(UserError):
+            job.action_reprint()
 
     def test_action_reprint_without_source_fails_loudly(self):
         from odoo.exceptions import UserError
@@ -82,12 +117,13 @@ class TestNativePrintJobLog(TransactionCase):
         self.assertEqual(job.company_id, self.env.company)
         self.assertEqual(job.user_id, self.env.user)
 
-    def test_device_registry_is_read_only_for_everyone(self):
-        # The registry is auto-synced history (audit F6): neither the
-        # user nor the manager group may create/write/unlink rows by
-        # hand — a manual rename or delete would corrupt the job log's
-        # printer history. Creation happens only via the controller's
-        # sudo() registration path.
+    def test_device_registry_access_policy(self):
+        # The registry is auto-synced: nobody may create or rename
+        # rows by hand (creation happens only via the controller's
+        # sudo() registration path). The ONE manual operation is a
+        # manager deleting a stale row (renamed/retired printer) —
+        # before the deep-debug round nobody could unlink at all and
+        # stale rows accumulated forever (audit M2).
         access = self.env["ir.model.access"].search([
             ("model_id.model", "=", "native.print.device"),
         ])
@@ -96,7 +132,30 @@ class TestNativePrintJobLog(TransactionCase):
             self.assertTrue(rule.perm_read)
             self.assertFalse(rule.perm_create, rule.name)
             self.assertFalse(rule.perm_write, rule.name)
-            self.assertFalse(rule.perm_unlink, rule.name)
+            if rule.group_id == self.env.ref(
+                    "native_print.group_native_print_manager"):
+                self.assertTrue(rule.perm_unlink, rule.name)
+            else:
+                self.assertFalse(rule.perm_unlink, rule.name)
+
+    def test_prune_job_log_removes_only_old_terminal_jobs(self):
+        old_done = self._job("prune-old-done")
+        old_active = self._job("prune-old-active")
+        recent_done = self._job("prune-recent-done")
+        for job in (old_done, old_active, recent_done):
+            job.with_context(native_print_status_sync=True).write(
+                {"state": "done" if "done" in job.name else "queued"})
+        self.env.cr.execute(
+            "UPDATE native_print_job SET create_date = "
+            "create_date - interval '200 days' WHERE id IN %s",
+            (tuple((old_done + old_active).ids),),
+        )
+        self.Job._cron_prune_job_log(days=180)
+        remaining = self.Job.search(
+            [("name", "like", "prune-")]).mapped("name")
+        self.assertNotIn("prune-old-done", remaining)
+        self.assertIn("prune-old-active", remaining)
+        self.assertIn("prune-recent-done", remaining)
 
 
 class TestTranslationFiles(TransactionCase):

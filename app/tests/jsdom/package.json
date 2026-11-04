@@ -1,0 +1,9 @@
+{
+  "name": "yaseir-print-jsdom-tests",
+  "private": true,
+  "type": "module",
+  "description": "jsdom regression suites for the injected bridge (watchdog, error tap) and the Control Center page. Run: npm install && node watchdog.test.mjs (each suite exits non-zero on failure).",
+  "devDependencies": {
+    "jsdom": "^24.1.3"
+  }
+}

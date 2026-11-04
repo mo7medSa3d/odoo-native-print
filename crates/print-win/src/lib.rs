@@ -52,14 +52,54 @@ impl Default for GdiJobOptions {
     }
 }
 
+/// Failure of a GDI print entry point (the `*_detailed` functions).
+/// `ambiguous` is true when pages may already have reached paper
+/// before the failure — ADR-0004's cardinal rule: an ambiguous job
+/// must never be auto-reprinted, because the "failed" copy may be
+/// sitting in the output tray. Setup failures (PDFium load, paper
+/// matching, CreateDC, StartDoc before any page) carry
+/// `ambiguous: false`: nothing was printed, so a retry is safe.
+/// The plain `print_*_gdi*` wrappers collapse this to the message
+/// string for callers that do not classify errors (audit M5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GdiPrintError {
+    pub message: String,
+    pub ambiguous: bool,
+}
+
+impl GdiPrintError {
+    /// A failure before anything could reach paper.
+    pub fn setup(message: String) -> Self {
+        Self {
+            message,
+            ambiguous: false,
+        }
+    }
+    /// A failure after printing started: output may exist.
+    pub fn mid_print(message: String) -> Self {
+        Self {
+            message,
+            ambiguous: true,
+        }
+    }
+}
+
+impl std::fmt::Display for GdiPrintError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for GdiPrintError {}
+
 #[cfg(windows)]
 mod win;
 
 #[cfg(windows)]
 pub use win::{
-    default_printer_name, discover_printers, paper_forms, print_canvas_gdi, print_pdf_gdi,
-    print_pdf_gdi_copies, print_pdf_gdi_with_options, print_raw, printer_capabilities,
-    printer_status,
+    default_printer_name, discover_printers, paper_forms, print_canvas_gdi,
+    print_canvas_gdi_detailed, print_pdf_gdi, print_pdf_gdi_copies, print_pdf_gdi_detailed,
+    print_pdf_gdi_with_options, print_raw, printer_capabilities, printer_status,
 };
 
 #[cfg(not(windows))]
@@ -111,6 +151,14 @@ mod stub {
     ) -> Result<usize, Unsupported> {
         Err(Unsupported)
     }
+    pub fn print_pdf_gdi_detailed(
+        _printer: &str,
+        _title: &str,
+        _pdf_bytes: &[u8],
+        _opts: &GdiJobOptions,
+    ) -> Result<usize, super::GdiPrintError> {
+        Err(super::GdiPrintError::setup(Unsupported.to_string()))
+    }
     pub fn print_canvas_gdi(
         _printer: &str,
         _title: &str,
@@ -118,6 +166,14 @@ mod stub {
         _copies: u16,
     ) -> Result<usize, Unsupported> {
         Err(Unsupported)
+    }
+    pub fn print_canvas_gdi_detailed(
+        _printer: &str,
+        _title: &str,
+        _canvas: &print_render::bitmap::Canvas,
+        _copies: u16,
+    ) -> Result<usize, super::GdiPrintError> {
+        Err(super::GdiPrintError::setup(Unsupported.to_string()))
     }
     pub fn discover_printers() -> Result<Vec<print_core::PrinterInfo>, Unsupported> {
         Err(Unsupported)
@@ -129,7 +185,7 @@ mod stub {
 
 #[cfg(not(windows))]
 pub use stub::{
-    default_printer_name, discover_printers, paper_forms, print_canvas_gdi, print_pdf_gdi,
-    print_pdf_gdi_copies, print_pdf_gdi_with_options, print_raw, printer_capabilities,
-    printer_status, Unsupported,
+    default_printer_name, discover_printers, paper_forms, print_canvas_gdi,
+    print_canvas_gdi_detailed, print_pdf_gdi, print_pdf_gdi_copies, print_pdf_gdi_detailed,
+    print_pdf_gdi_with_options, print_raw, printer_capabilities, printer_status, Unsupported,
 };

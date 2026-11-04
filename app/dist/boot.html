@@ -48,10 +48,39 @@
   function showDown() {
     document.getElementById("spinner").style.display = "none";
     document.getElementById("title").textContent = "سيرفر Odoo لا يستجيب";
-    document.getElementById("msg").innerHTML = "مش قادرين نوصل للسيرفر على <span class='origin'>" +
-      (origin || "") + "</span>. اتأكد إن السيرفر شغال وإن الشبكة واصلة، وهنحاول تاني تلقائيًا.";
+    // Built with textContent/createElement, not innerHTML: the
+    // configured origin is app data and must never become markup
+    // (audit JS-L1).
+    var msg = document.getElementById("msg");
+    msg.textContent = "مش قادرين نوصل للسيرفر على ";
+    var span = document.createElement("span");
+    span.className = "origin";
+    span.textContent = origin || "";
+    msg.appendChild(span);
+    msg.appendChild(document.createTextNode(". اتأكد إن السيرفر شغال وإن الشبكة واصلة، وهنحاول تاني تلقائيًا."));
     document.getElementById("actions").classList.add("show");
     startCountdown();
+  }
+  function showRedirected() {
+    // The probe connected, but after navigating the document never
+    // unloaded: the server redirected to a different origin than
+    // the configured one (HTTP→HTTPS upgrade, host canonicalization)
+    // and the app refuses cross-origin navigation. Without this the
+    // user stared at the connecting spinner forever (audit L4).
+    disarmNavWatchdog();
+    stopCountdown();
+    document.getElementById("spinner").style.display = "none";
+    document.getElementById("title").textContent = "السيرفر بيحوّل لعنوان مختلف";
+    var msg = document.getElementById("msg");
+    msg.textContent = "السيرفر ردّ لكنه بيحوّل الاتصال لعنوان غير العنوان المسجّل في الإعدادات (";
+    var span = document.createElement("span");
+    span.className = "origin";
+    span.textContent = origin || "";
+    msg.appendChild(span);
+    msg.appendChild(document.createTextNode("). راجع العنوان من مركز التحكم وخلّيه مطابق لعنوان السيرفر الفعلي."));
+    document.getElementById("actions").classList.add("show");
+    document.getElementById("anyway").style.display = "none";
+    document.getElementById("count").textContent = "";
   }
   function startCountdown() {
     stopCountdown();
@@ -66,10 +95,17 @@
   }
   function stopCountdown() { if (timer) { window.clearInterval(timer); timer = null; } }
 
+  var navTimer = null;
+  function armNavWatchdog() {
+    disarmNavWatchdog();
+    navTimer = window.setTimeout(showRedirected, 8000);
+  }
+  function disarmNavWatchdog() { if (navTimer) { window.clearTimeout(navTimer); navTimer = null; } }
+
   function tryProbe() {
     document.getElementById("spinner").style.display = "block";
     invoke("probe_origin", {}).then(function (ok) {
-      if (ok && origin) { window.location.replace(origin); }
+      if (ok && origin) { armNavWatchdog(); window.location.replace(origin); }
       else { showDown(); }
     }).catch(function () { showDown(); });
   }
@@ -78,7 +114,7 @@
     stopCountdown(); document.getElementById("count").textContent = ""; tryProbe();
   });
   document.getElementById("anyway").addEventListener("click", function () {
-    if (origin) window.location.replace(origin);
+    if (origin) { armNavWatchdog(); window.location.replace(origin); }
   });
   document.getElementById("cc").addEventListener("click", function () {
     window.location.replace("index.html");

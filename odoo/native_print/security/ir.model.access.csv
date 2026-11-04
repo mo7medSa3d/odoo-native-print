@@ -2,4 +2,4 @@ id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_job_user,native.print.job user,model_native_print_job,group_native_print_user,1,0,0,0
 access_job_manager,native.print.job manager,model_native_print_job,group_native_print_manager,1,0,0,0
 access_device_user,native.print.device user,model_native_print_device,group_native_print_user,1,0,0,0
-access_device_manager,native.print.device manager,model_native_print_device,group_native_print_manager,1,0,0,0
+access_device_manager,native.print.device manager,model_native_print_device,group_native_print_manager,1,0,0,1

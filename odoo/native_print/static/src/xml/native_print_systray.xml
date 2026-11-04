@@ -106,10 +106,7 @@
                         <i class="fa fa-list-ul me-2"/><t t-esc="labels.jobsLog"/>
                     </button>
                     <div t-if="state.bridgeActive" class="np-action-row">
-                        <button type="button" class="btn btn-sm btn-outline-primary" t-on-click="runQuickTestPrint">
-                            <i class="fa fa-check-square-o me-1"/><t t-esc="labels.testPrint"/>
-                        </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" t-on-click="openControlCenter">
+                        <button type="button" class="btn btn-sm btn-outline-secondary w-100" t-on-click="openControlCenter">
                             <i class="fa fa-sliders me-1"/><t t-esc="labels.controlCenter"/>
                         </button>
                     </div>

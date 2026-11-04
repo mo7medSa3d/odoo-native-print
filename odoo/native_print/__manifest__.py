@@ -1,8 +1,21 @@
 {
     "name": "Yaseir Print",
-    "version": "19.0.2.11.0",
+    "version": "19.0.2.12.0",
     "category": "Productivity",
     "summary": "Zero-gateway local printing for Odoo reports, labels, and POS receipts",
+    "description": """
+Yaseir Print — local printing for Odoo from the desktop app, with no
+gateway, no local agent service and no cloud in the print path.
+
+The server side of this module is deliberately small: printers are
+discovered live on each user's PC and never stored here. What the
+server keeps is the print job LOG. Note that log rows are
+CLIENT-REPORTED facts: the desktop app posts job outcomes to this
+module, so a row records what the app reported, and managers should
+treat it accordingly (it is an operational log, not a tamper-proof
+audit trail). Job rows are scoped per user and per company; the
+printer names in the log feed a per-company registry (pickers only).
+""",
     "author": "Yaseir",
     "depends": ["web"],
     "data": [
@@ -11,6 +24,7 @@
         "security/native_print_rules.xml",
         "views/native_print_views.xml",
         "views/login_fallback_templates.xml",
+        "data/native_print_cron.xml",
     ],
     "assets": {
         "web.assets_backend": [

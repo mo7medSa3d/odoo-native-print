@@ -9,6 +9,7 @@
     "allow-queue-admin",
     "allow-local-tools",
     "allow-app-shell",
+    "allow-web-data-reset",
     "allow-toolbar"
   ],
   "windows": [

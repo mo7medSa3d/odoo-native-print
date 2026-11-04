@@ -61,7 +61,6 @@ export class NativePrintSystray extends Component {
             doneJobs: _t("Done jobs"),
             failedJobs: _t("Failed jobs"),
             jobsLog: _t("Print Jobs Log"),
-            testPrint: _t("Send Compatible Printer Test"),
             controlCenter: _t("Open Native Control Center"),
             updateApp: _t("A newer desktop app is available. Update Yaseir Print for the latest fixes."),
         };
@@ -121,7 +120,12 @@ export class NativePrintSystray extends Component {
                 { title: _t("Printers Refreshed"), type: "success" },
             );
         } catch (error) {
-            if (showNotice) this.notification.add(String(error && error.message || error),
+            // Raw exception text stays in the console: users get a
+            // localized explanation, not an English stack message
+            // (audit JS-L3).
+            console.error(error);
+            if (showNotice) this.notification.add(
+                _t("Could not read this PC's printers. Check the desktop app and try again."),
                 { title: _t("Printer Refresh Failed"), type: "danger" });
         } finally {
             this.state.syncingPrinters = false;
@@ -184,77 +188,6 @@ export class NativePrintSystray extends Component {
             _t("%s will be used for printing from this PC.", printer.name),
             { title: _t("Printer Selected"), type: "success" },
         );
-    }
-
-    async runQuickTestPrint() {
-        const bridge = window.__NATIVE_PRINT__ || null;
-        if (!bridge || typeof bridge.runTestPrint !== "function") {
-            this.notification.add(
-                _t("Open Odoo inside the Yaseir Print app to send hardware calibration prints."),
-                { title: _t("Native App Required"), type: "warning" },
-            );
-            return;
-        }
-        const physicalPrinters = this.state.discoveredPrinters.filter(
-            (printer) => printer.kind !== "virtual",
-        );
-        const chosen = physicalPrinters.find(
-            (printer) => printer.name === getSelectedPrinter(),
-        );
-        const defaultPhysical = physicalPrinters.find((printer) => (
-            printer.is_default || printer.isDefault
-        ));
-        const selected = chosen || defaultPhysical || physicalPrinters[0];
-        if (!selected || !selected.name) {
-            this.notification.add(
-                _t("No physical printer was discovered. Connect or install a printer, then refresh the printer list."),
-                { title: _t("No Printer Available"), type: "warning" },
-            );
-            return;
-        }
-
-        let testKind = "pdf-a4";
-        let paper = "A4";
-        try {
-            const capabilities = typeof bridge.printerCapabilities === "function"
-                ? await bridge.printerCapabilities(selected.name)
-                : { forms: [] };
-            const forms = Array.isArray(capabilities && capabilities.forms)
-                ? capabilities.forms
-                : [];
-            const roll = forms.find((form) => form && form.roll);
-            const label = forms.find((form) => {
-                const name = String(form && form.name || "");
-                const size = form && form.size || {};
-                return /label|100x150/i.test(name) ||
-                    (size.width_mm >= 90 && size.height_mm >= 90 && size.height_mm <= 250);
-            });
-            if (roll) {
-                const width = Number(roll.size && roll.size.width_mm) || 80;
-                testKind = width <= 60 ? "thermal-58mm" : "thermal-80mm";
-                paper = roll.name || (width <= 60 ? "58mm" : "80mm");
-            } else if (label) {
-                testKind = "zpl-label";
-                paper = label.name || "100x150mm";
-            } else if (forms.length) {
-                const standard = forms.find((form) => /^a4$/i.test(form.name || "")) ||
-                    forms.find((form) => /^letter$/i.test(form.name || "")) ||
-                    forms[0];
-                paper = standard.name || "A4";
-            }
-
-            const jobId = await bridge.runTestPrint(selected.name, testKind, paper);
-            this.notification.add(
-                _t("Queued %s calibration test (%s) on %s", paper, jobId, selected.name),
-                { title: _t("Calibration Queued"), type: "success" },
-            );
-            await this.refreshStats();
-        } catch (err) {
-            this.notification.add(String(err), {
-                title: _t("Calibration Failed"),
-                type: "danger",
-            });
-        }
     }
 
     openJobs() {

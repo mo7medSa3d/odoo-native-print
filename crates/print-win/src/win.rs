@@ -2,7 +2,7 @@
 //! All wide strings are NUL-terminated UTF-16; every handle opened here is
 //! closed on every path out of its function.
 
-use crate::GdiJobOptions;
+use crate::{GdiJobOptions, GdiPrintError};
 use print_core::paper::{match_paper, match_paper_auto, Form, MatchKind, ScalePolicy};
 use print_core::PageSize;
 use print_render::split_subjobs;
@@ -403,31 +403,59 @@ pub fn print_pdf_gdi_with_options(
     pdf_bytes: &[u8],
     opts: &GdiJobOptions,
 ) -> Result<usize, String> {
-    let pdfium = print_render::Pdfium::load().map_err(|e| e.to_string())?;
-    let doc = pdfium.load_document(pdf_bytes).map_err(|e| e.to_string())?;
+    print_pdf_gdi_detailed(printer, title, pdf_bytes, opts).map_err(|e| e.message)
+}
+
+/// Like `print_pdf_gdi_with_options`, but the error says whether any
+/// output may already have reached paper (`GdiPrintError::ambiguous`,
+/// audit M5): setup failures happen before the first page and are
+/// safe to retry; failures after printing started are not.
+pub fn print_pdf_gdi_detailed(
+    printer: &str,
+    title: &str,
+    pdf_bytes: &[u8],
+    opts: &GdiJobOptions,
+) -> Result<usize, GdiPrintError> {
+    let pdfium = print_render::Pdfium::load().map_err(|e| GdiPrintError::setup(e.to_string()))?;
+    let doc = pdfium
+        .load_document(pdf_bytes)
+        .map_err(|e| GdiPrintError::setup(e.to_string()))?;
     let pages = doc.page_count();
     if pages == 0 {
-        return Err("PDF has no pages".to_string());
+        return Err(GdiPrintError::setup("PDF has no pages".to_string()));
     }
     let mut page_sizes = Vec::with_capacity(pages);
     for i in 0..pages {
-        page_sizes.push(doc.page_size_mm(i).map_err(|e| e.to_string())?);
+        page_sizes.push(
+            doc.page_size_mm(i)
+                .map_err(|e| GdiPrintError::setup(e.to_string()))?,
+        );
     }
     let subjobs = split_subjobs(&page_sizes);
-    let capabilities = printer_capabilities(printer).map_err(|e| e.to_string())?;
+    let capabilities =
+        printer_capabilities(printer).map_err(|e| GdiPrintError::setup(e.to_string()))?;
     let name = wide(printer);
     let mut total_sent = 0usize;
 
     for _copy in 0..opts.copies.max(1) {
         for sub in &subjobs {
+            // A failure inside the copies loop is a setup failure
+            // only when no earlier copy/sub-job reached paper yet.
+            let stage_err = |message: String, sent: usize| GdiPrintError {
+                message,
+                ambiguous: sent > 0,
+            };
             let matched = if capabilities.forms.is_empty() && !capabilities.custom_size_supported {
                 None
             } else if opts.scale_policy == ScalePolicy::CustomAllowed {
-                Some(match_paper_auto(sub.size, &capabilities).map_err(|e| e.to_string())?)
+                Some(
+                    match_paper_auto(sub.size, &capabilities)
+                        .map_err(|e| stage_err(e.to_string(), total_sent))?,
+                )
             } else {
                 Some(
                     match_paper(sub.size, &capabilities.forms, opts.scale_policy)
-                        .map_err(|e| e.to_string())?,
+                        .map_err(|e| stage_err(e.to_string(), total_sent))?,
                 )
             };
             let match_ref = matched.as_ref().map(|m| (&m.form, m.kind));
@@ -451,7 +479,10 @@ pub fn print_pdf_gdi_with_options(
             let dc =
                 unsafe { CreateDCW(std::ptr::null(), name.as_ptr(), std::ptr::null(), init_ptr) };
             if dc.is_null() {
-                return Err(format!("CreateDC for {printer:?}: {}", last_error()));
+                return Err(stage_err(
+                    format!("CreateDC for {printer:?}: {}", last_error()),
+                    total_sent,
+                ));
             }
             let sub_result = print_subjob_gdi(
                 dc,
@@ -465,7 +496,18 @@ pub fn print_pdf_gdi_with_options(
                 opts.dpi,
             );
             unsafe { DeleteDC(dc) };
-            total_sent += sub_result?;
+            match sub_result {
+                Ok(sent) => total_sent += sent,
+                Err(mut e) => {
+                    // Pages from earlier copies/sub-jobs are already
+                    // out: the failure is ambiguous even when this
+                    // sub-job itself failed before its first page.
+                    if total_sent > 0 {
+                        e.ambiguous = true;
+                    }
+                    return Err(e);
+                }
+            }
         }
     }
     Ok(total_sent)
@@ -479,8 +521,20 @@ pub fn print_canvas_gdi(
     canvas: &print_render::bitmap::Canvas,
     copies: u16,
 ) -> Result<usize, String> {
+    print_canvas_gdi_detailed(printer, title, canvas, copies).map_err(|e| e.message)
+}
+
+/// Like `print_canvas_gdi`, but the error carries the ADR-0004
+/// ambiguity flag (audit M5): failures before StartDoc are safe to
+/// retry; a blit failure after the document started is not.
+pub fn print_canvas_gdi_detailed(
+    printer: &str,
+    title: &str,
+    canvas: &print_render::bitmap::Canvas,
+    copies: u16,
+) -> Result<usize, GdiPrintError> {
     if canvas.width == 0 || canvas.height == 0 {
-        return Err("empty image canvas".to_string());
+        return Err(GdiPrintError::setup("empty image canvas".to_string()));
     }
     let page = print_render::RenderedPage {
         width_px: canvas.width,
@@ -498,15 +552,18 @@ pub fn print_canvas_gdi(
         canvas.width as f64 * 25.4 / 203.0,
         canvas.height as f64 * 25.4 / 203.0,
     );
-    let capabilities = printer_capabilities(printer)?;
+    let capabilities =
+        printer_capabilities(printer).map_err(|e| GdiPrintError::setup(e.to_string()))?;
     if capabilities.forms.is_empty() && !capabilities.custom_size_supported {
-        return Err(
+        return Err(GdiPrintError::setup(
             "PRINTER_MEDIA_UNAVAILABLE: Windows driver reported no supported forms or custom-size bounds"
                 .to_string(),
-        );
+        ));
     }
     let matched = match_paper_auto(page_size, &capabilities).map_err(|error| {
-        format!("PAPER_MISMATCH: no safe media form for the receipt image: {error}")
+        GdiPrintError::setup(format!(
+            "PAPER_MISMATCH: no safe media form for the receipt image: {error}"
+        ))
     })?;
     let media_page_size = matched.form.size;
     let devmode = build_printer_devmode(
@@ -518,14 +575,19 @@ pub fn print_canvas_gdi(
         None,
     )
     .ok_or_else(|| {
-        "PRINTER_DEVMODE_UNAVAILABLE: Windows driver could not apply the selected media form"
-            .to_string()
+        GdiPrintError::setup(
+            "PRINTER_DEVMODE_UNAVAILABLE: Windows driver could not apply the selected media form"
+                .to_string(),
+        )
     })?;
     let name = wide(printer);
     let init_ptr = devmode.as_ptr() as *const c_void;
     let dc = unsafe { CreateDCW(std::ptr::null(), name.as_ptr(), std::ptr::null(), init_ptr) };
     if dc.is_null() {
-        return Err(format!("CreateDC for {printer:?}: {}", last_error()));
+        return Err(GdiPrintError::setup(format!(
+            "CreateDC for {printer:?}: {}",
+            last_error()
+        )));
     }
     let doc_name = wide(title);
     let info = DocInfoW {
@@ -539,7 +601,7 @@ pub fn print_canvas_gdi(
     if started <= 0 {
         let err = last_error();
         unsafe { DeleteDC(dc) };
-        return Err(format!("StartDoc: {err}"));
+        return Err(GdiPrintError::setup(format!("StartDoc: {err}")));
     }
     let mut sent = 0usize;
     let mut failure: Option<String> = None;
@@ -559,7 +621,9 @@ pub fn print_canvas_gdi(
     }
     unsafe { DeleteDC(dc) };
     match failure {
-        Some(error) => Err(error),
+        // The document started; earlier copies may be on paper even
+        // though AbortDoc was called — ambiguous per ADR-0004.
+        Some(error) => Err(GdiPrintError::mid_print(error)),
         None => Ok(sent),
     }
 }
@@ -575,7 +639,7 @@ fn print_subjob_gdi(
     match_kind: MatchKind,
     mode: print_render::RenderMode,
     dpi: u32,
-) -> Result<usize, String> {
+) -> Result<usize, GdiPrintError> {
     let doc_name = wide(title);
     let info = DocInfoW {
         size: std::mem::size_of::<DocInfoW>() as i32,
@@ -586,7 +650,8 @@ fn print_subjob_gdi(
     };
     let started = unsafe { StartDocW(dc, &info) };
     if started <= 0 {
-        return Err(format!("StartDoc: {}", last_error()));
+        // The document never started: nothing can have printed.
+        return Err(GdiPrintError::setup(format!("StartDoc: {}", last_error())));
     }
     let mut sent = 0usize;
     let mut failure: Option<String> = None;
@@ -605,7 +670,10 @@ fn print_subjob_gdi(
         unsafe { EndDoc(dc) };
     }
     match failure {
-        Some(e) => Err(e),
+        // The document started and earlier pages of it were ended:
+        // output may exist even though AbortDoc was called, so the
+        // failure is ambiguous for ADR-0004 purposes.
+        Some(e) => Err(GdiPrintError::mid_print(e)),
         None => Ok(sent),
     }
 }

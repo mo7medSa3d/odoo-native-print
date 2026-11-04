@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from odoo import _, fields, models
 from odoo.exceptions import UserError
 
@@ -105,6 +107,30 @@ class NativePrintJob(models.Model):
                 "or its records were not recorded for it (for "
                 "example, POS receipts are reprinted from the POS)."
             ))
+        report = self.report_id
+        # The log row is client-reported, so nothing on it is trusted
+        # on its own (audit L4): the report's OWN model decides which
+        # records are rendered — never the posted source_model — the
+        # records must still exist and be readable by this user, and
+        # a group-restricted report stays restricted here too.
+        if report.group_ids and not (
+            report.group_ids & self.env.user.group_ids
+        ):
+            raise UserError(_(
+                "You do not have access to the report used by this job."
+            ))
+        model = report.model
+        if not model or model not in self.env:
+            raise UserError(_(
+                "This job cannot be reprinted: its report has no valid model."
+            ))
+        records = self.env[model].browse(ids).exists()
+        if not records:
+            raise UserError(_(
+                "This job cannot be reprinted: the original records "
+                "no longer exist or are not accessible."
+            ))
+        ids = records.ids
         settings = {}
         if self.copies:
             settings["copies"] = self.copies
@@ -116,13 +142,13 @@ class NativePrintJob(models.Model):
                         else self.device)
         return {
             "type": "ir.actions.report",
-            "report_name": self.report_id.report_name,
-            "report_type": self.report_id.report_type,
+            "report_name": report.report_name,
+            "report_type": report.report_type,
             "ids": ids,
             "context": {
                 "active_ids": ids,
                 "active_id": ids[0],
-                "active_model": self.source_model or self.report_id.model,
+                "active_model": model,
                 # Prefill for the print handler: reprint on the job's
                 # own printer (when it is connected to this PC) with
                 # the job's own settings, not today's selections.
@@ -137,6 +163,23 @@ class NativePrintJob(models.Model):
         "unique(name, company_id)",
         "A print job with this idempotency key already exists for this company.",
     )
+
+    def _cron_prune_job_log(self, days=180):
+        """Retention hook for the scheduled action (shipped
+        INACTIVE — see data/native_print_cron.xml): delete
+        terminal-state jobs older than `days`. The log is an audit
+        trail, so pruning is an explicit admin decision, never a
+        silent default (audit M2). Active jobs are never pruned:
+        their outcome is still owed to someone."""
+        cutoff = fields.Datetime.now() - timedelta(days=days)
+        old = self.sudo().search([
+            ("state", "in", ["done", "failed", "canceled", "dead_letter"]),
+            ("create_date", "<", fields.Datetime.to_string(cutoff)),
+        ])
+        count = len(old)
+        if old:
+            old.unlink()
+        return count
 
     def write(self, vals):
         # Job states are facts reported by the desktop app's print worker

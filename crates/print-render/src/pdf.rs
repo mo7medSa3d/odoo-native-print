@@ -220,6 +220,15 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
                 }
             }
         } else if is_page {
+            // Cap collection on the primary path too: the fallback
+            // /Count path below was hardened against a crafted page
+            // count, but a small file full of tiny /Page dictionaries
+            // reached this vector uncapped and amplified memory ~3x
+            // (lossy copy + cloned headers + page entries) before any
+            // caller-side limit could run (audit M2).
+            if page_dicts.len() >= print_core::security::MAX_PAGES as usize {
+                return Err(PdfParseError::TooManyPages(page_dicts.len() + 1));
+            }
             page_dicts.push(dict_header.to_string());
         }
     }
@@ -269,7 +278,7 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
         // allocating one entry per page, or a small crafted PDF can
         // exhaust memory by declaring billions of pages (the caller's
         // page-limit check runs on the vector built here, too late).
-        if count > 2000 {
+        if count > print_core::security::MAX_PAGES as usize {
             return Err(PdfParseError::TooManyPages(count));
         }
         let (w_pt, h_pt) = pages_tree_boxes
@@ -300,6 +309,23 @@ mod tests {
         let pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Count 4000000000 /MediaBox [0 0 595 842] >>\nendobj\n%%EOF";
         match parse_pdf_info(pdf) {
             Err(PdfParseError::TooManyPages(n)) => assert_eq!(n, 4_000_000_000),
+            other => panic!("expected TooManyPages, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn many_page_dictionaries_are_capped_on_the_primary_path() {
+        // The primary path (visible /Page dictionaries) must hit the
+        // same cap as the /Count fallback: a small file packed with
+        // tiny page dicts is refused, not collected (audit M2).
+        let mut pdf = String::from("%PDF-1.4\n");
+        for i in 0..(print_core::security::MAX_PAGES + 5) {
+            pdf.push_str(&format!(
+                "{i} 0 obj << /Type /Page /MediaBox [0 0 595 842] >> endobj\n"
+            ));
+        }
+        match parse_pdf_info(pdf.as_bytes()) {
+            Err(PdfParseError::TooManyPages(_)) => {}
             other => panic!("expected TooManyPages, got {other:?}"),
         }
     }

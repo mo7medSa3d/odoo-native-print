@@ -23,6 +23,11 @@ import { notifyUser, resolveBridgeTarget } from "./native_print_client";
 
 const TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);
 
+// The desktop queue's hard payload ceiling (print-core MAX_JOB_BYTES,
+// 50 MB). Payloads above it can never be accepted, so the handler
+// checks before enqueueing and keeps Odoo's standard download.
+const MAX_NATIVE_PAYLOAD_BYTES = 50 * 1024 * 1024;
+
 // Report submissions currently between click and desktop enqueue,
 // keyed by report + target records. A second invocation for the same
 // key is a duplicate of the SAME user intent, not a new print.
@@ -176,17 +181,25 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
 
 async function handleCloseOnReportDownload(action, options, env) {
     const onClose = options && options.onClose;
-    if (action.close_on_report_download) {
-        if (env && env.services && env.services.action) {
-            await env.services.action.doAction(
-                { type: "ir.actions.act_window_close" },
-                { onClose },
-            );
-            return;
+    try {
+        if (action.close_on_report_download) {
+            if (env && env.services && env.services.action) {
+                await env.services.action.doAction(
+                    { type: "ir.actions.act_window_close" },
+                    { onClose },
+                );
+                return;
+            }
         }
-    }
-    if (typeof onClose === "function") {
-        onClose();
+        if (typeof onClose === "function") {
+            onClose();
+        }
+    } catch (err) {
+        // The print already succeeded at this point: a failing
+        // wizard close (stale dialog, finished action service) must
+        // not surface as a print error or an RPC traceback (audit
+        // L6). Log it and let the handler return success.
+        console.warn("Native Print: closing the report wizard failed after a successful print", err);
     }
 }
 
@@ -228,6 +241,15 @@ async function handleReportSubmission(action, options, env, bridge) {
             // the handler as an exception. (Audit F1.)
             return undefined;
         }
+        // Byte size means UTF-8 bytes (what actually crosses the
+        // bridge), not UTF-16 code units: text.length undercounts
+        // Arabic/CJK content for the job log and the size guard.
+        const textBytes = new TextEncoder().encode(text).length;
+        if (textBytes > MAX_NATIVE_PAYLOAD_BYTES) {
+            // Oversized for the desktop queue: keep Odoo's standard
+            // download rather than a doomed enqueue (audit L5).
+            return undefined;
+        }
         const textKey =
             `odoo-txt-${action.id || action.report_name}-${Date.now()}-` +
             Math.random().toString(36).slice(2, 10);
@@ -246,7 +268,7 @@ async function handleReportSubmission(action, options, env, bridge) {
             color: rule.color !== false,
             mode: rule.mode || undefined,
             pages: 1,
-            byte_size: text.length,
+            byte_size: textBytes,
         }).catch(() => {});
         try {
             await bridge.printText({
@@ -264,7 +286,7 @@ async function handleReportSubmission(action, options, env, bridge) {
                     reportName: action.report_name,
                     printerPattern: rule.printer_pattern,
                     printerName: target.printer.name,
-                    byteSize: text.length,
+                    byteSize: textBytes,
                     pages: 1,
                 },
                 env,
@@ -308,6 +330,12 @@ async function handleReportSubmission(action, options, env, bridge) {
     // answers with the login page's HTML. Never queue HTML as a
     // document; fall back to the standard download instead.
     if (!(bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46)) {
+        return undefined;
+    }
+    if (bytes.length > MAX_NATIVE_PAYLOAD_BYTES) {
+        // Bigger than the desktop queue accepts: downloading keeps
+        // the document usable instead of failing at the bridge
+        // (audit L5).
         return undefined;
     }
     const idempotencyKey =

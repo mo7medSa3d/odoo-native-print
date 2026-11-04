@@ -93,7 +93,7 @@ fn renders_calibration_a4_page_1_at_plan_dimensions() {
     assert!((size.width_mm - 210.0).abs() < 1.5, "width {size:?}");
     assert!((size.height_mm - 297.0).abs() < 1.5, "height {size:?}");
 
-    let plan = plan_render(PageSize::a4(), 150, RenderMode::Grayscale);
+    let plan = plan_render(PageSize::a4(), 150, RenderMode::Grayscale).expect("A4 plan");
     let page = doc
         .render_page(0, RenderMode::Grayscale, 150)
         .expect("render page 1");

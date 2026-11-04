@@ -8,8 +8,11 @@ class NativePrintDevice(models.Model):
     real Many2one the user can pick, filter and group by in the job
     log, instead of a free-text string nobody should have to type or
     memorise. Rows are created automatically by the job-status sync
-    the first time a printer produces a job; there is deliberately
-    no menu, no configuration and no manual workflow for it.
+    the first time a printer produces a job; there is no
+    configuration and no manual workflow for it. Managers get one
+    small maintenance list (Printers, under the Native Print menu)
+    for the single lifecycle task the sync cannot do: deleting the
+    stale row of a renamed or retired printer (audit M2).
 
     Printing itself NEVER reads this registry: the target printer is
     resolved live on the user's PC through the desktop bridge (the

@@ -408,7 +408,12 @@ impl PdfDocument {
         let w_pt = unsafe { (api.get_page_width_f)(page) } as f64;
         let h_pt = unsafe { (api.get_page_height_f)(page) } as f64;
         let size = PageSize::new(w_pt * 25.4 / 72.0, h_pt * 25.4 / 72.0);
-        let plan = plan_render(size, requested_dpi, mode);
+        let plan = plan_render(size, requested_dpi, mode).map_err(|e| match e {
+            crate::plan::PlanError::ExceedsCeiling { bytes } => PdfiumError::CeilingExceeded {
+                needed: bytes,
+                ceiling: PER_PAGE_CEILING_BYTES,
+            },
+        })?;
         let (w, h) = (plan.width_px, plan.height_px);
         // Bytes the render itself will allocate: color/gray are the
         // final buffers; a threshold render stages through grayscale.

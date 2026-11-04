@@ -35,8 +35,23 @@ pub fn validate_origin(origin: &str) -> Result<String, String> {
     if !print_core::security::origin_is_allowed(&origin, &origin) {
         return Err("invalid Odoo address (HTTPS, or HTTP to an IP address)".to_string());
     }
-    if cfg!(not(debug_assertions)) && (origin.contains(".invalid") || origin.contains("example.")) {
-        return Err("configured Odoo origin is still a placeholder".to_string());
+    if cfg!(not(debug_assertions)) {
+        // Placeholder check by host labels, not substrings (audit
+        // I3): the old `contains("example.")` also rejected real
+        // domains like notexample.com and example.corp.com. Only the
+        // RFC 2606 example domains (and their subdomains) and the
+        // .invalid TLD count as placeholders.
+        if let Some((host, _)) = print_core::security::origin_host_port(&origin) {
+            let h = host.to_ascii_lowercase();
+            let placeholder = h == "invalid"
+                || h.ends_with(".invalid")
+                || ["example.com", "example.org", "example.net"]
+                    .iter()
+                    .any(|d| h == *d || h.ends_with(&format!(".{d}")));
+            if placeholder {
+                return Err("configured Odoo origin is still a placeholder".to_string());
+            }
+        }
     }
     Ok(origin)
 }
@@ -199,7 +214,12 @@ pub fn save_origin(config_dir: &Path, origin: &str, auto_reprint: bool) -> Resul
         auto_reprint,
     };
     let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
-    std::fs::write(&file, json).map_err(|e| e.to_string())?;
+    // Write-temp-then-rename (audit I2): a crash or power loss
+    // mid-write must not leave a truncated config.json that reads
+    // as "no origin configured" on the next launch.
+    let tmp = config_dir.join("config.json.tmp");
+    std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &file).map_err(|e| e.to_string())?;
     Ok(validated)
 }
 

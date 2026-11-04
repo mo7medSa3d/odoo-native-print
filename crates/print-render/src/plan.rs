@@ -39,35 +39,56 @@ fn bytes_for(size: PageSize, dpi: u32, mode: RenderMode) -> (u32, u32, u64) {
     (w, h, bytes)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanError {
+    /// Even the lowest DPI step exceeds the per-page ceiling; carries
+    /// the byte estimate at that lowest step.
+    ExceedsCeiling { bytes: u64 },
+}
+
+impl std::fmt::Display for PlanError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PlanError::ExceedsCeiling { bytes } => write!(
+                f,
+                "page bitmap needs {bytes} bytes even at the lowest DPI, over the {PER_PAGE_CEILING_BYTES}-byte ceiling"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PlanError {}
+
 /// Choose the highest DPI at or below the request whose bitmap fits the
-/// per-page ceiling. Never plans a page that would exceed the ceiling —
-/// at 100 DPI even a 1500 mm page fits; anything larger is a validation
-/// error earlier in the pipeline (print-core limits).
-pub fn plan_render(size: PageSize, requested_dpi: u32, mode: RenderMode) -> RenderPlan {
+/// per-page ceiling. Never returns a plan over the ceiling: when even
+/// the lowest step (100 DPI) does not fit — a 1500x1500 mm color page
+/// needs ~139.5 MB — the caller gets `PlanError::ExceedsCeiling`
+/// instead of a plan that violates the invariant (audit M4; the old
+/// code returned the over-ceiling plan while its docs claimed the
+/// opposite).
+pub fn plan_render(
+    size: PageSize,
+    requested_dpi: u32,
+    mode: RenderMode,
+) -> Result<RenderPlan, PlanError> {
     for dpi in DPI_STEPS {
         if dpi > requested_dpi && requested_dpi != 0 {
             continue;
         }
         let (w, h, bytes) = bytes_for(size, dpi, mode);
         if bytes <= PER_PAGE_CEILING_BYTES {
-            return RenderPlan {
+            return Ok(RenderPlan {
                 dpi,
                 width_px: w,
                 height_px: h,
                 bytes_estimate: bytes,
                 mode,
-            };
+            });
         }
     }
     let dpi = 100;
-    let (w, h, bytes) = bytes_for(size, dpi, mode);
-    RenderPlan {
-        dpi,
-        width_px: w,
-        height_px: h,
-        bytes_estimate: bytes,
-        mode,
-    }
+    let (_, _, bytes) = bytes_for(size, dpi, mode);
+    Err(PlanError::ExceedsCeiling { bytes })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -104,7 +125,7 @@ mod tests {
     use super::*;
     #[test]
     fn a4_color_300dpi_fits() {
-        let p = plan_render(PageSize::a4(), 300, RenderMode::Color);
+        let p = plan_render(PageSize::a4(), 300, RenderMode::Color).unwrap();
         assert_eq!(p.dpi, 300);
         assert_eq!((p.width_px, p.height_px), (2480, 3508));
         assert!(p.bytes_estimate < 40_000_000);
@@ -112,7 +133,7 @@ mod tests {
     #[test]
     fn huge_page_steps_down() {
         // 1000x1000mm at 600dpi color would be ~2.2 GB: must step down.
-        let p = plan_render(PageSize::new(1000.0, 1000.0), 600, RenderMode::Color);
+        let p = plan_render(PageSize::new(1000.0, 1000.0), 600, RenderMode::Color).unwrap();
         assert!(
             p.bytes_estimate <= PER_PAGE_CEILING_BYTES,
             "plan {} bytes at {} dpi",
@@ -122,8 +143,16 @@ mod tests {
         assert!(p.dpi < 600);
     }
     #[test]
+    fn over_ceiling_at_lowest_dpi_is_an_error_not_a_plan() {
+        // 1500x1500 mm color at 100 DPI is ~139.5 MB > the 128 MiB
+        // ceiling: no DPI step fits, so the planner must say so
+        // instead of returning an over-ceiling plan (audit M4).
+        let r = plan_render(PageSize::new(1500.0, 1500.0), 300, RenderMode::Color);
+        assert!(matches!(r, Err(PlanError::ExceedsCeiling { .. })));
+    }
+    #[test]
     fn threshold_is_cheap() {
-        let p = plan_render(PageSize::roll_80(200.0), 203, RenderMode::Threshold);
+        let p = plan_render(PageSize::roll_80(200.0), 203, RenderMode::Threshold).unwrap();
         assert_eq!(p.dpi, 200); // highest step <= 203
         assert!(p.bytes_estimate < 1_000_000);
     }

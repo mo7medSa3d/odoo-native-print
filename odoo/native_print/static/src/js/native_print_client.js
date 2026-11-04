@@ -1,4 +1,6 @@
 /** @odoo-module **/
+import { _t } from "@web/core/l10n/translation";
+
 // ---------------------------------------------------------------------
 // Live printer model: printers are never stored on the server. The
 // desktop app on THIS PC is the only printer authority; these helpers
@@ -36,13 +38,20 @@ export function detectPrinterType(printer) {
     if (kind === "virtual") {
         return { mode: "gdi", printerClass: "virtual" };
     }
-    if (["zdesigner", "zebra", "zpl"].some((t) => signature.includes(t))) {
+    // Short protocol tokens match on word boundaries only (audit
+    // L10): a bare substring search classifies any name containing
+    // "epl" (e.g. "Repl…") or "tsc" as a raw label printer, and an
+    // office printer misclassified that way gets raw jobs instead
+    // of GDI.
+    const hasWord = (tok) =>
+        new RegExp(`(^|[^a-z0-9])${tok}([^a-z0-9]|$)`).test(signature);
+    if (["zdesigner", "zebra"].some((t) => signature.includes(t)) || hasWord("zpl")) {
         return { mode: "zpl", printerClass: "label" };
     }
-    if (["tsc", "tspl"].some((t) => signature.includes(t))) {
+    if (hasWord("tsc") || hasWord("tspl")) {
         return { mode: "tspl", printerClass: "label" };
     }
-    if (signature.includes("epl")) {
+    if (hasWord("epl")) {
         return { mode: "epl", printerClass: "label" };
     }
     const thermalTokens = [
@@ -64,8 +73,17 @@ export function detectPrinterType(printer) {
 
 function isIpLiteral(value) {
     const text = String(value || "").trim();
-    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(text)) return true;
-    return text.includes(":") && /^[0-9a-fA-F:]+$/.test(text);
+    // IPv4: dotted quads with real octet ranges — "999.1.1.1" is a
+    // hostname-shaped string, not an IP (audit L9).
+    const v4 = text.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (v4) return v4.slice(1).every((o) => Number(o) <= 255);
+    if (!text.includes(":")) return false;
+    // IPv6: hex groups with at most one "::" compression and no
+    // stray leading/trailing single colon.
+    return /^[0-9a-fA-F:]+$/.test(text)
+        && (text.match(/::/g) || []).length <= 1
+        && (!text.startsWith(":") || text.startsWith("::"))
+        && (!text.endsWith(":") || text.endsWith("::"));
 }
 
 /** Raw printers reachable at an IP print directly; everything else
@@ -74,7 +92,10 @@ export function printerPatternFor(printer, mode) {
     const rawModes = ["escpos", "zpl", "tspl", "epl"];
     const port = (printer && printer.port) || "";
     if (rawModes.includes(mode) && isIpLiteral(port)) {
-        return `tcp://${port}:9100`;
+        // IPv6 literals need brackets in a URI authority, or the
+        // port suffix is ambiguous (audit L9).
+        const host = port.includes(":") ? `[${port}]` : port;
+        return `tcp://${host}:9100`;
     }
     return printer.name;
 }
@@ -167,7 +188,7 @@ export async function resolveBridgeTarget(bridge, options = {}) {
 const NOTIFICATION_DEDUPE_MS = 4000;
 const shownNotifications = new Map();
 
-export function notifyUser(env, message, type = "info", title = "Native Print") {
+export function notifyUser(env, message, type = "info", title = _t("Yaseir Print")) {
     try {
         const notification =
             env && env.services && env.services.notification;

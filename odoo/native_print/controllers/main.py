@@ -206,6 +206,28 @@ class NativePrintController(http.Controller):
                     ("name", "=", idempotency_key),
                     ("company_id", "=", company),
                 ], limit=1)
+                if not job:
+                    # The winning transaction has not committed yet
+                    # (READ COMMITTED): there is no row to update, so
+                    # the post must not claim success for a job that
+                    # does not exist — the client reposts (audit L2).
+                    return {"ok": False, "error": "retry"}
+                # The guards above ran while no job existed: re-apply
+                # them to the winner's row before the update path, or
+                # the loser of the create race could overwrite a
+                # just-finished job's terminal state, another user's
+                # job, or its monotonic attempt count (audit M3).
+                if job.user_id and job.user_id.id != request.env.user.id:
+                    return {"ok": False, "error": "forbidden"}
+                if job.state in TERMINAL_STATES:
+                    return {"ok": True, "job_id": job.id, "state": job.state,
+                            "ignored": "terminal_state_is_final"}
+                if state != job.state and \
+                        state not in ALLOWED_TRANSITIONS.get(job.state, set()):
+                    return {"ok": True, "job_id": job.id, "state": job.state,
+                            "ignored": "illegal_transition"}
+                if "attempts" in vals and vals["attempts"] < (job.attempts or 0):
+                    del vals["attempts"]
         if job and not created:
             # A later post may carry the source reference the creating
             # post missed (or vice versa): fill blanks, never overwrite.
@@ -227,7 +249,13 @@ class NativePrintController(http.Controller):
         if not (request.env.user.has_group("native_print.group_native_print_user")
                 or request.env.user.has_group("native_print.group_native_print_manager")):
             return {"ok": False, "error": "forbidden"}
-        Job = request.env["native.print.job"]
+        # Counters are company-wide for every role: the systray
+        # labels them "Completed Print Jobs" / "Failed Print Jobs",
+        # and the per-user record rule otherwise made the same
+        # widget show different numbers to cashiers and managers
+        # (audit L1). sudo + the explicit company domain keeps the
+        # scope exactly this company.
+        Job = request.env["native.print.job"].sudo()
         domain = [("company_id", "=", request.env.company.id)]
         return {
             "ok": True,

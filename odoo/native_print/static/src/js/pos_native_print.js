@@ -55,7 +55,24 @@ function notifyPosFallback(contextObj) {
     );
 }
 
-function findReceiptElement() {
+function findReceiptElement(orderRef) {
+    if (orderRef) {
+        // Prefer the receipt that actually belongs to this order:
+        // after fast order switching the DOM can still hold the
+        // previous order's receipt, and printing it would put the
+        // wrong receipt on paper (audit L8).
+        const candidates = document.querySelectorAll(".pos-receipt");
+        for (const el of candidates) {
+            if (el.textContent && el.textContent.includes(orderRef)) {
+                return el;
+            }
+        }
+        if (candidates.length) {
+            // A receipt is on screen but it is not this order's:
+            // decline and let the standard POS printing handle it.
+            return null;
+        }
+    }
     return (
         document.querySelector(".pos-receipt-container .pos-receipt") ||
         document.querySelector(".pos-receipt") ||
@@ -121,6 +138,22 @@ async function inlineMedia(source, clone) {
             // Leave cross-origin canvas as-is.
         }
     }
+    // CSS background images (shop logos are often background art,
+    // not <img>): the SVG rasterizer cannot load external URLs, so
+    // an un-inlined background silently vanishes from the printed
+    // receipt (audit JS-L9). Fetch them to data URLs like <img>s.
+    const sourceAll = source.querySelectorAll("*");
+    const cloneAll = clone.querySelectorAll("*");
+    for (let i = 0; i < sourceAll.length && i < cloneAll.length; i++) {
+        const bg = window.getComputedStyle(sourceAll[i]).backgroundImage;
+        const match = bg && bg.match(/url\(["']?(.*?)["']?\)/);
+        if (match && match[1] && !match[1].startsWith("data:")) {
+            const dataUrl = await fetchAsDataUrl(match[1]);
+            if (dataUrl) {
+                cloneAll[i].style.backgroundImage = `url("${dataUrl}")`;
+            }
+        }
+    }
 }
 
 async function elementToPngBytes(element, scale = 2) {
@@ -162,18 +195,24 @@ async function elementToPngBytes(element, scale = 2) {
     return Array.from(new Uint8Array(await blob.arrayBuffer()));
 }
 
-function clearPosReceiptKey(safeRef) {
-    try { sessionStorage.removeItem(`np.pos.key.${safeRef}`); } catch (_err) { /* ignore */ }
+function clearPosReceiptKey(safeRef, userId) {
+    try { sessionStorage.removeItem(`np.pos.key.${safeRef}.u${userId}`); } catch (_err) { /* ignore */ }
 }
 
-function posReceiptKey(safeRef) {
+function posReceiptKey(safeRef, userId) {
     // Idempotency with intent: resubmitting the SAME order within a
     // few seconds is the same print (double-fire, POS retry) and must
     // dedupe on the desktop, so it reuses the in-flight key. Once the
     // job reaches a terminal state the watcher clears the record, so
     // a later deliberate reprint becomes a fresh attempt (a2, a3...).
     // The day stamp bounds key reuse to one business day.
-    const storeKey = `np.pos.key.${safeRef}`;
+    // The cashier's user id is part of BOTH the storage key and the
+    // job key (audit H1): the server log scopes jobs per user, so a
+    // deterministic key shared across cashiers made the second
+    // cashier's identical order a forbidden collision — her print
+    // vanished from the log and her watcher read the first cashier's
+    // job. Per-user keys keep the dedupe semantics per cashier.
+    const storeKey = `np.pos.key.${safeRef}.u${userId}`;
     const now = Date.now();
     let record = null;
     try {
@@ -190,7 +229,7 @@ function posReceiptKey(safeRef) {
     }
     const attempt = (record && record.attempt ? record.attempt : 0) + 1;
     const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    const key = `pos-${safeRef}-${day}-a${attempt}`;
+    const key = `pos-${safeRef}-${day}-u${userId}-a${attempt}`;
     try {
         sessionStorage.setItem(
             storeKey, JSON.stringify({ key, ts: now, attempt }));
@@ -198,13 +237,13 @@ function posReceiptKey(safeRef) {
     return key;
 }
 
-function finishPosReceiptAttempt(safeRef) {
+function finishPosReceiptAttempt(safeRef, userId) {
     // Terminal state seen: the NEXT print of this order is a new
     // attempt. Keep the attempt counter as a tombstone (key cleared)
     // — deleting the record would reset the counter and reissue the
     // very same key, which the desktop would dedupe into silence.
     try {
-        const storeKey = `np.pos.key.${safeRef}`;
+        const storeKey = `np.pos.key.${safeRef}.u${userId}`;
         const record = JSON.parse(sessionStorage.getItem(storeKey) || "null");
         sessionStorage.setItem(storeKey, JSON.stringify({
             key: null, ts: 0, attempt: record && record.attempt ? record.attempt : 1,
@@ -212,7 +251,7 @@ function finishPosReceiptAttempt(safeRef) {
     } catch (_err) { /* ignore */ }
 }
 
-async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, env) {
+async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, env, userId, order) {
     // Same watch policy as report jobs: poll until terminal, giving
     // up only after 5 minutes without any state progress (a busy
     // queue legitimately takes longer), 30-minute absolute cap.
@@ -248,7 +287,19 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
                 // Terminal: the next print of this order is a new,
                 // deliberate attempt with a fresh idempotency key.
                 if (safeRef) {
-                    finishPosReceiptAttempt(safeRef);
+                    finishPosReceiptAttempt(safeRef, userId);
+                }
+                // The order's printed flag follows the CONFIRMED
+                // outcome, not the enqueue: it is pre-set at enqueue
+                // so the POS flow can advance, and a failed job must
+                // hand the order back as unprinted so the cashier's
+                // normal reprint path stays available (audit L7).
+                if (order) {
+                    if (state === "done") {
+                        order._printed = true;
+                    } else if (state === "failed" || state === "dead_letter") {
+                        order._printed = false;
+                    }
                 }
                 await rpc(
                     "/native_print/job_status",
@@ -309,10 +360,6 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
     if (!target) {
         return false; // No printer on this PC right now.
     }
-    const element = findReceiptElement();
-    if (!element) {
-        return false;
-    }
     const order =
         explicitOrder ||
         (contextObj && contextObj.currentOrder) ||
@@ -324,8 +371,22 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
         (order && (order.name || order.pos_reference || order.uid)) ||
         "pos-order";
     const safeRef = String(rawRef).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40);
+    // The cashier printing right now (audit H1): part of the job key
+    // and of the in-flight record, because the server log scopes jobs
+    // per user and one browser profile can serve several cashiers.
+    const posStore = (contextObj && contextObj.pos) || contextObj || null;
+    const cashierRaw =
+        (posStore && posStore.user && (posStore.user.id || posStore.user)) ||
+        (posStore && posStore.session && posStore.session.user_id) ||
+        (order && order.user_id && (order.user_id.id || order.user_id)) ||
+        0;
+    const userId = String(cashierRaw).replace(/[^0-9]/g, "") || "0";
+    const element = findReceiptElement(order ? rawRef : null);
+    if (!element) {
+        return false;
+    }
     const bytes = await elementToPngBytes(element, 2);
-    const idempotencyKey = posReceiptKey(safeRef);
+    const idempotencyKey = posReceiptKey(safeRef, userId);
     const rule = target.rule;
     try {
         await bridge.printImage({
@@ -344,7 +405,7 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
         // The enqueue itself failed: rotate the idempotency record so
         // an immediate deliberate reprint is a fresh attempt instead
         // of deduping into the dead job inside the 15 s window.
-        clearPosReceiptKey(safeRef);
+        clearPosReceiptKey(safeRef, userId);
         throw err;
     }
     rpc(
@@ -364,9 +425,12 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
     ).catch(() => {});
     watchPosJob(
         bridge, idempotencyKey, rule, bytes.length, safeRef,
-        target.printer.name, notificationEnv(contextObj),
+        target.printer.name, notificationEnv(contextObj), userId, order,
     ).catch(() => {});
     if (order) {
+        // Provisional: lets the POS flow advance to the receipt
+        // screen. The watcher corrects it to the confirmed outcome
+        // (clears it again when the job fails). (Audit L7.)
         order._printed = true;
     }
     return true;
@@ -377,6 +441,11 @@ function wrapPosStorePrintReceipt(posStore) {
         return;
     }
     const originalPrintReceipt = posStore.printReceipt.bind(posStore);
+    // Kept reachable for the ReceiptScreen patch: after a native
+    // attempt there, the standard fallback must call the ORIGINAL
+    // store method — calling the wrapped one would run the whole
+    // native capture a second time for the same click (audit JS-L8).
+    posStore.__npOriginalPrintReceipt = originalPrintReceipt;
     posStore.printReceipt = async function (opts = {}) {
         const isBasic = !!(opts && (opts.basic || opts.basicReceipt));
         if (!isBasic) {
@@ -419,6 +488,14 @@ patch(ReceiptScreen.prototype, {
                     error,
                 );
                 notifyPosFallback(this);
+            }
+            // Native printing was attempted for this click and
+            // declined or failed. The standard screen flow would now
+            // call the (wrapped) store method and capture the
+            // receipt a second time; go straight to the store's
+            // original implementation instead (audit JS-L8).
+            if (this.pos && typeof this.pos.__npOriginalPrintReceipt === "function") {
+                return await this.pos.__npOriginalPrintReceipt(opts);
             }
         }
         if (super.printReceipt) {

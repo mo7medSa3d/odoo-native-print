@@ -2,3 +2,22 @@ target/
 __pycache__/
 *.pyc
 node_modules/
+
+# Downloaded PDFium binaries (tools/fetch-pdfium.sh): large, platform
+# specific, and reproducible — never commit them. The old ignore file
+# did not actually cover this path (audit CI-M5).
+tools/pdfium/
+
+# Secrets and signing material must never enter the repo.
+*.pfx
+*.p12
+*.pem
+*.key
+.env
+.env.*
+
+# Local evidence bundles and release staging.
+evidence/
+release-files/
+*.log
+*.tar.gz

@@ -120,7 +120,16 @@ impl<'a, B: PrintBackend, S: FnMut(u64)> Worker<'a, B, S> {
         match self.backend.print(&job) {
             Ok(()) => {
                 self.queue.set_state(&job.id, JobState::Done, None)?;
-                self.queue.purge_payload(&job.id)?;
+                // The job printed and is Done: a payload-purge failure
+                // must not surface as a queue error for a completed job
+                // (audit L1). Retention is backstopped by the stale
+                // purge, so log and move on.
+                if let Err(e) = self.queue.purge_payload(&job.id) {
+                    eprintln!(
+                        "native-print: payload purge failed for done job {}: {e}",
+                        job.id
+                    );
+                }
                 Ok(Outcome::Done(job.id))
             }
             Err(e) if e.retryable && job.attempts < self.cfg.max_attempts => {
