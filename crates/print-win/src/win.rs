@@ -1164,7 +1164,7 @@ pub fn printer_capabilities(printer: &str) -> Result<print_core::PrinterCapabili
     let valid_bins = (got_bins.max(0) as usize)
         .min(got_bin_names.max(0) as usize)
         .min(bin_count);
-    let bins = (0..valid_bins)
+    let bins: Vec<String> = (0..valid_bins)
         .filter_map(|i| {
             let block = &bin_names[i * 24..(i + 1) * 24];
             let end = block.iter().position(|v| *v == 0).unwrap_or(24);

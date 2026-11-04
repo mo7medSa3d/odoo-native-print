@@ -8,11 +8,15 @@ on:
   workflow_dispatch:
   push:
     branches: ["main"]
-    paths: ["odoo/**"]
+    paths:
+      - "odoo/**"
+      - ".github/workflows/odoo.yml"
     tags:
       - "v*"
   pull_request:
-    paths: ["odoo/**"]
+    paths:
+      - "odoo/**"
+      - ".github/workflows/odoo.yml"
 
 jobs:
   addon-tests:
@@ -23,14 +27,19 @@ jobs:
       - uses: actions/checkout@v7
       - name: Pick an Odoo image (19.0 preferred)
         run: |
+          ODOO_IMAGE=""
           for tag in 19.0 19 latest; do
             if docker pull "odoo:$tag"; then
-              echo "ODOO_IMAGE=odoo:$tag" >> "$GITHUB_ENV"
-              echo "Using odoo:$tag"
+              ODOO_IMAGE="odoo:$tag"
+              echo "ODOO_IMAGE=$ODOO_IMAGE" >> "$GITHUB_ENV"
+              echo "Using $ODOO_IMAGE"
               break
             fi
           done
-          test -n "$ODOO_IMAGE"
+          if [ -z "$ODOO_IMAGE" ]; then
+            echo "::error::Unable to pull any supported Odoo image (19.0, 19, latest)."
+            exit 1
+          fi
       - name: Start Postgres and run Odoo with the addon + tests
         run: |
           set -o pipefail
