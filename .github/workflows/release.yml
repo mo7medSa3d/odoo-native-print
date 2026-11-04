@@ -28,6 +28,10 @@ jobs:
       - run: cargo test --workspace
       - run: cargo run --release -p print-tools -- bench
       - run: cargo run --release -p print-tools -- chaos
+      - name: Consistency gates (command surface + versions vs tag)
+        run: |
+          python3 tools/check_command_surface.py
+          python3 tools/check_versions.py
       - name: Source tarball
         run: |
           VERSION="${GITHUB_REF_NAME:-manual}"
@@ -60,6 +64,27 @@ jobs:
       - name: Install Tauri CLI
         working-directory: app
         run: npm ci
+      - name: Code signing (when a certificate is configured)
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE_BASE64) {
+            Write-Host "No signing certificate configured: installers will be UNSIGNED."
+            return
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+          $sec = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -Password $sec -CertStoreLocation Cert:\CurrentUser\My
+          $confPath = "app/src-tauri/tauri.conf.json"
+          $conf = Get-Content $confPath -Raw | ConvertFrom-Json
+          $conf.bundle.windows.certificateThumbprint = $cert.Thumbprint
+          $conf.bundle.windows.digestAlgorithm = "sha256"
+          $conf.bundle.windows.timestampUrl = "http://timestamp.digicert.com"
+          $conf | ConvertTo-Json -Depth 32 | Set-Content $confPath -Encoding utf8
+          Write-Host "Signing enabled with certificate $($cert.Thumbprint)"
       - name: Build the app and bundles
         working-directory: app
         run: npm run build
