@@ -951,12 +951,12 @@
             </div>
             <div class="form-group">
               <label class="form-label" data-i18n="lbl_test_type">نوع صفحة المعايرة والاختبار</label>
-              <select id="customTestKind" class="select">
+              <select id="customTestKind" class="select" onchange="updateCalWarning()">
                 <option value="pdf-a4" data-i18n="opt_calibration_pdf">A4 Calibration PDF (GDI + PDFium • rulers + 100×100 mm square + barcode)</option>
-                <option value="thermal-80mm">Thermal 80mm Receipt Calibration (ESC/POS Raster • 576 dots)</option>
-                <option value="thermal-58mm">Thermal 58mm Receipt Calibration (ESC/POS Raster • 384 dots)</option>
-                <option value="zpl-label">Label 100×150mm ZPL II Calibration (^XA^FO0,0^GFA...^FS^XZ)</option>
-                <option value="tspl-label">Label 100×150mm TSPL Calibration (SIZE / GAP / BITMAP / PRINT)</option>
+                <option value="thermal-80mm" data-i18n="opt_cal_thermal80">Thermal 80mm Receipt Calibration (ESC/POS • 576 dots)</option>
+                <option value="thermal-58mm" data-i18n="opt_cal_thermal58">Thermal 58mm Receipt Calibration (ESC/POS • 384 dots)</option>
+                <option value="zpl-label" data-i18n="opt_cal_zpl">Label 100×150mm Calibration (ZPL II)</option>
+                <option value="tspl-label" data-i18n="opt_cal_tspl">Label 100×150mm Calibration (TSPL)</option>
               </select>
             </div>
             <div>
@@ -966,6 +966,7 @@
               </button>
             </div>
           </div>
+          <div id="calVirtualWarning" class="form-error hidden" role="alert" style="margin-top:0.75rem;"></div>
         </div>
       </div>
 
@@ -1129,6 +1130,11 @@
       opt_recovery_safe: "آمن (افتراضي): عدم إعادة طباعة المهام الغامضة تلقائيًا",
       opt_recovery_auto: "إعادة الطباعة التلقائية للمهام قيد التنفيذ عند بدء التشغيل",
       opt_calibration_pdf: "PDF معايرة A4 (GDI + PDFium • مساطر + مربع 100×100مم + باركود)",
+      opt_cal_thermal80: "معايرة إيصالات حرارية 80مم (ESC/POS • 576 نقطة)",
+      opt_cal_thermal58: "معايرة إيصالات حرارية 58مم (ESC/POS • 384 نقطة)",
+      opt_cal_zpl: "معايرة ملصق 100×150مم (ZPL II)",
+      opt_cal_tspl: "معايرة ملصق 100×150مم (TSPL)",
+      cal_virtual_warning: "تنبيه: الطابعة المختارة افتراضية (PDF/XPS). صفحات المعايرة الخام (ESC/POS / ZPL / TSPL) لا تصلح لها — ستُنشئ ملفًا تالفًا بدل صفحة مطبوعة. اختر طابعة حقيقية.",
       help_recovery_mode: "المهام التي لم تُرسل للطابعة تُستأنف دائمًا. المهام المُرسلة يحددها هذا الخيار.",
       btn_save_origin: "حفظ الإعدادات",
       btn_save_and_launch: "حفظ وفتح Odoo",
@@ -1203,6 +1209,11 @@
       opt_recovery_safe: "Safe (default): never auto-reprint ambiguous jobs",
       opt_recovery_auto: "Auto-reprint in-flight jobs at startup",
       opt_calibration_pdf: "A4 Calibration PDF (GDI + PDFium • rulers + 100×100 mm square + barcode)",
+      opt_cal_thermal80: "Thermal 80mm Receipt Calibration (ESC/POS • 576 dots)",
+      opt_cal_thermal58: "Thermal 58mm Receipt Calibration (ESC/POS • 384 dots)",
+      opt_cal_zpl: "Label 100×150mm Calibration (ZPL II)",
+      opt_cal_tspl: "Label 100×150mm Calibration (TSPL)",
+      cal_virtual_warning: "Note: the selected printer is virtual (PDF/XPS). Raw calibration pages (ESC/POS / ZPL / TSPL) cannot go to it — they would create a corrupt file instead of a printed page. Choose a physical printer.",
       help_recovery_mode: "Jobs not yet sent to the printer always resume. Jobs already sent follow this choice.",
       btn_save_origin: "Save Settings",
       btn_save_and_launch: "Save & open Odoo",
@@ -1674,11 +1685,11 @@
         <div class="printer-meta-list">
           <div class="printer-meta-item">
             <span>${currentLang === "ar" ? "المنفذ (Port)" : "Port"}</span>
-            <strong class="mono">${escapeHtml(p.port || "—")}</strong>
+            <strong class="mono" dir="ltr">${escapeHtml(p.port || "—")}</strong>
           </div>
           <div class="printer-meta-item">
             <span>${currentLang === "ar" ? "التعريف (Driver)" : "Driver"}</span>
-            <strong>${escapeHtml(p.driver || "—")}</strong>
+            <strong dir="ltr">${escapeHtml(p.driver || "—")}</strong>
           </div>
         </div>
 
@@ -1688,12 +1699,12 @@
           <button class="btn btn-sm btn-primary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="pdf-a4">
             A4 PDF (GDI)
           </button>
-          <button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="thermal-80mm">
+          ${p.kind !== "virtual" ? `<button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="thermal-80mm">
             80mm ESC/POS
-          </button>
-          <button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="zpl-label">
+          </button>` : ""}
+          ${p.kind !== "virtual" ? `<button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="zpl-label">
             ZPL Label
-          </button>
+          </button>` : ""}
           <button class="btn btn-sm btn-secondary" data-action="inspect-forms" data-printer="${escapeHtml(p.name)}" data-idx="${idx}">
             ${currentLang === "ar" ? "مقاسات الورق" : "Paper Forms"}
           </button>
@@ -1719,7 +1730,29 @@
     else if (action === "inspect-forms") inspectForms(btn.getAttribute("data-printer"), Number(btn.getAttribute("data-idx")));
   });
 
+  function isRawTestKind(kind) {
+    return kind !== "pdf-a4" && kind !== "pdf" && kind !== "gdi";
+  }
+  function isVirtualPrinterName(name) {
+    const list = (overviewState && overviewState.printers) || [];
+    const found = list.find((p) => p.name === name);
+    return !!found && found.kind === "virtual";
+  }
+  function updateCalWarning() {
+    const warn = document.getElementById("calVirtualWarning");
+    if (!warn) return;
+    const printer = selectedTestPrinter();
+    const kindSel = document.getElementById("customTestKind");
+    const show = !!printer && !!kindSel && isRawTestKind(kindSel.value) && isVirtualPrinterName(printer);
+    warn.textContent = show ? I18N[currentLang].cal_virtual_warning : "";
+    warn.classList.toggle("hidden", !show);
+  }
+
   async function runPrinterTest(printerName, kind) {
+    if (isRawTestKind(kind) && isVirtualPrinterName(printerName)) {
+      showToast(I18N[currentLang].cal_virtual_warning, true);
+      return false;
+    }
     const b = bridge();
     if (!b || typeof b.runTestPrint !== "function") {
       showToast(I18N[currentLang].native_bridge_unavailable, true);
@@ -1773,6 +1806,7 @@
     const uri = document.getElementById("customPrinterUri");
     if (sel && uri) uri.classList.toggle("hidden", sel.value !== "__uri__");
     validateCustomPrinterUriField();
+    updateCalWarning();
   }
 
   function selectedTestPrinter() {

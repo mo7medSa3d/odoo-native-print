@@ -292,3 +292,17 @@ Full report: `docs/engineering-mission-2026-11-03.md`. Headlines:
   rounded card; dir=auto on user-language text.
 - Verified: Odoo suite 17/17 fresh; translations endpoint 200 with
   the new labels in Arabic.
+
+## 2026-11-04 — Raw-to-virtual guard (app 1.4.5)
+- Field bug: a raw calibration (ESC/POS / ZPL / TSPL) sent to
+  "Microsoft Print to PDF" produced a corrupt, unopenable "PDF" —
+  the virtual writer spools raw bytes into a document file. Fixed at
+  three layers: print-core gains raw_delivery_blocked() (unit-tested:
+  raw payload or raw mode + Virtual class); the app worker fails such
+  jobs fast with RAW_TO_VIRTUAL_PRINTER; run_test_print refuses them
+  up front with the reason. The Control Center warns inline when a
+  raw kind + virtual printer are combined, blocks the send, and no
+  longer offers raw quick-test buttons on virtual printer cards.
+- Calibration option labels shortened and translated (no more raw
+  ZPL code in the dropdown); port/driver values render LTR-isolated
+  so "PORTPROMPT:" no longer flips in RTL pages.

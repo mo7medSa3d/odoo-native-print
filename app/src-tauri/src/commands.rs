@@ -8,7 +8,7 @@
 use crate::config;
 use print_core::diagnostics::{build_bundle_from_queue, bundle_to_json, JobSummary};
 use print_core::paper::{match_paper, match_paper_auto, Form, ScalePolicy};
-use print_core::printer::{needs_intervention, PrinterInfo, PrinterStatus};
+use print_core::printer::{needs_intervention, PrinterInfo, PrinterKind, PrinterStatus};
 use print_core::routing::resolve_printer;
 use print_core::security::{origin_is_allowed, validate_job_input};
 use print_core::worker::Outcome;
@@ -630,6 +630,25 @@ pub fn run_test_print(
     check_origin(&webview, &state)?;
     if printer.trim().is_empty() {
         return Err("printer_required".to_string());
+    }
+    // Raw calibration pages (ESC/POS / ZPL / TSPL) sent to a virtual
+    // PDF/XPS writer produce a corrupt file instead of a page; refuse
+    // up front with the reason instead of enqueueing a doomed job.
+    let raw_kind = matches!(
+        kind.as_str(),
+        "thermal-80mm" | "thermal-58mm" | "escpos" | "zpl-label" | "zpl" | "tspl-label" | "tspl"
+    );
+    if raw_kind && !printer.contains("://") {
+        if let Ok(printers) = print_win::discover_printers() {
+            if let Some(found) = printers.iter().find(|p| p.name == printer.trim()) {
+                if found.kind == PrinterKind::Virtual {
+                    return Err(
+                        "This calibration sends raw printer language (ESC/POS / ZPL / TSPL) and cannot go to a virtual PDF/XPS printer - it would create a corrupt file. Choose a physical printer."
+                            .to_string(),
+                    );
+                }
+            }
+        }
     }
     let key = format!(
         "cal-{}-{}",
@@ -1467,7 +1486,9 @@ impl PrintBackend for NativePrintBackend {
         let discovered = print_win::discover_printers().map_err(|e| {
             BackendError::retryable("SPOOLER_UNAVAILABLE", &format!("discover_printers: {e}"))
         })?;
+        let mut target_kind: Option<PrinterKind> = None;
         let target_name = if let Some(matched) = resolve_printer(&job.printer, &discovered) {
+            target_kind = Some(matched.kind);
             if needs_intervention(matched.status) {
                 return Err(BackendError::retryable(
                     Self::status_code(matched.status),
@@ -1483,6 +1504,18 @@ impl PrintBackend for NativePrintBackend {
         } else {
             job.printer.clone()
         };
+
+        // Raw printer language can never go to a virtual PDF/XPS
+        // writer: the spooler would write the raw bytes into a
+        // document file, producing a corrupt, unopenable "PDF".
+        if let Some(pk) = target_kind {
+            if print_core::printer::raw_delivery_blocked(&kind, &opts.mode, pk) {
+                return Err(BackendError::fatal(
+                    "RAW_TO_VIRTUAL_PRINTER",
+                    "raw printer language (ESC/POS / ZPL / TSPL / EPL) cannot be sent to a virtual PDF/XPS printer; choose a physical printer",
+                ));
+            }
+        }
 
         if let Ok(live_status) = print_win::printer_status(&target_name) {
             if needs_intervention(live_status) {

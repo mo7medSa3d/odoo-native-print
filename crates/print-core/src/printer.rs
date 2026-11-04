@@ -185,6 +185,20 @@ impl PrinterInfo {
     }
 }
 
+/// True when a job must NOT be delivered to this printer class: raw
+/// printer languages (ESC/POS, ZPL, TSPL, EPL — whether the payload
+/// itself is raw or a PDF/image would be converted to raw) can only
+/// go to a physical printer. A virtual PDF/XPS writer would spool the
+/// raw bytes into a document file, producing a corrupt, unopenable
+/// "PDF" instead of a page (field report, 2026-11-04).
+pub fn raw_delivery_blocked(payload_kind: &str, mode: &str, printer: PrinterKind) -> bool {
+    if printer != PrinterKind::Virtual {
+        return false;
+    }
+    let raw = |v: &str| matches!(v, "escpos" | "zpl" | "tspl" | "epl");
+    raw(payload_kind) || raw(mode)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,5 +296,33 @@ mod tests {
         assert!(caps.custom_size_ok(crate::PageSize::label_100x150()));
         assert!(!caps.custom_size_ok(crate::PageSize::new(300.0, 300.0)));
         assert!(!caps.custom_size_ok(crate::PageSize::new(10.0, 100.0)));
+    }
+
+    #[test]
+    fn raw_delivery_blocked_only_for_virtual_printers() {
+        use super::raw_delivery_blocked;
+        // Raw payloads and raw conversions are blocked on virtual writers.
+        assert!(raw_delivery_blocked(
+            "escpos",
+            "escpos",
+            PrinterKind::Virtual
+        ));
+        assert!(raw_delivery_blocked("zpl", "zpl", PrinterKind::Virtual));
+        assert!(raw_delivery_blocked("pdf", "escpos", PrinterKind::Virtual));
+        assert!(raw_delivery_blocked(
+            "image-png",
+            "tspl",
+            PrinterKind::Virtual
+        ));
+        // GDI documents to a virtual writer are the legitimate preview path.
+        assert!(!raw_delivery_blocked("pdf", "gdi", PrinterKind::Virtual));
+        // Physical printers take everything.
+        assert!(!raw_delivery_blocked(
+            "escpos",
+            "escpos",
+            PrinterKind::Local
+        ));
+        assert!(!raw_delivery_blocked("zpl", "zpl", PrinterKind::Network));
+        assert!(!raw_delivery_blocked("pdf", "escpos", PrinterKind::Shared));
     }
 }
