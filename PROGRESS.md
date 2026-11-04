@@ -306,3 +306,16 @@ Full report: `docs/engineering-mission-2026-11-03.md`. Headlines:
 - Calibration option labels shortened and translated (no more raw
   ZPL code in the dropdown); port/driver values render LTR-isolated
   so "PORTPROMPT:" no longer flips in RTL pages.
+
+## 2026-11-04 — Full print-path audit (app 1.4.6)
+- Owner asked for every print path to be re-verified. Traced all of
+  them in code: payloads (pdf / image-png / raw) x modes (gdi /
+  escpos / zpl / tspl / epl) x transports (spooler / TCP 9100 / IPP),
+  including both converters (pdf_to_raw_stream, png_to_raw_stream).
+  All paths verified correct except the IPP transport, which sent
+  any payload labeled with the negotiated PDF format and preflighted
+  with is_stopped() only.
+- Fixed: the IPP branch now refuses non-PDF payloads up front
+  (IPP_REQUIRES_PDF) and preflights with is_blocked() +
+  blocking_reasons() (media-empty/jam/door/toner-empty/...), the
+  swap deferred from the engineering mission.

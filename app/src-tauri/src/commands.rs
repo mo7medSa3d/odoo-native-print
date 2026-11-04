@@ -1460,6 +1460,16 @@ impl PrintBackend for NativePrintBackend {
 
         // 2. Direct IPP transport (ipp://host:port/path or mode == "ipp")
         if job.printer.starts_with("ipp://") || opts.mode == "ipp" {
+            // IPP submissions are PDF documents (the only format the
+            // client negotiates). Anything else - a POS receipt image,
+            // raw printer language - must never be sent labeled as
+            // PDF; refuse loudly instead of corrupting the job.
+            if kind != "pdf" {
+                return Err(BackendError::fatal(
+                    "IPP_REQUIRES_PDF",
+                    "IPP printers accept PDF documents only; images and raw printer language cannot be sent over IPP",
+                ));
+            }
             let (host, port, path) = Self::parse_host_port(&job.printer, 631)?;
             let mut client = print_ipp::IppClient::new(&host, port);
             client.path = path.clone();
@@ -1467,10 +1477,13 @@ impl PrintBackend for NativePrintBackend {
             let caps = client
                 .get_printer_attributes()
                 .map_err(|e| BackendError::retryable("IPP_ATTRIBUTES_ERROR", &e.to_string()))?;
-            if caps.is_stopped() {
+            if caps.is_blocked() {
                 return Err(BackendError::retryable(
                     "PRINTER_STOPPED",
-                    "IPP printer reported stopped state",
+                    &format!(
+                        "IPP printer is blocked: {}",
+                        caps.blocking_reasons().join(", ")
+                    ),
                 ));
             }
             let fmt = caps
