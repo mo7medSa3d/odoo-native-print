@@ -51,6 +51,12 @@ jobs:
             cp "$f" /tmp/check.mjs && node --check /tmp/check.mjs
           done
           echo "addon JS OK"
+      - name: Consistency gates (command surface, versions, JS unit tests)
+        run: |
+          python3 tools/check_command_surface.py
+          python3 tools/check_versions.py
+          node odoo/native_print/tests/test_live_target.mjs
+          node odoo/native_print/tests/test_pos_keys.mjs
       - name: Bench, chaos, calibration (measured evidence)
         run: |
           set -o pipefail
