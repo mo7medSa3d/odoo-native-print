@@ -393,3 +393,14 @@ Full report: `docs/engineering-mission-2026-11-03.md`. Headlines:
   fresh install AND on upgrade from 19.0.2.10.0, live bundle +
   translations + model-term checks above. Windows CI + real-printer
   gates remain owner-side as before.
+- CI follow-up: run #83 on the sweep commit FAILED all jobs. Root
+  causes found by reproducing the exact CI steps locally: (1) clippy
+  -D warnings rejected an unused `mut` in print-ipp (the whole Linux
+  Core job reproduced green locally after the fix); (2) the app
+  crate — now type-checkable on Linux after installing the Tauri
+  system deps (libwebkit2gtk-4.1-dev et al.), a check added to the
+  local battery permanently — failed on `print_ipp::IppJobOptions`
+  (defined but not re-exported) and `PrinterKind::classify` (the
+  classifier is `PrinterInfo::classify`). Fix commit 0d036e9;
+  run #84 SUCCESS, all five jobs green, windows-installers-unsigned
+  artifact 18.3 MB. App 1.4.7 / addon 19.0.2.11.0 is installable.
