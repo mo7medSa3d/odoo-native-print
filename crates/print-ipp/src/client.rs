@@ -289,7 +289,7 @@ impl IppClient {
                 Value::Text(tag::MIME, format.to_string()),
             ),
         ];
-        let mut job_attrs = job_attributes(job_name, copies, options);
+        let job_attrs = job_attributes(job_name, copies, options);
         let body = proto::encode_request(
             op::PRINT_JOB,
             id,

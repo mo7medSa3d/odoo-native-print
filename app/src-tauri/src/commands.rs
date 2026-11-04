@@ -1655,7 +1655,7 @@ impl PrintBackend for NativePrintBackend {
         // verbatim as the queue name and no kind was resolved: classify
         // from the name so the raw-to-virtual guard below still
         // applies instead of being skipped (fail-open edge).
-        let target_kind = target_kind.or_else(|| Some(PrinterKind::classify(&target_name, "")));
+        let target_kind = target_kind.or_else(|| Some(PrinterInfo::classify(&target_name, "")));
 
         // Raw printer language can never go to a virtual PDF/XPS
         // writer: the spooler would write the raw bytes into a
