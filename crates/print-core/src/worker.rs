@@ -84,12 +84,13 @@ pub fn backoff_delay_ms(cfg: &WorkerConfig, attempt: u32, entropy: u64) -> u64 {
 
 /// Process jobs for one printer serially (one worker per printer, spec
 /// section 5). `run_once` claims and handles at most one job; the caller
-/// (app shell) loops it. Sleeper is injected so tests never really sleep.
-pub struct Worker<'a, B: PrintBackend, S: FnMut(u64)> {
+/// (app shell) loops it. Retry backoff is recorded in the queue
+/// (`available_at`) instead of slept: a backing-off printer never
+/// blocks the worker thread that serves the other printers.
+pub struct Worker<'a, B: PrintBackend> {
     pub queue: &'a mut Queue,
     pub backend: B,
     pub cfg: WorkerConfig,
-    pub sleep: S,
     pub entropy: u64,
 }
 
@@ -102,7 +103,7 @@ pub enum Outcome {
     DeadLetter(String),
 }
 
-impl<'a, B: PrintBackend, S: FnMut(u64)> Worker<'a, B, S> {
+impl<'a, B: PrintBackend> Worker<'a, B> {
     pub fn run_once(&mut self, printer: &str) -> Result<Outcome, QueueError> {
         let Some(job) = self.queue.claim_next(printer)? else {
             return Ok(Outcome::Idle);
@@ -133,14 +134,11 @@ impl<'a, B: PrintBackend, S: FnMut(u64)> Worker<'a, B, S> {
                 Ok(Outcome::Done(job.id))
             }
             Err(e) if e.retryable && job.attempts < self.cfg.max_attempts => {
-                // Back to failed, then re-queue is a separate explicit
-                // transition (Failed -> Queued) so the audit trail shows it.
-                self.queue
-                    .set_state(&job.id, JobState::Failed, Some(&e.code))?;
-                self.queue
-                    .set_state(&job.id, JobState::Queued, Some(&e.code))?;
+                // Failed, then re-queued after a durable backoff: the
+                // audit trail shows both transitions, and the worker
+                // thread is free to serve other printers meanwhile.
                 let delay = backoff_delay_ms(&self.cfg, job.attempts, self.entropy);
-                (self.sleep)(delay);
+                self.queue.requeue_with_delay(&job.id, delay, &e.code)?;
                 Ok(Outcome::Retried(job.id))
             }
             Err(e) if e.retryable => {
@@ -212,7 +210,6 @@ mod tests {
                 results: VecDeque::from([Ok(())]),
             },
             cfg: WorkerConfig::default(),
-            sleep: |_| {},
             entropy: 0,
         };
         assert_eq!(w.run_once("p1").unwrap(), Outcome::Done("1".into()));
@@ -227,29 +224,49 @@ mod tests {
         q.enqueue(&job("1")).unwrap();
         let cfg = WorkerConfig {
             max_attempts: 2,
-            backoff_base_ms: 1,
-            backoff_max_ms: 5,
+            backoff_base_ms: 500,
+            backoff_max_ms: 5_000,
         };
-        let mut slept = Vec::new();
         {
             let mut w = Worker {
                 queue: &mut q,
                 backend: ScriptedBackend {
-                    results: VecDeque::from([
-                        Err(BackendError::retryable("PRINTER_OFFLINE", "offline")),
-                        Err(BackendError::retryable("PRINTER_OFFLINE", "offline")),
-                    ]),
+                    results: VecDeque::from([Err(BackendError::retryable(
+                        "PRINTER_OFFLINE",
+                        "offline",
+                    ))]),
                 },
                 cfg,
-                sleep: |d| slept.push(d),
                 entropy: 0,
             };
             // Attempt 1 (attempts becomes 1 at claim): retryable -> re-queued.
             assert_eq!(w.run_once("p1").unwrap(), Outcome::Retried("1".into()));
+            // The re-queued job is inside its durable backoff window:
+            // it must not be claimable yet, even though the worker
+            // thread is free.
+            assert_eq!(w.run_once("p1").unwrap(), Outcome::Idle);
+        }
+        // A manual retry clears the backoff delay immediately.
+        q.retry_job("1").unwrap();
+        {
+            let mut w = Worker {
+                queue: &mut q,
+                backend: ScriptedBackend {
+                    results: VecDeque::from([Err(BackendError::retryable(
+                        "PRINTER_OFFLINE",
+                        "offline",
+                    ))]),
+                },
+                cfg: WorkerConfig {
+                    max_attempts: 2,
+                    backoff_base_ms: 0,
+                    backoff_max_ms: 5,
+                },
+                entropy: 0,
+            };
             // Attempt 2: attempts == max -> dead letter.
             assert_eq!(w.run_once("p1").unwrap(), Outcome::DeadLetter("1".into()));
         }
-        assert_eq!(slept.len(), 1);
         assert_eq!(q.count_by_state(JobState::DeadLetter).unwrap(), 1);
         // One-click retry from dead letter works.
         q.set_state("1", JobState::Queued, None).unwrap();
@@ -271,7 +288,6 @@ mod tests {
                 ))]),
             },
             cfg: WorkerConfig::default(),
-            sleep: |_| {},
             entropy: 0,
         };
         assert_eq!(w.run_once("p1").unwrap(), Outcome::Failed("1".into()));
@@ -288,7 +304,6 @@ mod tests {
                 results: VecDeque::from([Err(BackendError::fatal("PAPER_MISMATCH", "wrong size"))]),
             },
             cfg: WorkerConfig::default(),
-            sleep: |_| {},
             entropy: 0,
         };
         assert_eq!(w.run_once("p1").unwrap(), Outcome::Failed("1".into()));

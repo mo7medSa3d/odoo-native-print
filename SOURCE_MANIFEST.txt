@@ -1,156 +1,173 @@
-Yaseir Print — source manifest
-App 1.4.7 / Odoo addon 19.0.2.11.0 — root-cause sweep (CSS bundle fix, catalog rebuild, hardening, CC redesign), 2026-11-04
+Yaseir Print / Odoo Native Print — source manifest
+App version: 1.4.12 — Odoo addon version: 19.0.2.15.0
+Generated: 2026-11-04 (engineering mission cycle; see ENGINEERING_AUDIT.md)
+Root directory in archive: odoo-native-print-main/
+Files listed relative to the project root, sorted, with byte sizes.
 
-.github/workflows/ci.yml
-.github/workflows/odoo.yml
-.github/workflows/printer-lab.yml
-.github/workflows/release.yml
-.gitignore
-CHANGELOG_ENGINEERING.md
-Cargo.lock
-Cargo.toml
-ENGINEERING_AUDIT.md
-PRINTER_COMPATIBILITY_MATRIX.md
-PROGRESS.md
-README.md
-VERIFICATION_REPORT.md
-app/README.md
-app/deploy/admx/OdooNativePrint.admx
-app/deploy/admx/en-US/OdooNativePrint.adml
-app/dist/app-icon.png
-app/dist/boot.html
-app/dist/fonts/thmanyahsans-Black.otf
-app/dist/fonts/thmanyahsans-Bold.otf
-app/dist/fonts/thmanyahsans-Light.otf
-app/dist/fonts/thmanyahsans-Medium.otf
-app/dist/fonts/thmanyahsans-Regular.otf
-app/dist/index.html
-app/dist/toolbar.html
-app/package-lock.json
-app/package.json
-app/src-tauri/Cargo.lock
-app/src-tauri/Cargo.toml
-app/src-tauri/build.rs
-app/src-tauri/capabilities/main.json
-app/src-tauri/capabilities/remote.json
-app/src-tauri/capabilities/toolbar.json
-app/src-tauri/icons/128x128.png
-app/src-tauri/icons/128x128@2x.png
-app/src-tauri/icons/32x32.png
-app/src-tauri/icons/icon.ico
-app/src-tauri/icons/icon.png
-app/src-tauri/permissions/print.toml
-app/src-tauri/resources/pdfium-LICENSE.txt
-app/src-tauri/resources/pdfium.dll
-app/src-tauri/src/commands.rs
-app/src-tauri/src/config.rs
-app/src-tauri/src/lib.rs
-app/src-tauri/src/main.rs
-app/src-tauri/tauri.conf.json
-app/tests/control-center.test.mjs
-crates/print-core/Cargo.toml
-crates/print-core/src/diagnostics.rs
-crates/print-core/src/lib.rs
-crates/print-core/src/page.rs
-crates/print-core/src/paper.rs
-crates/print-core/src/printer.rs
-crates/print-core/src/queue.rs
-crates/print-core/src/routing.rs
-crates/print-core/src/security.rs
-crates/print-core/src/state.rs
-crates/print-core/src/worker.rs
-crates/print-ipp/Cargo.toml
-crates/print-ipp/src/client.rs
-crates/print-ipp/src/lib.rs
-crates/print-ipp/src/proto.rs
-crates/print-raw/Cargo.toml
-crates/print-raw/src/epl.rs
-crates/print-raw/src/escpos.rs
-crates/print-raw/src/lib.rs
-crates/print-raw/src/mono.rs
-crates/print-raw/src/tcp9100.rs
-crates/print-raw/src/tspl.rs
-crates/print-raw/src/zpl.rs
-crates/print-render/Cargo.toml
-crates/print-render/src/bitmap.rs
-crates/print-render/src/calibration.rs
-crates/print-render/src/image.rs
-crates/print-render/src/lib.rs
-crates/print-render/src/pdf.rs
-crates/print-render/src/pdfium.rs
-crates/print-render/src/plan.rs
-crates/print-render/tests/pdfium_render.rs
-crates/print-win/Cargo.lock
-crates/print-win/Cargo.toml
-crates/print-win/src/bin/npwin_probe.rs
-crates/print-win/src/dib.rs
-crates/print-win/src/discovery.rs
-crates/print-win/src/lib.rs
-crates/print-win/src/win.rs
-crates/tools/Cargo.toml
-crates/tools/src/main.rs
-deny.toml
-docs/adr/0001-greenfield-no-gateway.md
-docs/adr/0002-tauri-version-and-origin.md
-docs/adr/0003-paper-ladder-fail-loud.md
-docs/adr/0004-queue-semantics.md
-docs/api-contract.md
-docs/ci.md
-docs/compatibility.md
-docs/engineering-hardening-2026-11-03.md
-docs/engineering-mission-2026-11-03.md
-docs/error-catalog.md
-docs/hardware-test-matrix.md
-docs/hardware/validation-kit.md
-docs/odoo-setup.md
-docs/pdfium.md
-docs/release-checklist.md
-docs/research/android-ios-printing.md
-docs/research/ipp-protocol.md
-docs/research/odoo-pos-and-formats.md
-docs/research/odoo-report-handlers.md
-docs/research/pdfium-gdi-windows-printing.md
-docs/research/tauri-remote-ipc.md
-docs/research/tauri-security-advisories.md
-docs/research/windows-discovery-and-status.md
-docs/routing-and-interception.md
-docs/runbooks.md
-docs/security/threat-model.md
-docs/spikes/S1-S8.md
-docs/system-audit-2026-11-03.md
-docs/zero-config.md
-fuzz/Cargo.toml
-fuzz/fuzz_targets/pdf_info.rs
-odoo/native_print/__init__.py
-odoo/native_print/__manifest__.py
-odoo/native_print/controllers/__init__.py
-odoo/native_print/controllers/main.py
-odoo/native_print/i18n/ar.po
-odoo/native_print/migrations/19.0.1.3.0/pre-migration.py
-odoo/native_print/migrations/19.0.2.5.0/post-migration.py
-odoo/native_print/migrations/19.0.2.6.0/post-migration.py
-odoo/native_print/models/__init__.py
-odoo/native_print/models/native_print_device.py
-odoo/native_print/models/native_print_job.py
-odoo/native_print/security/ir.model.access.csv
-odoo/native_print/security/native_print_groups.xml
-odoo/native_print/security/native_print_rules.xml
-odoo/native_print/static/description/icon.png
-odoo/native_print/static/description/icon.svg
-odoo/native_print/static/src/js/native_print_client.js
-odoo/native_print/static/src/js/native_print_handler.js
-odoo/native_print/static/src/js/native_print_systray.js
-odoo/native_print/static/src/js/pos_native_print.js
-odoo/native_print/static/src/scss/native_print.scss
-odoo/native_print/static/src/xml/native_print_systray.xml
-odoo/native_print/tests/__init__.py
-odoo/native_print/tests/test_controllers.py
-odoo/native_print/tests/test_live_target.mjs
-odoo/native_print/tests/test_native_print.py
-odoo/native_print/tests/test_pos_keys.mjs
-odoo/native_print/views/login_fallback_templates.xml
-odoo/native_print/views/native_print_views.xml
-tools/check_command_surface.py
-tools/check_versions.py
-tools/fetch-pdfium.sh
-tools/results-2026-11-02.md
+5795 ./.github/workflows/ci.yml
+2879 ./.github/workflows/odoo.yml
+3688 ./.github/workflows/printer-lab.yml
+5905 ./.github/workflows/release.yml
+430 ./.gitignore
+10718 ./CHANGELOG_ENGINEERING.md
+10726 ./Cargo.lock
+397 ./Cargo.toml
+19269 ./ENGINEERING_AUDIT.md
+10827 ./PRINTER_COMPATIBILITY_MATRIX.md
+32629 ./PROGRESS.md
+5186 ./README.md
+8969 ./VERIFICATION_REPORT.md
+2200 ./app/README.md
+1602 ./app/deploy/admx/OdooNativePrint.admx
+1571 ./app/deploy/admx/en-US/OdooNativePrint.adml
+20873 ./app/dist/app-icon.png
+6905 ./app/dist/boot.html
+242168 ./app/dist/fonts/thmanyahsans-Black.otf
+242808 ./app/dist/fonts/thmanyahsans-Bold.otf
+234588 ./app/dist/fonts/thmanyahsans-Light.otf
+242116 ./app/dist/fonts/thmanyahsans-Medium.otf
+241292 ./app/dist/fonts/thmanyahsans-Regular.otf
+112125 ./app/dist/index.html
+5387 ./app/dist/toolbar.html
+7248 ./app/package-lock.json
+557 ./app/package.json
+107649 ./app/src-tauri/Cargo.lock
+853 ./app/src-tauri/Cargo.toml
+930 ./app/src-tauri/build.rs
+535 ./app/src-tauri/capabilities/main.json
+660 ./app/src-tauri/capabilities/remote.json
+389 ./app/src-tauri/capabilities/toolbar.json
+9871 ./app/src-tauri/icons/128x128.png
+20873 ./app/src-tauri/icons/128x128@2x.png
+1810 ./app/src-tauri/icons/32x32.png
+124759 ./app/src-tauri/icons/icon.ico
+45878 ./app/src-tauri/icons/icon.png
+2410 ./app/src-tauri/permissions/print.toml
+1184 ./app/src-tauri/resources/pdfium-LICENSE.txt
+7586816 ./app/src-tauri/resources/pdfium.dll
+84177 ./app/src-tauri/src/commands.rs
+8965 ./app/src-tauri/src/config.rs
+35027 ./app/src-tauri/src/lib.rs
+182 ./app/src-tauri/src/main.rs
+1054 ./app/src-tauri/tauri.conf.json
+4703 ./app/tests/control-center.test.mjs
+5437 ./app/tests/jsdom/cc-capabilities.test.mjs
+4021 ./app/tests/jsdom/control-center-behavior.test.mjs
+2985 ./app/tests/jsdom/errortap.test.mjs
+830 ./app/tests/jsdom/extract-bridge.mjs
+4760 ./app/tests/jsdom/navpill.test.mjs
+29203 ./app/tests/jsdom/package-lock.json
+333 ./app/tests/jsdom/package.json
+4306 ./app/tests/jsdom/watchdog.test.mjs
+288 ./crates/print-core/Cargo.toml
+4315 ./crates/print-core/src/diagnostics.rs
+20693 ./crates/print-core/src/health.rs
+864 ./crates/print-core/src/lib.rs
+2772 ./crates/print-core/src/page.rs
+12656 ./crates/print-core/src/paper.rs
+29922 ./crates/print-core/src/printer.rs
+3705 ./crates/print-core/src/profiles.rs
+59391 ./crates/print-core/src/queue.rs
+4368 ./crates/print-core/src/routing.rs
+12573 ./crates/print-core/src/security.rs
+3470 ./crates/print-core/src/state.rs
+11571 ./crates/print-core/src/worker.rs
+192 ./crates/print-ipp/Cargo.toml
+22845 ./crates/print-ipp/src/client.rs
+616 ./crates/print-ipp/src/lib.rs
+11190 ./crates/print-ipp/src/proto.rs
+192 ./crates/print-raw/Cargo.toml
+2422 ./crates/print-raw/src/epl.rs
+7690 ./crates/print-raw/src/escpos.rs
+764 ./crates/print-raw/src/lib.rs
+3921 ./crates/print-raw/src/mono.rs
+10181 ./crates/print-raw/src/tcp9100.rs
+7590 ./crates/print-raw/src/tspl.rs
+7392 ./crates/print-raw/src/zpl.rs
+305 ./crates/print-render/Cargo.toml
+5135 ./crates/print-render/src/bitmap.rs
+11280 ./crates/print-render/src/calibration.rs
+14886 ./crates/print-render/src/image.rs
+842 ./crates/print-render/src/lib.rs
+15876 ./crates/print-render/src/pdf.rs
+22257 ./crates/print-render/src/pdfium.rs
+5827 ./crates/print-render/src/plan.rs
+6009 ./crates/print-render/tests/pdfium_render.rs
+10655 ./crates/print-win/Cargo.lock
+332 ./crates/print-win/Cargo.toml
+6432 ./crates/print-win/src/bin/npwin_probe.rs
+7901 ./crates/print-win/src/dib.rs
+10241 ./crates/print-win/src/discovery.rs
+6646 ./crates/print-win/src/lib.rs
+42752 ./crates/print-win/src/win.rs
+341 ./crates/tools/Cargo.toml
+8038 ./crates/tools/src/main.rs
+449 ./deny.toml
+654 ./docs/adr/0001-greenfield-no-gateway.md
+2762 ./docs/adr/0002-tauri-version-and-origin.md
+441 ./docs/adr/0003-paper-ladder-fail-loud.md
+843 ./docs/adr/0004-queue-semantics.md
+2169 ./docs/adr/0005-subframe-origin-trust.md
+7382 ./docs/api-contract.md
+6127 ./docs/ci.md
+3052 ./docs/compatibility.md
+8117 ./docs/engineering-hardening-2026-11-03.md
+10401 ./docs/engineering-mission-2026-11-03.md
+6910 ./docs/error-catalog.md
+3584 ./docs/hardware-test-matrix.md
+1437 ./docs/hardware/validation-kit.md
+3198 ./docs/odoo-setup.md
+2442 ./docs/pdfium.md
+4847 ./docs/release-checklist.md
+1389 ./docs/research/android-ios-printing.md
+2182 ./docs/research/ipp-protocol.md
+3673 ./docs/research/odoo-pos-and-formats.md
+1965 ./docs/research/odoo-report-handlers.md
+2176 ./docs/research/pdfium-gdi-windows-printing.md
+2194 ./docs/research/tauri-remote-ipc.md
+1779 ./docs/research/tauri-security-advisories.md
+2361 ./docs/research/windows-discovery-and-status.md
+2714 ./docs/routing-and-interception.md
+5575 ./docs/runbooks.md
+2164 ./docs/security/threat-model.md
+4543 ./docs/spikes/S1-S8.md
+7383 ./docs/system-audit-2026-11-03.md
+1524 ./docs/zero-config.md
+585 ./fuzz/Cargo.toml
+474 ./fuzz/fuzz_targets/ipp_response.rs
+421 ./fuzz/fuzz_targets/pdf_info.rs
+493 ./fuzz/fuzz_targets/png_decode.rs
+47 ./odoo/native_print/__init__.py
+2095 ./odoo/native_print/__manifest__.py
+19 ./odoo/native_print/controllers/__init__.py
+13613 ./odoo/native_print/controllers/main.py
+855 ./odoo/native_print/data/native_print_cron.xml
+24350 ./odoo/native_print/i18n/ar.po
+828 ./odoo/native_print/migrations/19.0.1.3.0/pre-migration.py
+335 ./odoo/native_print/migrations/19.0.2.5.0/post-migration.py
+1432 ./odoo/native_print/migrations/19.0.2.6.0/post-migration.py
+65 ./odoo/native_print/models/__init__.py
+1480 ./odoo/native_print/models/native_print_device.py
+7668 ./odoo/native_print/models/native_print_job.py
+485 ./odoo/native_print/security/ir.model.access.csv
+1025 ./odoo/native_print/security/native_print_groups.xml
+1301 ./odoo/native_print/security/native_print_rules.xml
+20873 ./odoo/native_print/static/description/icon.png
+5872 ./odoo/native_print/static/description/icon.svg
+8843 ./odoo/native_print/static/src/js/native_print_client.js
+19795 ./odoo/native_print/static/src/js/native_print_handler.js
+7875 ./odoo/native_print/static/src/js/native_print_systray.js
+24193 ./odoo/native_print/static/src/js/pos_native_print.js
+5626 ./odoo/native_print/static/src/scss/native_print.scss
+6824 ./odoo/native_print/static/src/xml/native_print_systray.xml
+63 ./odoo/native_print/tests/__init__.py
+15028 ./odoo/native_print/tests/test_controllers.py
+4303 ./odoo/native_print/tests/test_live_target.mjs
+10821 ./odoo/native_print/tests/test_native_print.py
+2322 ./odoo/native_print/tests/test_pos_keys.mjs
+2089 ./odoo/native_print/views/login_fallback_templates.xml
+13437 ./odoo/native_print/views/native_print_views.xml
+5539 ./tools/check_command_surface.py
+2248 ./tools/check_versions.py
+1538 ./tools/fetch-pdfium.sh
+1585 ./tools/results-2026-11-02.md

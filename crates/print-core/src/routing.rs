@@ -77,6 +77,8 @@ mod tests {
             is_default: false,
             protocol: "gdi".into(),
             printer_class: "office".into(),
+            stable_id: String::new(),
+            health: None,
         }
     }
 

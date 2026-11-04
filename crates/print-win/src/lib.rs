@@ -99,7 +99,7 @@ mod win;
 pub use win::{
     default_printer_name, discover_printers, paper_forms, print_canvas_gdi,
     print_canvas_gdi_detailed, print_pdf_gdi, print_pdf_gdi_copies, print_pdf_gdi_detailed,
-    print_pdf_gdi_with_options, print_raw, printer_capabilities, printer_status,
+    print_pdf_gdi_with_options, print_raw, printer_capabilities, printer_health, printer_status,
 };
 
 #[cfg(not(windows))]
@@ -181,11 +181,15 @@ mod stub {
     pub fn printer_status(_printer: &str) -> Result<print_core::PrinterStatus, Unsupported> {
         Err(Unsupported)
     }
+    pub fn printer_health(_printer: &str) -> Result<print_core::PrinterHealth, Unsupported> {
+        Err(Unsupported)
+    }
 }
 
 #[cfg(not(windows))]
 pub use stub::{
     default_printer_name, discover_printers, paper_forms, print_canvas_gdi,
     print_canvas_gdi_detailed, print_pdf_gdi, print_pdf_gdi_copies, print_pdf_gdi_detailed,
-    print_pdf_gdi_with_options, print_raw, printer_capabilities, printer_status, Unsupported,
+    print_pdf_gdi_with_options, print_raw, printer_capabilities, printer_health, printer_status,
+    Unsupported,
 };

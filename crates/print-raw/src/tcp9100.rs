@@ -28,13 +28,28 @@ use std::net::ToSocketAddrs;
 
 /// ESC/POS real-time status request (DLE EOT n) — the "sensor read" for
 /// thermal printers that support it. Per Epson's DLE EOT spec the
-/// response frames are: n=1 printer status, n=2 offline cause (cover
-/// open / error / offline bits), n=3 error cause, n=4 paper-roll sensor
-/// status — paper near-end and paper-end live in the n=4 frame, NOT in
-/// n=2. Raw bytes are kept and decoded by decode_dle_eot /
-/// decode_dle_eot_paper.
+/// response frames are: n=1 printer status, n=2 offline cause, n=3
+/// error cause (cutter / unrecoverable / auto-recoverable), n=4
+/// paper-roll sensor status — paper near-end and paper-end live in
+/// the n=4 frame, NOT in n=2. Raw bytes are kept and decoded by
+/// decode_dle_eot / decode_dle_eot_paper / decode_dle_eot_error.
+///
+/// n=2 carries NO cover-open bit: bit 3 is a generic offline flag
+/// (cover open, paper end, or an error put the printer offline).
+/// Cover state must not be inferred from n=2 alone.
 pub fn query_status(host: &str, port: u16, timeout: Duration) -> std::io::Result<u8> {
     query_dle_eot(host, port, 2, timeout)
+}
+
+/// Query the DLE EOT 1 printer status (online/offline, drawer, error).
+pub fn query_printer_status(host: &str, port: u16, timeout: Duration) -> std::io::Result<u8> {
+    query_dle_eot(host, port, 1, timeout)
+}
+
+/// Query the DLE EOT 3 error-cause status (cutter, unrecoverable,
+/// auto-recoverable errors).
+pub fn query_error_status(host: &str, port: u16, timeout: Duration) -> std::io::Result<u8> {
+    query_dle_eot(host, port, 3, timeout)
 }
 
 /// Query the DLE EOT 4 paper-roll status (near-end / paper-end sensors).
@@ -85,6 +100,9 @@ pub struct ThermalStatus {
     pub drawer_pin_high: bool,
     /// Bit 5: the printer is waiting for online recovery.
     pub waiting_online_recovery: bool,
+    /// Bit 6: an error occurred (paper jam, cutter fault, or other
+    /// error put the printer offline). Present in n=1 and n=2.
+    pub error_occurred: bool,
 }
 
 pub fn decode_dle_eot(status: u8) -> ThermalStatus {
@@ -93,6 +111,39 @@ pub fn decode_dle_eot(status: u8) -> ThermalStatus {
         offline: status & 0x08 != 0,
         drawer_pin_high: status & 0x04 != 0,
         waiting_online_recovery: status & 0x20 != 0,
+        error_occurred: status & 0x40 != 0,
+    }
+}
+
+/// DLE EOT 1 (printer status) decoder. Bit 3 offline, bit 2 drawer
+/// pin, bit 6 error occurred; bit 5 is set when printing stopped
+/// due to paper-end / near-end. The bit layout is the same skeleton
+/// as n=2, so the same struct carries it; the query function that
+/// produced the byte records which frame it is.
+pub fn decode_dle_eot_printer(status: u8) -> ThermalStatus {
+    decode_dle_eot(status)
+}
+
+/// DLE EOT 3 (error-cause status) decoder (Epson TM reference,
+/// Citizen CD-S500 reference guide): bit 2 mechanical/recoverable
+/// error, bit 3 auto-cutter error, bit 5 unrecoverable error,
+/// bit 6 auto-recoverable error (e.g. head over-temperature).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ErrorStatus {
+    pub raw: u8,
+    pub mechanical_error: bool,
+    pub cutter_error: bool,
+    pub unrecoverable_error: bool,
+    pub auto_recoverable_error: bool,
+}
+
+pub fn decode_dle_eot_error(status: u8) -> ErrorStatus {
+    ErrorStatus {
+        raw: status,
+        mechanical_error: status & 0x04 != 0,
+        cutter_error: status & 0x08 != 0,
+        unrecoverable_error: status & 0x20 != 0,
+        auto_recoverable_error: status & 0x40 != 0,
     }
 }
 
@@ -119,6 +170,27 @@ pub fn decode_dle_eot_paper(status: u8) -> PaperStatus {
 mod tests {
     use super::*;
     use std::net::TcpListener;
+
+    #[test]
+    fn dle_eot_error_table_n1_n3() {
+        // DLE EOT 3 bit table (Epson TM / Citizen references).
+        let ok = decode_dle_eot_error(0x12);
+        assert!(!ok.mechanical_error && !ok.cutter_error && !ok.unrecoverable_error);
+        let cut = decode_dle_eot_error(0x12 | 0x08);
+        assert!(cut.cutter_error && !cut.unrecoverable_error);
+        let fatal = decode_dle_eot_error(0x12 | 0x20);
+        assert!(fatal.unrecoverable_error);
+        let hot = decode_dle_eot_error(0x12 | 0x40);
+        assert!(hot.auto_recoverable_error);
+        let mech = decode_dle_eot_error(0x12 | 0x04);
+        assert!(mech.mechanical_error);
+        // n=2 gained the bit-6 error flag (previously dropped).
+        let st = decode_dle_eot(0x12 | 0x40);
+        assert!(st.error_occurred);
+        assert!(!st.offline);
+        let st1 = decode_dle_eot_printer(0x12 | 0x08 | 0x40);
+        assert!(st1.offline && st1.error_occurred);
+    }
 
     #[test]
     fn dle_eot_paper_table() {

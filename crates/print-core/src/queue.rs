@@ -111,6 +111,13 @@ pub struct JobOptions {
     /// output to their real media even with no local Windows driver.
     #[serde(default)]
     pub media_roll_width_mm: Option<f64>,
+    /// Label gap (mm) between labels on gap-sensed media, for TSPL
+    /// (`GAP`) and EPL (`Q` gap parameter). Absent means the
+    /// printer's 3 mm default. Ignored by modes without a gap
+    /// concept (GDI, ESC/POS, ZPL, IPP). Added in 1.4.12: older
+    /// stored rows deserialize with `None` (serde default).
+    #[serde(default)]
+    pub label_gap_mm: Option<f64>,
 }
 
 impl Default for JobOptions {
@@ -125,6 +132,7 @@ impl Default for JobOptions {
             cut: true,
             tray: None,
             media_roll_width_mm: None,
+            label_gap_mm: None,
         }
     }
 }
@@ -217,6 +225,31 @@ impl Queue {
         if !has_payload_hash {
             conn.execute("ALTER TABLE payloads ADD COLUMN payload_hash INTEGER", [])?;
         }
+        // Migration: jobs.available_at (unix seconds from which a
+        // re-queued job may be claimed again). Retry backoff used to
+        // be a thread sleep inside the worker, which stalled every
+        // other printer for up to 30 s; the delay is now durable
+        // state, so a restart keeps it and independent printers
+        // keep working. Added in place, like updated_at above.
+        let has_available_at: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('jobs') WHERE name='available_at')",
+            [],
+            |r| r.get::<_, i64>(0),
+        )? == 1;
+        if !has_available_at {
+            conn.execute(
+                "ALTER TABLE jobs ADD COLUMN available_at INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_claim_available ON jobs(printer, state, available_at, priority DESC, seq)",
+            [],
+        )?;
+        // Schema version 2 = updated_at + payload_hash + available_at.
+        if user_version < 2 {
+            conn.pragma_update(None, "user_version", 2)?;
+        }
         Ok(Self {
             conn,
             max_active_per_printer: DEFAULT_MAX_ACTIVE_PER_PRINTER,
@@ -306,11 +339,97 @@ impl Queue {
     /// Retry a failed or dead-letter job. The attempt counter is NOT
     /// reset: attempts are monotonic across the job's whole life (the
     /// audit invariant), so max-attempts accounting and diagnostics
-    /// stay truthful across manual retries.
+    /// stay truthful across manual retries. A manual retry is
+    /// immediate: any pending automatic backoff is cleared.
     pub fn retry_job(&mut self, id: &str) -> Result<(), QueueError> {
-        self.set_state(id, JobState::Queued, None)?;
-        self.conn
-            .execute("UPDATE jobs SET error_code=NULL WHERE id=?1", params![id])?;
+        // A job waiting out its durable backoff is already queued:
+        // a manual retry clears the delay (and any stale error code)
+        // instead of failing on a queued -> queued transition.
+        let current: String =
+            self.conn
+                .query_row("SELECT state FROM jobs WHERE id=?1", params![id], |r| {
+                    r.get(0)
+                })?;
+        let from = JobState::parse(&current).ok_or_else(|| {
+            QueueError::Db(rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown job state in database: {current}"),
+                )),
+            ))
+        })?;
+        if from != JobState::Queued {
+            self.set_state(id, JobState::Queued, None)?;
+        }
+        self.conn.execute(
+            "UPDATE jobs SET error_code=NULL, available_at=0 WHERE id=?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    /// Fail a printing job and re-queue it after `delay_ms`, in one
+    /// transaction: `printing -> failed -> queued` with the backoff
+    /// recorded durably (`available_at`) instead of slept. The state
+    /// machine is validated in memory before either write lands, so
+    /// a job that is not currently printing cannot be re-queued by
+    /// this path. The worker calls this for retryable errors; the
+    /// caller never blocks on the delay, so other printers proceed.
+    pub fn requeue_with_delay(
+        &mut self,
+        id: &str,
+        delay_ms: u64,
+        error_code: &str,
+    ) -> Result<(), QueueError> {
+        let now = now_unix();
+        // Ceiling division: a 1 ms delay must still defer the next
+        // claim past the current second boundary behaviour, and a
+        // 0 ms delay means "immediately claimable" (available now).
+        let available_at = now + delay_ms.div_ceil(1000) as i64;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let current: String =
+            tx.query_row("SELECT state FROM jobs WHERE id=?1", params![id], |r| {
+                r.get(0)
+            })?;
+        let from = JobState::parse(&current).ok_or_else(|| {
+            QueueError::Db(rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown job state in database: {current}"),
+                )),
+            ))
+        })?;
+        from.transition_to(JobState::Failed)?;
+        JobState::Failed.transition_to(JobState::Queued)?;
+        tx.execute(
+            "UPDATE jobs SET state='failed', error_code=?1, updated_at=?2 WHERE id=?3 AND state='printing'",
+            params![error_code, now, id],
+        )?;
+        tx.execute(
+            "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'state:failed',?3)",
+            params![id, now, error_code],
+        )?;
+        let changed = tx.execute(
+            "UPDATE jobs SET state='queued', error_code=?1, available_at=?2, updated_at=?3 WHERE id=?4 AND state='failed'",
+            params![error_code, available_at, now, id],
+        )?;
+        if changed == 0 {
+            return Err(QueueError::Transition(crate::state::TransitionError {
+                from,
+                to: JobState::Queued,
+            }));
+        }
+        tx.execute(
+            "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'state:queued',?3)",
+            params![id, now, error_code],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -731,12 +850,15 @@ impl Queue {
 
     /// Atomically claim the next queued job for a printer (queued -> rendering).
     /// The UPDATE ... WHERE state='queued' guard makes double-claim impossible
-    /// even across concurrent connections.
+    /// even across concurrent connections. Jobs whose retry backoff
+    /// (`available_at`) has not elapsed are not claimable: the worker
+    /// never sleeps for one printer while others have work.
     pub fn claim_next(&mut self, printer: &str) -> Result<Option<Job>, QueueError> {
+        let now = now_unix();
         let candidate: Option<String> = {
             let mut stmt = self.conn.prepare(
-                "SELECT id FROM jobs WHERE printer=?1 AND state='queued' ORDER BY priority DESC, seq ASC LIMIT 1")?;
-            let mut rows = stmt.query(params![printer])?;
+                "SELECT id FROM jobs WHERE printer=?1 AND state='queued' AND available_at<=?2 ORDER BY priority DESC, seq ASC LIMIT 1")?;
+            let mut rows = stmt.query(params![printer, now])?;
             match rows.next()? {
                 Some(r) => Some(r.get(0)?),
                 None => None,
@@ -744,8 +866,8 @@ impl Queue {
         };
         let Some(id) = candidate else { return Ok(None) };
         let updated = self.conn.execute(
-            "UPDATE jobs SET state='rendering', error_code=NULL, attempts=attempts+1, updated_at=?2 WHERE id=?1 AND state='queued'",
-            params![id, now_unix()],
+            "UPDATE jobs SET state='rendering', error_code=NULL, attempts=attempts+1, updated_at=?2 WHERE id=?1 AND state='queued' AND available_at<=?3",
+            params![id, now, now],
         )?;
         if updated == 0 {
             return Ok(None);
@@ -764,7 +886,7 @@ impl Queue {
     /// Returns (requeued, ambiguous) counts. Never silently duplicates.
     pub fn recover_on_startup(&mut self, auto_reprint: bool) -> Result<(u64, u64), QueueError> {
         let requeued = self.conn.execute(
-            "UPDATE jobs SET state='queued', error_code='RECOVERED_BEFORE_SPOOL', updated_at=?1 WHERE state IN ('rendering','spooling')",
+            "UPDATE jobs SET state='queued', error_code='RECOVERED_BEFORE_SPOOL', available_at=0, updated_at=?1 WHERE state IN ('rendering','spooling')",
             params![now_unix()])? as u64;
         let (state, code) = if auto_reprint {
             ("queued", "RECOVERED_AUTO_REPRINT")
@@ -772,7 +894,7 @@ impl Queue {
             ("failed", "RECOVERY_AMBIGUOUS")
         };
         let ambiguous = self.conn.execute(
-            "UPDATE jobs SET state=?1, error_code=?2, updated_at=?3 WHERE state='printing'",
+            "UPDATE jobs SET state=?1, error_code=?2, available_at=0, updated_at=?3 WHERE state='printing'",
             params![state, code, now_unix()],
         )? as u64;
         self.record_event_best_effort(

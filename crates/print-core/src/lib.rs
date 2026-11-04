@@ -3,6 +3,7 @@
 //! No platform (Win32) code lives here, so this crate is fully testable anywhere.
 
 pub mod diagnostics;
+pub mod health;
 pub mod page;
 pub mod paper;
 pub mod printer;
@@ -12,6 +13,7 @@ pub mod security;
 pub mod state;
 pub mod worker;
 
+pub use health::{HealthCondition, HealthSource, PrinterHealth};
 pub use page::{PageSize, Rotation};
 pub use paper::{match_paper, Form, MatchKind, PaperError, ScalePolicy};
 pub use printer::{PrinterCapabilities, PrinterInfo, PrinterKind, PrinterStatus};

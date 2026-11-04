@@ -235,6 +235,10 @@ pub struct PrintPdfRequest {
     pub tray: Option<String>,
     #[serde(default)]
     pub media_roll_width_mm: Option<f64>,
+    /// Label gap in millimetres (TSPL GAP / EPL Q gap). Absent =
+    /// the printer's 3 mm default. Only label modes use it.
+    #[serde(default)]
+    pub label_gap_mm: Option<f64>,
     #[allow(dead_code)]
     pub url: String,
     #[serde(deserialize_with = "deserialize_bytes")]
@@ -290,6 +294,7 @@ pub async fn print_pdf(
         cut: true,
         tray: req.tray.clone(),
         media_roll_width_mm: req.media_roll_width_mm,
+        label_gap_mm: req.label_gap_mm,
     };
     let id = {
         let mut queue = lock_queue(&state.queue);
@@ -381,6 +386,7 @@ pub fn print_text(
         cut: req.cut,
         tray: None,
         media_roll_width_mm: None,
+        label_gap_mm: None,
     };
     let id = {
         let mut queue = lock_queue(&state.queue);
@@ -413,6 +419,8 @@ pub struct PrintImageRequest {
     pub paper: Option<String>,
     #[serde(default)]
     pub media_roll_width_mm: Option<f64>,
+    #[serde(default)]
+    pub label_gap_mm: Option<f64>,
     #[serde(default)]
     pub mode: Option<String>,
     #[serde(default)]
@@ -465,6 +473,7 @@ pub async fn print_image(
         cut: true,
         tray: None,
         media_roll_width_mm: req.media_roll_width_mm,
+        label_gap_mm: req.label_gap_mm,
     };
     let id = {
         let mut queue = lock_queue(&state.queue);
@@ -757,6 +766,7 @@ pub fn run_test_print(
                     cut: true,
                     tray: None,
                     media_roll_width_mm: None,
+                    label_gap_mm: None,
                 },
                 10,
             )
@@ -777,6 +787,7 @@ pub fn run_test_print(
                     cut: false,
                     tray: None,
                     media_roll_width_mm: None,
+                    label_gap_mm: None,
                 },
                 5,
             )
@@ -800,6 +811,7 @@ pub fn run_test_print(
                     cut: false,
                     tray: None,
                     media_roll_width_mm: None,
+                    label_gap_mm: None,
                 },
                 5,
             )
@@ -819,6 +831,7 @@ pub fn run_test_print(
                     cut: false,
                     tray: None,
                     media_roll_width_mm: None,
+                    label_gap_mm: None,
                 },
                 0,
             )
@@ -1140,6 +1153,22 @@ pub fn open_odoo_origin(webview: tauri::Webview, state: State<'_, AppState>) -> 
 
 // --- Background Print Worker & Hardware Dispatch ----------------------
 
+/// Parameters shared by the PDF and PNG raw-render paths.
+/// `render_dpi` is the device render resolution
+/// (driver-reported; 203 when unknown): label bitmaps are
+/// emitted in device dots, so rendering at any other DPI
+/// would mis-scale the label.
+#[derive(Clone, Copy)]
+struct RawRender<'a> {
+    mode: &'a str,
+    paper: Option<&'a str>,
+    target_width_dots: Option<u32>,
+    copies: u16,
+    label_box: Option<(u32, u32)>,
+    render_dpi: u32,
+    label_gap_mm: Option<f64>,
+}
+
 struct NativePrintBackend {
     db_path: String,
 }
@@ -1156,6 +1185,18 @@ impl NativePrintBackend {
             PrinterStatus::Error => "PRINTER_ERROR",
             _ => "PRINTER_BUSY",
         }
+    }
+
+    /// Scale a 203-dpi print-head profile width (see
+    /// `receipt_dots_for_paper`) to the device's reported render
+    /// resolution. A 300-dpi head prints each ESC/POS dot smaller,
+    /// so the unscaled dot count would come out physically narrow;
+    /// the driver-reported resolution is the best evidence
+    /// available. With no reported resolutions this is the
+    /// identity (203 dpi).
+    fn scale_head_dots(dots: u32, caps: &print_core::printer::PrinterCapabilities) -> u32 {
+        let dpi = print_core::printer::preferred_raw_render_dpi(&caps.resolutions_dpi);
+        ((dots as u64 * dpi as u64 + 101) / 203) as u32
     }
 
     fn receipt_width_dots(
@@ -1198,7 +1239,7 @@ impl NativePrintBackend {
                     }
                 }
             }
-            return Ok(dots);
+            return Ok(Self::scale_head_dots(dots, &caps));
         }
         let capabilities = print_win::printer_capabilities(printer).map_err(|error| {
             BackendError::fatal(
@@ -1212,7 +1253,7 @@ impl NativePrintBackend {
                 "The printer driver did not report a continuous/receipt paper form. Install or update the vendor driver; Native Print will not assume 58mm or 80mm.",
             )
         })?;
-        print_render::receipt_dots_for_width_mm(roll.size.width_mm).ok_or_else(|| {
+        let dots = print_render::receipt_dots_for_width_mm(roll.size.width_mm).ok_or_else(|| {
             BackendError::fatal(
                 "ROLL_WIDTH_UNSUPPORTED",
                 &format!(
@@ -1220,7 +1261,8 @@ impl NativePrintBackend {
                     roll.size.width_mm
                 ),
             )
-        })
+        })?;
+        Ok(Self::scale_head_dots(dots, &capabilities))
     }
 
     fn parse_scale_policy(s: Option<&str>) -> ScalePolicy {
@@ -1229,6 +1271,20 @@ impl NativePrintBackend {
             "nearest_larger_centered" => ScalePolicy::NearestLargerCentered,
             "nearest_larger_fit" => ScalePolicy::NearestLargerFit,
             _ => ScalePolicy::CustomAllowed,
+        }
+    }
+
+    /// Printer-URI for the IPP client: IPv6 hosts must be
+    /// bracketed (RFC 3986). `parse_host_port` strips the
+    /// brackets, so re-adding them here is what makes
+    /// `ipp://[::1]:631/...` round-trip. `IppClient::new`
+    /// brackets the host itself for the HTTP connection; this
+    /// URI is the `printer-uri` attribute sent to the printer.
+    fn ipp_uri(host: &str, port: u16, path: &str) -> String {
+        if host.contains(':') {
+            format!("ipp://[{host}]:{port}{path}")
+        } else {
+            format!("ipp://{host}:{port}{path}")
         }
     }
 
@@ -1286,15 +1342,32 @@ impl NativePrintBackend {
         Ok((host, port, path))
     }
 
+    /// Configured label gap in millimetres; the printer's 3 mm
+    /// default when the job carries none. Negative gaps are
+    /// clamped to 0 (continuous media).
+    fn label_gap_mm(gap: Option<f64>) -> f64 {
+        gap.unwrap_or(3.0).max(0.0)
+    }
+
+    /// Configured label gap in dots at `dpi` (EPL `Q` parameter).
+    fn label_gap_dots(gap: Option<f64>, dpi: u32) -> u32 {
+        (Self::label_gap_mm(gap) * dpi as f64 / 25.4).round() as u32
+    }
+
     fn pdf_to_raw_stream(
         pdf_bytes: &[u8],
-        mode: &str,
-        paper: Option<&str>,
-        target_width_dots: Option<u32>,
-        copies: u16,
+        render: RawRender<'_>,
         cut: bool,
-        label_box: Option<(u32, u32)>,
     ) -> Result<Vec<u8>, BackendError> {
+        let RawRender {
+            mode,
+            paper,
+            target_width_dots,
+            copies,
+            label_box,
+            render_dpi,
+            label_gap_mm,
+        } = render;
         let pdfium = print_render::Pdfium::load()
             .map_err(|e| BackendError::fatal("PDFIUM_LOAD_ERROR", &e.to_string()))?;
         let doc = pdfium
@@ -1318,7 +1391,7 @@ impl NativePrintBackend {
                 for _ in 0..copies.max(1) {
                     for i in 0..count {
                         let page = doc
-                            .render_page(i, RenderMode::Grayscale, 203)
+                            .render_page(i, RenderMode::Grayscale, render_dpi)
                             .map_err(|e| BackendError::fatal("RENDER_FAILED", &e.to_string()))?;
                         let canvas = print_render::bitmap::Canvas {
                             width: page.width_px,
@@ -1339,7 +1412,7 @@ impl NativePrintBackend {
                 let mut out = String::new();
                 for i in 0..count {
                     let page = doc
-                        .render_page(i, RenderMode::Threshold, 203)
+                        .render_page(i, RenderMode::Threshold, render_dpi)
                         .map_err(|e| BackendError::fatal("RENDER_FAILED", &e.to_string()))?;
                     let w_aligned = page.width_px.div_ceil(8) * 8;
                     let bm = MonoBitmap::from_packed(w_aligned, page.height_px, page.pixels)
@@ -1356,7 +1429,7 @@ impl NativePrintBackend {
                 let mut out = Vec::new();
                 for i in 0..count {
                     let page = doc
-                        .render_page(i, RenderMode::Threshold, 203)
+                        .render_page(i, RenderMode::Threshold, render_dpi)
                         .map_err(|e| BackendError::fatal("RENDER_FAILED", &e.to_string()))?;
                     let w_aligned = page.width_px.div_ceil(8) * 8;
                     let bm = MonoBitmap::from_packed(w_aligned, page.height_px, page.pixels)
@@ -1371,9 +1444,13 @@ impl NativePrintBackend {
                     let h_mm = ((bm.height_dots as f64) * 25.4 / (page.dpi.max(1) as f64))
                         .round()
                         .max(20.0) as u32;
-                    let tspl = print_raw::tspl::TsplLabel::new(w_mm, h_mm, 3)
-                        .bitmap(0, 0, &bm)
-                        .print(1, copies.max(1) as u32);
+                    let tspl = print_raw::tspl::TsplLabel::new(
+                        w_mm,
+                        h_mm,
+                        Self::label_gap_mm(label_gap_mm).round() as u32,
+                    )
+                    .bitmap(0, 0, &bm)
+                    .print(1, copies.max(1) as u32);
                     out.extend_from_slice(&tspl);
                 }
                 Ok(out)
@@ -1382,7 +1459,7 @@ impl NativePrintBackend {
                 let mut out = Vec::new();
                 for i in 0..count {
                     let page = doc
-                        .render_page(i, RenderMode::Threshold, 203)
+                        .render_page(i, RenderMode::Threshold, render_dpi)
                         .map_err(|e| BackendError::fatal("RENDER_FAILED", &e.to_string()))?;
                     let w_aligned = page.width_px.div_ceil(8) * 8;
                     let bm = MonoBitmap::from_packed(w_aligned, page.height_px, page.pixels)
@@ -1391,7 +1468,11 @@ impl NativePrintBackend {
                         Some((w, h)) => print_render::bitmap::fit_mono_to_box(&bm, w, h),
                         None => bm,
                     };
-                    out.extend_from_slice(&print_raw::epl::epl_label_copies(&bm, copies));
+                    out.extend_from_slice(&print_raw::epl::epl_label_copies_with_gap(
+                        &bm,
+                        copies,
+                        Self::label_gap_dots(label_gap_mm, render_dpi),
+                    ));
                 }
                 Ok(out)
             }
@@ -1402,14 +1483,19 @@ impl NativePrintBackend {
         }
     }
 
-    fn png_to_raw_stream(
-        png_bytes: &[u8],
-        mode: &str,
-        paper: Option<&str>,
-        target_width_dots: Option<u32>,
-        copies: u16,
-        label_box: Option<(u32, u32)>,
-    ) -> Result<Vec<u8>, BackendError> {
+    fn png_to_raw_stream(png_bytes: &[u8], render: RawRender<'_>) -> Result<Vec<u8>, BackendError> {
+        // A PNG carries no intrinsic DPI; `render_dpi` is the
+        // interpretation used for label sizing (203 when no
+        // driver capabilities are known).
+        let RawRender {
+            mode,
+            paper,
+            target_width_dots,
+            copies,
+            label_box,
+            render_dpi,
+            label_gap_mm,
+        } = render;
         match mode {
             "zpl" => {
                 let canvas = print_render::decode_png(png_bytes)
@@ -1429,11 +1515,19 @@ impl NativePrintBackend {
                     Some((w, h)) => print_render::bitmap::fit_mono_to_box(&mono, w, h),
                     None => mono,
                 };
-                let w_mm = ((mono.width_dots as f64) * 25.4 / 203.0).round().max(20.0) as u32;
-                let h_mm = ((mono.height_dots as f64) * 25.4 / 203.0).round().max(20.0) as u32;
-                Ok(print_raw::tspl::TsplLabel::new(w_mm, h_mm, 3)
-                    .bitmap(0, 0, &mono)
-                    .print(1, copies.max(1) as u32))
+                let w_mm = ((mono.width_dots as f64) * 25.4 / render_dpi as f64)
+                    .round()
+                    .max(20.0) as u32;
+                let h_mm = ((mono.height_dots as f64) * 25.4 / render_dpi as f64)
+                    .round()
+                    .max(20.0) as u32;
+                Ok(print_raw::tspl::TsplLabel::new(
+                    w_mm,
+                    h_mm,
+                    Self::label_gap_mm(label_gap_mm).round() as u32,
+                )
+                .bitmap(0, 0, &mono)
+                .print(1, copies.max(1) as u32))
             }
             "epl" => {
                 let canvas = print_render::decode_png(png_bytes)
@@ -1443,7 +1537,11 @@ impl NativePrintBackend {
                     Some((w, h)) => print_render::bitmap::fit_mono_to_box(&mono, w, h),
                     None => mono,
                 };
-                Ok(print_raw::epl::epl_label_copies(&mono, copies))
+                Ok(print_raw::epl::epl_label_copies_with_gap(
+                    &mono,
+                    copies,
+                    Self::label_gap_dots(label_gap_mm, render_dpi),
+                ))
             }
             "escpos" => {
                 let target_width_dots = target_width_dots
@@ -1500,20 +1598,28 @@ impl PrintBackend for NativePrintBackend {
             let raw_bytes = match kind.as_str() {
                 "pdf" => Self::pdf_to_raw_stream(
                     &data,
-                    &opts.mode,
-                    paper,
-                    media_width_dots,
-                    opts.copies,
+                    RawRender {
+                        mode: &opts.mode,
+                        paper,
+                        target_width_dots: media_width_dots,
+                        copies: opts.copies,
+                        label_box: None,
+                        render_dpi: 203,
+                        label_gap_mm: opts.label_gap_mm,
+                    },
                     opts.cut,
-                    None,
                 )?,
                 "image-png" => Self::png_to_raw_stream(
                     &data,
-                    &opts.mode,
-                    paper,
-                    media_width_dots,
-                    opts.copies,
-                    None,
+                    RawRender {
+                        mode: &opts.mode,
+                        paper,
+                        target_width_dots: media_width_dots,
+                        copies: opts.copies,
+                        label_box: None,
+                        render_dpi: 203,
+                        label_gap_mm: opts.label_gap_mm,
+                    },
                 )?,
                 _ => {
                     let mut v = Vec::with_capacity(data.len() * opts.copies.max(1) as usize);
@@ -1549,7 +1655,7 @@ impl PrintBackend for NativePrintBackend {
             let (host, port, path) = Self::parse_host_port(&job.printer, 631)?;
             let mut client = print_ipp::IppClient::new(&host, port);
             client.path = path.clone();
-            client.printer_uri = format!("ipp://{host}:{port}{path}");
+            client.printer_uri = Self::ipp_uri(&host, port, &path);
             let caps = client
                 .get_printer_attributes()
                 .map_err(|e| BackendError::retryable("IPP_ATTRIBUTES_ERROR", &e.to_string()))?;
@@ -1685,11 +1791,22 @@ impl PrintBackend for NativePrintBackend {
             }
         }
 
-        if let Ok(live_status) = print_win::printer_status(&target_name) {
-            if needs_intervention(live_status) {
+        // Live multi-condition health: ANY blocking condition
+        // (paper out AND door open, toner empty AND paused, ...)
+        // blocks the job, where the old single-status read could
+        // only see the highest-priority flag. A failed read keeps
+        // the discovery-time status checked above as the gate
+        // rather than failing the job on a transient spooler
+        // read error; a failed read is never reported as Ready.
+        if let Ok(health) = print_win::printer_health(&target_name) {
+            if health.blocks_printing() {
+                let status = health.primary_status();
                 return Err(BackendError::retryable(
-                    Self::status_code(live_status),
-                    &format!("printer {target_name:?} status is {live_status:?}"),
+                    Self::status_code(status),
+                    &format!(
+                        "printer {target_name:?} health blocks printing: {:?}",
+                        health.conditions
+                    ),
                 ));
             }
         }
@@ -1704,42 +1821,51 @@ impl PrintBackend for NativePrintBackend {
         // Label modes: the fit box is the printer's largest discrete
         // form (or its roll width when only continuous media exists),
         // so a rendered label can never exceed the physical media.
-        let label_box = if matches!(opts.mode.as_str(), "zpl" | "tspl" | "epl")
+        // The same capabilities read supplies the render DPI:
+        // label bitmaps are emitted in device dots, so the box
+        // and the render must use one resolution.
+        let (label_box, render_dpi) = if matches!(opts.mode.as_str(), "zpl" | "tspl" | "epl")
             && matches!(kind.as_str(), "pdf" | "image-png")
         {
-            print_win::printer_capabilities(&target_name)
-                .ok()
-                .and_then(|caps| {
+            match print_win::printer_capabilities(&target_name) {
+                Ok(caps) => {
+                    let dpi = print_core::printer::preferred_raw_render_dpi(&caps.resolutions_dpi);
                     let mut best: Option<(u32, u32)> = None;
                     let mut roll_w: Option<u32> = None;
                     for form in &caps.forms {
-                        let w = (form.size.width_mm * 203.0 / 25.4) as u32;
+                        let w = (form.size.width_mm * dpi as f64 / 25.4) as u32;
                         if form.roll {
                             roll_w = Some(w);
                             continue;
                         }
-                        let cand = (w, (form.size.height_mm * 203.0 / 25.4) as u32);
+                        let cand = (w, (form.size.height_mm * dpi as f64 / 25.4) as u32);
                         let area = cand.0 as u64 * cand.1 as u64;
                         if best.map_or(true, |b: (u32, u32)| area > b.0 as u64 * b.1 as u64) {
                             best = Some(cand);
                         }
                     }
-                    best.or_else(|| roll_w.map(|w| (w, u32::MAX)))
-                })
+                    (best.or_else(|| roll_w.map(|w| (w, u32::MAX))), dpi)
+                }
+                Err(_) => (None, 203),
+            }
         } else {
-            None
+            (None, 203)
         };
 
         match (kind.as_str(), opts.mode.as_str()) {
             ("pdf", "escpos" | "zpl" | "tspl" | "epl") => {
                 let raw_bytes = Self::pdf_to_raw_stream(
                     &data,
-                    &opts.mode,
-                    paper,
-                    target_width_dots,
-                    opts.copies,
+                    RawRender {
+                        mode: &opts.mode,
+                        paper,
+                        target_width_dots,
+                        copies: opts.copies,
+                        label_box,
+                        render_dpi,
+                        label_gap_mm: opts.label_gap_mm,
+                    },
                     opts.cut,
-                    label_box,
                 )?;
                 print_win::print_raw(&target_name, title, &raw_bytes)
                     .map_err(|e| BackendError::ambiguous("SPOOLER_RAW_ERROR", &e.to_string()))?;
@@ -1837,11 +1963,15 @@ impl PrintBackend for NativePrintBackend {
             ("image-png", "escpos" | "zpl" | "tspl" | "epl") => {
                 let raw_bytes = Self::png_to_raw_stream(
                     &data,
-                    &opts.mode,
-                    paper,
-                    target_width_dots,
-                    opts.copies,
-                    label_box,
+                    RawRender {
+                        mode: &opts.mode,
+                        paper,
+                        target_width_dots,
+                        copies: opts.copies,
+                        label_box,
+                        render_dpi,
+                        label_gap_mm: opts.label_gap_mm,
+                    },
                 )?;
                 print_win::print_raw(&target_name, title, &raw_bytes)
                     .map_err(|e| BackendError::ambiguous("SPOOLER_RAW_ERROR", &e.to_string()))?;
@@ -1905,7 +2035,6 @@ pub fn spawn_worker_loop(db_path: String, wake: Arc<(Mutex<bool>, Condvar)>) {
                                 db_path: db_path.clone(),
                             },
                             cfg: WorkerConfig::default(),
-                            sleep: |ms| std::thread::sleep(Duration::from_millis(ms)),
                             entropy,
                         };
                         // Panic isolation: one bad job or backend panic
@@ -1967,5 +2096,36 @@ mod tests {
         assert_eq!(h6, "::1");
         assert_eq!(p6, 631);
         assert_eq!(path6, "/ipp/print");
+    }
+
+    #[test]
+    fn ipp_uri_brackets_ipv6_hosts() {
+        // parse_host_port strips the brackets; the printer-uri
+        // sent to the printer must put them back, or the URI is
+        // malformed and the printer rejects the job.
+        let (h, p, path) =
+            NativePrintBackend::parse_host_port("ipp://[2001:db8::1]:631/ipp/print", 631).unwrap();
+        assert_eq!(
+            NativePrintBackend::ipp_uri(&h, p, &path),
+            "ipp://[2001:db8::1]:631/ipp/print"
+        );
+        assert_eq!(
+            NativePrintBackend::ipp_uri("192.168.1.50", 631, "/ipp/print"),
+            "ipp://192.168.1.50:631/ipp/print"
+        );
+        assert_eq!(
+            NativePrintBackend::ipp_uri("printer.local", 631, "/ipp/print"),
+            "ipp://printer.local:631/ipp/print"
+        );
+    }
+
+    #[test]
+    fn label_gap_helpers_default_to_3mm() {
+        assert_eq!(NativePrintBackend::label_gap_mm(None), 3.0);
+        assert_eq!(NativePrintBackend::label_gap_mm(Some(2.0)), 2.0);
+        assert_eq!(NativePrintBackend::label_gap_mm(Some(-1.0)), 0.0);
+        // 3 mm at 203 dpi is the EPL default of 24 dots.
+        assert_eq!(NativePrintBackend::label_gap_dots(None, 203), 24);
+        assert_eq!(NativePrintBackend::label_gap_dots(Some(3.0), 300), 35);
     }
 }

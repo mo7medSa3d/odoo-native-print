@@ -22,6 +22,11 @@ import { notifyUser, resolveBridgeTarget } from "./native_print_client";
  */
 
 const TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);
+// Only these end the watch. `failed` and `dead_letter` are
+// retryable outcomes (the desktop worker re-queues a failed job
+// and the operator may retry a dead-letter job): the watcher
+// keeps polling after them so the retry's outcome, not the
+// first failure, is what the user and the server log end with.
 
 // The desktop queue's hard payload ceiling (print-core MAX_JOB_BYTES,
 // 50 MB). Payloads above it can never be accepted, so the handler
@@ -89,6 +94,10 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
     let lastPages = meta.pages || 1;
     let lastAttempts = 1;
     let consecutiveErrors = 0;
+    // One failure notification per (state, attempts): the watch
+    // continues past retryable outcomes, so without this a job
+    // failing on every retry would toast on every poll.
+    let notifiedFailure = null;
     // Give up only after 5 minutes WITHOUT any state progress (a job
     // queued behind a busy desktop queue legitimately takes longer),
     // with a 30-minute absolute cap. The watcher is the only status
@@ -141,23 +150,35 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
             }
             if (TERMINAL_STATES.has(state)) {
                 const printerLabel = meta.printerName || meta.printerPattern;
-                if (state === "done") {
-                    // "Done" means the desktop backend accepted and
-                    // completed its submission stage; it is not proof
-                    // paper physically emerged on every transport.
-                    notifyUser(
-                        env,
-                        _t('Sent "%s" to %s', meta.reportName, printerLabel),
-                        "success",
-                    );
-                } else if (state === "failed" || state === "dead_letter") {
+                if (state === "done" || state === "canceled") {
+                    if (state === "done") {
+                        // "Done" means the desktop backend accepted and
+                        // completed its submission stage; it is not proof
+                        // paper physically emerged on every transport.
+                        notifyUser(
+                            env,
+                            _t('Sent "%s" to %s', meta.reportName, printerLabel),
+                            "success",
+                        );
+                    }
+                    return state;
+                }
+                // Retryable outcome (failed / dead_letter): notify
+                // once per attempt, then KEEP WATCHING. The worker
+                // may re-queue the job; stopping here would leave
+                // the retry's outcome unposted and the server log
+                // stuck on the first failure. The existing
+                // 5-minute-no-progress / 30-minute ladder bounds
+                // the extended watch.
+                const failureKey = state + ":" + attempts;
+                if (notifiedFailure !== failureKey) {
+                    notifiedFailure = failureKey;
                     notifyUser(
                         env,
                         _t('Printing failed on "%s" (%s). Check the printer before reprinting.', printerLabel, errorCode || state),
                         "danger",
                     );
                 }
-                return state;
             }
         } catch (_err) {
             // One flaky poll must not orphan the job: the user would

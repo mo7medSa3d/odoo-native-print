@@ -12,4 +12,10 @@ pub mod zpl;
 
 pub use escpos::EscPos;
 pub use mono::{MonoBitmap, MonoError};
+pub use tcp9100::{
+    decode_dle_eot, decode_dle_eot_error, decode_dle_eot_paper, ErrorStatus, PaperStatus,
+    ThermalStatus,
+};
+pub use tspl::{decode_tspl_status, TsplStatus, TSPL_STATUS_QUERY};
+pub use zpl::{parse_host_status, ZplHostStatus, ZPL_HOST_STATUS_QUERY};
 pub use zpl::{zpl_graphic_field, zpl_label, zpl_label_with_options};

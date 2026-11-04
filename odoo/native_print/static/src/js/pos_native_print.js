@@ -261,6 +261,12 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
     let lastSeenState = null;
     let reachedTerminal = false;
     let consecutiveErrors = 0;
+    // The watch continues past retryable outcomes (failed /
+    // dead_letter: the worker may re-queue the job), so outcome
+    // handling must run once per (state, attempts) — otherwise
+    // the same failure would re-post and re-notify on every poll.
+    let lastOutcomeKey = null;
+    let orderReleased = false;
     for (let i = 0; Date.now() < absoluteDeadline && Date.now() - lastProgressAt < 5 * 60 * 1000; i++) {
         await new Promise((resolve) =>
             setTimeout(resolve, i < 10 ? 600 : 2000));
@@ -284,22 +290,41 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
                 lastProgressAt = Date.now();
             }
             if (state && TERMINAL_STATES.has(state)) {
-                reachedTerminal = true;
-                // Terminal: the next print of this order is a new,
-                // deliberate attempt with a fresh idempotency key.
-                if (safeRef) {
-                    finishPosReceiptAttempt(safeRef, userId);
+                const outcomeKey = state + ":" + attempts;
+                if (outcomeKey === lastOutcomeKey) {
+                    // Same outcome as last poll: still waiting on
+                    // a possible retry. Do not re-post or re-notify.
+                    continue;
                 }
-                // The order's printed flag follows the CONFIRMED
-                // outcome, not the enqueue: it is pre-set at enqueue
-                // so the POS flow can advance, and a failed job must
-                // hand the order back as unprinted so the cashier's
-                // normal reprint path stays available (audit L7).
-                if (order) {
-                    if (state === "done") {
-                        order._printed = true;
-                    } else if (state === "failed" || state === "dead_letter") {
-                        order._printed = false;
+                lastOutcomeKey = outcomeKey;
+                reachedTerminal = true;
+                // Every outcome observation is posted to the server
+                // log, including a retryable failure: the controller
+                // accepts failed/dead_letter -> queued re-entry, so
+                // the log converges on the retry's outcome instead
+                // of freezing on the first failure.
+                if (!orderReleased) {
+                    // The order is handed back on the FIRST outcome
+                    // (success or failure) so the cashier's flow and
+                    // reprint path stay available immediately; later
+                    // retry outcomes only update the server log.
+                    orderReleased = true;
+                    // Terminal: the next print of this order is a new,
+                    // deliberate attempt with a fresh idempotency key.
+                    if (safeRef) {
+                        finishPosReceiptAttempt(safeRef, userId);
+                    }
+                    // The order's printed flag follows the CONFIRMED
+                    // outcome, not the enqueue: it is pre-set at enqueue
+                    // so the POS flow can advance, and a failed job must
+                    // hand the order back as unprinted so the cashier's
+                    // normal reprint path stays available (audit L7).
+                    if (order) {
+                        if (state === "done") {
+                            order._printed = true;
+                        } else if (state === "failed" || state === "dead_letter") {
+                            order._printed = false;
+                        }
                     }
                 }
                 await rpc(
@@ -329,6 +354,11 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
                         _t('Receipt printing failed on "%s" (%s). Check the printer before reprinting.', printerName || rule.printer_pattern, errorCode || state),
                         "danger",
                     );
+                    // Retryable outcome: keep polling within the
+                    // existing ladder so a re-queued job's later
+                    // outcome still reaches the server log. The
+                    // order was already handed back above.
+                    continue;
                 }
                 break;
             }

@@ -51,7 +51,6 @@ fn bench() {
             printed: HashMap::new(),
         },
         cfg: WorkerConfig::default(),
-        sleep: |_| {},
         entropy: 0,
     };
     let t1 = Instant::now();
@@ -149,10 +148,14 @@ fn chaos() {
             },
             cfg: WorkerConfig {
                 max_attempts: 6,
-                backoff_base_ms: 1,
-                backoff_max_ms: 4,
+                // Zero backoff here on purpose: simulated restarts
+                // are near-instant, so any real delay would exhaust
+                // the restart guard before it elapsed. Durable
+                // backoff itself is covered by print-core unit
+                // tests; chaos covers crash recovery and no-loss.
+                backoff_base_ms: 0,
+                backoff_max_ms: 0,
             },
-            sleep: |_| {},
             entropy: guard,
         };
         // Process a bounded slice, then "crash" (drop everything, reopen).

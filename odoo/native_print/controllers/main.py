@@ -8,7 +8,15 @@ JOB_STATES = {
     "done", "failed", "canceled", "dead_letter",
 }
 
-TERMINAL_STATES = {"done", "failed", "canceled", "dead_letter"}
+# Only `done` and `canceled` are final. `failed` and
+# `dead_letter` are retryable outcomes, not terminal states:
+# the desktop worker re-queues a failed job automatically
+# (print-core: failed -> queued) and the operator may retry a
+# dead-letter job from the Control Center (dead_letter ->
+# queued). Treating them as final here used to discard the
+# retry's outcome posts, so a job that failed once and then
+# printed stayed `failed` in Odoo forever (audit, 2026-11-04).
+TERMINAL_STATES = {"done", "canceled"}
 
 # The formal job state machine (mirrors the desktop queue, print-core):
 # a job only ever moves FORWARD. Working states progress
@@ -16,9 +24,11 @@ TERMINAL_STATES = {"done", "failed", "canceled", "dead_letter"}
 # (an intermediate status post may have been lost), any non-terminal
 # state may end in a terminal state except that a job already printing
 # can no longer be canceled (the spooler owns it by then). Backward
-# moves and exits from terminal states are rejected: they can only
+# moves and exits from `done`/`canceled` are rejected: they can only
 # come from a stale watcher or a duplicated post, and must never
-# regress the recorded outcome.
+# regress the recorded outcome. `failed` and `dead_letter` re-enter
+# at `queued` on retry (forward skips tolerated for a lost `queued`
+# post); they are NOT exits from a final state.
 ALLOWED_TRANSITIONS = {
     "queued": {"rendering", "spooling", "printing",
                "done", "failed", "canceled", "dead_letter"},
@@ -26,6 +36,10 @@ ALLOWED_TRANSITIONS = {
                   "done", "failed", "canceled", "dead_letter"},
     "spooling": {"printing", "done", "failed", "canceled", "dead_letter"},
     "printing": {"done", "failed", "dead_letter"},
+    "failed": {"queued", "rendering", "spooling", "printing",
+               "done", "canceled", "dead_letter"},
+    "dead_letter": {"queued", "rendering", "spooling", "printing",
+                    "done", "failed", "canceled"},
 }
 
 

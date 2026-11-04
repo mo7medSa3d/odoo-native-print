@@ -1,218 +1,222 @@
-# Engineering Changelog — Audit Repair Cycle
+# Engineering Changelog — Audit Repair Cycle (2026-11-04)
 
-Versions: app **1.4.1 → 1.4.2**, addon **19.0.2.7.0 → 19.0.2.8.0**.
-Finding IDs refer to `ENGINEERING_AUDIT.md` / the audit tracks
-(A = Rust core, B = app shell, C = Odoo addon, D = protocols/status).
-Unless stated, each change ships with the regression tests listed in
-`VERIFICATION_REPORT.md`.
+Versions: app **1.4.11 → 1.4.12**, addon **19.0.2.14.0 → 19.0.2.15.0**.
+Finding IDs refer to `ENGINEERING_AUDIT.md` §3. Unless stated, each
+change ships with the regression tests listed in
+`VERIFICATION_REPORT.md`. No model, migration, permission, capability,
+workflow, or translation file was changed; the version bump needs no
+Odoo migration script.
 
-## print-core
+## C1 — Durable retry backoff (queue/worker isolation)
 
-- **Atomic `set_state`** (A-M3). The state write is guarded on the
-  previously read state (`WHERE id=? AND state=<old>`); 0 rows changed
-  returns the transition error instead of silently winning a race.
-  Risk: low — mirrors the proven `claim_next` guard.
-- **Retry keeps attempts** (A-M1). `retry_job` no longer resets
-  `attempts=0`; monotonicity now holds across manual retries.
-- **Reconcile excludes `printing`** (A-M2). `reconcile_stale` covers
-  `rendering`/`spooling` only; long physical prints are no longer
-  force-failed, and the worker's final transition can no longer
-  collide with a reconciliation write.
-- **Duplicate-conflict detection compares payload bytes** (A-L1), not
-  just size. First writer still wins; only the diagnostic log is
-  affected.
-- **Unknown DB state strings are an error** (A-L4) instead of a silent
-  coercion to `failed` in `row_to_job`.
-- **`PRAGMA user_version` = 1 marker** (A-L5) set on first open so
-  future migrations key off a version instead of ad-hoc probes.
-  Non-destructive; existing databases are untouched apart from the
-  marker.
-- **Status decoder completeness** (D-2/A-L10). New `UserIntervention`
-  status; USER_INTERVENTION / MANUAL_FEED / OUTPUT_BIN_FULL map to it
-  (and to `needs_intervention`), PAPER_PROBLEM → `Error`,
-  NOT_AVAILABLE → `Offline`, BUSY → `Printing`. Serde adds one
-  snake_case value (`user_intervention`); JS consumers display status
-  strings they do not recognize without breaking.
-- **Port classification** (A-L11). USB/COM/LPT/FILE ports classify as
-  `Local` before the network heuristics; IPv4 check validates octet
-  ranges.
-- **Deterministic quirk lookup** (A-M4). Longest matching driver key
-  wins, independent of HashMap iteration order.
+- **Why:** the worker thread slept through retry backoff (up to
+  30 s), stalling every printer behind one offline printer.
+- **Root cause:** backoff implemented as a thread sleep in
+  `Worker::run_once` instead of queue state.
+- **Fix:** `jobs.available_at` column + `idx_jobs_claim_available`
+  index (schema user_version 2, idempotent migration);
+  `claim_next` filters on `available_at`; new transactional
+  `Queue::requeue_with_delay`; `retry_job` clears the delay for
+  queued jobs too; `Worker` sleeper parameter removed; app worker
+  loop and chaos harness updated.
+- **Files:** `crates/print-core/src/{queue,worker}.rs`,
+  `crates/tools/src/main.rs`, `app/src-tauri/src/commands.rs`
+  (worker construction only).
+- **Tests:** `worker::tests::retry_then_dead_letter` (backoff
+  unclaimable, manual retry clears delay, then dead-letter);
+  chaos harness reconfigured to zero backoff with a comment
+  (simulated restarts are near-instant; backoff durability is
+  covered by the unit test).
+- **Regression risk:** low. Claim semantics change only for jobs
+  inside a backoff window; recovery paths clear delays for
+  in-flight rows only. A job that previously retried after a
+  sleep now retries after the same delay measured in wall time.
+- **Compatibility:** existing databases migrate automatically;
+  old rows get `available_at = 0` (immediately claimable).
 
-## print-render
+## C2 — Retryable outcomes in Odoo sync (state machine)
 
-- **PDFium lock resilience** (A-M10). All lock acquisitions recover a
-  poisoned mutex instead of panicking; the one in-lock `.expect` on
-  the grayscale conversion became a per-job `BitmapFailed` error.
+- **Why:** jobs that failed once then printed stayed `failed` in
+  Odoo forever; the retry's outcome post was discarded.
+- **Root cause:** the controller treated `failed`/`dead_letter`
+  as terminal while the desktop machine allows re-entry; the JS
+  watchers stopped at the first failure.
+- **Fix:** `TERMINAL_STATES = {done, canceled}`; `failed` and
+  `dead_letter` accept `queued` re-entry (+ forward skips) in
+  `ALLOWED_TRANSITIONS`; report watcher continues past retryable
+  outcomes (notify once per attempt); POS watcher releases the
+  order on first failure but keeps a background poll with
+  once-per-outcome posting and never touches the order again.
+- **Files:** `odoo/native_print/controllers/main.py`,
+  `odoo/native_print/static/src/js/{native_print_handler,pos_native_print}.js`,
+  `odoo/native_print/tests/test_controllers.py` (new retry test).
+- **Tests:** new `test_job_status_retry_after_failure_converges`
+  (Odoo suite BLOCKED here — Python-compiled only, must run in
+  `odoo.yml` CI); Node live-target/POS-key suites still pass.
+- **Regression risk:** low–medium. Posts that were previously
+  discarded as `terminal_state_is_final` are now accepted for
+  retryable states only; `done`/`canceled` finality is unchanged
+  and covered by the existing lifecycle test. A stale duplicate
+  `failed` post after a retry's `done` is still discarded.
+- **Compatibility:** the `/native_print/job_status` wire contract
+  is unchanged; older desktop builds posting the same states see
+  identical behavior except retry outcomes now land.
 
-## print-raw
+## C3 — Multi-condition printer health model
 
-- **DLE EOT 4 paper status** (D-5). New `query_paper_status` +
-  `decode_dle_eot_paper` (near-end = bits 2–3 pair, paper-end = bits
-  5–6 pair) with a bit-table test; the n=2 comment that misattributed
-  paper bits was corrected.
-- **Status frame validation** (A-L13). DLE EOT responses are checked
-  against the frame's fixed bits; up to 4 bytes are skipped looking
-  for a valid frame (ASB/noise tolerance); otherwise an `InvalidData`
-  error. Applies to both status queries.
-- **TSPL TEXT sanitization** (A-L14). Control characters are stripped
-  (CR/LF could inject arbitrary TSPL commands); quote folding kept.
+- **Why:** simultaneous conditions were lost; stale `Ready` could
+  be displayed as live; the pre-print check was fail-open.
+- **Root cause:** single-value status enum with no timestamp,
+  TTL, source, or condition set.
+- **Fix:** new `health.rs` (`PrinterHealth`, `HealthCondition`,
+  `HealthSource`, TTL-0-always-stale); spooler/IPP/TSPL/ESC-POS
+  decoders; `printer_health()` in print-win (error on failed
+  read, never fabricated Ready); app gate uses
+  `blocks_printing()`; Control Center shows conditions + source
+  + STALE marker; re-render signature includes the health
+  fingerprint. `PAPER_PROBLEM` maps to `UserIntervention` in the
+  health decoder (legacy single-status decoder mapped it to
+  `Error`); both block printing.
+- **Files:** `crates/print-core/src/{health,lib,printer}.rs`,
+  `crates/print-win/src/{discovery,win,lib}.rs`,
+  `app/src-tauri/src/commands.rs`, `app/dist/index.html`.
+- **Tests:** health unit tests (simultaneous spooler conditions,
+  work-offline, IPP warnings vs blockers, TSPL table, ESC/POS
+  combination, staleness incl. TTL 0, serde round-trip);
+  `convert_populates_health_and_stable_id`; jsdom suites pass
+  with the new card markup.
+- **Regression risk:** low. `primary_status()` preserves the old
+  single-status semantics for existing consumers; the gate blocks
+  on a superset of the old conditions only where multiple
+  conditions were previously hidden.
+- **Compatibility:** `PrinterInfo` gains `stable_id`/`health`
+  with serde defaults; older consumers ignore the fields.
 
-## print-ipp
+## C4 — Capability provenance
 
-- **PDF-only format promise** (D-1). `FORMAT_PREFERENCE` is now
-  `["application/pdf"]`; raster-only printers get `NoUsableFormat`.
-  The pre-existing test that asserted the old mislabeling behavior was
-  rewritten to assert the honest contract (renamed
-  `format_choice_without_pdf_is_rejected_not_mislabeled`) — the old
-  expectation encoded the defect.
-- **Status interpretation** (D-8). Requests now include
-  `printer-is-accepting-jobs`; `PrinterCaps.accepting_jobs` added;
-  `blocking_reasons()` / `is_blocked()` interpret the documented
-  reason set with RFC 8011 severity suffixes stripped; warnings
-  (toner-low, media-low) do not block. **Remaining step** (documented,
-  not applied): the app dispatch should call `is_blocked()` where it
-  currently calls `is_stopped()` — a one-token change in
-  `app/src-tauri/src/commands.rs` that must ride the Windows CI build
-  rather than ship unverified from this environment.
-- **Lenient format matching** (A-L16). Comparisons use the MIME base
-  type (parameters/case ignored).
+- **Why:** driver query failures were presented as concrete
+  capability facts.
+- **Root cause:** `DeviceCapabilitiesW` −1 clamped into defaults
+  with no provenance tracking.
+- **Fix:** `CapabilityProvenance` per field +
+  `from_driver_report`; `printer_capabilities` passes `None`
+  for failed queries; legacy payloads deserialize all-`Unknown`.
+- **Files:** `crates/print-core/src/printer.rs`,
+  `crates/print-win/src/win.rs`.
+- **Tests:** provenance flagging + legacy deserialization;
+  DPI-preference tests.
+- **Regression risk:** low. Fallback values are unchanged; only
+  their provenance labeling is new.
+- **Compatibility:** serialized `PrinterCapabilities` gains a
+  `provenance` field with a serde default.
 
-## print-win (Windows FFI — verified by Linux-side tests + Windows CI gate)
+## C5 — Stable printer identity
 
-- **RAW write loop + abort** (H-1/D-3). `print_raw` loops
-  `WritePrinter` until the payload is fully spooled; on failure it
-  calls the newly declared `AbortPrinter` instead of ending the job;
-  `GetLastError` is captured immediately after the failing call
-  (including the `StartPagePrinter` branch); chunk length uses a
-  checked u32 conversion. **This code compiles only on Windows**; it
-  follows the file's existing FFI patterns exactly and is gated on CI.
-- **Discovery snapshot cache** (B-5). New platform-free
-  `DiscoveryCache` (single-flight, TTL) in `discovery.rs`, used by the
-  Windows `discover_printers` with a 5 s TTL; the uncached body is
-  unchanged. Unit-tested on Linux.
-- **EnumPrinters probe errors propagate** (A-L8) instead of reading as
-  an empty printer list.
-- **Tray/bin exact-match first** (A-L7); substring match remains as a
-  fallback.
-- **`printer_status` doc corrected** (A-L9): spooler-reported status,
-  not a physical sensor read.
-- Not changed (documented in the audit): `DeviceCapabilitiesW` −1
-  capability defaults (M6) and the plain-`String` error type (M7) —
-  both need model/FFI-wide changes that belong with a Windows build
-  available; `classify_form`'s 72→80 mm canonicalization (M5/D-11) is
-  preserved because downstream receipt logic consumes the canonical
-  width today.
+- **Why:** display names are not identities; renames and shared
+  ports split/merged devices incorrectly.
+- **Root cause:** no identity field existed.
+- **Fix:** `stable_printer_id` (FNV-1a over normalized driver +
+  uppercase port, endpoint ports only) + `same_physical_endpoint`;
+  populated by discovery; surfaced in Control Center signatures.
+- **Files:** `crates/print-core/src/printer.rs`,
+  `crates/print-win/src/discovery.rs`.
+- **Tests:** rename/shared-port/virtual-port identity cases.
+- **Regression risk:** low. Identity is additive; no merging
+  behavior was introduced.
+- **Compatibility:** does not survive driver reinstall / USB
+  renumbering (documented limitation).
 
-## App shell (Tauri)
+## C6 — Device-DPI rendering and label gap threading
 
-App-crate edits are deliberately pattern-identical to code already
-present in the same files; their compile gate is Windows CI (see the
-verification report). JS-string edits were verified with the jsdom
-suites.
+- **Why:** 300-dpi devices received 203-dpi rasters; label gaps
+  were hardcoded and unconfigurable.
+- **Root cause:** literal `203` in dispatch and literal gaps at
+  every label call site; no gap field in `JobOptions`.
+- **Fix:** `preferred_raw_render_dpi` + `render_dpi` threaded
+  through one capabilities read (label box, PDF render, TSPL mm
+  conversion, ESC/POS head-dot scaling); `RawRender` parameter
+  struct (Clippy `too_many_arguments`); `label_gap_mm` from
+  request → queue JSON → TSPL `GAP` / EPL `Q` gap;
+  `epl_label_copies_with_gap` added (old entry point delegates
+  with 24 dots).
+- **Files:** `crates/print-core/src/{printer,queue}.rs`,
+  `crates/print-raw/src/epl.rs`,
+  `app/src-tauri/src/commands.rs`.
+- **Tests:** DPI preference, EPL gap threading, label-gap
+  helpers (3 mm → 24 dots at 203 dpi, 35 at 300 dpi), app lib
+  tests pass.
+- **Regression risk:** low–medium. Rendering resolution now
+  follows driver-reported values; a driver that misreports
+  resolutions changes output scale. The 203 fallback applies
+  whenever no resolutions are reported (the common case today),
+  preserving existing output.
+- **Compatibility:** `label_gap_mm` is optional on the wire
+  (serde default); older callers get the 3 mm default.
 
-- **Queue-admin local-only enforcement** (B-2). `retry_job_cmd`,
-  `cancel_job_cmd`, `clear_finished_cmd`, `export_diagnostics` now
-  call `check_local_only` in addition to `check_origin` (the exact
-  call the nav/settings commands already make). No behavior change for
-  the local Control Center; the remote origin was and remains denied
-  (now by two independent layers).
-- **Async submission commands** (B-3). `print_pdf` and `print_image`
-  are `async fn`, matching the read commands; bodies unchanged.
-- **Sparse byte-map rejection** (B-4) in payload deserialization.
-- **Permission overlap resolved** (B-8). `open_odoo_origin` removed
-  from `allow-queue-admin` (still granted to the main window via
-  `allow-toolbar`); remote reach identical (13 commands).
-- **Gate extended** (B-8). `tools/check_command_surface.py` models
-  `toolbar.json` with a group allowlist, scans the shell's JS surfaces
-  for `invoke()` names, and dropped a dead helper.
-- **Bridge facade hardening** (B-6). Published via
-  `Object.defineProperty` (non-writable, non-configurable) with a
-  plain-assignment fallback; page scripts can no longer replace it.
-- **Bridge argument cleanup** (B-12). Duplicate snake_case invoke
-  arguments removed (5 call sites); Tauri's camelCase mapping is the
-  single contract.
-- **Watchdog SPA arming** (B-7). The boot watchdog re-checks on
-  `pushState`/`popstate` transitions and self-guards with an armed
-  flag, so SPA soft-navigation into the backend is covered.
-- **Control Center (B-1, HIGH)**. All dynamically rendered action
-  buttons (job retry/cancel, printer test/forms) now carry
-  `data-action`/`data-*` attributes handled by one delegated listener;
-  value interpolation into inline handlers is gone and the unsafe
-  `escapeJsStr` helper was deleted.
-- **Control Center (B-10)**. Cancel-job confirms first (new i18n key
-  in both languages, parity kept); the job row shows the diagnostics
-  ID under the job id; `refreshAll` has an in-flight guard.
-- **Control Center origin validator (B-12)**. IPv6 literal check
-  tightened (single `::`, no stray edge colons).
+## C7 — IPP IPv6 printer URIs
 
-## Odoo addon (19.0.2.8.0)
+- **Why:** IPv6 IPP printers received a malformed `printer-uri`.
+- **Root cause:** brackets stripped by `parse_host_port` were
+  never restored when building the URI.
+- **Fix:** `NativePrintBackend::ipp_uri` brackets `:`-containing
+  hosts; round-trip unit tests.
+- **Files:** `app/src-tauri/src/commands.rs`.
+- **Tests:** `ipp_uri_brackets_ipv6_hosts`.
+- **Regression risk:** none for IPv4/hostnames (byte-identical
+  output); fixes IPv6 only.
 
-- **Fetch fallback** (F1). Report fetches (text + PDF branches) catch
-  network failures and return to Odoo's standard download flow.
-- **Display-name device posts** (F4). Every job-status post now sends
-  the printer's display name as `device` (handler create/watch/error
-  posts, POS create/watch posts). Routing still uses the pattern; the
-  registry, picker, and reprint prefill now key on the real name.
-- **Race-safe job creation** (F5). `Job.create` runs in a savepoint;
-  on the unique-key `IntegrityError` the controller re-reads the row
-  and continues through the existing update path (state/device/
-  attempts still applied) instead of returning a 500.
-- **Read-only registry ACL** (F6). Manager device rule is now
-  `1,0,0,0`; new test `test_device_registry_is_read_only_for_everyone`.
-- **Watcher policy** (F7). Report and POS watchers stop after 5
-  minutes without state progress (30-minute absolute cap), and post a
-  visible "outcome unconfirmed" notification instead of going silent;
-  the server record keeps converging for long-queued jobs.
-- **Honest outcome wording** (B-11). Success reads "Sent … to …"
-  (submission-stage truth), failure no longer claims "Nothing was
-  printed" and tells the user to check the printer before reprinting.
-- **In-flight guard fingerprint** (F8). The duplicate-submission guard
-  key now includes a fingerprint of `action.data` and record ids, so
-  two different wizard submissions of the same report cannot collide.
-- **Prefill priority** (F9). In `resolveBridgeTarget`, a named
-  (reprint) printer is no longer overridden by class preference.
-- **POS key window anchored** (F12). Reuse no longer refreshes the
-  15 s idempotency window timestamp.
-- **Translatable JS + rebuilt Arabic catalog** (F2/F3). User-facing
-  strings in the handler, POS, and systray go through `_t`
-  (`@web/core/l10n/translation`); `i18n/ar.po` dropped 21 stale
-  entries (deleted profile/rule features) and gained 51 current
-  entries with Arabic translations — 110 entries, 0 untranslated.
-  Static OWL template labels remain untranslated (documented).
-- **Text corrections** (F10/F13). POS header comment now describes the
-  real fallback; the groups XML comment no longer mentions the deleted
-  rules; both reprint confirm dialogs describe the prefill behavior.
+## C8 — Protocol status parsers (library only)
 
-## Versions
+- **Why:** no TSPL/ZPL status parsing existed; DLE EOT coverage
+  was n=2/n=4 only, unwired.
+- **Root cause:** never implemented; status came only from the
+  spooler.
+- **Fix:** DLE EOT n=1/n=3 queries + decoders (incl. n=2
+  documentation correction: no cover bit); TSPL `ESC !?`
+  decoder; ZPL `~HS`/SGD parser (both framings, empty-tolerant);
+  all table-tested, exported from `print-raw`, deliberately NOT
+  wired into print paths.
+- **Files:** `crates/print-raw/src/{tcp9100,tspl,zpl,lib}.rs`.
+- **Tests:** `dle_eot_error_table_n1_n3`,
+  `tspl_status_byte_table`, ZPL framing/short/empty tests.
+- **Regression risk:** none — new code paths only, no existing
+  call sites changed.
+- **Compatibility:** additive API only.
 
-- App 1.4.1 → **1.4.2** (tauri.conf.json, package.json, package-lock,
-  Cargo.toml, app Cargo.lock — `check_versions.py` green).
-- Addon 19.0.2.7.0 → **19.0.2.8.0** (manifest; fresh-install and
-  upgrade suites green).
+## Incidental fixes found by the battery (no behavior change intended)
 
-## Hotfix 1.4.3 / addon 19.0.2.9.0 (2026-11-04, field report)
+- `printer.rs` test module had a stray closing brace left by an
+  edit (compile error); removed.
+- `PrinterHealth::is_stale` treated TTL-0 observations as fresh
+  for past timestamps; TTL 0 is now always stale.
+- `zpl.rs` field-access closure had an unnameable lifetime;
+  replaced with a nested function.
+- `print-tools` and app worker constructions still passed the
+  removed `Worker::sleep` field; removed.
+- Doc comments inside function parameter lists (rejected by
+  rustc); converted to line comments.
+- `cargo fmt` normalization in `crates/print-win` and the app
+  crate (formatting only).
 
-- **White page after login (Arabic) — root cause + fix.** The
-  mission-rebuilt `i18n/ar.po` had 51 entries missing the
-  `#. module:` comment that Odoo's PO reader unconditionally matches;
-  the reader raised, `/web/webclient/translations` returned 500 for
-  ar_001, and the web client's localization service rejected during
-  boot (no IndexedDB cache on a fresh registry) — login worked, the
-  backend never mounted. Reproduced locally end-to-end (500 with an
-  authenticated ar_001 session, identical 265-byte body to the
-  production server), fixed by completing every entry's comment, and
-  verified: endpoint 200 with all 24 web messages served in Arabic.
-  The same pass added the missing `#. odoo-javascript` /
-  `#. odoo-python` markers and `code:` occurrences — without them the
-  catalog parsed but served zero code translations. A regression test
-  (`TestTranslationFiles`) now loads the catalog in the addon suite.
-- **Control Center.** Refresh gives feedback (spinner + disabled
-  state + completion toast); native `window.confirm` replaced by a
-  styled in-app modal everywhere; topbar/nav modernized (sticky
-  glass, pill tabs); Paper Forms toggles per printer without
-  stretching sibling cards.
-- **Diagnostics.** The exported bundle reported `app_version: 0.1.0`
-  (the print-core crate version); it now stamps the app version.
-- **Brand.** Arabic product name changed to "الطباعة من Yaseir"
-  (owner request) in the Control Center, toolbar, and Arabic strings.
+## Documentation
+
+- `ENGINEERING_AUDIT.md`, `VERIFICATION_REPORT.md`,
+  `CHANGELOG_ENGINEERING.md` rewritten from the current code and
+  this cycle's actual test evidence (the bundled copies described
+  1.4.2 / 19.0.2.8.0).
+- `PRINTER_COMPATIBILITY_MATRIX.md` updated: DLE EOT n=1/n=3,
+  TSPL/ZPL parsers as library-only, EPL/TSPL gap threading,
+  IPP `is_blocked()` wiring (was already live since 1.4.6),
+  health model + staleness, DPI scaling, unknown-paper refusal.
+- `README.md` rewritten to the actual architecture and versions
+  (was v1.0.0 / addon 19.0.1.2.0-era, incl. an incorrect IPP
+  format-negotiation claim).
+- `PROGRESS.md`: 1.4.12 entry appended; header stamp updated.
+
+## Not changed (by design)
+
+Licensing/activation, code signing, origin policy (ADR-0002),
+permissions/capabilities, workflows, migrations, translations,
+and the HTTP warning/strip behavior. No dependency version was
+changed in this cycle (see verification report for the audit
+status).

@@ -1858,13 +1858,54 @@
     }
   }
 
+  // Multi-condition health from the discovery observation
+  // (print-core PrinterHealth): every reported condition is
+  // shown, never collapsed to one badge, and an observation
+  // past its TTL is marked STALE instead of shown as live.
+  // No observation at all means the status badge alone is a
+  // spooler-reported value, not a sensor read.
+  const HEALTH_BLOCKING = new Set(["paper_out", "paper_jam", "cover_open", "head_open",
+    "ribbon_out", "toner_empty", "ink_empty", "marker_supply_empty", "offline", "paused",
+    "stopped", "hardware_error", "communication_error", "overheating", "user_intervention",
+    "other_error"]);
+  function healthFingerprint(p) {
+    const h = p.health || null;
+    if (!h) return "none";
+    const ttl = typeof h.ttl_secs === "number" ? h.ttl_secs : 0;
+    const stale = ttl === 0 || (Date.now() / 1000 - (h.observed_at || 0) > ttl);
+    const conds = (Array.isArray(h.conditions) ? h.conditions : []).slice().sort().join(",");
+    return (h.source || "?") + "|" + conds + "|" + (stale ? "stale" : "live");
+  }
+  function healthChipsHtml(p) {
+    const h = p.health || null;
+    if (!h) return "";
+    const ttl = typeof h.ttl_secs === "number" ? h.ttl_secs : 0;
+    const stale = ttl === 0 || (Date.now() / 1000 - (h.observed_at || 0) > ttl);
+    const conds = Array.isArray(h.conditions) ? h.conditions : [];
+    const chips = conds.map((c) => {
+      const cls = HEALTH_BLOCKING.has(c) ? "badge-err" : "badge-warn";
+      return `<span class="badge ${cls}">${escapeHtml(String(c).replace(/_/g, " ").toUpperCase())}</span>`;
+    });
+    if (!conds.length) {
+      chips.push(`<span class="badge badge-ok">${currentLang === "ar" ? "جاهز" : "READY"}</span>`);
+    }
+    if (stale) {
+      chips.push(`<span class="badge badge-neutral">${currentLang === "ar" ? "بيانات قديمة" : "STALE"}</span>`);
+    }
+    chips.push(`<span class="badge badge-neutral">${escapeHtml(String(h.source || "?").toUpperCase())}</span>`);
+    return `<div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-top:0.5rem;">${chips.join("")}</div>`;
+  }
+
   function renderPrintersGrid(printers) {
     const grid = document.getElementById("printersGrid");
     lastGridPrinters = printers;
     // Same skip-if-identical guard as the jobs table: an unchanged
     // printer set leaves the cards (and any open paper-forms box) alone.
+    // Health conditions, staleness and the stable id are part of the
+    // signature (the raw observation timestamp is not: it changes on
+    // every poll and would defeat the guard and flicker the grid).
     const signature = currentLang + "|" + capsVersion + "|" + JSON.stringify(printers.map((p) =>
-      [p.name, p.kind, p.is_default, p.status, p.port, p.driver, p.protocol, p.printer_class]));
+      [p.name, p.kind, p.is_default, p.status, p.port, p.driver, p.protocol, p.printer_class, p.stable_id || "", healthFingerprint(p)]));
     if (signature === lastPrintersSignature) return;
     lastPrintersSignature = signature;
     const scrollY = window.scrollY;
@@ -1908,6 +1949,8 @@
         </div>
 
         ${capsChipsHtml(p)}
+
+        ${healthChipsHtml(p)}
 
         <div id="forms-box-${idx}" class="hidden" style="font-size:0.76rem;background:var(--bg-subtle);padding:0.6rem;border-radius:8px;max-height:110px;overflow:auto;"></div>
 

@@ -58,6 +58,56 @@ class TestNativePrintControllers(HttpCase):
         self.assertEqual(job.device, "EPSON TM-T88VII")
         self.assertEqual(job.report_name, "account.report_invoice")
 
+    def test_job_status_retry_after_failure_converges(self):
+        # A job that fails once and prints on retry must end `done`
+        # in Odoo, not stuck on the first failure: `failed` and
+        # `dead_letter` are retryable outcomes (the desktop worker
+        # re-queues failed jobs; the operator retries dead-letter
+        # jobs), while `done`/`canceled` stay final.
+        key = "22222222-3333-4444-8555-666666666666"
+        self._rpc("/native_print/job_status", {
+            "idempotency_key": key, "state": "queued", "attempts": 1,
+        })
+        self._rpc("/native_print/job_status", {
+            "idempotency_key": key, "state": "failed",
+            "error_code": "PRINTER_OFFLINE",
+        })
+        res = self._rpc("/native_print/job_status", {
+            "idempotency_key": key, "state": "queued", "attempts": 2,
+        })
+        self.assertTrue(res["ok"], res)
+        self.assertNotIn("ignored", res)
+        self.assertEqual(res["state"], "queued")
+        res = self._rpc("/native_print/job_status", {
+            "idempotency_key": key, "state": "done", "attempts": 2,
+        })
+        self.assertEqual(res["state"], "done")
+        # ...but a late post after `done` is still discarded.
+        res = self._rpc("/native_print/job_status", {
+            "idempotency_key": key, "state": "failed",
+            "error_code": "LATE",
+        })
+        self.assertEqual(res.get("ignored"), "terminal_state_is_final")
+        self.assertEqual(res["state"], "done")
+
+        # Dead-letter retry: dead_letter -> queued -> done.
+        key2 = "33333333-4444-4555-8666-777777777777"
+        self._rpc("/native_print/job_status", {
+            "idempotency_key": key2, "state": "dead_letter",
+            "error_code": "PRINTER_OFFLINE",
+        })
+        res = self._rpc("/native_print/job_status", {
+            "idempotency_key": key2, "state": "queued",
+        })
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["state"], "queued")
+        res = self._rpc("/native_print/job_status", {
+            "idempotency_key": key2, "state": "done",
+        })
+        self.assertEqual(res["state"], "done")
+        job = self.env["native.print.job"].search([("name", "=", key2)])
+        self.assertEqual(job.state, "done")
+
     def test_job_status_state_machine(self):
         key = "11111111-2222-4333-8444-555555555555"
         self._rpc("/native_print/job_status", {

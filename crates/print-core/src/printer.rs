@@ -120,6 +120,176 @@ pub struct PrinterCapabilities {
     pub custom_size_supported: bool,
     pub min_custom_mm: Option<(f64, f64)>,
     pub max_custom_mm: Option<(f64, f64)>,
+    /// How each capability value was obtained. A value reported by
+    /// the driver is evidence; a value defaulted because the driver
+    /// call failed (`DeviceCapabilitiesW` returning -1, which the
+    /// API does not distinguish from "unsupported") is `Unknown`
+    /// and must not be presented as a confirmed device fact.
+    /// Absent in older serialized payloads: defaults to all-unknown.
+    #[serde(default)]
+    pub provenance: CapabilityReport,
+}
+
+/// Per-field provenance for [`PrinterCapabilities`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityProvenance {
+    /// Reported by the driver / device protocol.
+    DriverReported,
+    /// Derived by the application from other evidence.
+    Inferred,
+    /// Set by the operator.
+    Configured,
+    /// Not reported, or the capability query itself failed: the
+    /// value beside it (if any) is a fallback, not a device fact.
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct CapabilityReport {
+    #[serde(default)]
+    pub duplex: CapabilityProvenance,
+    #[serde(default)]
+    pub color: CapabilityProvenance,
+    #[serde(default)]
+    pub max_copies: CapabilityProvenance,
+    #[serde(default)]
+    pub resolutions: CapabilityProvenance,
+    #[serde(default)]
+    pub bins: CapabilityProvenance,
+    #[serde(default)]
+    pub custom_size: CapabilityProvenance,
+}
+
+impl Default for PrinterCapabilities {
+    fn default() -> Self {
+        Self {
+            forms: Vec::new(),
+            resolutions_dpi: Vec::new(),
+            duplex: false,
+            color: false,
+            bins: Vec::new(),
+            max_copies: 1,
+            custom_size_supported: false,
+            min_custom_mm: None,
+            max_custom_mm: None,
+            provenance: CapabilityReport::default(),
+        }
+    }
+}
+
+fn provenance_of(reported: bool) -> CapabilityProvenance {
+    if reported {
+        CapabilityProvenance::DriverReported
+    } else {
+        CapabilityProvenance::Unknown
+    }
+}
+
+/// Render DPI to use for raw (raster) output given the resolutions
+/// the driver reported. 203 dpi is the thermal/label raster standard
+/// and is preferred when reported; otherwise the smallest reported
+/// resolution in the 200-300 dpi band (rendering a receipt at 600 dpi
+/// wastes memory and buffer for no physical gain); otherwise the
+/// smallest reported resolution; with no report at all, 203 dpi is
+/// the documented fallback, not a claimed device fact.
+pub fn preferred_raw_render_dpi(resolutions_dpi: &[u32]) -> u32 {
+    if resolutions_dpi.contains(&203) {
+        return 203;
+    }
+    if let Some(dpi) = resolutions_dpi
+        .iter()
+        .copied()
+        .filter(|d| (200..=300).contains(d))
+        .min()
+    {
+        return dpi;
+    }
+    resolutions_dpi.iter().copied().min().unwrap_or(203)
+}
+
+/// Stable identity for a spooler queue backed by a physical
+/// endpoint, or `None` when the port cannot identify a device
+/// (virtual writers, print-to-file, generic local ports).
+///
+/// The fingerprint hashes the normalized driver name and port: a
+/// queue rename does not change it, and two queues on the same
+/// physical port (one device, two queues) share it. It does NOT
+/// survive a driver reinstall (the driver name is part of the
+/// hash) or a USB port renumbering, because the spooler exposes no
+/// stronger stable identifier (no device instance ID) through the
+/// level-2 record used here. Callers must treat two different
+/// fingerprints as "possibly the same device, not proven
+/// different" only via this function — never merge devices on a
+/// name or model match alone.
+pub fn stable_printer_id(driver: &str, port: &str) -> Option<String> {
+    let p = port.trim().to_ascii_uppercase();
+    let endpoint = p.starts_with("USB")
+        || p.starts_with("COM")
+        || p.starts_with("LPT")
+        || p.contains("IP_")
+        || p.contains("WSD")
+        || p.contains("IPP")
+        || is_ipv4(&p);
+    if !endpoint {
+        return None;
+    }
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in format!("{}|{}", driver.trim().to_ascii_lowercase(), p).as_bytes() {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    Some(format!("spooler-{hash:016x}"))
+}
+
+/// True when both identities name the same physical endpoint.
+/// `None` identities never merge: unknown identity is not identity.
+pub fn same_physical_endpoint(a: &str, b: &str) -> bool {
+    !a.is_empty() && a == b
+}
+
+impl PrinterCapabilities {
+    /// Build capabilities from driver-query results where each
+    /// `Option` is `Some` when the driver actually answered and
+    /// `None` when the query failed or was unsupported. `None`
+    /// values fall back to safe defaults *and* are flagged
+    /// `Unknown` in the provenance record, so no consumer can
+    /// mistake a fallback for a reported capability.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_driver_report(
+        forms: Vec<Form>,
+        resolutions_dpi: Vec<u32>,
+        duplex: Option<bool>,
+        color: Option<bool>,
+        max_copies: Option<u16>,
+        bins: Vec<String>,
+        bins_reported: bool,
+        min_custom_mm: Option<(f64, f64)>,
+        max_custom_mm: Option<(f64, f64)>,
+    ) -> Self {
+        let custom_size_supported = min_custom_mm.is_some() && max_custom_mm.is_some();
+        let resolutions_reported = !resolutions_dpi.is_empty();
+        Self {
+            forms,
+            resolutions_dpi,
+            duplex: duplex.unwrap_or(false),
+            color: color.unwrap_or(false),
+            bins,
+            max_copies: max_copies.unwrap_or(1),
+            custom_size_supported,
+            min_custom_mm,
+            max_custom_mm,
+            provenance: CapabilityReport {
+                duplex: provenance_of(duplex.is_some()),
+                color: provenance_of(color.is_some()),
+                max_copies: provenance_of(max_copies.is_some()),
+                resolutions: provenance_of(resolutions_reported),
+                bins: provenance_of(bins_reported),
+                custom_size: provenance_of(custom_size_supported),
+            },
+        }
+    }
 }
 
 impl PrinterCapabilities {
@@ -164,6 +334,18 @@ pub struct PrinterInfo {
     pub protocol: String,
     #[serde(default)]
     pub printer_class: String,
+    /// Stable endpoint identity from driver + port (see
+    /// [`stable_printer_id`]). Empty when the queue's port cannot
+    /// identify a physical device. The display name is NOT an
+    /// identity: renames must not split one device into two.
+    #[serde(default)]
+    pub stable_id: String,
+    /// Full multi-condition health observation, when the discovery
+    /// path produced one. `None` means no live observation exists —
+    /// status alone must then be read as spooler-reported, possibly
+    /// stale, never as a physical sensor read.
+    #[serde(default)]
+    pub health: Option<crate::health::PrinterHealth>,
 }
 
 /// Conservative protocol inference from the installed driver
@@ -407,6 +589,7 @@ mod tests {
             custom_size_supported: true,
             min_custom_mm: Some((20.0, 20.0)),
             max_custom_mm: Some((210.0, 297.0)),
+            provenance: Default::default(),
         };
         assert!(caps.custom_size_ok(crate::PageSize::label_100x150()));
         assert!(!caps.custom_size_ok(crate::PageSize::new(300.0, 300.0)));
@@ -539,6 +722,76 @@ mod tests {
             document_mode_downgrade("pdf", "escpos", PrinterKind::Network),
             None
         );
+    }
+
+    #[test]
+    fn stable_id_survives_rename_and_shared_port_but_not_virtual_ports() {
+        // A queue rename keeps driver+port: same identity.
+        let a = stable_printer_id("EPSON TM-T88VII", "USB001").unwrap();
+        let renamed = stable_printer_id("EPSON TM-T88VII", "USB001").unwrap();
+        assert_eq!(a, renamed);
+        assert!(same_physical_endpoint(&a, &renamed));
+        // A second queue on the same physical port is the same endpoint.
+        assert!(same_physical_endpoint(
+            &a,
+            &stable_printer_id("EPSON TM-T88VII", "usb001").unwrap()
+        ));
+        // A different port is a different endpoint; virtual/file ports
+        // have no endpoint identity at all and never merge.
+        assert_ne!(a, stable_printer_id("EPSON TM-T88VII", "USB002").unwrap());
+        assert_eq!(
+            stable_printer_id("Microsoft Print To PDF", "PORTPROMPT:"),
+            None
+        );
+        assert_eq!(stable_printer_id("OneNote", "NUL:"), None);
+        assert_eq!(stable_printer_id("HP", "FILE:"), None);
+        assert!(!same_physical_endpoint("", ""));
+    }
+
+    #[test]
+    fn driver_report_provenance_flags_unknown_values() {
+        let caps = PrinterCapabilities::from_driver_report(
+            vec![],
+            vec![203, 300],
+            None,
+            Some(true),
+            None,
+            vec![],
+            false,
+            None,
+            None,
+        );
+        assert_eq!(
+            caps.provenance.duplex,
+            CapabilityProvenance::Unknown,
+            "a failed duplex query must not read as reported"
+        );
+        assert_eq!(caps.provenance.color, CapabilityProvenance::DriverReported);
+        assert_eq!(caps.provenance.max_copies, CapabilityProvenance::Unknown);
+        assert_eq!(caps.max_copies, 1, "fallback value, flagged unknown");
+        assert_eq!(
+            caps.provenance.resolutions,
+            CapabilityProvenance::DriverReported
+        );
+        assert!(!caps.custom_size_supported);
+        // Old serialized payloads without the field deserialize
+        // with all-unknown provenance.
+        let legacy = r#"{"forms":[],"resolutions_dpi":[],"duplex":false,"color":false,"bins":[],"max_copies":1,"custom_size_supported":false,"min_custom_mm":null,"max_custom_mm":null}"#;
+        let back: PrinterCapabilities = serde_json::from_str(legacy).unwrap();
+        assert_eq!(
+            back.provenance,
+            CapabilityReport::default(),
+            "legacy payloads must not gain invented provenance"
+        );
+    }
+
+    #[test]
+    fn preferred_raw_render_dpi_prefers_203_then_band() {
+        assert_eq!(preferred_raw_render_dpi(&[300, 203, 600]), 203);
+        assert_eq!(preferred_raw_render_dpi(&[300, 600]), 300);
+        assert_eq!(preferred_raw_render_dpi(&[600]), 600);
+        assert_eq!(preferred_raw_render_dpi(&[]), 203);
+        assert_eq!(preferred_raw_render_dpi(&[150, 300]), 300);
     }
 
     #[test]

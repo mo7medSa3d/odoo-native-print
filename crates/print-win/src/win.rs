@@ -920,6 +920,40 @@ pub fn printer_status(printer: &str) -> Result<print_core::PrinterStatus, String
     result
 }
 
+/// Full multi-condition health observation for one printer (same
+/// spooler read as [`printer_status`], without collapsing the flag
+/// word to a single status). A failed read is an error, never a
+/// fabricated `Ready`: callers must treat it as unknown/stale.
+pub fn printer_health(printer: &str) -> Result<print_core::PrinterHealth, String> {
+    let name = wide(printer);
+    let mut handle: Handle = std::ptr::null_mut();
+    let ok = unsafe { OpenPrinterW(name.as_ptr(), &mut handle, std::ptr::null_mut()) };
+    if ok == 0 || handle.is_null() {
+        return Err(last_error());
+    }
+    let result = unsafe {
+        let mut needed: u32 = 0;
+        GetPrinterW(handle, 2, std::ptr::null_mut(), 0, &mut needed);
+        if needed == 0 {
+            Err(last_error())
+        } else {
+            let mut buf = vec![0u8; needed as usize];
+            let ok2 = GetPrinterW(handle, 2, buf.as_mut_ptr(), needed, &mut needed);
+            if ok2 == 0 {
+                Err(last_error())
+            } else {
+                let info = &*(buf.as_ptr() as *const PrinterInfo2W);
+                match crate::discovery::convert(&convert_info2(info)).health {
+                    Some(health) => Ok(health),
+                    None => Err("spooler status produced no health observation".to_string()),
+                }
+            }
+        }
+    };
+    unsafe { ClosePrinter(handle) };
+    result
+}
+
 fn wide(s: &str) -> Vec<u16> {
     std::ffi::OsStr::new(s)
         .encode_wide()
@@ -1048,9 +1082,29 @@ pub fn printer_capabilities(printer: &str) -> Result<print_core::PrinterCapabili
             std::ptr::null(),
         )
     };
-    let duplex = count(DC_DUPLEX) > 0;
-    let color = count(DC_COLORDEVICE) > 0;
-    let max_copies = count(DC_COPIES).clamp(1, u16::MAX as i32) as u16;
+    // DeviceCapabilitiesW returns -1 on error, which the API does
+    // not distinguish from "unsupported". A -1 is therefore
+    // reported as "unknown" (None) to the provenance-aware
+    // constructor instead of being clamped into a fabricated
+    // concrete value (e.g. max_copies=1 presented as a device fact).
+    let duplex_raw = count(DC_DUPLEX);
+    let duplex = if duplex_raw < 0 {
+        None
+    } else {
+        Some(duplex_raw > 0)
+    };
+    let color_raw = count(DC_COLORDEVICE);
+    let color = if color_raw < 0 {
+        None
+    } else {
+        Some(color_raw > 0)
+    };
+    let copies_raw = count(DC_COPIES);
+    let max_copies = if copies_raw < 0 {
+        None
+    } else {
+        Some(copies_raw.clamp(1, u16::MAX as i32) as u16)
+    };
 
     let resolution_count = count(DC_ENUMRESOLUTIONS).clamp(0, 128) as usize;
     let mut resolution_pairs = vec![0i32; resolution_count * 2];
@@ -1139,17 +1193,18 @@ pub fn printer_capabilities(printer: &str) -> Result<print_core::PrinterCapabili
     };
     let min_custom_mm = extent(DC_MINEXTENT);
     let max_custom_mm = extent(DC_MAXEXTENT);
-    Ok(print_core::PrinterCapabilities {
+    let bins_reported = !bins.is_empty();
+    Ok(print_core::PrinterCapabilities::from_driver_report(
         forms,
         resolutions_dpi,
         duplex,
         color,
-        bins,
         max_copies,
-        custom_size_supported: min_custom_mm.is_some() && max_custom_mm.is_some(),
+        bins,
+        bins_reported,
         min_custom_mm,
         max_custom_mm,
-    })
+    ))
 }
 
 /// Submit raw bytes (ESC/POS, ZPL, TSPL) to a printer through the spooler

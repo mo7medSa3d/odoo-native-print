@@ -9,7 +9,7 @@
 //! compiler, not a hand-computed offset, does the layout on Windows.
 
 use print_core::paper::Form;
-use print_core::printer::{decode_printer_status, PrinterInfo, PrinterKind};
+use print_core::printer::{PrinterInfo, PrinterKind};
 use print_core::PageSize;
 
 /// A raw level-2 record as read from Windows, before conversion.
@@ -30,15 +30,22 @@ pub const PRINTER_ATTRIBUTE_SHARED: u32 = 0x0000_0008;
 pub const PRINTER_ATTRIBUTE_WORK_OFFLINE: u32 = 0x0000_0400;
 
 pub fn convert(raw: &RawPrinterInfo2) -> PrinterInfo {
-    let mut status = decode_printer_status(raw.status);
-    if raw.attributes & PRINTER_ATTRIBUTE_WORK_OFFLINE != 0
-        && status == print_core::PrinterStatus::Ready
-    {
-        status = print_core::PrinterStatus::Offline;
-    }
     let kind = PrinterInfo::classify(&raw.printer_name, &raw.port_name);
     let (protocol, printer_class) =
         print_core::printer::detect_protocol(&raw.printer_name, &raw.driver_name, kind);
+    let health = print_core::PrinterHealth::from_spooler_flags(
+        raw.status,
+        raw.attributes & PRINTER_ATTRIBUTE_WORK_OFFLINE != 0,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0),
+    );
+    // The single status is derived from the full observation so the
+    // two can never disagree (e.g. PAPER_PROBLEM reads as
+    // UserIntervention in both, never Error in one and
+    // UserIntervention in the other).
+    let status = health.primary_status();
     PrinterInfo {
         kind,
         name: raw.printer_name.clone(),
@@ -48,6 +55,9 @@ pub fn convert(raw: &RawPrinterInfo2) -> PrinterInfo {
         is_default: raw.attributes & PRINTER_ATTRIBUTE_DEFAULT != 0,
         protocol: protocol.to_string(),
         printer_class: printer_class.to_string(),
+        stable_id: print_core::printer::stable_printer_id(&raw.driver_name, &raw.port_name)
+            .unwrap_or_default(),
+        health: Some(health),
     }
 }
 
@@ -179,6 +189,8 @@ mod tests {
                     is_default: true,
                     protocol: "gdi".into(),
                     printer_class: "office".into(),
+                    stable_id: String::new(),
+                    health: None,
                 }])
             })
         };
@@ -200,6 +212,23 @@ mod tests {
             .unwrap();
         assert!(c.is_empty());
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn convert_populates_health_and_stable_id() {
+        // Simultaneous flags survive as separate conditions, and the
+        // endpoint identity survives a queue rename (same driver+port).
+        let mut r = raw(0x0040_0000 | 0x10, 0);
+        r.port_name = "USB001".into();
+        let info = convert(&r);
+        let health = info.health.as_ref().unwrap();
+        assert!(health.has(print_core::HealthCondition::CoverOpen));
+        assert!(health.has(print_core::HealthCondition::PaperOut));
+        assert_eq!(info.status, health.primary_status());
+        assert!(!info.stable_id.is_empty());
+        let mut renamed = r.clone();
+        renamed.printer_name = "Renamed Queue".into();
+        assert_eq!(convert(&renamed).stable_id, info.stable_id);
     }
 
     #[test]

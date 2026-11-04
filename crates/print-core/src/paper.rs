@@ -297,6 +297,7 @@ mod tests {
             custom_size_supported: true,
             min_custom_mm: Some((25.0, 25.0)),
             max_custom_mm: Some((300.0, 500.0)),
+            provenance: Default::default(),
         };
         assert_eq!(
             match_paper_auto(PageSize::a4(), &caps).unwrap().kind,
@@ -323,6 +324,7 @@ mod tests {
             custom_size_supported: false,
             min_custom_mm: None,
             max_custom_mm: None,
+            provenance: Default::default(),
         };
         let selected = match_paper_auto(PageSize::new(72.0, 180.0), &caps).unwrap();
         assert_eq!(selected.kind, MatchKind::Roll);
@@ -344,6 +346,7 @@ mod tests {
             custom_size_supported: true,
             min_custom_mm: Some((50.0, 50.0)),
             max_custom_mm: Some((100.0, 150.0)),
+            provenance: Default::default(),
         };
         let matched = match_paper_auto(PageSize::new(160.0, 220.0), &caps).unwrap();
         assert_eq!(matched.kind, MatchKind::NearestLargerFit);

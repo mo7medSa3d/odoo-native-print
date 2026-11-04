@@ -1,6 +1,6 @@
 # PROGRESS
 
-Last updated: 2026-11-03 (Africa/Cairo) — v1.3.0 hardening
+Last updated: 2026-11-04 (Africa/Cairo) — v1.4.12 engineering mission
 Owner spec: Master Build Prompt — Odoo Native Print Client (Windows, then Android, then iOS)
 
 ## Status: v1.3.0 — full hardening pass (21-point plan, all four phases)
@@ -404,3 +404,43 @@ Full report: `docs/engineering-mission-2026-11-03.md`. Headlines:
   classifier is `PrinterInfo::classify`). Fix commit 0d036e9;
   run #84 SUCCESS, all five jobs green, windows-installers-unsigned
   artifact 18.3 MB. App 1.4.7 / addon 19.0.2.11.0 is installable.
+
+## 2026-11-04 — Master engineering mission (app 1.4.12, addon 19.0.2.15.0)
+
+- Full-repository audit + repair cycle against the supplied ZIP
+  (app 1.4.11 / addon 19.0.2.14.0 as received). Out-of-scope areas
+  (licensing, signing, origin policy, deployment) untouched. The
+  bundled audit/verification/changelog reports described 1.4.2 /
+  19.0.2.8.0 and were rewritten from current code and this cycle's
+  evidence; see ENGINEERING_AUDIT.md, VERIFICATION_REPORT.md,
+  CHANGELOG_ENGINEERING.md, PRINTER_COMPATIBILITY_MATRIX.md.
+- Queue isolation (C1): retry backoff moved from a worker-thread
+  sleep to durable `available_at` queue state (schema v2 +
+  index, `requeue_with_delay`, `retry_job` clears delays). One
+  offline printer can no longer stall healthy printers.
+- Sync convergence (C2): Odoo no longer treats `failed` /
+  `dead_letter` as terminal — the desktop re-queues both, and the
+  controller + both JS watchers now follow retries to the final
+  outcome. `done`/`canceled` stay final.
+- Printer intelligence (C3–C5): multi-condition, source-aware,
+  timestamped health model (`PrinterHealth`, 30 s TTL, STALE in
+  the Control Center); capability provenance (driver −1 reads as
+  Unknown, never fabricated); stable endpoint identity
+  (driver+port hash; no merging on name/model; does not survive
+  driver reinstall — documented).
+- Rendering/media (C6): device-DPI rendering instead of hardcoded
+  203 dpi (label box, PDF render, TSPL conversion, ESC/POS
+  head-dot scaling); label gap threaded end-to-end
+  (`label_gap_mm`: TSPL GAP, EPL Q gap). IPP IPv6 URIs bracketed
+  (C7). Protocol status parsers added as tested library code
+  only — DLE EOT n=1/n=3, TSPL `ESC !?`, ZPL `~HS`/SGD — not
+  wired into print streams (C8); GS r / ASB / SNMP remain
+  unimplemented by design.
+- Verification this cycle (Linux, no Windows/Odoo/hardware):
+  workspace 135/135, print-win 11/11, app crate check + 5/5 lib
+  tests, fmt + clippy clean in all three workspaces, gates green,
+  Node suites pass, jsdom 63 checks pass, bench 4587 jobs/s +
+  chaos 300/300 no-loss. Windows build, Odoo suite, and hardware
+  matrix remain BLOCKED/NOT RUN behind their CI/lab gates.
+- No dependency version changed; cargo-audit status recorded in
+  VERIFICATION_REPORT.md.
