@@ -39,6 +39,17 @@ eq(m.detectPrinterType({ name: "Zebra ZPL Label", driver: "Zebra" }).mode, "zpl"
 eq(m.detectPrinterType({ name: "TSC TTP-244", driver: "TSC" }).mode, "tspl", "tsc word");
 eq(m.rollWidthMm({ forms: [{ roll: true, size: { width_mm: 80 } }] }), 80, "roll width");
 eq(m.rollWidthMm({ forms: [{ roll: false, size: { width_mm: 210 } }] }), null, "no roll");
+// Bridge-shipped detection wins over the name heuristic: the app
+// is the single detection authority (field bug, 2026-11-05 — the
+// two detectors disagreed and valid POS printers were refused).
+eq(m.detectPrinterType({ name: "POS Printer", driver: "Generic", protocol: "escpos", printer_class: "thermal" }).mode, "escpos", "bridge protocol wins");
+eq(m.detectPrinterType({ name: "EPSON TM-T88VII", driver: "EPSON", protocol: "gdi", printer_class: "office" }).mode, "gdi", "bridge protocol wins over heuristic");
+// Generic clone-driver identities are thermal in the fallback
+// heuristic too (mirrors the Rust token table).
+eq(m.detectPrinterType({ name: "POS Printer", driver: "POS Printer Driver" }).mode, "escpos", "generic pos printer");
+eq(m.detectPrinterType({ name: "Thermal Printer", driver: "Generic" }).printerClass, "thermal", "generic thermal printer");
+eq(m.detectPrinterType({ name: "POS80", driver: "POS Printer Driver" }).mode, "escpos", "pos80");
+eq(m.detectPrinterType({ name: "PostScript Printer", driver: "Adobe PDF" }).mode, "gdi", "postscript is not pos");
 
 globalThis.window = {
     localStorage: {

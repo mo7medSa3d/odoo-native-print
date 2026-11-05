@@ -384,7 +384,14 @@ pub fn detect_protocol(
     if has_word("epl") {
         return ("epl", "label");
     }
-    const THERMAL_TOKENS: [&str; 12] = [
+    // Kept in sync with the fallback heuristic in the addon's
+    // native_print_client.js (this Rust detection is the primary:
+    // it ships on every PrinterInfo and the page prefers it). The
+    // generic POS-printer names matter as much as the brands —
+    // clone drivers very often identify only as "POS Printer" /
+    // "POS80" / "Thermal Printer", and missing them routed real
+    // POS printers to GDI (owner report, 2026-11-05).
+    const THERMAL_TOKENS: [&str; 27] = [
         "epson tm-",
         "epson tm ",
         "xprinter",
@@ -396,7 +403,22 @@ pub fn detect_protocol(
         "esc/pos",
         "escpos",
         "thermal receipt",
+        "thermal printer",
         "receipt printer",
+        "pos printer",
+        "pos-58",
+        "pos-80",
+        "pos58",
+        "pos80",
+        "tm-t",
+        "tm-m",
+        "sunmi",
+        "munbyn",
+        "hprt",
+        "cashino",
+        "snbc",
+        "gprinter",
+        "sprt",
     ];
     if THERMAL_TOKENS.iter().any(|t| signature.contains(t)) {
         return ("escpos", "thermal");
@@ -673,6 +695,29 @@ mod tests {
         assert_eq!(
             detect_protocol("POS-80 Receipt", "Generic", PrinterKind::Local),
             ("escpos", "thermal")
+        );
+        // Generic clone-driver identities (owner report,
+        // 2026-11-05): a POS printer whose driver says nothing
+        // but "POS Printer" / "Thermal Printer" / "POS80" is a
+        // thermal printer, not an office printer.
+        for (name, driver) in [
+            ("POS Printer", "POS Printer Driver"),
+            ("Thermal Printer", "Generic Thermal"),
+            ("POS80", "POS Printer Driver"),
+            ("Cashier", "SUNMI POS Driver"),
+            ("XP-58IIH", "MUNBYN"),
+        ] {
+            assert_eq!(
+                detect_protocol(name, driver, PrinterKind::Local),
+                ("escpos", "thermal"),
+                "{name} / {driver}"
+            );
+        }
+        // Near-miss names stay office: "PostScript" contains "pos"
+        // but is not a POS printer.
+        assert_eq!(
+            detect_protocol("PostScript Printer", "Adobe PDF", PrinterKind::Local),
+            ("gdi", "office")
         );
     }
 

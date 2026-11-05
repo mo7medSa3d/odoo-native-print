@@ -31,6 +31,20 @@ export function setSelectedPrinter(name) {
 
 /** Conservative protocol inference from the installed driver identity. */
 export function detectPrinterType(printer) {
+    // The desktop bridge ships the app's own protocol detection on
+    // every printer (Rust print-core detect_protocol, present
+    // since app 1.4.11): when it is there it is the ONLY detection
+    // — a second name heuristic in the page disagreed with it in
+    // the field and valid POS printers were routed to the wrong
+    // mode and refused. The heuristic below remains only as a
+    // fallback for bridges too old to ship the fields.
+    if (printer && printer.protocol) {
+        return {
+            mode: printer.protocol,
+            printerClass:
+                printer.printer_class || printer.printerClass || "office",
+        };
+    }
     const signature =
         `${(printer && printer.name) || ""} ${(printer && printer.driver) || ""}`
             .toLowerCase();
@@ -54,10 +68,18 @@ export function detectPrinterType(printer) {
     if (hasWord("epl")) {
         return { mode: "epl", printerClass: "label" };
     }
+    // Mirrors the Rust THERMAL_TOKENS table (print-core
+    // detect_protocol) — keep the two in sync. The generic
+    // identities matter as much as the brands: clone POS drivers
+    // very often identify only as "POS Printer" / "POS80" /
+    // "Thermal Printer".
     const thermalTokens = [
         "epson tm-", "epson tm ", "xprinter", "rongta", "bixolon",
         "star tsp", "citizen ct-", "sewoo", "esc/pos", "escpos",
-        "thermal receipt", "receipt printer", "pos-58", "pos-80",
+        "thermal receipt", "thermal printer", "receipt printer",
+        "pos printer", "pos-58", "pos-80", "pos58", "pos80",
+        "tm-t", "tm-m", "sunmi", "munbyn", "hprt", "cashino",
+        "snbc", "gprinter", "sprt",
     ];
     if (thermalTokens.some((t) => signature.includes(t))) {
         return { mode: "escpos", printerClass: "thermal" };

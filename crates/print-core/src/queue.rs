@@ -118,6 +118,15 @@ pub struct JobOptions {
     /// stored rows deserialize with `None` (serde default).
     #[serde(default)]
     pub label_gap_mm: Option<f64>,
+    /// Physical width (mm) of the source document itself — for a
+    /// POS receipt, the receipt element's rendered width. It is
+    /// the last width evidence for receipt rendering when neither
+    /// the job nor the driver reports media (owner directive,
+    /// 2026-11-05): a receipt is sized by the best width evidence
+    /// available, never refused while any evidence exists. Added
+    /// in 1.5.1: older stored rows deserialize with `None`.
+    #[serde(default)]
+    pub source_width_mm: Option<f64>,
 }
 
 impl Default for JobOptions {
@@ -133,6 +142,7 @@ impl Default for JobOptions {
             tray: None,
             media_roll_width_mm: None,
             label_gap_mm: None,
+            source_width_mm: None,
         }
     }
 }

@@ -405,6 +405,7 @@ pub async fn print_pdf(
         tray: req.tray.clone(),
         media_roll_width_mm: req.media_roll_width_mm,
         label_gap_mm: req.label_gap_mm,
+        source_width_mm: None,
     };
     let id = {
         let mut queue = lock_queue(&state.queue);
@@ -497,6 +498,7 @@ pub fn print_text(
         tray: None,
         media_roll_width_mm: None,
         label_gap_mm: None,
+        source_width_mm: None,
     };
     let id = {
         let mut queue = lock_queue(&state.queue);
@@ -531,6 +533,11 @@ pub struct PrintImageRequest {
     pub media_roll_width_mm: Option<f64>,
     #[serde(default)]
     pub label_gap_mm: Option<f64>,
+    /// Physical width (mm) of the source element the image was
+    /// rendered from (a POS receipt's on-screen width). Last-resort
+    /// width evidence for receipt rendering; sanitized at enqueue.
+    #[serde(default)]
+    pub source_width_mm: Option<f64>,
     #[serde(default)]
     pub mode: Option<String>,
     #[serde(default)]
@@ -554,6 +561,12 @@ pub async fn print_image(
     print_core::security::validate_payload_limits(req.bytes.len(), copies)
         .map_err(|e| format!("{e:?}"))?;
     let _img = print_render::decode_png(&req.bytes).map_err(|e| e.to_string())?;
+    // Width evidence from the page is a hint, not truth: keep only
+    // plausible physical widths (a receipt wider than half a metre
+    // or narrower than 20 mm is a bug or an attack, not media).
+    let source_width_mm = req
+        .source_width_mm
+        .filter(|w| w.is_finite() && (20.0..=500.0).contains(w));
     validate_job_input(
         req.bytes.len(),
         1,
@@ -584,6 +597,7 @@ pub async fn print_image(
         tray: None,
         media_roll_width_mm: req.media_roll_width_mm,
         label_gap_mm: req.label_gap_mm,
+        source_width_mm,
     };
     let id = {
         let mut queue = lock_queue(&state.queue);
@@ -877,6 +891,7 @@ pub fn run_test_print(
                     tray: None,
                     media_roll_width_mm: None,
                     label_gap_mm: None,
+                    source_width_mm: None,
                 },
                 10,
             )
@@ -898,6 +913,7 @@ pub fn run_test_print(
                     tray: None,
                     media_roll_width_mm: None,
                     label_gap_mm: None,
+                    source_width_mm: None,
                 },
                 5,
             )
@@ -922,6 +938,7 @@ pub fn run_test_print(
                     tray: None,
                     media_roll_width_mm: None,
                     label_gap_mm: None,
+                    source_width_mm: None,
                 },
                 5,
             )
@@ -942,6 +959,7 @@ pub fn run_test_print(
                     tray: None,
                     media_roll_width_mm: None,
                     label_gap_mm: None,
+                    source_width_mm: None,
                 },
                 0,
             )
@@ -1627,9 +1645,32 @@ impl NativePrintBackend {
         ((dots as u64 * dpi as u64 + 101) / 203) as u32
     }
 
+    /// Resolve the ESC/POS raster width (dots) for a receipt job
+    /// from the best width evidence available, in order:
+    /// 1. an explicit paper choice on the job (verified against
+    ///    the driver's roll forms when it reports any);
+    /// 2. the roll width the page resolved from this printer's
+    ///    driver capabilities at click time (rides on the job);
+    /// 3. the driver's own forms read here: a roll form first,
+    ///    else the narrowest receipt-range form — a POS queue
+    ///    whose driver reports its roll as a plain sheet form
+    ///    ("80 x 297 mm") still yields its real width;
+    /// 4. the receipt's own physical width (its rendered width,
+    ///    sent by the page).
+    ///
+    /// When both (3) and (4) exist but disagree wildly, the
+    /// receipt's own width wins: the form list then plainly does
+    /// not describe receipt media. Only a job with NO width
+    /// evidence at all fails — printing at an invented width is
+    /// worse than a clear error, but a valid printer is never
+    /// refused for lacking one specific form flag (owner
+    /// directive, 2026-11-05: POS prints to any printer, rendered
+    /// to that printer's dimensions).
     fn receipt_width_dots(
         printer: &str,
         paper_override: Option<&str>,
+        job_media_mm: Option<f64>,
+        source_width_mm: Option<f64>,
     ) -> Result<u32, BackendError> {
         if let Some(paper) = paper_override {
             let dots = print_render::receipt_dots_for_paper(paper).ok_or_else(|| {
@@ -1669,28 +1710,72 @@ impl NativePrintBackend {
             }
             return Ok(Self::scale_head_dots(dots, &caps));
         }
-        let capabilities = print_win::printer_capabilities(printer).map_err(|error| {
-            BackendError::fatal(
+        let sane = |w: &f64| w.is_finite() && (20.0..=500.0).contains(w);
+        // (2) The job's own media width: page-side driver evidence
+        // captured at click time. Head-DPI scaling still applies
+        // when the driver can be read here; a failed read must not
+        // kill a job whose width is already known.
+        if let Some(dots) = job_media_mm
+            .filter(sane)
+            .and_then(print_render::receipt_dots_for_width_mm)
+        {
+            return Ok(match print_win::printer_capabilities(printer) {
+                Ok(caps) => Self::scale_head_dots(dots, &caps),
+                Err(_) => dots,
+            });
+        }
+        // (3) Driver forms read here: roll first, else the
+        // narrowest receipt-range form.
+        let caps = print_win::printer_capabilities(printer).ok();
+        let form_mm = caps.as_ref().and_then(|caps| {
+            caps.forms
+                .iter()
+                .find(|form| form.roll)
+                .map(|form| form.size.width_mm)
+                .or_else(|| {
+                    caps.forms
+                        .iter()
+                        .map(|form| form.size.width_mm)
+                        .filter(|w| (40.0..=220.0).contains(w))
+                        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                })
+        });
+        let source_mm = source_width_mm.filter(sane);
+        // (3) vs (4): a form list that disagrees with the receipt
+        // itself by more than 30 mm is not describing this media.
+        if let Some(dots) = Self::form_width_dots(form_mm, source_mm) {
+            if let Some(caps) = &caps {
+                return Ok(Self::scale_head_dots(dots, caps));
+            }
+            return Ok(dots);
+        }
+        // (4) The receipt's own physical width.
+        if let Some(dots) = source_mm.and_then(print_render::receipt_dots_for_width_mm) {
+            return Ok(dots);
+        }
+        if caps.is_none() {
+            return Err(BackendError::fatal(
                 "PRINTER_CAPABILITIES_UNAVAILABLE",
-                &format!("The Windows driver did not expose printer capabilities: {error}"),
-            )
-        })?;
-        let roll = capabilities.forms.iter().find(|form| form.roll).ok_or_else(|| {
-            BackendError::fatal(
-                "ROLL_MEDIA_NOT_REPORTED",
-                "The printer driver did not report a continuous/receipt paper form. Install or update the vendor driver; Native Print will not assume 58mm or 80mm.",
-            )
-        })?;
-        let dots = print_render::receipt_dots_for_width_mm(roll.size.width_mm).ok_or_else(|| {
-            BackendError::fatal(
-                "ROLL_WIDTH_UNSUPPORTED",
-                &format!(
-                    "The detected roll width ({:.1} mm) has no verified ESC/POS print-head profile.",
-                    roll.size.width_mm
-                ),
-            )
-        })?;
-        Ok(Self::scale_head_dots(dots, &capabilities))
+                "The Windows driver did not expose printer capabilities, and the job carries no media width.",
+            ));
+        }
+        Err(BackendError::fatal(
+            "AUTO_MEDIA_UNAVAILABLE",
+            "No width evidence for ESC/POS rendering: the driver reports no usable form and the job carries no media width.",
+        ))
+    }
+
+    /// The (3)-vs-(4) width choice, pure for testing: the
+    /// form-derived width converts to dots unless the receipt's
+    /// own width disagrees with it by more than 30 mm, in which
+    /// case the form evidence is discarded (the caller then uses
+    /// the receipt's width).
+    fn form_width_dots(form_mm: Option<f64>, source_mm: Option<f64>) -> Option<u32> {
+        match (form_mm, source_mm) {
+            (Some(f), Some(s)) if (f - s).abs() > 30.0 => None,
+            (Some(f), _) => print_render::receipt_dots_for_width_mm(f),
+            _ => None,
+        }
     }
 
     fn parse_scale_policy(s: Option<&str>) -> ScalePolicy {
@@ -1977,7 +2062,7 @@ impl NativePrintBackend {
                     .ok_or_else(|| {
                         BackendError::fatal(
                             "AUTO_MEDIA_UNAVAILABLE",
-                            "No driver-reported roll width is available for ESC/POS rendering.",
+                            "No width evidence is available for ESC/POS rendering (no driver form, no job media width, no source width).",
                         )
                     })?;
                 let single =
@@ -2035,12 +2120,19 @@ impl PrintBackend for NativePrintBackend {
         // 1. Direct TCP 9100 transport (tcp://host:port or raw://host:port)
         if job.printer.starts_with("tcp://") || job.printer.starts_with("raw://") {
             let (host, port, _) = Self::parse_host_port(&job.printer, 9100)?;
-            // No local driver exists for a raw network printer: the
-            // server-reported roll width (from the driver forms it
-            // synced) is the media truth used to fit the output.
+            // No local driver exists for a raw network printer:
+            // the job's media width (resolved page-side from the
+            // printer's synced driver forms) is the media truth;
+            // the receipt's own physical width is the fallback —
+            // a network POS printer prints at its real width from
+            // either evidence, never neither (2026-11-05).
             let media_width_dots = opts
                 .media_roll_width_mm
-                .and_then(print_render::receipt_dots_for_width_mm);
+                .and_then(print_render::receipt_dots_for_width_mm)
+                .or_else(|| {
+                    opts.source_width_mm
+                        .and_then(print_render::receipt_dots_for_width_mm)
+                });
             let raw_bytes = match kind.as_str() {
                 "pdf" => Self::pdf_to_raw_stream(
                     &data,
@@ -2269,7 +2361,12 @@ impl PrintBackend for NativePrintBackend {
 
         let target_width_dots =
             if opts.mode == "escpos" && matches!(kind.as_str(), "pdf" | "image-png") {
-                Some(Self::receipt_width_dots(&target_name, paper)?)
+                Some(Self::receipt_width_dots(
+                    &target_name,
+                    paper,
+                    opts.media_roll_width_mm,
+                    opts.source_width_mm,
+                )?)
             } else {
                 None
             };
@@ -2545,6 +2642,31 @@ pub fn spawn_worker_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn receipt_width_evidence_choice() {
+        // Form evidence wins when it roughly agrees with the
+        // receipt (80 mm form, 79.4 mm receipt -> 576 dots).
+        assert_eq!(
+            NativePrintBackend::form_width_dots(Some(80.0), Some(79.4)),
+            Some(576)
+        );
+        // A form list describing other media entirely (A4 forms
+        // for an 80 mm receipt) is discarded, not obeyed.
+        assert_eq!(
+            NativePrintBackend::form_width_dots(Some(210.0), Some(79.4)),
+            None
+        );
+        // No form evidence: no dots from this step (the caller
+        // falls through to the receipt's own width).
+        assert_eq!(NativePrintBackend::form_width_dots(None, Some(80.0)), None);
+        // Non-catalogue form widths convert through the general
+        // printable-width model.
+        assert_eq!(
+            NativePrintBackend::form_width_dots(Some(100.0), None),
+            Some(728)
+        );
+    }
+
     #[test]
     fn tab_titles_and_pos_detection() {
         // Tab titles are derived from routes, never from page text.

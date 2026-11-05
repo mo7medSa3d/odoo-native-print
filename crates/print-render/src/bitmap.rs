@@ -8,6 +8,46 @@ pub struct Canvas {
     pub px: Vec<u8>,
 }
 
+/// Split a canvas height into consecutive row chunks of at most
+/// `rows_per_page` rows: the pagination plan for printing a tall
+/// image (a POS receipt) across several sheets. Returns
+/// `(start_row, row_count)` pairs covering the full height in
+/// order; an empty height or a non-positive page size yields no
+/// chunks (callers treat that as "nothing to print", never as a
+/// one-page fallback that would rescale the whole strip).
+pub fn page_row_chunks(height: u32, rows_per_page: u32) -> Vec<(u32, u32)> {
+    if height == 0 || rows_per_page == 0 {
+        return Vec::new();
+    }
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < height {
+        let rows = rows_per_page.min(height - start);
+        chunks.push((start, rows));
+        start += rows;
+    }
+    chunks
+}
+
+/// Extract one row chunk of a canvas as its own canvas (rows are
+/// copied; the chunk keeps the source width). Out-of-range chunks
+/// clamp to the canvas bounds.
+pub fn slice_canvas_rows(canvas: &Canvas, start_row: u32, rows: u32) -> Canvas {
+    let width = canvas.width as usize;
+    let start = (start_row.min(canvas.height)) as usize;
+    let end = ((start_row.saturating_add(rows)).min(canvas.height)) as usize;
+    let px = if width == 0 || end <= start {
+        Vec::new()
+    } else {
+        canvas.px[start * width..end * width].to_vec()
+    };
+    Canvas {
+        width: canvas.width,
+        height: (end - start) as u32,
+        px,
+    }
+}
+
 /// Downscale a mono bitmap so it fits inside `max_w` x `max_h`
 /// dots, preserving aspect ratio. Never upscales: a bitmap that
 /// already fits is returned unchanged. The result width is aligned
@@ -100,6 +140,30 @@ impl Canvas {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn row_chunks_cover_the_strip_exactly() {
+        assert_eq!(page_row_chunks(0, 100), Vec::new());
+        assert_eq!(page_row_chunks(100, 0), Vec::new());
+        assert_eq!(
+            page_row_chunks(250, 100),
+            vec![(0, 100), (100, 100), (200, 50)]
+        );
+        assert_eq!(page_row_chunks(100, 100), vec![(0, 100)]);
+        // Slicing returns the chunk's own rows, in order.
+        let mut c = Canvas::new(4, 6);
+        for y in 0..6 {
+            for x in 0..4 {
+                c.px[(y * 4 + x) as usize] = (y * 10) as u8;
+            }
+        }
+        let mid = slice_canvas_rows(&c, 2, 3);
+        assert_eq!((mid.width, mid.height), (4, 3));
+        assert_eq!(mid.px[0], 20);
+        assert_eq!(mid.px[11], 40);
+        let tail = slice_canvas_rows(&c, 5, 100);
+        assert_eq!(tail.height, 1);
+    }
+
     #[test]
     fn rect_corners_black_inside_white() {
         let mut c = Canvas::new(40, 30);

@@ -422,6 +422,14 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
     if (!element) {
         return false;
     }
+    // The receipt's own physical width (CSS px render at 96 dpi):
+    // the last width evidence for the native renderer when
+    // neither the job nor the target's driver reports media — a
+    // receipt is sized by the best evidence available, and this
+    // one is always available (owner directive, 2026-11-05).
+    const sourceWidthMm = element.offsetWidth
+        ? Math.round((element.offsetWidth * 25.4) / 96 * 10) / 10
+        : undefined;
     const bytes = await elementToPngBytes(element, 2);
     const idempotencyKey = posReceiptKey(safeRef, userId);
     const rule = target.rule;
@@ -444,6 +452,7 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
             // Never guess 58mm or 80mm for a kitchen/POS receipt.
             mediaRollWidthMm:
                 (rule.media && rule.media.roll_width_mm) || undefined,
+            sourceWidthMm,
             copies: rule.copies || 1,
             bytes,
         });

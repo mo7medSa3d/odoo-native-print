@@ -60,8 +60,18 @@ pub fn receipt_dots_for_paper(paper: &str) -> Option<u32> {
     }
 }
 
-/// Map the printer driver's reported roll width to a known ESC/POS print head.
-/// Unsupported widths are rejected rather than silently treated as 80mm.
+/// Map a receipt paper width (mm) to the ESC/POS raster width in
+/// dots at 203 dpi. Widths with verified head profiles keep their
+/// exact dot counts (58 mm paper -> 48 mm printable = 384; 80/72 mm
+/// -> 72 mm = 576; 112 mm -> 104 mm = 832). Any other plausible
+/// receipt width uses the same physical model those profiles
+/// encode — the printable area is the paper minus ~8 mm of head
+/// margins, at ~8 dots per mm, rounded down to whole raster bytes
+/// (GS v 0 rows are byte-addressed). A POS printer prints at ITS
+/// width; it is never refused for missing a catalogue entry
+/// (owner directive, 2026-11-05: POS prints to any printer, sized
+/// to that printer's paper). Widths outside the receipt range are
+/// not receipt media and return None.
 pub fn receipt_dots_for_width_mm(width_mm: f64) -> Option<u32> {
     if !width_mm.is_finite() || width_mm <= 0.0 {
         return None;
@@ -72,6 +82,10 @@ pub fn receipt_dots_for_width_mm(width_mm: f64) -> Option<u32> {
         Some(576)
     } else if (width_mm - 112.0).abs() <= 8.0 {
         Some(832)
+    } else if (40.0..=220.0).contains(&width_mm) {
+        let printable_mm = width_mm - 8.0;
+        let dots = (printable_mm * 203.0 / 25.4 / 8.0).floor() as u32 * 8;
+        Some(dots.clamp(256, 1664))
     } else {
         None
     }
@@ -82,7 +96,7 @@ pub fn receipt_png_to_escpos_width(
     png_bytes: &[u8],
     target_width_dots: u32,
 ) -> Result<Vec<u8>, ImageError> {
-    if !(256..=1200).contains(&target_width_dots) || target_width_dots % 8 != 0 {
+    if !(256..=2048).contains(&target_width_dots) || target_width_dots % 8 != 0 {
         return Err(ImageError::DimensionsTooLarge(target_width_dots, 1));
     }
     let img = decode_png(png_bytes)?;
@@ -262,7 +276,17 @@ mod tests {
         assert_eq!(receipt_dots_for_width_mm(58.0), Some(384));
         assert_eq!(receipt_dots_for_width_mm(80.0), Some(576));
         assert_eq!(receipt_dots_for_width_mm(112.0), Some(832));
-        assert_eq!(receipt_dots_for_width_mm(100.0), None);
+        // Non-catalogue widths follow the printable-width model
+        // (paper - 8 mm at 203 dpi, whole bytes): POS prints at
+        // whatever width the printer actually has.
+        assert_eq!(receipt_dots_for_width_mm(100.0), Some(728));
+        assert_eq!(receipt_dots_for_width_mm(90.0), Some(648));
+        assert_eq!(receipt_dots_for_width_mm(76.0), Some(576));
+        assert_eq!(receipt_dots_for_width_mm(44.0), Some(280));
+        assert_eq!(receipt_dots_for_width_mm(210.0), Some(1608));
+        // Outside the receipt range there is no honest mapping.
+        assert_eq!(receipt_dots_for_width_mm(30.0), None);
+        assert_eq!(receipt_dots_for_width_mm(250.0), None);
         assert_eq!(receipt_dots_for_width_mm(f64::NAN), None);
     }
 
@@ -367,8 +391,10 @@ mod tests {
         let bytes = half_black_rgba_png(832, 8);
         let stream = receipt_png_to_escpos_width(&bytes, 832).unwrap();
         assert_eq!(raster_bands(&stream), vec![(832 / 8, 8)]);
-        // Not a multiple of 8, below the floor, above the ceiling.
-        for bad in [100u32, 128, 1600] {
+        // Not a multiple of 8, below the floor, above the ceiling
+        // (the ceiling rose to 2048 with generalized widths: a
+        // 210 mm receipt head legitimately renders 1608 dots).
+        for bad in [100u32, 128, 2056] {
             assert!(
                 receipt_png_to_escpos_width(&bytes, bad).is_err(),
                 "target {bad} must be rejected"

@@ -3,7 +3,9 @@
 //! closed on every path out of its function.
 
 use crate::{GdiJobOptions, GdiPrintError};
-use print_core::paper::{match_paper, match_paper_auto, Form, MatchKind, ScalePolicy};
+use print_core::paper::{
+    match_paper, match_paper_auto, pick_sheet_form, Form, MatchKind, PaperMatch, ScalePolicy,
+};
 use print_core::PageSize;
 use print_render::split_subjobs;
 use std::ffi::c_void;
@@ -566,6 +568,8 @@ pub fn print_canvas_gdi_configured(
     // POS/kitchen PNG jobs that use GDI must obey the same media contract as
     // PDF jobs: derive the physical page geometry from the 203-DPI raster,
     // then select an exact/roll/custom/larger media form from the driver.
+    // A strip taller than every sheet is not a mismatch: it paginates
+    // across sheets (see the fallback below).
     let page_size = match roll_width_mm {
         Some(w) if (20.0..=500.0).contains(&w) => {
             PageSize::new(w, w * canvas.height as f64 / canvas.width as f64)
@@ -583,11 +587,24 @@ pub fn print_canvas_gdi_configured(
                 .to_string(),
         ));
     }
-    let matched = match_paper_auto(page_size, &capabilities).map_err(|error| {
-        GdiPrintError::setup(format!(
-            "PAPER_MISMATCH: no safe media form for the receipt image: {error}"
-        ))
-    })?;
+    let matched = match match_paper_auto(page_size, &capabilities) {
+        Ok(m) => m,
+        Err(error) => match pick_sheet_form(&capabilities.forms, page_size.width_mm) {
+            // The strip fits no form whole: it paginates onto the
+            // best sheet below instead of refusing the job — a
+            // receipt's height is not a paper mismatch (owner
+            // directive, 2026-11-05: POS prints to any printer).
+            Some(form) => PaperMatch {
+                kind: MatchKind::NearestLargerFit,
+                form,
+            },
+            None => {
+                return Err(GdiPrintError::setup(format!(
+                    "PAPER_MISMATCH: no safe media form for the receipt image: {error}"
+                )));
+            }
+        },
+    };
     let media_page_size = matched.form.size;
     let devmode = build_printer_devmode(
         printer,
@@ -626,14 +643,28 @@ pub fn print_canvas_gdi_configured(
         unsafe { DeleteDC(dc) };
         return Err(GdiPrintError::setup(format!("StartDoc: {err}")));
     }
+    // Pagination decision: a receipt strip taller than the chosen
+    // sheet is sliced across pages (the office/virtual printer
+    // case). Roll and custom matches already carry the strip's own
+    // height, so they keep printing as one continuous page.
+    let paginate = !matched.form.roll
+        && page_size.height_mm
+            > matched.form.size.height_mm + print_core::paper::EXACT_TOLERANCE_MM;
     let mut sent = 0usize;
     let mut failure: Option<String> = None;
-    for _ in 0..copies.max(1) {
-        match blit_dib_page(dc, &dib, Some(page_size), matched.kind) {
-            Ok(()) => sent += 1,
-            Err(error) => {
-                failure = Some(error);
-                break;
+    if paginate {
+        match print_canvas_pages(dc, canvas, copies.max(1)) {
+            Ok(pages) => sent = pages,
+            Err(error) => failure = Some(error),
+        }
+    } else {
+        for _ in 0..copies.max(1) {
+            match blit_dib_page(dc, &dib, Some(page_size), matched.kind) {
+                Ok(()) => sent += 1,
+                Err(error) => {
+                    failure = Some(error);
+                    break;
+                }
             }
         }
     }
@@ -649,6 +680,90 @@ pub fn print_canvas_gdi_configured(
         Some(error) => Err(GdiPrintError::mid_print(error)),
         None => Ok(sent),
     }
+}
+
+/// Print a tall canvas (a receipt strip) across as many sheet
+/// pages as its height needs: the image is scaled ONCE to the
+/// page's printable width, then sliced into page-height row
+/// chunks printed top-aligned, page after page — the same thing
+/// a browser does with a long receipt on A4. Returns the number
+/// of pages printed.
+fn print_canvas_pages(
+    dc: Hdc,
+    canvas: &print_render::bitmap::Canvas,
+    copies: u16,
+) -> Result<usize, String> {
+    let area_w = unsafe { GetDeviceCaps(dc, HORZRES) };
+    let area_h = unsafe { GetDeviceCaps(dc, VERTRES) };
+    if area_w <= 0 || area_h <= 0 || canvas.width == 0 {
+        return Err(format!("GetDeviceCaps: {}", last_error()));
+    }
+    let scale = area_w as f64 / canvas.width as f64;
+    let rows_per_page = ((area_h as f64 / scale).floor() as u32).max(1);
+    let chunks = print_render::bitmap::page_row_chunks(canvas.height, rows_per_page);
+    if chunks.is_empty() {
+        return Err("receipt image has no rows to print".to_string());
+    }
+    let mut sent = 0usize;
+    for _ in 0..copies.max(1) {
+        for (start, rows) in &chunks {
+            let chunk = print_render::bitmap::slice_canvas_rows(canvas, *start, *rows);
+            let page = print_render::RenderedPage {
+                width_px: chunk.width,
+                height_px: chunk.height,
+                mode: print_render::RenderMode::Grayscale,
+                dpi: 203,
+                pixels: chunk.px.clone(),
+            };
+            let dib = crate::dib::build_dib(&page);
+            let drawn_h = ((chunk.height as f64 * scale).round() as u32)
+                .min(area_h as u32)
+                .max(1);
+            blit_dib_top(dc, &dib, area_w as u32, drawn_h)?;
+            sent += 1;
+        }
+    }
+    Ok(sent)
+}
+
+/// Draw one DIB as a full-width, top-aligned page (StartPage ..
+/// EndPage): the chunk blit for paginated receipt strips, where
+/// vertical centering (fit_to_page) would misplace every slice.
+fn blit_dib_top(
+    dc: Hdc,
+    dib: &crate::dib::DibImage,
+    dest_w: u32,
+    dest_h: u32,
+) -> Result<(), String> {
+    if unsafe { StartPage(dc) } <= 0 {
+        return Err(format!("StartPage: {}", last_error()));
+    }
+    let info = dib.bitmap_info();
+    let drawn = unsafe {
+        StretchDIBits(
+            dc,
+            0,
+            0,
+            dest_w as i32,
+            dest_h as i32,
+            0,
+            0,
+            dib.width as i32,
+            dib.height as i32,
+            dib.bits.as_ptr() as *const c_void,
+            info.as_ptr() as *const c_void,
+            DIB_RGB_COLORS,
+            SRCCOPY,
+        )
+    };
+    let end = unsafe { EndPage(dc) };
+    if drawn == GDI_ERROR || drawn == 0 {
+        return Err(format!("StretchDIBits: {}", last_error()));
+    }
+    if end <= 0 {
+        return Err(format!("EndPage: {}", last_error()));
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
