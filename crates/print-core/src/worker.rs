@@ -59,7 +59,14 @@ pub struct WorkerConfig {
 impl Default for WorkerConfig {
     fn default() -> Self {
         Self {
-            max_attempts: 4,
+            // Six attempts over ~15 s of backoff (0.5+1+2+4+8 s,
+            // capped): transient printer states — a network printer
+            // waking, a spooler momentarily busy, a brief offline —
+            // ride through instead of dead-lettering a printable job
+            // after ~4 s (owner practicality directive, 2026-11-05).
+            // Genuinely dead printers still fail, with the payload
+            // kept for one-click retry.
+            max_attempts: 6,
             backoff_base_ms: 500,
             backoff_max_ms: 30_000,
         }

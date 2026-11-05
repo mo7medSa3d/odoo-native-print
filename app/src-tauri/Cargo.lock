@@ -2137,7 +2137,7 @@ dependencies = [
 
 [[package]]
 name = "odoo-native-print-app"
-version = "1.5.1"
+version = "1.5.2"
 dependencies = [
  "print-core",
  "print-ipp",

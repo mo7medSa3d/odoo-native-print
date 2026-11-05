@@ -1682,13 +1682,14 @@ impl NativePrintBackend {
             // An explicit paper choice is verified against the driver's
             // reported roll forms when they are available: rendering an
             // 80mm receipt for a 58mm roll (or the reverse) clips or
-            // scales the customer's receipt.
-            let caps = print_win::printer_capabilities(printer).map_err(|error| {
-                BackendError::fatal(
-                    "PRINTER_CAPABILITIES_UNAVAILABLE",
-                    &format!("The Windows driver did not expose printer capabilities: {error}"),
-                )
-            })?;
+            // scales the customer's receipt. A FAILED capabilities read
+            // must not kill it (2026-11-05 practicality round): the
+            // paper was chosen deliberately, so print it unverified —
+            // the same rule step (2) applies to job-carried widths.
+            let caps = match print_win::printer_capabilities(printer) {
+                Ok(caps) => caps,
+                Err(_) => return Ok(dots),
+            };
             {
                 let rolls: Vec<f64> = caps
                     .forms
@@ -1754,7 +1755,11 @@ impl NativePrintBackend {
             return Ok(dots);
         }
         if caps.is_none() {
-            return Err(BackendError::fatal(
+            // A capabilities read can fail transiently (spooler
+            // busy, driver still initializing): retryable, so the
+            // job rides the backoff envelope instead of dying on a
+            // momentary read failure.
+            return Err(BackendError::retryable(
                 "PRINTER_CAPABILITIES_UNAVAILABLE",
                 "The Windows driver did not expose printer capabilities, and the job carries no media width.",
             ));
@@ -2167,14 +2172,25 @@ impl PrintBackend for NativePrintBackend {
                     v
                 }
             };
-            print_raw::tcp9100::send_raw(
+            // A connect-phase failure proves zero bytes reached
+            // the printer (it is off, asleep, or unreachable), so
+            // the job retries safely; only a write-phase failure is
+            // ambiguous (2026-11-05 practicality round).
+            print_raw::tcp9100::send_raw_phased(
                 &host,
                 port,
                 &raw_bytes,
                 Duration::from_secs(5),
                 Duration::from_secs(20),
             )
-            .map_err(|e| BackendError::ambiguous("TCP9100_ERROR", &e.to_string()))?;
+            .map_err(|e| match e {
+                print_raw::tcp9100::SendPhaseError::Connect(io) => {
+                    BackendError::retryable("TCP9100_CONNECT_ERROR", &io.to_string())
+                }
+                print_raw::tcp9100::SendPhaseError::Write(io) => {
+                    BackendError::ambiguous("TCP9100_ERROR", &io.to_string())
+                }
+            })?;
             return Ok(());
         }
 
@@ -2427,9 +2443,16 @@ impl PrintBackend for NativePrintBackend {
             ("pdf", "gdi") => {
                 let policy = Self::parse_scale_policy(opts.scale_policy.as_deref());
                 // Validate page geometry against the current Windows driver.
+                // Both failures here are RETRYABLE (2026-11-05
+                // practicality round): a capabilities read fails
+                // transiently while the spooler/driver is busy or
+                // initializing, and an empty form list at printer
+                // power-on is the same condition one read later.
+                // A genuinely broken driver still fails — after the
+                // retry envelope, with the same codes.
                 let capabilities =
                     print_win::printer_capabilities(&target_name).map_err(|error| {
-                        BackendError::fatal(
+                        BackendError::retryable(
                             "PRINTER_CAPABILITIES_UNAVAILABLE",
                             &format!(
                                 "The Windows driver did not expose media capabilities: {error}"
@@ -2439,7 +2462,7 @@ impl PrintBackend for NativePrintBackend {
                 if let Ok(info) = print_render::parse_pdf_info(&data) {
                     for page in &info.pages {
                         if capabilities.forms.is_empty() && !capabilities.custom_size_supported {
-                            return Err(BackendError::fatal(
+                            return Err(BackendError::retryable(
                                 "PRINTER_MEDIA_UNAVAILABLE",
                                 "The installed driver reported no paper forms or custom-size limits; install/update the vendor printer driver.",
                             ));

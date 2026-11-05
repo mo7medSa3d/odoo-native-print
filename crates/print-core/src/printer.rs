@@ -53,7 +53,8 @@ pub fn decode_printer_status(flags: u32) -> PrinterStatus {
     const PAPER_PROBLEM: u32 = 0x0000_0040;
     const BUSY: u32 = 0x0000_0200;
     const MANUAL_FEED: u32 = 0x0000_0020;
-    const NOT_AVAILABLE: u32 = 0x0000_1000;
+    // PRINTER_STATUS_NOT_AVAILABLE (0x1000) is deliberately not
+    // decoded to a blocking state: see the Unknown fallthrough.
     const OUTPUT_BIN_FULL: u32 = 0x0000_0800;
     const USER_INTERVENTION: u32 = 0x0010_0000;
     // Priority: what the user must fix first, then activity states.
@@ -65,7 +66,7 @@ pub fn decode_printer_status(flags: u32) -> PrinterStatus {
         PrinterStatus::PaperOut
     } else if flags & NO_TONER != 0 {
         PrinterStatus::NoToner
-    } else if flags & OFFLINE != 0 || flags & NOT_AVAILABLE != 0 {
+    } else if flags & OFFLINE != 0 {
         PrinterStatus::Offline
     } else if flags & USER_INTERVENTION != 0
         || flags & MANUAL_FEED != 0
@@ -539,7 +540,12 @@ mod tests {
             PrinterStatus::UserIntervention
         ); // output bin full
         assert_eq!(decode_printer_status(0x0000_0040), PrinterStatus::Error); // paper problem
-        assert_eq!(decode_printer_status(0x0000_1000), PrinterStatus::Offline); // not available
+                                                                              // NOT_AVAILABLE alone means "state unknown" (drivers set
+                                                                              // it while initializing or waking); it is not evidence the
+                                                                              // device is offline and must not block printing. Combined
+                                                                              // with the real OFFLINE flag it stays Offline.
+        assert_eq!(decode_printer_status(0x0000_1000), PrinterStatus::Unknown);
+        assert_eq!(decode_printer_status(0x0000_1080), PrinterStatus::Offline);
         assert_eq!(decode_printer_status(0x0000_0200), PrinterStatus::Printing);
         // busy
     }

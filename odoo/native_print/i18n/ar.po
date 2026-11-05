@@ -333,6 +333,12 @@ msgstr "تعذرت الطباعة الأصلية على \"%s\": %s. تم تنز�
 
 #. module: native_print
 #. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_handler.js:0
+msgid "No printer is available on this device right now. The file was downloaded instead."
+msgstr "لا توجد طابعة متاحة على هذا الجهاز الآن. تم تنزيل الملف بدلاً من ذلك."
+
+#. module: native_print
+#. odoo-javascript
 #: code:addons/native_print/static/src/js/pos_native_print.js:0
 msgid ""
 "Native Print could not print this receipt, and nothing was printed. Check "

@@ -234,6 +234,16 @@ async function handleReportSubmission(action, options, env, bridge) {
         preferPrinterName: (prefill && prefill.printer) || undefined,
     }).catch(() => null);
     if (!target) {
+        // Inside the app, falling back to a downloaded file with
+        // no word reads as "printing did nothing": say so first
+        // (2026-11-05). In a normal browser there is no bridge and
+        // this handler never runs, so the download stays silent
+        // there as it should.
+        notifyUser(
+            env,
+            _t("No printer is available on this device right now. The file was downloaded instead."),
+            "warning",
+        );
         return undefined; // No printer on this PC right now.
     }
     const rule = target.rule;

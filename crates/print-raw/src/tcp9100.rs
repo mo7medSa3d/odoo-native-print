@@ -2,6 +2,27 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
+/// Which phase of a raw TCP send failed. The distinction decides
+/// whether a retry is safe: a connect-phase failure proves ZERO
+/// bytes reached the printer (nothing could have printed), while
+/// a write-phase failure leaves the outcome unknown.
+#[derive(Debug)]
+pub enum SendPhaseError {
+    Connect(std::io::Error),
+    Write(std::io::Error),
+}
+
+impl std::fmt::Display for SendPhaseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SendPhaseError::Connect(e) => write!(f, "connect failed: {e}"),
+            SendPhaseError::Write(e) => write!(f, "write failed: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for SendPhaseError {}
+
 /// Raw TCP 9100 (JetDirect) transport: connect, write all bytes, close.
 /// Closing the connection is the end-of-job signal for these printers.
 /// Timeouts are always set: a hung printer must never hang the worker.
@@ -12,15 +33,42 @@ pub fn send_raw(
     connect_timeout: Duration,
     io_timeout: Duration,
 ) -> std::io::Result<()> {
+    send_raw_phased(host, port, bytes, connect_timeout, io_timeout).map_err(|e| match e {
+        SendPhaseError::Connect(e) | SendPhaseError::Write(e) => e,
+    })
+}
+
+/// [`send_raw`] with the failure phase preserved (see
+/// [`SendPhaseError`]).
+pub fn send_raw_phased(
+    host: &str,
+    port: u16,
+    bytes: &[u8],
+    connect_timeout: Duration,
+    io_timeout: Duration,
+) -> Result<(), SendPhaseError> {
     let addr = (host, port)
-        .to_socket_addrs()?
+        .to_socket_addrs()
+        .map_err(SendPhaseError::Connect)?
         .next()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "no address"))?;
-    let mut stream = TcpStream::connect_timeout(&addr, connect_timeout)?;
-    stream.set_write_timeout(Some(io_timeout))?;
-    stream.set_read_timeout(Some(io_timeout))?;
-    stream.write_all(bytes)?;
-    stream.shutdown(std::net::Shutdown::Write)?;
+        .ok_or_else(|| {
+            SendPhaseError::Connect(std::io::Error::new(
+                std::io::ErrorKind::AddrNotAvailable,
+                "no address",
+            ))
+        })?;
+    let mut stream =
+        TcpStream::connect_timeout(&addr, connect_timeout).map_err(SendPhaseError::Connect)?;
+    stream
+        .set_write_timeout(Some(io_timeout))
+        .map_err(SendPhaseError::Write)?;
+    stream
+        .set_read_timeout(Some(io_timeout))
+        .map_err(SendPhaseError::Write)?;
+    stream.write_all(bytes).map_err(SendPhaseError::Write)?;
+    stream
+        .shutdown(std::net::Shutdown::Write)
+        .map_err(SendPhaseError::Write)?;
     Ok(())
 }
 
@@ -170,6 +218,25 @@ pub fn decode_dle_eot_paper(status: u8) -> PaperStatus {
 mod tests {
     use super::*;
     use std::net::TcpListener;
+
+    #[test]
+    fn connect_failure_is_connect_phase() {
+        // A port nothing listens on: the failure must surface as
+        // the Connect phase (zero bytes sent -> safe to retry),
+        // never as an ambiguous write failure.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let err = send_raw_phased(
+            "127.0.0.1",
+            port,
+            b"job",
+            Duration::from_millis(500),
+            Duration::from_millis(500),
+        )
+        .unwrap_err();
+        assert!(matches!(err, SendPhaseError::Connect(_)), "{err:?}");
+    }
 
     #[test]
     fn dle_eot_error_table_n1_n3() {

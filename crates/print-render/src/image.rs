@@ -15,7 +15,10 @@ use thiserror::Error;
 
 pub const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 pub const MAX_IMAGE_PIXELS: u64 = 50_000_000;
-pub const MAX_IMAGE_SIDE: u32 = 20_000;
+/// One side may be a very long receipt strip: at receipt widths
+/// (~640 px) a 40,000 px strip is ~26 Mpx, still bounded by
+/// MAX_IMAGE_PIXELS; the pixel cap is the real memory guard.
+pub const MAX_IMAGE_SIDE: u32 = 40_000;
 /// Receipt threshold: receipt text is pure black on white; 160 keeps
 /// anti-aliased edges while never inventing dots from paper-white.
 pub const RECEIPT_THRESHOLD: u8 = 160;
@@ -308,11 +311,20 @@ mod tests {
     fn garbage_and_oversize_rejected() {
         assert!(matches!(decode_png(b"not a png"), Err(ImageError::NotPng)));
         assert!(matches!(decode_png(&[]), Err(ImageError::TooLarge)));
-        let wide = make_png(20_001, 1, png::ColorType::Grayscale, &vec![255u8; 20_001]);
+        let wide = make_png(40_001, 1, png::ColorType::Grayscale, &vec![255u8; 40_001]);
         assert!(matches!(
             decode_png(&wide),
-            Err(ImageError::DimensionsTooLarge(20_001, 1))
+            Err(ImageError::DimensionsTooLarge(40_001, 1))
         ));
+        // A long receipt strip (narrow, very tall) stays printable:
+        // the pixel cap, not the side cap, is the memory guard.
+        let strip = make_png(
+            640,
+            30_000,
+            png::ColorType::Grayscale,
+            &vec![255u8; 640 * 30_000],
+        );
+        assert!(decode_png(&strip).is_ok());
     }
     #[test]
     fn scale_averages_blocks() {
