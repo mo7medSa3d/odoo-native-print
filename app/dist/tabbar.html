@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Yaseir Print — Tabs</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+    background: #101623;
+    color: #e6ebf4;
+    display: flex; align-items: stretch; gap: 6px;
+    padding: 6px 8px;
+    user-select: none; -webkit-user-select: none;
+  }
+  .nav-group { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+  .tb-btn {
+    width: 32px; height: 32px; border: 0; border-radius: 8px;
+    background: transparent; color: #c7d0dd; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .tb-btn:hover { background: #1e293b; color: #fff; }
+  .tb-btn svg { width: 17px; height: 17px; }
+  [dir="rtl"] .flip-rtl { transform: scaleX(-1); }
+  .tabs {
+    flex: 1 1 auto; display: flex; align-items: center; gap: 5px;
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+    padding: 1px;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    flex: 0 1 190px; min-width: 92px; max-width: 190px; height: 32px;
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 6px 0 10px;
+    background: #1b2536; color: #aeb9c9;
+    border: 1px solid rgba(255,255,255,.05);
+    border-radius: 8px; cursor: pointer; white-space: nowrap;
+  }
+  [dir="rtl"] .tab { padding: 0 10px 0 6px; }
+  .tab:hover { background: #232f45; color: #dbe4f0; }
+  .tab.active { background: #f4f7fc; color: #17202e; border-color: transparent; }
+  .tab .t-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
+  .tab .t-pos {
+    flex: 0 0 auto; font-size: 9.5px; font-weight: 700; letter-spacing: .04em;
+    background: #0953de; color: #fff; border-radius: 4px; padding: 1px 4px;
+  }
+  .tab .t-close {
+    flex: 0 0 auto; width: 18px; height: 18px; border: 0; border-radius: 5px;
+    background: transparent; color: inherit; cursor: pointer; font-size: 13px;
+    display: flex; align-items: center; justify-content: center; line-height: 1;
+  }
+  .tab .t-close:hover { background: rgba(220, 60, 60, .18); color: #e5484d; }
+  .tab.active .t-close:hover { background: rgba(220, 60, 60, .14); }
+  .tb-action {
+    flex: 0 0 auto; height: 32px; border: 0; border-radius: 8px; cursor: pointer;
+    display: flex; align-items: center; gap: 6px; padding: 0 10px;
+    background: #1b2536; color: #c7d0dd; font-size: 12.5px; font-family: inherit;
+  }
+  .tb-action:hover { background: #232f45; color: #fff; }
+  .tb-action.brand { background: #0953de; color: #fff; }
+  .tb-action.brand:hover { background: #0b47bd; }
+  .tb-action img { width: 17px; height: 17px; border-radius: 4px; }
+  .tb-action svg { width: 15px; height: 15px; }
+</style>
+</head>
+<body>
+  <div class="nav-group">
+    <button class="tb-btn" id="btnBack" title="Back / رجوع">
+      <svg class="flip-rtl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
+    </button>
+    <button class="tb-btn" id="btnForward" title="Forward / تقدم">
+      <svg class="flip-rtl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="10 6 16 12 10 18"/></svg>
+    </button>
+    <button class="tb-btn" id="btnReload" title="Reload / إعادة تحميل">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>
+    </button>
+  </div>
+
+  <div class="tabs" id="tabs"></div>
+
+  <button class="tb-action" id="btnNewTab" title="New tab / تبويب جديد">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    <span data-i18n="new_tab">تبويب جديد</span>
+  </button>
+  <button class="tb-action brand" id="btnCc" title="Control Center / مركز التحكم">
+    <img src="app-icon.png" alt=""/>
+    <span data-i18n="cc">مركز التحكم</span>
+  </button>
+
+<script>
+  "use strict";
+  var invoke = function (cmd, args) {
+    return window.__TAURI_INTERNALS__.invoke(cmd, args || {});
+  };
+  var STR = {
+    ar: { new_tab: "تبويب جديد", cc: "مركز التحكم" },
+    en: { new_tab: "New Tab", cc: "Control Center" }
+  };
+  var lang = "ar";
+  function applyLang() {
+    var saved = null;
+    try { saved = localStorage.getItem("np_cc_lang"); } catch (e) {}
+    var next = saved === "en" ? "en" : "ar";
+    if (next !== lang || !document.documentElement.lang) {
+      lang = next;
+      document.documentElement.lang = lang;
+      document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
+      document.querySelectorAll("[data-i18n]").forEach(function (el) {
+        el.textContent = STR[lang][el.getAttribute("data-i18n")] || el.textContent;
+      });
+    }
+  }
+  var lastSignature = "";
+  function render(tabs) {
+    var sig = lang + "|" + tabs.map(function (t) {
+      return t.label + ":" + t.title + ":" + (t.active ? 1 : 0) + ":" + (t.is_pos ? 1 : 0);
+    }).join("|");
+    if (sig === lastSignature) return;
+    lastSignature = sig;
+    var strip = document.getElementById("tabs");
+    strip.innerHTML = "";
+    tabs.forEach(function (t) {
+      var el = document.createElement("div");
+      el.className = "tab" + (t.active ? " active" : "");
+      el.title = t.url || "";
+      var title = document.createElement("span");
+      title.className = "t-title";
+      title.textContent = t.title;
+      el.appendChild(title);
+      if (t.is_pos) {
+        var tag = document.createElement("span");
+        tag.className = "t-pos";
+        tag.textContent = "POS";
+        el.appendChild(tag);
+      }
+      var close = document.createElement("button");
+      close.className = "t-close";
+      close.textContent = "×";
+      close.title = lang === "ar" ? "إغلاق التبويب" : "Close tab";
+      close.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        invoke("tab_close", { label: t.label }).then(refresh).catch(function () {});
+      });
+      el.appendChild(close);
+      el.addEventListener("click", function () {
+        invoke("tab_switch", { label: t.label }).then(refresh).catch(function () {});
+      });
+      strip.appendChild(el);
+    });
+    var active = strip.querySelector(".tab.active");
+    if (active && active.scrollIntoView) {
+      active.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }
+  function refresh() {
+    applyLang();
+    invoke("tab_list", {}).then(render).catch(function () {});
+  }
+  document.getElementById("btnBack").addEventListener("click", function () {
+    invoke("nav_back", {}).catch(function () {});
+  });
+  document.getElementById("btnForward").addEventListener("click", function () {
+    invoke("nav_forward", {}).catch(function () {});
+  });
+  document.getElementById("btnReload").addEventListener("click", function () {
+    invoke("nav_reload", {}).catch(function () {});
+  });
+  document.getElementById("btnNewTab").addEventListener("click", function () {
+    // An empty URL asks Rust for a fresh tab on the configured
+    // origin (the Control Center when none is configured).
+    invoke("tab_open", { url: "" }).then(refresh).catch(function () {
+      invoke("open_control_center", {}).catch(function () {});
+    });
+  });
+  document.getElementById("btnCc").addEventListener("click", function () {
+    invoke("open_control_center", {}).catch(function () {});
+  });
+  applyLang();
+  refresh();
+  window.setInterval(refresh, 700);
+</script>
+</body>
+</html>

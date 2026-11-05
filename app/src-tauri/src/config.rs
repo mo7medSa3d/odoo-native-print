@@ -223,6 +223,49 @@ pub fn save_origin(config_dir: &Path, origin: &str, auto_reprint: bool) -> Resul
     Ok(validated)
 }
 
+/// Per-printer defaults chosen in the Control Center (owner brief,
+/// 2026-11-05): the paper, tray, duplex and color a printer uses
+/// when a print job does not specify them itself. They live in
+/// their own file next to config.json — save_origin rewrites
+/// config.json wholesale and must not swallow them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct PrinterSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paper: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tray: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duplex: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<bool>,
+}
+
+pub type PrinterSettingsMap = std::collections::BTreeMap<String, PrinterSettings>;
+
+pub fn load_printer_settings(config_dir: &Path) -> PrinterSettingsMap {
+    let file = config_dir.join("printer_settings.json");
+    if let Ok(raw) = std::fs::read_to_string(&file) {
+        if let Ok(parsed) = serde_json::from_str::<PrinterSettingsMap>(&raw) {
+            return parsed;
+        }
+    }
+    PrinterSettingsMap::new()
+}
+
+pub fn save_printer_settings(
+    config_dir: &Path,
+    settings: &PrinterSettingsMap,
+) -> Result<(), String> {
+    std::fs::create_dir_all(config_dir).map_err(|e| e.to_string())?;
+    let file = config_dir.join("printer_settings.json");
+    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    // Same write-temp-then-rename discipline as save_origin (I2).
+    let tmp = config_dir.join("printer_settings.json.tmp");
+    std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &file).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,6 +281,28 @@ mod tests {
         assert!(validate_origin("http://odoo.company.local:8069").is_err());
         assert!(validate_origin("http://999.999.999.999:8069").is_err());
         assert!(validate_origin("not a url").is_err());
+    }
+
+    #[test]
+    fn printer_settings_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("np-pset-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Missing file reads as an empty map, never an error.
+        assert!(load_printer_settings(&dir).is_empty());
+        let mut map = PrinterSettingsMap::new();
+        map.insert(
+            "HP LaserJet".to_string(),
+            PrinterSettings {
+                paper: Some("A4".to_string()),
+                tray: Some("Tray 2".to_string()),
+                duplex: Some(true),
+                color: None,
+            },
+        );
+        save_printer_settings(&dir, &map).unwrap();
+        let back = load_printer_settings(&dir);
+        assert_eq!(back, map);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -10,5 +10,5 @@
 pub mod client;
 pub mod proto;
 
-pub use client::{IppClient, IppError, IppJobOptions, JobInfo, PrinterCaps};
+pub use client::{tray_to_media_source, IppClient, IppError, IppJobOptions, JobInfo, PrinterCaps};
 pub use proto::{parse_message, Attr, IppMessage, Value};

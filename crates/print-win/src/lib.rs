@@ -98,8 +98,9 @@ mod win;
 #[cfg(windows)]
 pub use win::{
     default_printer_name, discover_printers, paper_forms, print_canvas_gdi,
-    print_canvas_gdi_detailed, print_pdf_gdi, print_pdf_gdi_copies, print_pdf_gdi_detailed,
-    print_pdf_gdi_with_options, print_raw, printer_capabilities, printer_health, printer_status,
+    print_canvas_gdi_configured, print_canvas_gdi_detailed, print_pdf_gdi, print_pdf_gdi_copies,
+    print_pdf_gdi_detailed, print_pdf_gdi_with_options, print_raw, printer_capabilities,
+    printer_health, printer_status,
 };
 
 #[cfg(not(windows))]
@@ -175,6 +176,16 @@ mod stub {
     ) -> Result<usize, super::GdiPrintError> {
         Err(super::GdiPrintError::setup(Unsupported.to_string()))
     }
+    pub fn print_canvas_gdi_configured(
+        _printer: &str,
+        _title: &str,
+        _canvas: &print_render::bitmap::Canvas,
+        _copies: u16,
+        _tray: Option<&str>,
+        _roll_width_mm: Option<f64>,
+    ) -> Result<usize, super::GdiPrintError> {
+        Err(super::GdiPrintError::setup(Unsupported.to_string()))
+    }
     pub fn discover_printers() -> Result<Vec<print_core::PrinterInfo>, Unsupported> {
         Err(Unsupported)
     }
@@ -189,7 +200,7 @@ mod stub {
 #[cfg(not(windows))]
 pub use stub::{
     default_printer_name, discover_printers, paper_forms, print_canvas_gdi,
-    print_canvas_gdi_detailed, print_pdf_gdi, print_pdf_gdi_copies, print_pdf_gdi_detailed,
-    print_pdf_gdi_with_options, print_raw, printer_capabilities, printer_health, printer_status,
-    Unsupported,
+    print_canvas_gdi_configured, print_canvas_gdi_detailed, print_pdf_gdi, print_pdf_gdi_copies,
+    print_pdf_gdi_detailed, print_pdf_gdi_with_options, print_raw, printer_capabilities,
+    printer_health, printer_status, Unsupported,
 };

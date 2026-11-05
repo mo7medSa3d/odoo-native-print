@@ -533,6 +533,24 @@ pub fn print_canvas_gdi_detailed(
     canvas: &print_render::bitmap::Canvas,
     copies: u16,
 ) -> Result<usize, GdiPrintError> {
+    print_canvas_gdi_configured(printer, title, canvas, copies, None, None)
+}
+
+/// `print_canvas_gdi_detailed` plus the job's tray selection and
+/// the receipt roll width reported with the job (owner brief,
+/// 2026-11-05): when the roll width is known it defines the page
+/// width exactly (the raster's own DPI is only a fallback), so a
+/// POS receipt lands on paper of its real width — a matching roll
+/// form, a custom size, or the closest larger form.
+#[allow(clippy::too_many_arguments)]
+pub fn print_canvas_gdi_configured(
+    printer: &str,
+    title: &str,
+    canvas: &print_render::bitmap::Canvas,
+    copies: u16,
+    tray: Option<&str>,
+    roll_width_mm: Option<f64>,
+) -> Result<usize, GdiPrintError> {
     if canvas.width == 0 || canvas.height == 0 {
         return Err(GdiPrintError::setup("empty image canvas".to_string()));
     }
@@ -548,10 +566,15 @@ pub fn print_canvas_gdi_detailed(
     // POS/kitchen PNG jobs that use GDI must obey the same media contract as
     // PDF jobs: derive the physical page geometry from the 203-DPI raster,
     // then select an exact/roll/custom/larger media form from the driver.
-    let page_size = PageSize::new(
-        canvas.width as f64 * 25.4 / 203.0,
-        canvas.height as f64 * 25.4 / 203.0,
-    );
+    let page_size = match roll_width_mm {
+        Some(w) if (20.0..=500.0).contains(&w) => {
+            PageSize::new(w, w * canvas.height as f64 / canvas.width as f64)
+        }
+        _ => PageSize::new(
+            canvas.width as f64 * 25.4 / 203.0,
+            canvas.height as f64 * 25.4 / 203.0,
+        ),
+    };
     let capabilities =
         printer_capabilities(printer).map_err(|e| GdiPrintError::setup(e.to_string()))?;
     if capabilities.forms.is_empty() && !capabilities.custom_size_supported {
@@ -572,7 +595,7 @@ pub fn print_canvas_gdi_detailed(
         Some((&matched.form, matched.kind)),
         false,
         false,
-        None,
+        tray,
     )
     .ok_or_else(|| {
         GdiPrintError::setup(

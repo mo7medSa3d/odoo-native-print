@@ -17,5 +17,8 @@
   },
   "windows": [
     "main"
+  ],
+  "webviews": [
+    "tab-*"
   ]
 }

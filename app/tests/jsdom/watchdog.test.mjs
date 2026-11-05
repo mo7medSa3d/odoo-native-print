@@ -17,13 +17,15 @@ function makePage(path, bodyHtml, url) {
   return { dom, w };
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-// A: healthy boot (shell + action content) -> no overlay, nav pill present
+// A: healthy boot (shell + action content) -> no overlay, and NO
+// floating nav pill (removed in 1.5.0: navigation lives in the
+// window's tab bar now — owner brief, 2026-11-05)
 {
   const { w } = makePage("/odoo", BOOTED);
   await sleep(250);
   ok("healthy: no overlay", !w.document.getElementById("np-boot-overlay"));
   const pill = w.document.getElementById("np-nav-pill");
-  ok("healthy: nav pill with 3 buttons", !!pill && pill.querySelectorAll("button").length === 3);
+  ok("healthy: no floating nav pill (tab bar era)", !pill);
   w.close();
 }
 // B: slow boot -> corner card appears, then auto-hides when shell+content arrive

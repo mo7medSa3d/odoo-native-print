@@ -29,13 +29,16 @@ commands.allow = [
     "clear_finished_cmd",
     "export_diagnostics",
     "save_origin_cmd",
+    "get_printer_settings",
+    "set_printer_settings",
 ]
 
 [[permission]]
 identifier = "allow-app-shell"
-description = "App-shell action initiated by a user click, granted to the configured Odoo origin and the local Control Center: switch to the Control Center view."
+description = "App-shell action initiated by a user click, granted to the configured Odoo origin and the local Control Center: switch to the Control Center view, or open a new tab (Rust validates the tab URL against the configured origin)."
 commands.allow = [
     "open_control_center",
+    "tab_open",
 ]
 
 [[permission]]
@@ -47,11 +50,14 @@ commands.allow = [
 
 [[permission]]
 identifier = "allow-toolbar"
-description = "Toolbar webview only (local, app-bundled page): browser-style navigation of the main webview, the lightweight app identity, and switching between Odoo and the Control Center. Never granted to the remote Odoo origin."
+description = "Tab bar webview only (local, app-bundled tabbar.html): browser-style navigation of the active tab, tab management, the lightweight app identity, and switching between Odoo and the Control Center. Never granted to the remote Odoo origin."
 commands.allow = [
     "nav_back",
     "nav_forward",
     "nav_reload",
+    "tab_list",
+    "tab_switch",
+    "tab_close",
     "app_identity",
     "open_control_center",
     "open_odoo_origin",

@@ -59,6 +59,116 @@ pub struct AppState {
     /// enumerating on every call made the whole app feel heavy and
     /// blocked the UI thread. 20s is fresh enough for a settings page.
     pub printer_cache: RwLock<Option<PrinterCache>>,
+    /// Tab registry for the tabbed browser (owner brief,
+    /// 2026-11-05): one window, a local tab bar, and one child
+    /// webview per tab, all sharing one data directory so Odoo
+    /// sessions and cookies behave as in a single browser profile.
+    pub tabs: RwLock<TabsState>,
+}
+
+/// One tab in the tabbed browser. The tab bar renders from these
+/// snapshots; titles are derived from URLs because a child webview
+/// does not expose its document title to Rust.
+#[derive(Debug, Clone, Serialize)]
+pub struct TabInfo {
+    pub label: String,
+    pub url: String,
+    pub title: String,
+    pub is_pos: bool,
+    pub is_local: bool,
+    pub active: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct TabsState {
+    pub order: Vec<String>,
+    pub active: Option<String>,
+    pub next_id: u64,
+    pub urls: std::collections::HashMap<String, String>,
+}
+
+impl TabsState {
+    pub fn register(&mut self, label: &str, url: &str) {
+        if !self.order.iter().any(|l| l == label) {
+            self.order.push(label.to_string());
+        }
+        self.urls.insert(label.to_string(), url.to_string());
+        if self.active.is_none() {
+            self.active = Some(label.to_string());
+        }
+    }
+
+    pub fn set_url(&mut self, label: &str, url: &str) {
+        self.urls.insert(label.to_string(), url.to_string());
+    }
+
+    pub fn url_of(&self, label: &str) -> Option<&str> {
+        self.urls.get(label).map(|s| s.as_str())
+    }
+
+    pub fn is_pos_tab(&self, label: &str) -> bool {
+        self.url_of(label).map(is_pos_url).unwrap_or(false)
+    }
+
+    pub fn snapshot(&self) -> Vec<TabInfo> {
+        self.order
+            .iter()
+            .map(|label| {
+                let url = self.url_of(label).unwrap_or("").to_string();
+                let parsed = tauri::Url::parse(&url).ok();
+                TabInfo {
+                    label: label.clone(),
+                    title: tab_title_for(&url),
+                    is_pos: is_pos_url(&url),
+                    is_local: parsed.as_ref().map(is_local_app_url).unwrap_or(false),
+                    active: self.active.as_deref() == Some(label.as_str()),
+                    url,
+                }
+            })
+            .collect()
+    }
+}
+
+/// Point of Sale URLs live under /pos (the POS UI is /pos/ui).
+pub fn is_pos_url(url: &str) -> bool {
+    tauri::Url::parse(url)
+        .map(|u| {
+            let path = u.path();
+            path == "/pos" || path.starts_with("/pos/")
+        })
+        .unwrap_or(false)
+}
+
+/// Human tab title for a URL. Deliberately deterministic (unit
+/// tested): the tab bar is chrome, not content, so titles come
+/// from the route, never from page-supplied strings.
+pub fn tab_title_for(url: &str) -> String {
+    let Ok(u) = tauri::Url::parse(url) else {
+        return "Odoo".to_string();
+    };
+    if is_local_app_url(&u) {
+        if url.contains("index.html") {
+            return "Control Center".to_string();
+        }
+        return "Yaseir Print".to_string();
+    }
+    let path = u.path();
+    if is_pos_url(url) {
+        return "Point of Sale".to_string();
+    }
+    if path.starts_with("/web/login") {
+        return "Sign in".to_string();
+    }
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if segments.first() == Some(&"odoo") && segments.len() > 1 {
+        let app = segments[1].replace('-', " ");
+        let mut chars = app.chars();
+        return match chars.next() {
+            Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+            None => "Odoo".to_string(),
+        };
+    }
+    "Odoo".to_string()
 }
 
 /// One cached printer enumeration (see `AppState::printer_cache`).
@@ -991,34 +1101,232 @@ pub fn app_identity(
     })
 }
 
-/// Browser-style navigation for the toolbar webview: history back on
-/// the main webview. Odoo is an SPA whose screens stack routes with no
-/// visible way back; these give the user the browser controls back.
+/// Create a tab for `url` and make it active. Shared by the
+/// tab_open command, the POS navigation rule and window.open
+/// handling. Async: creating a webview from a synchronous command
+/// can deadlock on Windows.
+pub async fn open_tab_internal(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    url: tauri::Url,
+) -> Result<String, String> {
+    let label = {
+        let mut tabs = state
+            .tabs
+            .write()
+            .map_err(|_| "tabs_lock_poisoned".to_string())?;
+        tabs.next_id += 1;
+        let label = format!("tab-{}", tabs.next_id);
+        tabs.register(&label, url.as_str());
+        tabs.active = Some(label.clone());
+        label
+    };
+    let web_url = if is_local_app_url(&url) {
+        let path = url.path().trim_start_matches('/');
+        tauri::WebviewUrl::App(path.into())
+    } else {
+        tauri::WebviewUrl::External(url.clone())
+    };
+    crate::create_tab_webview(app, &label, web_url)?;
+    crate::activate_tab(app, &label);
+    Ok(label)
+}
+
+/// Open a URL in a new tab. Callable from the configured Odoo
+/// origin (allow-app-shell): the URL must belong to that origin —
+/// validated here in Rust, never trusted from the page.
 #[tauri::command]
-pub fn nav_back(app: tauri::AppHandle, webview: tauri::Webview) -> Result<(), String> {
+pub async fn tab_open(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<String, String> {
+    // An empty URL is the tab bar's "new tab" action: a fresh tab
+    // on the configured origin (the Control Center when none is
+    // configured yet).
+    if url.trim().is_empty() {
+        let origin = state
+            .configured_origin
+            .read()
+            .map_err(|_| "config_lock_poisoned".to_string())?
+            .clone();
+        let target = match origin {
+            Some(origin) => origin,
+            None => {
+                if cfg!(windows) {
+                    "http://tauri.localhost/index.html".to_string()
+                } else {
+                    "tauri://localhost/index.html".to_string()
+                }
+            }
+        };
+        let parsed = tauri::Url::parse(&target).map_err(|_| "bad_tab_url".to_string())?;
+        return open_tab_internal(&app, &state, parsed).await;
+    }
+    let parsed = tauri::Url::parse(&url).map_err(|_| "bad_tab_url".to_string())?;
+    if !is_local_app_url(&parsed) {
+        let configured = state
+            .configured_origin
+            .read()
+            .map_err(|_| "config_lock_poisoned".to_string())?
+            .clone()
+            .ok_or_else(|| "no_origin_configured".to_string())?;
+        let origin = parsed.origin().ascii_serialization();
+        if !origin_is_allowed(&configured, &origin) {
+            return Err("tab_url_not_on_configured_origin".to_string());
+        }
+    }
+    open_tab_internal(&app, &state, parsed).await
+}
+
+/// Tab list for the tab bar (local pages only: the tab bar itself).
+#[tauri::command]
+pub fn tab_list(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<Vec<TabInfo>, String> {
     check_local_only(&webview)?;
-    let main = app
-        .get_webview("main")
-        .ok_or_else(|| "main_webview_missing".to_string())?;
-    main.eval("history.back()").map_err(|e| e.to_string())
+    let tabs = state
+        .tabs
+        .read()
+        .map_err(|_| "tabs_lock_poisoned".to_string())?;
+    Ok(tabs.snapshot())
+}
+
+/// Activate a tab (tab bar only).
+#[tauri::command]
+pub fn tab_switch(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    label: String,
+) -> Result<(), String> {
+    check_local_only(&webview)?;
+    {
+        let tabs = state
+            .tabs
+            .read()
+            .map_err(|_| "tabs_lock_poisoned".to_string())?;
+        if !tabs.order.iter().any(|l| l == &label) {
+            return Err("unknown_tab".to_string());
+        }
+    }
+    crate::activate_tab(&app, &label);
+    Ok(())
+}
+
+/// Close a tab (tab bar only). The window never drops to zero
+/// tabs: closing the last one opens a fresh tab on the configured
+/// origin (or the Control Center when no origin is configured).
+#[tauri::command]
+pub async fn tab_close(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    label: String,
+) -> Result<(), String> {
+    check_local_only(&webview)?;
+    let (was_active, neighbor) = {
+        let mut tabs = state
+            .tabs
+            .write()
+            .map_err(|_| "tabs_lock_poisoned".to_string())?;
+        let idx = tabs.order.iter().position(|l| l == &label);
+        let Some(idx) = idx else {
+            return Err("unknown_tab".to_string());
+        };
+        let was_active = tabs.active.as_deref() == Some(label.as_str());
+        tabs.order.remove(idx);
+        tabs.urls.remove(&label);
+        let neighbor = if tabs.order.is_empty() {
+            None
+        } else {
+            Some(tabs.order[idx.min(tabs.order.len() - 1)].clone())
+        };
+        if was_active {
+            tabs.active = neighbor.clone();
+        }
+        (was_active, neighbor)
+    };
+    if let Some(wv) = app.get_webview(&label) {
+        let _ = wv.close();
+    }
+    if was_active {
+        match neighbor {
+            Some(next) => crate::activate_tab(&app, &next),
+            None => {
+                let origin = state
+                    .configured_origin
+                    .read()
+                    .map_err(|_| "config_lock_poisoned".to_string())?
+                    .clone();
+                match origin {
+                    Some(origin) => {
+                        let url =
+                            tauri::Url::parse(&origin).map_err(|_| "bad_origin_url".to_string())?;
+                        open_tab_internal(&app, &state, url).await?;
+                    }
+                    None => {
+                        let url = tauri::Url::parse("tauri://localhost/index.html")
+                            .map_err(|_| "bad_local_url".to_string())?;
+                        open_tab_internal(&app, &state, url).await?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The active content webview, for the navigation commands.
+fn active_tab_webview(app: &tauri::AppHandle, state: &AppState) -> Result<tauri::Webview, String> {
+    let label = {
+        let tabs = state
+            .tabs
+            .read()
+            .map_err(|_| "tabs_lock_poisoned".to_string())?;
+        tabs.active.clone()
+    }
+    .ok_or_else(|| "no_active_tab".to_string())?;
+    app.get_webview(&label)
+        .ok_or_else(|| "active_tab_missing".to_string())
+}
+
+/// Browser-style navigation for the tab bar: history back on the
+/// ACTIVE tab's webview. Odoo is an SPA whose screens stack routes
+/// with no visible way back; these give the user the browser
+/// controls back.
+#[tauri::command]
+pub fn nav_back(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    check_local_only(&webview)?;
+    let target = active_tab_webview(&app, &state)?;
+    target.eval("history.back()").map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn nav_forward(app: tauri::AppHandle, webview: tauri::Webview) -> Result<(), String> {
+pub fn nav_forward(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     check_local_only(&webview)?;
-    let main = app
-        .get_webview("main")
-        .ok_or_else(|| "main_webview_missing".to_string())?;
-    main.eval("history.forward()").map_err(|e| e.to_string())
+    let target = active_tab_webview(&app, &state)?;
+    target.eval("history.forward()").map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn nav_reload(app: tauri::AppHandle, webview: tauri::Webview) -> Result<(), String> {
+pub fn nav_reload(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     check_local_only(&webview)?;
-    let main = app
-        .get_webview("main")
-        .ok_or_else(|| "main_webview_missing".to_string())?;
-    main.reload().map_err(|e| e.to_string())
+    let target = active_tab_webview(&app, &state)?;
+    target.reload().map_err(|e| e.to_string())
 }
 
 /// Store the page's environment probe report (JS features, storage,
@@ -1062,18 +1370,29 @@ pub async fn report_environment(
 /// never be able to loop it into a permanent forced logout. The
 /// boot watchdog card points users here instead of invoking it.
 #[tauri::command]
-pub fn clear_web_data_cmd(
+pub async fn clear_web_data_cmd(
     app: tauri::AppHandle,
     webview: tauri::Webview,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     check_local_only(&webview)?;
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "main_window_missing".to_string())?;
-    window
-        .clear_all_browsing_data()
-        .map_err(|e| e.to_string())?;
+    // Tabbed browser: every tab shares one data directory, so the
+    // wipe is applied per webview (any one clears the shared
+    // profile) and every remote tab is sent back to the origin to
+    // sign in again — the same clean slate the single-webview
+    // build produced.
+    let labels = {
+        let tabs = state
+            .tabs
+            .read()
+            .map_err(|_| "tabs_lock_poisoned".to_string())?;
+        tabs.order.clone()
+    };
+    for label in &labels {
+        if let Some(wv) = app.get_webview(label) {
+            wv.clear_all_browsing_data().map_err(|e| e.to_string())?;
+        }
+    }
     let origin = state
         .configured_origin
         .read()
@@ -1081,7 +1400,18 @@ pub fn clear_web_data_cmd(
         .clone();
     if let Some(origin) = origin {
         let url = origin.parse::<tauri::Url>().map_err(|e| e.to_string())?;
-        window.navigate(url).map_err(|e| e.to_string())?;
+        let snapshot = {
+            let tabs = state
+                .tabs
+                .read()
+                .map_err(|_| "tabs_lock_poisoned".to_string())?;
+            tabs.snapshot()
+        };
+        for tab in snapshot.iter().filter(|t| !t.is_local) {
+            if let Some(wv) = app.get_webview(&tab.label) {
+                let _ = wv.navigate(url.clone());
+            }
+        }
     }
     Ok(())
 }
@@ -1120,12 +1450,74 @@ pub fn save_origin_cmd(
     Ok(validated)
 }
 
+/// Per-printer defaults for the Control Center (owner brief,
+/// 2026-11-05). Local pages only: a remote Odoo page must never
+/// read or rewrite this PC's printer configuration.
 #[tauri::command]
-pub fn open_control_center(
+pub fn get_printer_settings(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<config::PrinterSettingsMap, String> {
+    check_local_only(&webview)?;
+    Ok(config::load_printer_settings(&state.config_dir))
+}
+
+#[tauri::command]
+pub fn set_printer_settings(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    printer: String,
+    settings: config::PrinterSettings,
+) -> Result<config::PrinterSettingsMap, String> {
+    check_local_only(&webview)?;
+    let name = printer.trim().to_string();
+    if name.is_empty() || name.chars().count() > 256 {
+        return Err("invalid printer name".to_string());
+    }
+    for v in [&settings.paper, &settings.tray].into_iter().flatten() {
+        if v.chars().count() > 160 {
+            return Err("printer setting value too long".to_string());
+        }
+    }
+    let mut map = config::load_printer_settings(&state.config_dir);
+    if settings == config::PrinterSettings::default() {
+        map.remove(&name);
+    } else {
+        map.insert(name, settings);
+    }
+    config::save_printer_settings(&state.config_dir, &map)?;
+    Ok(map)
+}
+
+#[tauri::command]
+pub async fn open_control_center(
+    app: tauri::AppHandle,
     webview: tauri::Webview,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     check_origin(&webview, &state)?;
+    // The Control Center lives in its own tab (owner brief,
+    // 2026-11-05): opening it never replaces the Odoo page the
+    // user was working on.
+    let existing = {
+        let tabs = state
+            .tabs
+            .read()
+            .map_err(|_| "tabs_lock_poisoned".to_string())?;
+        tabs.order
+            .iter()
+            .find(|label| {
+                tabs.url_of(label)
+                    .and_then(|u| tauri::Url::parse(u).ok())
+                    .map(|u| is_local_app_url(&u) && u.path().ends_with("index.html"))
+                    .unwrap_or(false)
+            })
+            .cloned()
+    };
+    if let Some(label) = existing {
+        crate::activate_tab(&app, &label);
+        return Ok(());
+    }
     let local_url: tauri::Url = if cfg!(windows) {
         "http://tauri.localhost/index.html"
             .parse()
@@ -1135,11 +1527,16 @@ pub fn open_control_center(
             .parse()
             .map_err(|_| "bad_local_url".to_string())?
     };
-    webview.navigate(local_url).map_err(|e| e.to_string())
+    open_tab_internal(&app, &state, local_url).await?;
+    Ok(())
 }
 
 #[tauri::command]
-pub fn open_odoo_origin(webview: tauri::Webview, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn open_odoo_origin(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     check_origin(&webview, &state)?;
     let origin = state
         .configured_origin
@@ -1148,7 +1545,37 @@ pub fn open_odoo_origin(webview: tauri::Webview, state: State<'_, AppState>) -> 
         .clone()
         .ok_or_else(|| "no_origin_configured".to_string())?;
     let url: tauri::Url = origin.parse().map_err(|_| "bad_origin_url".to_string())?;
-    webview.navigate(url).map_err(|e| e.to_string())
+    // Tabbed browser: prefer an existing remote tab (switch back
+    // to Odoo without losing anything), navigate the calling tab
+    // when it is the only candidate (the boot page flow), and give
+    // the tab bar a fresh tab.
+    let caller = webview.label().to_string();
+    let (existing, caller_is_tab) = {
+        let tabs = state
+            .tabs
+            .read()
+            .map_err(|_| "tabs_lock_poisoned".to_string())?;
+        let snapshot = tabs.snapshot();
+        let existing = snapshot
+            .iter()
+            .find(|t| !t.is_local && t.label != caller)
+            .map(|t| t.label.clone());
+        let caller_is_tab = tabs.order.iter().any(|l| l == &caller);
+        (existing, caller_is_tab)
+    };
+    if let Some(label) = existing {
+        crate::activate_tab(&app, &label);
+        if let Some(wv) = app.get_webview(&label) {
+            wv.navigate(url).map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+    if caller_is_tab {
+        webview.navigate(url).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    open_tab_internal(&app, &state, url).await?;
+    Ok(())
 }
 
 // --- Background Print Worker & Hardware Dispatch ----------------------
@@ -1171,6 +1598,7 @@ struct RawRender<'a> {
 
 struct NativePrintBackend {
     db_path: String,
+    config_dir: std::path::PathBuf,
 }
 
 impl NativePrintBackend {
@@ -1583,6 +2011,24 @@ impl PrintBackend for NativePrintBackend {
                 &format!("stored job options unreadable: {e}"),
             )
         })?;
+        // Per-printer defaults from the Control Center fill whatever
+        // this job did not specify (owner brief, 2026-11-05): the
+        // user configures each printer once; a document carrying
+        // its own paper/tray always wins.
+        if let Some(defaults) = config::load_printer_settings(&self.config_dir).get(&job.printer) {
+            if opts.paper.is_none() {
+                opts.paper = defaults.paper.clone();
+            }
+            if opts.tray.is_none() {
+                opts.tray = defaults.tray.clone();
+            }
+            if let Some(d) = defaults.duplex {
+                opts.duplex = d;
+            }
+            if let Some(c) = defaults.color {
+                opts.color = c;
+            }
+        }
         let paper = opts.paper.as_deref();
         let title = job.report.as_deref().unwrap_or("Yaseir Print Job");
 
@@ -1675,13 +2121,23 @@ impl PrintBackend for NativePrintBackend {
             // against the printer's reported capabilities: anything
             // requested that IPP cannot honour fails loudly instead
             // of being silently dropped.
-            if opts.tray.is_some() {
-                return Err(BackendError::fatal(
-                    "IPP_OPTION_UNSUPPORTED",
-                    "tray selection is not supported over IPP in this client",
-                ));
-            }
             let mut ipp_options = print_ipp::IppJobOptions::default();
+            if let Some(tray_name) = opts.tray.as_deref() {
+                // Standard tray names map to IPP media-source
+                // keywords; anything else keeps the loud refusal —
+                // a tray must never be silently dropped (2026-11-05).
+                match print_ipp::tray_to_media_source(tray_name) {
+                    Some(source) => ipp_options.media_source = Some(source),
+                    None => {
+                        return Err(BackendError::fatal(
+                            "IPP_OPTION_UNSUPPORTED",
+                            &format!(
+                                "tray {tray_name:?} cannot be mapped to an IPP media-source keyword"
+                            ),
+                        ));
+                    }
+                }
+            }
             if opts.duplex {
                 let sides = "two-sided-long-edge";
                 if !caps.sides_supported.is_empty()
@@ -1945,11 +2401,13 @@ impl PrintBackend for NativePrintBackend {
             ("image-png", "gdi") => {
                 let canvas = print_render::decode_png(&data)
                     .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
-                print_win::print_canvas_gdi_detailed(
+                print_win::print_canvas_gdi_configured(
                     &target_name,
                     title,
                     &canvas,
                     opts.copies.max(1),
+                    opts.tray.as_deref(),
+                    opts.media_roll_width_mm,
                 )
                 .map_err(|e| {
                     if e.ambiguous {
@@ -1995,7 +2453,11 @@ impl PrintBackend for NativePrintBackend {
 
 /// Spawn the background worker thread that drains queued jobs across all
 /// printer patterns using `print_core::Worker`.
-pub fn spawn_worker_loop(db_path: String, wake: Arc<(Mutex<bool>, Condvar)>) {
+pub fn spawn_worker_loop(
+    db_path: String,
+    config_dir: std::path::PathBuf,
+    wake: Arc<(Mutex<bool>, Condvar)>,
+) {
     std::thread::spawn(move || {
         // Retention bounds: drop stored document bytes of jobs that
         // failed long ago, then — on a much longer window — the
@@ -2033,6 +2495,7 @@ pub fn spawn_worker_loop(db_path: String, wake: Arc<(Mutex<bool>, Condvar)>) {
                             queue: &mut worker_queue,
                             backend: NativePrintBackend {
                                 db_path: db_path.clone(),
+                                config_dir: config_dir.clone(),
                             },
                             cfg: WorkerConfig::default(),
                             entropy,
@@ -2082,6 +2545,49 @@ pub fn spawn_worker_loop(db_path: String, wake: Arc<(Mutex<bool>, Condvar)>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tab_titles_and_pos_detection() {
+        // Tab titles are derived from routes, never from page text.
+        assert_eq!(
+            tab_title_for("http://192.168.1.20:8069/pos/ui"),
+            "Point of Sale"
+        );
+        assert_eq!(
+            tab_title_for("https://odoo.example.com/web/login"),
+            "Sign in"
+        );
+        assert_eq!(
+            tab_title_for("https://odoo.example.com/odoo/sales"),
+            "Sales"
+        );
+        assert_eq!(tab_title_for("https://odoo.example.com/odoo"), "Odoo");
+        assert_eq!(
+            tab_title_for("tauri://localhost/index.html"),
+            "Control Center"
+        );
+        assert_eq!(tab_title_for("tauri://localhost/boot.html"), "Yaseir Print");
+        // POS detection: /pos and /pos/* only — a backend route that
+        // merely contains "pos" must not divert into a POS tab.
+        assert!(is_pos_url("http://h/pos/ui"));
+        assert!(is_pos_url("http://h/pos"));
+        assert!(!is_pos_url("http://h/odoo/point-of-sale"));
+        assert!(!is_pos_url("http://h/postal"));
+        // Registry: snapshot marks the POS tab and the active tab.
+        let mut tabs = TabsState {
+            next_id: 2,
+            ..Default::default()
+        };
+        tabs.register("tab-1", "http://h/odoo");
+        tabs.register("tab-2", "http://h/pos/ui");
+        tabs.active = Some("tab-2".to_string());
+        let snap = tabs.snapshot();
+        assert_eq!(snap.len(), 2);
+        assert!(!snap[0].is_pos && !snap[0].active);
+        assert!(snap[1].is_pos && snap[1].active);
+        assert!(tabs.is_pos_tab("tab-2"));
+        assert!(!tabs.is_pos_tab("tab-1"));
+    }
+
     #[test]
     fn base64_and_host_port_parsing() {
         let decoded = decode_base64("JVBERi0xLjQ=").unwrap();

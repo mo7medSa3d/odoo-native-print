@@ -1009,7 +1009,7 @@
         <div class="card-header">
           <div class="card-title">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-            <span data-i18n="env_title">بيئة العرض (WebView2)</span>
+            <span data-i18n="env_title">بيئة العرض المدمجة</span>
           </div>
           <div style="display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:flex-end;">
             <button class="btn btn-sm btn-secondary" id="btnClearWebData" onclick="clearWebData()" data-i18n="btn_clear_web">مسح بيانات التصفح</button>
@@ -1090,6 +1090,18 @@
       cls_virtual: "افتراضية · GDI",
       cap_duplex: "وجهان (Duplex)",
       cap_color: "ألوان",
+      cap_trays: "الأدراج",
+      ps_title: "إعدادات الطابعة",
+      ps_paper: "الورق الافتراضي",
+      ps_tray: "الدرج الافتراضي",
+      ps_duplex: "الطباعة على الوجهين",
+      ps_color: "الألوان",
+      ps_driver_default: "افتراضي التعريف",
+      ps_on: "تشغيل",
+      ps_off: "إيقاف",
+      ps_save: "حفظ الإعدادات",
+      ps_saved: "تم حفظ إعدادات الطابعة",
+      ps_hint: "تُستخدم عندما لا يحدد المستند إعداداته بنفسه.",
       cap_more_forms: "مقاسات إضافية",
       diag_placeholder: "لسه ما اتولّدتش حزمة تشخيص. اضغط «توليد الحزمة».",
       dialog_confirm: "تأكيد",
@@ -1100,7 +1112,7 @@
       tab_printers: "الطابعات ومعمل المعايرة",
       tab_settings: "إعدادات اتصال Odoo والأمان",
       tab_diagnostics: "حزمة التشخيص والدعم الفني",
-      env_title: "بيئة العرض (WebView2)",
+      env_title: "بيئة العرض المدمجة",
       btn_clear_web: "مسح بيانات التصفح",
       env_desc: "فحص حي لبيئة عرض صفحات Odoo على هذا الجهاز. إذا ظهرت شاشة بيضاء بعد تسجيل الدخول، فالمسح يعيد البيئة نظيفة (كاش وملفات ارتباط وتخزين) ويحل المشكلة غالبًا.",
       btn_configure_now: "ضبط الرابط الآن",
@@ -1205,6 +1217,18 @@
       cls_virtual: "Virtual · GDI",
       cap_duplex: "Duplex",
       cap_color: "Color",
+      cap_trays: "Trays",
+      ps_title: "Printer Settings",
+      ps_paper: "Default paper",
+      ps_tray: "Default tray",
+      ps_duplex: "Duplex",
+      ps_color: "Color",
+      ps_driver_default: "Printer default",
+      ps_on: "On",
+      ps_off: "Off",
+      ps_save: "Save settings",
+      ps_saved: "Printer settings saved",
+      ps_hint: "Used when a document does not specify its own settings.",
       cap_more_forms: "more sizes",
       diag_placeholder: "No diagnostics bundle yet. Press Generate.",
       dialog_confirm: "Confirm",
@@ -1215,7 +1239,7 @@
       tab_printers: "Printers & Calibration Lab",
       tab_settings: "Odoo Connection & Security",
       tab_diagnostics: "Diagnostics & Support Bundle",
-      env_title: "WebView2 Environment",
+      env_title: "Embedded Browser Environment",
       btn_clear_web: "Clear Web Data",
       env_desc: "Live check of the environment that renders Odoo pages on this PC. If a white page appears after sign-in, clearing returns a clean environment (cache, cookies, storage) and usually fixes it.",
       btn_configure_now: "Configure Now",
@@ -1671,7 +1695,7 @@
         const fact = (label, ok, value) =>
           `<div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid var(--border-color,#eef1f6);font-size:0.85rem;"><span style="color:var(--text-secondary);">${escapeHtml(label)}</span><strong style="color:${ok ? "#12713f" : "#b3261e"};">${escapeHtml(value)}</strong></div>`;
         envEl.innerHTML =
-          fact("WebView2 Runtime", !!data.webviewVersion, data.webviewVersion || "—") +
+          fact("Embedded Browser Runtime", !!data.webviewVersion, data.webviewVersion || "—") +
           fact("ES2022", !!env.es2022, env.es2022 ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
           fact(currentLang === "ar" ? "التخزين المحلي" : "Local storage", !!env.localStorage, env.localStorage ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
           fact(currentLang === "ar" ? "ملفات الارتباط" : "Cookies", !!env.cookies, env.cookies ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
@@ -1841,6 +1865,9 @@
     if (seen.size > 4) chips.push(`<span class="badge badge-neutral">+${seen.size - 4} ${escapeHtml(d.cap_more_forms)}</span>`);
     if (caps.duplex) chips.push(`<span class="badge badge-info">${escapeHtml(d.cap_duplex)}</span>`);
     if (caps.color) chips.push(`<span class="badge badge-info">${escapeHtml(d.cap_color)}</span>`);
+    const bins = Array.isArray(caps.bins) ? caps.bins.filter(Boolean) : [];
+    bins.slice(0, 3).forEach((bin) => chips.push(`<span class="badge badge-neutral">${escapeHtml(d.cap_trays)}: ${escapeHtml(bin)}</span>`));
+    if (bins.length > 3) chips.push(`<span class="badge badge-neutral">${escapeHtml(d.cap_trays)} +${bins.length - 3}</span>`);
     if (!chips.length) return "";
     return `<div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-top:0.5rem;">${chips.join("")}</div>`;
   }
@@ -1855,6 +1882,89 @@
         capsVersion++;
         renderPrintersGrid(lastGridPrinters);
       }).catch(() => { capsCache.set(p.name, {}); });
+    }
+  }
+
+  // Per-printer defaults (paper / tray / duplex / color), stored in
+  // the desktop app and applied by the print worker when a job does
+  // not specify them (owner brief, 2026-11-05). Every choice comes
+  // from the DRIVER's reported capabilities: a printer only offers
+  // the sizes, trays and features it actually has.
+  let printerSettings = {};
+  let printerSettingsVersion = 0;
+  let printerSettingsRequested = false;
+  function loadPrinterSettings() {
+    if (printerSettingsRequested) return;
+    printerSettingsRequested = true;
+    const b = bridge();
+    if (!b || typeof b.getPrinterSettings !== "function") return;
+    b.getPrinterSettings().then((map) => {
+      printerSettings = map || {};
+      printerSettingsVersion++;
+      renderPrintersGrid(lastGridPrinters);
+    }).catch(() => {});
+  }
+  function printerSettingsHtml(p, idx) {
+    const caps = capsCache.get(p.name);
+    if (!caps || caps === "loading") return "";
+    const d = I18N[currentLang];
+    const cur = printerSettings[p.name] || {};
+    const formNames = [...new Set((Array.isArray(caps.forms) ? caps.forms : []).map((f) => f && f.name).filter(Boolean))];
+    const bins = (Array.isArray(caps.bins) ? caps.bins : []).filter(Boolean);
+    const opt = (val, sel, label) => `<option value="${escapeHtml(val)}"${sel ? " selected" : ""}>${escapeHtml(label)}</option>`;
+    const listOpts = (names, current) => opt("", !current, d.ps_driver_default) + names.map((n) => opt(n, current === n, n)).join("");
+    const triOpts = (current) => opt("", current === undefined || current === null, d.ps_driver_default) +
+      opt("on", current === true, d.ps_on) + opt("off", current === false, d.ps_off);
+    const row = (label, id, inner) => `<label style="display:flex;flex-direction:column;gap:0.2rem;flex:1 1 45%;min-width:120px;"><span style="color:var(--text-muted);">${escapeHtml(label)}</span><select id="${id}" class="input">${inner}</select></label>`;
+    return `
+      <div style="margin-top:0.6rem;">
+        <button class="btn btn-sm btn-secondary" data-action="toggle-settings" data-idx="${idx}">
+          ${escapeHtml(d.ps_title)}
+        </button>
+        <div id="settings-box-${idx}" class="hidden" style="margin-top:0.5rem;font-size:0.76rem;background:var(--bg-subtle);padding:0.6rem;border-radius:8px;">
+          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+            ${row(d.ps_paper, `ps-paper-${idx}`, listOpts(formNames, cur.paper))}
+            ${bins.length ? row(d.ps_tray, `ps-tray-${idx}`, listOpts(bins, cur.tray)) : ""}
+            ${caps.duplex ? row(d.ps_duplex, `ps-duplex-${idx}`, triOpts(cur.duplex)) : ""}
+            ${caps.color ? row(d.ps_color, `ps-color-${idx}`, triOpts(cur.color)) : ""}
+          </div>
+          <div style="color:var(--text-muted);margin-top:0.4rem;">${escapeHtml(d.ps_hint)}</div>
+          <button class="btn btn-sm btn-primary" style="margin-top:0.5rem;" data-action="save-settings" data-printer="${escapeHtml(p.name)}" data-idx="${idx}">
+            ${escapeHtml(d.ps_save)}
+          </button>
+        </div>
+      </div>`;
+  }
+  function toggleSettings(idx) {
+    const box = document.getElementById(`settings-box-${idx}`);
+    if (box) box.classList.toggle("hidden");
+  }
+  async function saveSettings(btn) {
+    const idx = Number(btn.getAttribute("data-idx"));
+    const name = btn.getAttribute("data-printer");
+    const b = bridge();
+    if (!b || typeof b.setPrinterSettings !== "function") return;
+    const val = (id) => {
+      const el = document.getElementById(id);
+      return el ? el.value : "";
+    };
+    const tri = (v) => v === "on" ? true : v === "off" ? false : null;
+    const settings = {};
+    const paper = val(`ps-paper-${idx}`);
+    if (paper) settings.paper = paper;
+    const trayEl = document.getElementById(`ps-tray-${idx}`);
+    if (trayEl && trayEl.value) settings.tray = trayEl.value;
+    const duplexEl = document.getElementById(`ps-duplex-${idx}`);
+    if (duplexEl) { const dv = tri(duplexEl.value); if (dv !== null) settings.duplex = dv; }
+    const colorEl = document.getElementById(`ps-color-${idx}`);
+    if (colorEl) { const cv = tri(colorEl.value); if (cv !== null) settings.color = cv; }
+    try {
+      printerSettings = await b.setPrinterSettings(name, settings) || {};
+      printerSettingsVersion++;
+      showToast(I18N[currentLang].ps_saved);
+      renderPrintersGrid(lastGridPrinters);
+    } catch (e) {
+      showToast(String(e && e.message || e), true);
     }
   }
 
@@ -1904,7 +2014,7 @@
     // Health conditions, staleness and the stable id are part of the
     // signature (the raw observation timestamp is not: it changes on
     // every poll and would defeat the guard and flicker the grid).
-    const signature = currentLang + "|" + capsVersion + "|" + JSON.stringify(printers.map((p) =>
+    const signature = currentLang + "|" + capsVersion + "|" + printerSettingsVersion + "|" + JSON.stringify(printers.map((p) =>
       [p.name, p.kind, p.is_default, p.status, p.port, p.driver, p.protocol, p.printer_class, p.stable_id || "", healthFingerprint(p)]));
     if (signature === lastPrintersSignature) return;
     lastPrintersSignature = signature;
@@ -1952,6 +2062,8 @@
 
         ${healthChipsHtml(p)}
 
+        ${printerSettingsHtml(p, idx)}
+
         <div id="forms-box-${idx}" class="hidden" style="font-size:0.76rem;background:var(--bg-subtle);padding:0.6rem;border-radius:8px;max-height:110px;overflow:auto;"></div>
 
         <div class="printer-actions">
@@ -1974,6 +2086,7 @@
       </div>
     `).join("");
     ensureCaps(printers);
+    loadPrinterSettings();
     if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
   }
 
@@ -1991,6 +2104,8 @@
     else if (action === "cancel-job") { btn.disabled = true; cancelJob(btn.getAttribute("data-job-id")).finally(() => { btn.disabled = false; }); }
     else if (action === "test-print") runPrinterTest(btn.getAttribute("data-printer"), btn.getAttribute("data-kind"));
     else if (action === "inspect-forms") inspectForms(btn.getAttribute("data-printer"), Number(btn.getAttribute("data-idx")));
+    else if (action === "toggle-settings") toggleSettings(Number(btn.getAttribute("data-idx")));
+    else if (action === "save-settings") { btn.disabled = true; saveSettings(btn).finally(() => { btn.disabled = false; }); }
   });
 
   function isRawTestKind(kind) {

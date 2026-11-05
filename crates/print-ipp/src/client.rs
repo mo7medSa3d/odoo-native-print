@@ -105,6 +105,48 @@ pub struct IppJobOptions {
     pub sides: Option<String>,
     pub media: Option<String>,
     pub color_mode: Option<String>,
+    pub media_source: Option<String>,
+}
+
+/// Map a Windows tray/bin display name (DC_BINNAMES, e.g. "Tray 1",
+/// "Cassette", "Manual Feed") to the IPP `media-source` keyword
+/// (PWG 5100 series). Standard names only: anything unrecognised
+/// returns None so the caller can fail loudly instead of guessing
+/// a tray the printer may not have (owner brief, 2026-11-05).
+pub fn tray_to_media_source(tray_name: &str) -> Option<String> {
+    let name = tray_name.trim().to_ascii_lowercase();
+    if name.is_empty() {
+        return None;
+    }
+    if name.contains("auto") {
+        return Some("auto".to_string());
+    }
+    if name.contains("manual") {
+        return Some("manual".to_string());
+    }
+    if name.contains("envelope") {
+        return Some("envelope-tray".to_string());
+    }
+    if name.contains("large") {
+        return Some("large-capacity".to_string());
+    }
+    if name.contains("cassette") {
+        return Some("cassette".to_string());
+    }
+    if name.contains("tray") {
+        let digits: String = name
+            .chars()
+            .skip_while(|c| !c.is_ascii_digit())
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        if let Ok(n) = digits.parse::<u32>() {
+            if (1..=20).contains(&n) {
+                return Some(format!("tray-{n}"));
+            }
+        }
+        return None;
+    }
+    None
 }
 
 /// Build the job-template attributes for a Print-Job request.
@@ -112,6 +154,9 @@ fn job_attributes(job_name: &str, copies: u16, options: &IppJobOptions) -> Vec<A
     let mut job_attrs = vec![Attr::name("job-name", job_name)];
     if copies > 1 {
         job_attrs.push(Attr::integer("copies", copies as i32));
+    }
+    if let Some(source) = &options.media_source {
+        job_attrs.push(Attr::keyword("media-source", source));
     }
     if let Some(sides) = &options.sides {
         job_attrs.push(Attr::keyword("sides", sides));
@@ -395,11 +440,50 @@ mod job_attribute_tests {
     use super::*;
 
     #[test]
+    fn tray_names_map_to_media_source_keywords() {
+        // Windows DC_BINNAMES values -> IPP media-source keywords.
+        assert_eq!(tray_to_media_source("Tray 1").as_deref(), Some("tray-1"));
+        assert_eq!(tray_to_media_source("Tray 2").as_deref(), Some("tray-2"));
+        assert_eq!(
+            tray_to_media_source("Automatically Select").as_deref(),
+            Some("auto")
+        );
+        assert_eq!(
+            tray_to_media_source("Manual Feed").as_deref(),
+            Some("manual")
+        );
+        assert_eq!(
+            tray_to_media_source("Cassette 1").as_deref(),
+            Some("cassette")
+        );
+        assert_eq!(
+            tray_to_media_source("Envelope Tray").as_deref(),
+            Some("envelope-tray")
+        );
+        // Unmappable names stay unmappable (caller must fail loudly).
+        assert_eq!(tray_to_media_source("Bypass"), None);
+        assert_eq!(tray_to_media_source("Tray 99"), None);
+        assert_eq!(tray_to_media_source(""), None);
+        // And the mapped value lands in the job attributes.
+        let attrs = job_attributes(
+            "job",
+            1,
+            &IppJobOptions {
+                media_source: tray_to_media_source("Tray 1"),
+                ..Default::default()
+            },
+        );
+        assert!(attrs.iter().any(|a| a.name == "media-source"
+            && matches!(&a.values[..], [crate::proto::Value::Text(_, s)] if s == "tray-1")));
+    }
+
+    #[test]
     fn job_attributes_carry_finishing_options() {
         let opts = IppJobOptions {
             sides: Some("two-sided-long-edge".to_string()),
             media: Some("iso_a4_210x297mm".to_string()),
             color_mode: Some("monochrome".to_string()),
+            media_source: None,
         };
         let attrs = job_attributes("Report", 2, &opts);
         let names: Vec<&str> = attrs.iter().map(|a| a.name.as_str()).collect();

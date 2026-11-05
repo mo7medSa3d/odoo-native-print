@@ -1,11 +1,11 @@
 mod commands;
 mod config;
 
-use commands::{is_local_app_url, spawn_worker_loop, AppState};
+use commands::{is_local_app_url, spawn_worker_loop, AppState, TabsState};
 use print_core::security::origin_is_allowed;
 use print_core::Queue;
 use std::sync::{Arc, Condvar, Mutex, RwLock};
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, WebviewUrl};
 
 /// Bridge injected into the webview. Maps `window.__NATIVE_PRINT__` calls
 /// onto Tauri IPC commands (which re-validate the caller's origin in Rust
@@ -128,8 +128,27 @@ const BRIDGE_JS: &str = r#"
         autoReprint: !!autoReprint
       });
     },
+    getPrinterSettings: function () {
+      // Per-printer defaults are a Control Center feature (Rust
+      // enforces local-only too): remote Odoo pages never see them.
+      if (!npIsLocalPage()) {
+        return Promise.reject(new Error("printer settings are only available in the Control Center"));
+      }
+      return invoke("get_printer_settings", {});
+    },
+    setPrinterSettings: function (printer, settings) {
+      if (!npIsLocalPage()) {
+        return Promise.reject(new Error("printer settings are only available in the Control Center"));
+      }
+      return invoke("set_printer_settings", { printer: printer, settings: settings });
+    },
     openControlCenter: function () {
       return invoke("open_control_center", {});
+    },
+    openTab: function (url) {
+      // New tab on the configured origin (Rust validates the URL
+      // against the configured origin; off-origin is refused).
+      return invoke("tab_open", { url: String(url) });
     },
     openOdooOrigin: function () {
       return invoke("open_odoo_origin", {});
@@ -367,134 +386,6 @@ const BRIDGE_JS: &str = r#"
     if (am && am.children.length > 0) return true;
     return !!document.querySelector(".o-mail-Discuss, .o_mail_discuss, .o_kanban_view, .o_list_view, .o_form_view, .o_pivot_view, .o_graph_view, .o_calendar_view");
   }
-  // Browser-style navigation pill (back / forward / reload),
-  // injected into remote Odoo pages: the app window has no browser
-  // chrome, and the owner asked for visible browser-like controls.
-  // Pure page script — no native toolbar webview involved.
-  function npNavPill() {
-    var build = function () {
-      if (!document.body) return;
-      if (document.getElementById("np-nav-pill")) return;
-      var rtl = false;
-      try { rtl = (document.documentElement.getAttribute("dir") || document.dir) === "rtl"; } catch (e) {}
-      var style = document.createElement("style");
-      style.textContent = '#np-nav-pill{position:fixed;top:54px;inset-inline-start:10px;z-index:2147483000;display:flex;gap:2px;padding:3px;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid rgba(15,23,42,.09);border-radius:999px;box-shadow:0 6px 20px rgba(16,18,25,.14);opacity:.92;transition:opacity .15s;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none} #np-nav-pill:hover{opacity:1} #np-nav-pill.np-dragging{cursor:grabbing;opacity:1;transition:none} #np-nav-pill .np-pill-grip{display:flex;align-items:center;padding:0 1px 0 4px;color:#9aa3b2;font-size:10px;letter-spacing:-3px;cursor:grab} #np-nav-pill button{width:30px;height:30px;border:0;border-radius:50%;background:transparent;color:#23272f;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0} #np-nav-pill button:hover{background:#eef1f6} #np-nav-pill svg{width:17px;height:17px}';
-      document.head.appendChild(style);
-      var pill = document.createElement("div");
-      pill.id = "np-nav-pill";
-      function btn(title, path, flip, fn) {
-        var b = document.createElement("button");
-        b.type = "button";
-        b.title = title;
-        b.setAttribute("aria-label", title);
-        b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"' + (flip ? ' style="transform:scaleX(-1)"' : '') + '><path d="' + path + '"/></svg>';
-        b.addEventListener("click", fn);
-        return b;
-      }
-      var grip = document.createElement("span");
-      grip.className = "np-pill-grip";
-      grip.title = "اسحب لنقل الأزرار — نقرة مزدوجة للإرجاع";
-      grip.setAttribute("aria-hidden", "true");
-      grip.textContent = "⋮⋮";
-      pill.appendChild(grip);
-      pill.appendChild(btn("رجوع", "M15 5 L8 12 L15 19", rtl, function () { window.history.back(); }));
-      pill.appendChild(btn("تقدم", "M9 5 L16 12 L9 19", rtl, function () { window.history.forward(); }));
-      pill.appendChild(btn("إعادة تحميل", "M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6", false, function () { window.location.reload(); }));
-      document.body.appendChild(pill);
-      // The owner parks the pill wherever it hides nothing on his
-      // screens: drag by the grip or the pill body and the position
-      // is remembered (per origin, in localStorage); a double-click
-      // on the grip returns it to the default corner. Buttons keep
-      // working as plain clicks — a drag only starts after a few
-      // pixels of movement, and the click that ends a drag is
-      // swallowed so it can never also press a button.
-      var NP_PILL_POS_KEY = "npNavPillPos";
-      function npPillClamp(x, y) {
-        var w = pill.offsetWidth || 116;
-        var h = pill.offsetHeight || 38;
-        var maxX = Math.max(2, (window.innerWidth || 320) - w - 2);
-        var maxY = Math.max(2, (window.innerHeight || 320) - h - 2);
-        return {
-          x: Math.min(Math.max(2, x), maxX),
-          y: Math.min(Math.max(2, y), maxY),
-        };
-      }
-      function npPillApply(x, y) {
-        var p = npPillClamp(x, y);
-        pill.style.left = p.x + "px";
-        pill.style.top = p.y + "px";
-        pill.style.insetInlineStart = "auto";
-        return p;
-      }
-      try {
-        var npSaved = JSON.parse(window.localStorage.getItem(NP_PILL_POS_KEY) || "null");
-        if (npSaved && isFinite(npSaved.x) && isFinite(npSaved.y)) {
-          npPillApply(npSaved.x, npSaved.y);
-        }
-      } catch (e) {}
-      var npDrag = null;
-      var npSuppressClick = false;
-      pill.addEventListener("pointerdown", function (ev) {
-        if (ev.button !== undefined && ev.button !== 0) return;
-        var r = pill.getBoundingClientRect();
-        npDrag = { dx: ev.clientX - r.left, dy: ev.clientY - r.top, moved: false, id: ev.pointerId };
-      });
-      pill.addEventListener("pointermove", function (ev) {
-        if (!npDrag) return;
-        var nx = ev.clientX - npDrag.dx;
-        var ny = ev.clientY - npDrag.dy;
-        if (!npDrag.moved) {
-          var r0 = pill.getBoundingClientRect();
-          if (Math.abs(nx - r0.left) + Math.abs(ny - r0.top) < 4) return;
-          npDrag.moved = true;
-          pill.classList.add("np-dragging");
-          try { pill.setPointerCapture(npDrag.id); } catch (e) {}
-        }
-        npPillApply(nx, ny);
-      });
-      function npEndDrag() {
-        if (!npDrag) return;
-        var wasDrag = npDrag.moved;
-        npDrag = null;
-        pill.classList.remove("np-dragging");
-        if (wasDrag) {
-          npSuppressClick = true;
-          window.setTimeout(function () { npSuppressClick = false; }, 80);
-          var r = pill.getBoundingClientRect();
-          try {
-            window.localStorage.setItem(
-              NP_PILL_POS_KEY,
-              JSON.stringify({ x: Math.round(r.left), y: Math.round(r.top) })
-            );
-          } catch (e) {}
-        }
-      }
-      pill.addEventListener("pointerup", npEndDrag);
-      pill.addEventListener("pointercancel", npEndDrag);
-      pill.addEventListener("click", function (ev) {
-        if (npSuppressClick) {
-          ev.stopPropagation();
-          ev.preventDefault();
-          npSuppressClick = false;
-        }
-      }, true);
-      pill.addEventListener("dblclick", function (ev) {
-        if (ev.target !== pill && ev.target !== grip) return;
-        try { window.localStorage.removeItem(NP_PILL_POS_KEY); } catch (e) {}
-        pill.style.left = "";
-        pill.style.top = "";
-        pill.style.insetInlineStart = "";
-      });
-      window.addEventListener("resize", function () {
-        if (pill.style.left) {
-          var r = pill.getBoundingClientRect();
-          npPillApply(r.left, r.top);
-        }
-      });
-    };
-    if (document.body) { build(); }
-    else { document.addEventListener("DOMContentLoaded", build); }
-  }
   function npBootWatchdog() {
     if (window.__NP_WATCHDOG_ARMED__) return;
     if (npIsLocalPage() || !npIsBackendPage()) return;
@@ -548,7 +439,8 @@ const BRIDGE_JS: &str = r#"
     npReportEnvironment();
     npBootWatchdog();
     npHttpWarning();
-    npNavPill();
+    // No floating nav pill any more: navigation lives in the
+    // window's tab bar (owner brief, 2026-11-05).
     // Odoo is an SPA: it soft-navigates between actions and can
     // soft-navigate from a non-backend landing page into /odoo
     // without a new document load. Re-check on history transitions;
@@ -587,6 +479,185 @@ const BRIDGE_JS: &str = r#"
 })();
 "#;
 
+/// Height of the tab bar strip at the top of the window (logical
+/// pixels). Content webviews live below it.
+pub const TABBAR_HEIGHT: f64 = 46.0;
+
+/// Fit the tab bar and the ACTIVE content webview to the window's
+/// current client size. Called at startup and on every resize.
+pub fn layout_webviews(app: &tauri::AppHandle) {
+    let Some(window) = app.get_window("main") else {
+        return;
+    };
+    let Ok(size) = window.inner_size() else {
+        return;
+    };
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let width = size.width as f64 / scale;
+    let height = size.height as f64 / scale;
+    if let Some(tabbar) = app.get_webview("tabbar") {
+        let _ = tabbar.set_position(tauri::LogicalPosition::new(0.0, 0.0));
+        let _ = tabbar.set_size(tauri::LogicalSize::new(width, TABBAR_HEIGHT));
+    }
+    let active = {
+        let state = app.state::<AppState>();
+        let Ok(tabs) = state.tabs.read() else { return };
+        tabs.active.clone()
+    };
+    if let Some(label) = active {
+        if let Some(wv) = app.get_webview(&label) {
+            let _ = wv.set_position(tauri::LogicalPosition::new(0.0, TABBAR_HEIGHT));
+            let _ = wv.set_size(tauri::LogicalSize::new(
+                width,
+                (height - TABBAR_HEIGHT).max(80.0),
+            ));
+        }
+    }
+}
+
+/// Make `label` the visible tab: hide every other content webview,
+/// show this one, refit it to the window.
+pub fn activate_tab(app: &tauri::AppHandle, label: &str) {
+    let labels = {
+        let state = app.state::<AppState>();
+        let Ok(mut tabs) = state.tabs.write() else {
+            return;
+        };
+        if !tabs.order.iter().any(|l| l == label) {
+            return;
+        }
+        tabs.active = Some(label.to_string());
+        tabs.order.clone()
+    };
+    for other in &labels {
+        if let Some(wv) = app.get_webview(other) {
+            if other == label {
+                let _ = wv.show();
+            } else {
+                let _ = wv.hide();
+            }
+        }
+    }
+    layout_webviews(app);
+}
+
+/// Create one content webview (a tab) in the main window. All tabs
+/// share ONE data directory, so cookies and sessions are shared
+/// exactly like tabs in a normal browser — which is how Odoo's
+/// session model expects to be browsed (owner brief, 2026-11-05).
+/// The navigation gate is the same origin policy as the old single
+/// webview, plus the tab rules: POS navigations from a non-POS tab
+/// are diverted into a fresh POS tab, and on-origin window.open
+/// becomes a tab instead of being dropped.
+pub fn create_tab_webview(
+    app: &tauri::AppHandle,
+    label: &str,
+    url: WebviewUrl,
+) -> Result<tauri::Webview, String> {
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "main_window_missing".to_string())?;
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let nav_handle = app.clone();
+    let nav_label = label.to_string();
+    let open_handle = app.clone();
+    let load_handle = app.clone();
+    let load_label = label.to_string();
+    let builder = tauri::webview::WebviewBuilder::new(label, url)
+        .data_directory(data_dir)
+        .initialization_script(BRIDGE_JS.replace("__APP_VERSION__", env!("CARGO_PKG_VERSION")))
+        .on_navigation(move |u| {
+            if u.as_str() == "about:blank" || is_local_app_url(u) {
+                return true;
+            }
+            let state = nav_handle.state::<AppState>();
+            let allowed = state.configured_origin.read().ok().and_then(|g| g.clone());
+            let verdict = match allowed {
+                Some(cfg_origin) => {
+                    let o = u.origin().ascii_serialization();
+                    origin_is_allowed(&cfg_origin, &o)
+                }
+                None => false,
+            };
+            if !verdict {
+                eprintln!(
+                    "Yaseir Print: blocked navigation to {} (not the configured Odoo origin)",
+                    u.as_str()
+                );
+                return false;
+            }
+            // POS rule: entering the Point of Sale from any other
+            // tab opens it in its own tab (it takes over the screen
+            // and runs its own session logic; the backend tab the
+            // user was on stays untouched behind it).
+            if commands::is_pos_url(u.as_str()) {
+                let tabs = state.tabs.read().ok();
+                let is_pos_tab = tabs
+                    .as_ref()
+                    .map(|t| t.is_pos_tab(&nav_label))
+                    .unwrap_or(false);
+                let current_is_local = tabs
+                    .as_ref()
+                    .and_then(|t| t.url_of(&nav_label).map(|s| s.to_string()))
+                    .map(|s| {
+                        tauri::Url::parse(&s)
+                            .map(|cu| is_local_app_url(&cu))
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+                if !is_pos_tab && !current_is_local {
+                    let spawn_handle = nav_handle.clone();
+                    let target = u.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let st = spawn_handle.state::<AppState>();
+                        let _ = commands::open_tab_internal(&spawn_handle, &st, target).await;
+                    });
+                    return false;
+                }
+            }
+            true
+        })
+        .on_new_window(move |u, _features| {
+            // On-origin popups become tabs; anything else is denied
+            // (the origin policy leaves the app no other browser).
+            let state = open_handle.state::<AppState>();
+            let allowed = state.configured_origin.read().ok().and_then(|g| g.clone());
+            let on_origin = is_local_app_url(&u)
+                || allowed
+                    .map(|cfg| origin_is_allowed(&cfg, &u.origin().ascii_serialization()))
+                    .unwrap_or(false);
+            if on_origin {
+                let spawn_handle = open_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let st = spawn_handle.state::<AppState>();
+                    let _ = commands::open_tab_internal(&spawn_handle, &st, u).await;
+                });
+            }
+            tauri::webview::NewWindowResponse::Deny
+        })
+        .on_page_load(move |_webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                if let Ok(mut tabs) = load_handle.state::<AppState>().tabs.write() {
+                    tabs.set_url(&load_label, payload.url().as_str());
+                }
+            }
+        });
+    let (width, height) = {
+        let scale = window.scale_factor().unwrap_or(1.0);
+        match window.inner_size() {
+            Ok(size) => (size.width as f64 / scale, size.height as f64 / scale),
+            Err(_) => (1280.0, 820.0),
+        }
+    };
+    window
+        .add_child(
+            builder,
+            tauri::LogicalPosition::new(0.0, TABBAR_HEIGHT),
+            tauri::LogicalSize::new(width, (height - TABBAR_HEIGHT).max(80.0)),
+        )
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -613,7 +684,11 @@ pub fn run() {
             let queue_arc = Arc::new(Mutex::new(queue));
             let environment = RwLock::new(None);
             let worker_wake = Arc::new((Mutex::new(true), Condvar::new()));
-            spawn_worker_loop(db_path.clone(), Arc::clone(&worker_wake));
+            spawn_worker_loop(
+                db_path.clone(),
+                config_dir.clone(),
+                Arc::clone(&worker_wake),
+            );
 
             let initial_origin = resolved.odoo_origin.clone();
             app.manage(AppState {
@@ -622,6 +697,7 @@ pub fn run() {
                 config_dir,
                 environment,
                 printer_cache: RwLock::new(None),
+                tabs: RwLock::new(TabsState::default()),
                 locked_by_policy: resolved.locked_by_policy,
                 auto_reprint: RwLock::new(resolved.auto_reprint),
                 worker_wake,
@@ -642,54 +718,55 @@ pub fn run() {
                 None => WebviewUrl::App("index.html".into()),
             };
 
-            let app_handle = app.handle().clone();
-            // The handle itself is not used after build (the runtime
-            // owns the window); the binding just keeps it in scope
-            // through setup.
-            let _window = WebviewWindowBuilder::new(app, "main", start_url)
+            // Tabbed browser (owner brief, 2026-11-05): ONE window
+            // hosting a local tab bar (tabbar.html) plus one child
+            // webview per tab. This supersedes the v1.4.1 caution
+            // below in history: the multi-webview API is enabled
+            // (tauri "unstable" feature, already on), webviews are
+            // created from setup or async commands only (the
+            // documented Windows deadlock rule), and the Windows
+            // build is verified on CI for this exact tree.
+            let window = tauri::window::WindowBuilder::new(app, "main")
                 .title("Yaseir Print")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(960.0, 640.0)
-                .initialization_script(
-                    BRIDGE_JS.replace("__APP_VERSION__", env!("CARGO_PKG_VERSION")),
-                )
-                .on_navigation(move |u| {
-                    if u.as_str() == "about:blank" || is_local_app_url(u) {
-                        return true;
-                    }
-                    let state = app_handle.state::<AppState>();
-                    let allowed = state.configured_origin.read().ok().and_then(|g| g.clone());
-                    let verdict = match allowed {
-                        Some(cfg_origin) => {
-                            let o = u.origin().ascii_serialization();
-                            origin_is_allowed(&cfg_origin, &o)
-                        }
-                        None => false,
-                    };
-                    if !verdict {
-                        eprintln!(
-                            "Yaseir Print: blocked navigation to {} (not the configured Odoo origin)",
-                            u.as_str()
-                        );
-                    }
-                    verdict
-                })
-                .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
                 .build()?;
+            let _tabbar = window.add_child(
+                tauri::webview::WebviewBuilder::new(
+                    "tabbar",
+                    WebviewUrl::App("tabbar.html".into()),
+                ),
+                tauri::LogicalPosition::new(0.0, 0.0),
+                tauri::LogicalSize::new(1280.0, TABBAR_HEIGHT),
+            )?;
 
-            // NOTE (v1.4.1): the child-webview toolbar block is
-            // intentionally absent. Every variant of it broke the
-            // Windows installer build (CI runs #68-#70, #73-#75)
-            // while the identical tree without it built green
-            // (run #71), and the CI logs are not reachable from the
-            // build environment to extract the exact compiler
-            // error. The nav commands (nav_back / nav_forward /
-            // nav_reload), the toolbar capability and toolbar.html
-            // stay in place, inert, and back/forward is available
-            // in the Odoo view via Alt+Left / Alt+Right (bridge).
-            // Restore the block only with a Windows compiler log
-            // in hand (build once on a Windows machine and read
-            // the first error).
+            // The first tab: the boot page (origin configured) or
+            // the Control Center (nothing configured yet).
+            {
+                let state = app.state::<AppState>();
+                let mut tabs = state
+                    .tabs
+                    .write()
+                    .map_err(|_| std::io::Error::other("tabs_lock_poisoned"))?;
+                tabs.next_id = 1;
+                let first_url = match initial_origin.as_deref() {
+                    Some(_) => "tauri://localhost/boot.html",
+                    None => "tauri://localhost/index.html",
+                };
+                tabs.register("tab-1", first_url);
+                tabs.active = Some("tab-1".to_string());
+            }
+            create_tab_webview(app.handle(), "tab-1", start_url)?;
+
+            // Keep the tab bar and the active tab fitted to the
+            // window on every resize.
+            let resize_handle = app.handle().clone();
+            window.on_window_event(move |event| {
+                if matches!(event, tauri::WindowEvent::Resized(_)) {
+                    layout_webviews(&resize_handle);
+                }
+            });
+            layout_webviews(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -711,6 +788,12 @@ pub fn run() {
             commands::report_environment,
             commands::clear_web_data_cmd,
             commands::save_origin_cmd,
+            commands::get_printer_settings,
+            commands::set_printer_settings,
+            commands::tab_open,
+            commands::tab_list,
+            commands::tab_switch,
+            commands::tab_close,
             commands::open_control_center,
             commands::open_odoo_origin,
             commands::app_identity,
