@@ -392,7 +392,7 @@ pub fn detect_protocol(
     // clone drivers very often identify only as "POS Printer" /
     // "POS80" / "Thermal Printer", and missing them routed real
     // POS printers to GDI (owner report, 2026-11-05).
-    const THERMAL_TOKENS: [&str; 27] = [
+    const THERMAL_TOKENS: [&str; 45] = [
         "epson tm-",
         "epson tm ",
         "xprinter",
@@ -400,12 +400,14 @@ pub fn detect_protocol(
         "bixolon",
         "star tsp",
         "citizen ct-",
+        "citizen",
         "sewoo",
         "esc/pos",
         "escpos",
         "thermal receipt",
         "thermal printer",
         "receipt printer",
+        "receipt",
         "pos printer",
         "pos-58",
         "pos-80",
@@ -413,6 +415,7 @@ pub fn detect_protocol(
         "pos80",
         "tm-t",
         "tm-m",
+        "tm-u",
         "sunmi",
         "munbyn",
         "hprt",
@@ -420,6 +423,28 @@ pub fn detect_protocol(
         "snbc",
         "gprinter",
         "sprt",
+        "gainscha",
+        "zjiang",
+        "btp-",
+        "srp-",
+        "posiflex",
+        "mc-print",
+        "xp-80",
+        "xp-58",
+        // Bare media widths in a printer's name/driver are
+        // receipt hardware by definition — no office printer is
+        // named after a 58/80 mm roll (2026-11-06 expansion from
+        // the real-world POS ecosystem: clone drivers often carry
+        // nothing but the width and a generic word).
+        "58mm",
+        "80mm",
+        "usb thermal",
+        "mini printer",
+        // Clone drivers frequently report Chinese identities:
+        // thermal / receipt / small-ticket printer.
+        "热敏",
+        "票据",
+        "小票",
     ];
     if THERMAL_TOKENS.iter().any(|t| signature.contains(t)) {
         return ("escpos", "thermal");
@@ -723,6 +748,34 @@ mod tests {
         // but is not a POS printer.
         assert_eq!(
             detect_protocol("PostScript Printer", "Adobe PDF", PrinterKind::Local),
+            ("gdi", "office")
+        );
+        // The wider real-world POS ecosystem (owner report,
+        // 2026-11-06): vendor lines and clone identities beyond
+        // the first table — Xprinter model names, SNBC/Bixolon
+        // model prefixes, Chinese clone drivers, and names that
+        // carry nothing but the roll width.
+        for (name, driver) in [
+            ("XP-80C", "USB Printing Support"),
+            ("ZJ-8090", "Zjiang Printer"),
+            ("BTP-R880NP", "SNBC"),
+            ("SRP-350plusIII", "BIXOLON"),
+            ("RP80 Printer", "GAINSCHA"),
+            ("POSIFLEX PP-8800", "Posiflex"),
+            ("80mm Mini Printer", "Generic USB"),
+            ("58mm Receipt", "USB Thermal Driver"),
+            ("小票打印机", "热敏驱动"),
+        ] {
+            assert_eq!(
+                detect_protocol(name, driver, PrinterKind::Local),
+                ("escpos", "thermal"),
+                "{name} / {driver}"
+            );
+        }
+        // Width words alone do not make an office printer thermal:
+        // these names contain no token ("LaserJet" has no 58/80mm).
+        assert_eq!(
+            detect_protocol("Canon PIXMA G3420", "Canon", PrinterKind::Local),
             ("gdi", "office")
         );
     }

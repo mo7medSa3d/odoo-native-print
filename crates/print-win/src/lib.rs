@@ -99,8 +99,8 @@ mod win;
 pub use win::{
     default_printer_name, discover_printers, paper_forms, print_canvas_gdi,
     print_canvas_gdi_configured, print_canvas_gdi_detailed, print_pdf_gdi, print_pdf_gdi_copies,
-    print_pdf_gdi_detailed, print_pdf_gdi_with_options, print_raw, printer_capabilities,
-    printer_health, printer_status,
+    print_pdf_gdi_detailed, print_pdf_gdi_with_options, print_raw, print_raw_phased,
+    printer_capabilities, printer_health, printer_status, RawSendError,
 };
 
 #[cfg(not(windows))]
@@ -124,6 +124,29 @@ mod stub {
     }
     pub fn print_raw(_printer: &str, _title: &str, _bytes: &[u8]) -> Result<u32, Unsupported> {
         Err(Unsupported)
+    }
+    /// Mirror of the Windows `win::RawSendError` so callers can
+    /// match on the failure phase on every platform.
+    #[derive(Debug)]
+    pub struct RawSendError {
+        pub pre_write: bool,
+        pub message: String,
+    }
+    impl std::fmt::Display for RawSendError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.message)
+        }
+    }
+    impl std::error::Error for RawSendError {}
+    pub fn print_raw_phased(
+        _printer: &str,
+        _title: &str,
+        _bytes: &[u8],
+    ) -> Result<u32, RawSendError> {
+        Err(RawSendError {
+            pre_write: true,
+            message: "print-win is only available on Windows".to_string(),
+        })
     }
     pub fn print_pdf_gdi(
         _printer: &str,
@@ -201,6 +224,6 @@ mod stub {
 pub use stub::{
     default_printer_name, discover_printers, paper_forms, print_canvas_gdi,
     print_canvas_gdi_configured, print_canvas_gdi_detailed, print_pdf_gdi, print_pdf_gdi_copies,
-    print_pdf_gdi_detailed, print_pdf_gdi_with_options, print_raw, printer_capabilities,
-    printer_health, printer_status, Unsupported,
+    print_pdf_gdi_detailed, print_pdf_gdi_with_options, print_raw, print_raw_phased,
+    printer_capabilities, printer_health, printer_status, RawSendError, Unsupported,
 };

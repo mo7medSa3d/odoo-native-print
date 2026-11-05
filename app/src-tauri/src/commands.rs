@@ -2218,6 +2218,84 @@ impl NativePrintBackend {
     }
 }
 
+/// The document GDI path (media validation + PDFium render),
+/// shared by native GDI jobs and by the pre-write rescue for
+/// raw-mode documents whose driver refused the RAW document
+/// (GDI-only POS/label drivers - see the ("pdf", raw) arm).
+fn print_pdf_via_gdi(
+    target_name: &str,
+    title: &str,
+    data: &[u8],
+    opts: &JobOptions,
+) -> Result<(), BackendError> {
+    let policy = NativePrintBackend::parse_scale_policy(opts.scale_policy.as_deref());
+    // Validate page geometry against the current Windows driver.
+    // Both failures here are RETRYABLE (2026-11-05
+    // practicality round): a capabilities read fails
+    // transiently while the spooler/driver is busy or
+    // initializing, and an empty form list at printer
+    // power-on is the same condition one read later.
+    // A genuinely broken driver still fails — after the
+    // retry envelope, with the same codes.
+    let capabilities = print_win::printer_capabilities(target_name).map_err(|error| {
+        BackendError::retryable(
+            "PRINTER_CAPABILITIES_UNAVAILABLE",
+            &format!("The Windows driver did not expose media capabilities: {error}"),
+        )
+    })?;
+    if let Ok(info) = print_render::parse_pdf_info(data) {
+        for page in &info.pages {
+            if capabilities.forms.is_empty() && !capabilities.custom_size_supported {
+                return Err(BackendError::retryable(
+                        "PRINTER_MEDIA_UNAVAILABLE",
+                        "The installed driver reported no paper forms or custom-size limits; install/update the vendor printer driver.",
+                    ));
+            }
+            let result = if policy == ScalePolicy::CustomAllowed {
+                match_paper_auto(page.size, &capabilities)
+            } else {
+                match_paper(page.size, &capabilities.forms, policy)
+            };
+            result.map_err(|e| BackendError::fatal("PAPER_MISMATCH", &e.to_string()))?;
+        }
+    } else if policy != ScalePolicy::CustomAllowed {
+        // The lightweight parser could not read this PDF:
+        // a strict paper policy must not silently skip the
+        // media validation this block exists to provide.
+        return Err(BackendError::fatal(
+            "PAPER_VALIDATION_UNAVAILABLE",
+            "the document's page sizes could not be verified against the printer's paper forms",
+        ));
+    }
+    let render_mode = if opts.color {
+        RenderMode::Color
+    } else {
+        RenderMode::Grayscale
+    };
+    let gdi_opts = print_win::GdiJobOptions {
+        mode: render_mode,
+        dpi: 300,
+        copies: opts.copies.max(1),
+        duplex: opts.duplex,
+        color: opts.color,
+        scale_policy: policy,
+        tray: opts.tray.clone(),
+    };
+    print_win::print_pdf_gdi_detailed(target_name, title, data, &gdi_opts).map_err(|e| {
+        // ADR-0004 classification from the backend
+        // (audit M5): a failure after pages reached
+        // paper is ambiguous and must never auto-retry;
+        // a setup failure printed nothing, so the
+        // worker may retry it like any transient error.
+        if e.ambiguous {
+            BackendError::ambiguous("GDI_PRINT_ERROR", &e.message)
+        } else {
+            BackendError::retryable("GDI_SETUP_ERROR", &e.message)
+        }
+    })?;
+    Ok(())
+}
+
 impl PrintBackend for NativePrintBackend {
     fn print(&mut self, job: &Job) -> Result<(), BackendError> {
         let q = Queue::open(&self.db_path)
@@ -2576,84 +2654,27 @@ impl PrintBackend for NativePrintBackend {
                     },
                     opts.cut,
                 )?;
-                print_win::print_raw(&target_name, title, &raw_bytes)
-                    .map_err(|e| BackendError::ambiguous("SPOOLER_RAW_ERROR", &e.to_string()))?;
-                Ok(())
-            }
-            ("pdf", "gdi") => {
-                let policy = Self::parse_scale_policy(opts.scale_policy.as_deref());
-                // Validate page geometry against the current Windows driver.
-                // Both failures here are RETRYABLE (2026-11-05
-                // practicality round): a capabilities read fails
-                // transiently while the spooler/driver is busy or
-                // initializing, and an empty form list at printer
-                // power-on is the same condition one read later.
-                // A genuinely broken driver still fails — after the
-                // retry envelope, with the same codes.
-                let capabilities =
-                    print_win::printer_capabilities(&target_name).map_err(|error| {
-                        BackendError::retryable(
-                            "PRINTER_CAPABILITIES_UNAVAILABLE",
-                            &format!(
-                                "The Windows driver did not expose media capabilities: {error}"
-                            ),
-                        )
-                    })?;
-                if let Ok(info) = print_render::parse_pdf_info(&data) {
-                    for page in &info.pages {
-                        if capabilities.forms.is_empty() && !capabilities.custom_size_supported {
-                            return Err(BackendError::retryable(
-                                "PRINTER_MEDIA_UNAVAILABLE",
-                                "The installed driver reported no paper forms or custom-size limits; install/update the vendor printer driver.",
-                            ));
-                        }
-                        let result = if policy == ScalePolicy::CustomAllowed {
-                            match_paper_auto(page.size, &capabilities)
-                        } else {
-                            match_paper(page.size, &capabilities.forms, policy)
-                        };
-                        result
-                            .map_err(|e| BackendError::fatal("PAPER_MISMATCH", &e.to_string()))?;
+                match print_win::print_raw_phased(&target_name, title, &raw_bytes) {
+                    Ok(_) => Ok(()),
+                    Err(e) if e.pre_write => {
+                        // The spooler/driver refused the RAW
+                        // document before a single payload byte was
+                        // accepted — the signature of a GDI-only
+                        // POS/label driver (2026-11-06 field round:
+                        // real POS printers died here as an
+                        // ambiguous dead end). Nothing was printed,
+                        // so rendering the same document through
+                        // GDI cannot duplicate it (ADR-0004-safe).
+                        eprintln!(
+                            "Yaseir Print: raw send to {target_name:?} refused pre-write ({}); falling back to GDI rendering",
+                            e.message
+                        );
+                        print_pdf_via_gdi(&target_name, title, &data, &opts)
                     }
-                } else if policy != ScalePolicy::CustomAllowed {
-                    // The lightweight parser could not read this PDF:
-                    // a strict paper policy must not silently skip the
-                    // media validation this block exists to provide.
-                    return Err(BackendError::fatal(
-                        "PAPER_VALIDATION_UNAVAILABLE",
-                        "the document's page sizes could not be verified against the printer's paper forms",
-                    ));
+                    Err(e) => Err(BackendError::ambiguous("SPOOLER_RAW_ERROR", &e.message)),
                 }
-                let render_mode = if opts.color {
-                    RenderMode::Color
-                } else {
-                    RenderMode::Grayscale
-                };
-                let gdi_opts = print_win::GdiJobOptions {
-                    mode: render_mode,
-                    dpi: 300,
-                    copies: opts.copies.max(1),
-                    duplex: opts.duplex,
-                    color: opts.color,
-                    scale_policy: policy,
-                    tray: opts.tray.clone(),
-                };
-                print_win::print_pdf_gdi_detailed(&target_name, title, &data, &gdi_opts).map_err(
-                    |e| {
-                        // ADR-0004 classification from the backend
-                        // (audit M5): a failure after pages reached
-                        // paper is ambiguous and must never auto-retry;
-                        // a setup failure printed nothing, so the
-                        // worker may retry it like any transient error.
-                        if e.ambiguous {
-                            BackendError::ambiguous("GDI_PRINT_ERROR", &e.message)
-                        } else {
-                            BackendError::retryable("GDI_SETUP_ERROR", &e.message)
-                        }
-                    },
-                )?;
-                Ok(())
             }
+            ("pdf", "gdi") => print_pdf_via_gdi(&target_name, title, &data, &opts),
             ("pdf", _) => Err(BackendError::fatal(
                 "UNKNOWN_MODE",
                 &format!("unsupported print mode {:?} for this document", opts.mode),
@@ -2691,18 +2712,62 @@ impl PrintBackend for NativePrintBackend {
                         label_gap_mm: opts.label_gap_mm,
                     },
                 )?;
-                print_win::print_raw(&target_name, title, &raw_bytes)
-                    .map_err(|e| BackendError::ambiguous("SPOOLER_RAW_ERROR", &e.to_string()))?;
-                Ok(())
+                match print_win::print_raw_phased(&target_name, title, &raw_bytes) {
+                    Ok(_) => Ok(()),
+                    Err(e) if e.pre_write => {
+                        // Same GDI-only-driver rescue as the PDF
+                        // arm: the RAW document was refused before
+                        // any byte was accepted, so printing the
+                        // receipt image through GDI (every Windows
+                        // driver renders it, sized to the roll the
+                        // job reported) cannot duplicate anything.
+                        // This is the difference between a POS
+                        // receipt that prints on any printer and
+                        // one that dies as "wrong printer".
+                        eprintln!(
+                            "Yaseir Print: raw send to {target_name:?} refused pre-write ({}); printing the image through GDI instead",
+                            e.message
+                        );
+                        let canvas = print_render::decode_png(&data).map_err(|err| {
+                            BackendError::fatal("IMAGE_DECODE_ERROR", &err.to_string())
+                        })?;
+                        print_win::print_canvas_gdi_configured(
+                            &target_name,
+                            title,
+                            &canvas,
+                            opts.copies.max(1),
+                            opts.tray.as_deref(),
+                            opts.media_roll_width_mm.or(opts.source_width_mm),
+                        )
+                        .map_err(|err| {
+                            if err.ambiguous {
+                                BackendError::ambiguous("GDI_PRINT_ERROR", &err.message)
+                            } else {
+                                BackendError::retryable("GDI_SETUP_ERROR", &err.message)
+                            }
+                        })?;
+                        Ok(())
+                    }
+                    Err(e) => Err(BackendError::ambiguous("SPOOLER_RAW_ERROR", &e.message)),
+                }
             }
             ("image-png", _) => Err(BackendError::fatal(
                 "UNKNOWN_MODE",
                 &format!("unsupported print mode {:?} for this image", opts.mode),
             )),
             _ => {
+                // Pre-rendered raw payloads have no GDI rendering
+                // to rescue into, but their failure classification
+                // still follows the phase: a pre-write refusal
+                // printed nothing and may retry; a write failure
+                // stays ambiguous (ADR-0004).
                 for _ in 0..opts.copies.max(1) {
-                    print_win::print_raw(&target_name, title, &data).map_err(|e| {
-                        BackendError::ambiguous("SPOOLER_RAW_ERROR", &e.to_string())
+                    print_win::print_raw_phased(&target_name, title, &data).map_err(|e| {
+                        if e.pre_write {
+                            BackendError::retryable("SPOOLER_RAW_ERROR", &e.message)
+                        } else {
+                            BackendError::ambiguous("SPOOLER_RAW_ERROR", &e.message)
+                        }
                     })?;
                 }
                 Ok(())

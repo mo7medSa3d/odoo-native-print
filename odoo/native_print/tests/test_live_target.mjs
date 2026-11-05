@@ -37,6 +37,13 @@ eq(m.printerPatternFor({ name: "Label", port: "999.1.1.1" }, "zpl"), "Label", "b
 eq(m.detectPrinterType({ name: "Replit OfficeJet", driver: "HP" }).mode, "gdi", "epl substring is not epl");
 eq(m.detectPrinterType({ name: "Zebra ZPL Label", driver: "Zebra" }).mode, "zpl", "zpl word");
 eq(m.detectPrinterType({ name: "TSC TTP-244", driver: "TSC" }).mode, "tspl", "tsc word");
+// The wider POS ecosystem (2026-11-06): the JS fallback table
+// carries the same identities as the Rust detection, so a real
+// POS printer is recognized even with an old bridge.
+eq(m.detectPrinterType({ name: "XP-80C", driver: "USB Printing Support" }).mode, "escpos", "xprinter model name");
+eq(m.detectPrinterType({ name: "BTP-R880NP", driver: "SNBC" }).mode, "escpos", "snbc btp model");
+eq(m.detectPrinterType({ name: "80mm Mini Printer", driver: "Generic USB" }).printerClass, "thermal", "width-only identity");
+eq(m.detectPrinterType({ name: "小票打印机", driver: "热敏驱动" }).mode, "escpos", "chinese clone driver");
 eq(m.rollWidthMm({ forms: [{ roll: true, size: { width_mm: 80 } }] }), 80, "roll width");
 eq(m.rollWidthMm({ forms: [{ roll: false, size: { width_mm: 210 } }] }), null, "no roll");
 // Bridge-shipped detection wins over the name heuristic: the app

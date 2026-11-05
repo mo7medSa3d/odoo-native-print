@@ -75,11 +75,14 @@ export function detectPrinterType(printer) {
     // "Thermal Printer".
     const thermalTokens = [
         "epson tm-", "epson tm ", "xprinter", "rongta", "bixolon",
-        "star tsp", "citizen ct-", "sewoo", "esc/pos", "escpos",
+        "star tsp", "citizen ct-", "citizen", "sewoo", "esc/pos", "escpos",
         "thermal receipt", "thermal printer", "receipt printer",
-        "pos printer", "pos-58", "pos-80", "pos58", "pos80",
-        "tm-t", "tm-m", "sunmi", "munbyn", "hprt", "cashino",
-        "snbc", "gprinter", "sprt",
+        "receipt", "pos printer", "pos-58", "pos-80", "pos58", "pos80",
+        "tm-t", "tm-m", "tm-u", "sunmi", "munbyn", "hprt", "cashino",
+        "snbc", "gprinter", "sprt", "gainscha", "zjiang", "btp-",
+        "srp-", "posiflex", "mc-print", "xp-80", "xp-58",
+        "58mm", "80mm", "usb thermal", "mini printer",
+        "热敏", "票据", "小票",
     ];
     if (thermalTokens.some((t) => signature.includes(t))) {
         return { mode: "escpos", printerClass: "thermal" };

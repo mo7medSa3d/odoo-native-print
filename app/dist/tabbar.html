@@ -5,13 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Yaseir Print — Tabs</title>
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: light; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; overflow: hidden; }
   body {
     font-family: "Segoe UI", Tahoma, Arial, sans-serif;
-    background: #101623;
-    color: #e6ebf4;
+    background: #ffffff;
+    color: #17202e;
+    border-bottom: 1px solid #e3e8f0;
     display: flex; align-items: stretch; gap: 6px;
     padding: 6px 8px;
     user-select: none; -webkit-user-select: none;
@@ -19,10 +20,10 @@
   .nav-group { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
   .tb-btn {
     width: 32px; height: 32px; border: 0; border-radius: 8px;
-    background: transparent; color: #c7d0dd; cursor: pointer;
+    background: transparent; color: #eb6b29; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
   }
-  .tb-btn:hover { background: #1e293b; color: #fff; }
+  .tb-btn:hover { background: #fdf0e7; color: #d55a1d; }
   .tb-btn svg { width: 17px; height: 17px; }
   [dir="rtl"] .flip-rtl { transform: scaleX(-1); }
   .tabs {
@@ -35,17 +36,18 @@
     flex: 0 1 190px; min-width: 92px; max-width: 190px; height: 32px;
     display: flex; align-items: center; gap: 6px;
     padding: 0 6px 0 10px;
-    background: #1b2536; color: #aeb9c9;
-    border: 1px solid rgba(255,255,255,.05);
+    background: #eef1f6; color: #5b6472;
+    border: 1px solid #e3e8f0;
     border-radius: 8px; cursor: pointer; white-space: nowrap;
   }
   [dir="rtl"] .tab { padding: 0 10px 0 6px; }
-  .tab:hover { background: #232f45; color: #dbe4f0; }
-  .tab.active { background: #f4f7fc; color: #17202e; border-color: transparent; }
+  .tab:hover { background: #e2e9f4; color: #17202e; }
+  .tab.active { background: #ffffff; color: #17202e; border-color: #cfd9e6;
+    box-shadow: inset 0 -2px 0 #0953de; font-weight: 600; }
   .tab .t-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
   .tab .t-pos {
     flex: 0 0 auto; font-size: 9.5px; font-weight: 700; letter-spacing: .04em;
-    background: #0953de; color: #fff; border-radius: 4px; padding: 1px 4px;
+    background: #0098d3; color: #fff; border-radius: 4px; padding: 1px 4px;
   }
   .tab .t-close {
     flex: 0 0 auto; width: 18px; height: 18px; border: 0; border-radius: 5px;
@@ -56,17 +58,17 @@
   .tab.active .t-close:hover { background: rgba(220, 60, 60, .14); }
   .tab-add {
     flex: 0 0 auto; width: 28px; height: 28px; border: 0; border-radius: 50%;
-    background: transparent; color: #aeb9c9; cursor: pointer; align-self: center;
+    background: transparent; color: #5b6472; cursor: pointer; align-self: center;
     display: flex; align-items: center; justify-content: center; margin: 0 2px;
   }
-  .tab-add:hover { background: #232f45; color: #fff; }
+  .tab-add:hover { background: #e2e9f4; color: #0953de; }
   .tab-add svg { width: 15px; height: 15px; }
   .tb-action {
     flex: 0 0 auto; height: 32px; border: 0; border-radius: 8px; cursor: pointer;
     display: flex; align-items: center; gap: 6px; padding: 0 10px;
-    background: #1b2536; color: #c7d0dd; font-size: 12.5px; font-family: inherit;
+    background: #eef1f6; color: #3d4656; font-size: 12.5px; font-family: inherit;
   }
-  .tb-action:hover { background: #232f45; color: #fff; }
+  .tb-action:hover { background: #e2e9f4; color: #17202e; }
   .tb-action.brand { background: #0953de; color: #fff; }
   .tb-action.brand:hover { background: #0b47bd; }
   .tb-action img { width: 17px; height: 17px; border-radius: 4px; }

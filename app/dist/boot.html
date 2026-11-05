@@ -5,10 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Yaseir Print — جارٍ الاتصال</title>
 <style>
-  :root { --brand: #0953de; --ink: #101219; --muted: #5b6472; --line: #e3e8f0; }
+  :root { --brand: #0953de; --cyan: #00c7fc; --ink: #101219; --muted: #5b6472; --line: #e3e8f0; }
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-         font-family: "Segoe UI", system-ui, -apple-system, sans-serif; background: #f6f8fc; color: var(--ink); }
+         font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+         background: linear-gradient(160deg, #0953de 0%, #0098d3 100%); color: var(--ink); }
   .card { width: min(92vw, 430px); background: #fff; border: 1px solid var(--line); border-radius: 20px;
           box-shadow: 0 18px 50px rgba(16,18,25,.10); padding: 2rem 1.8rem; text-align: center; }
   .logo { width: 64px; height: 64px; border-radius: 16px; margin-bottom: 1rem; }
@@ -22,8 +23,10 @@
   .actions.show { display: flex; }
   button { border: 0; border-radius: 999px; padding: .65rem 1.25rem; font: inherit; font-size: .92rem;
            cursor: pointer; background: #eef1f6; color: var(--ink); }
-  button.primary { background: var(--brand); color: #fff; }
+  button.primary { background: var(--cyan); color: #fff; font-weight: 700; }
   .count { font-size: .82rem; color: var(--muted); margin-top: .9rem; min-height: 1.2em; }
+  .credit { position: fixed; inset-inline: 0; bottom: 14px; text-align: center;
+            color: rgba(255,255,255,.85); font-size: .8rem; }
 </style>
 </head>
 <body>
@@ -39,6 +42,7 @@
     </div>
     <div class="count" id="count"></div>
   </div>
+  <div class="credit">تطوير وتشغيل Yaseir.com — جميع الحقوق محفوظة © يسير</div>
 <script>
   function invoke(cmd, args) { return window.__TAURI_INTERNALS__.invoke(cmd, args || {}); }
   var origin = null;

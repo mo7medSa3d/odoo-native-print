@@ -1345,14 +1345,44 @@ pub fn printer_capabilities(printer: &str) -> Result<print_core::PrinterCapabili
     ))
 }
 
+/// A failed raw spooler send, classified by HOW FAR the payload
+/// got (ADR-0004): `pre_write` failures (the queue could not be
+/// opened, or the spooler/driver refused the RAW document before
+/// any payload byte was accepted — the signature of a GDI-only
+/// POS driver) prove nothing was printed, so the caller may retry
+/// or re-render through GDI. A failure inside WritePrinter is
+/// ambiguous: part of the stream may already be on paper.
+#[derive(Debug)]
+pub struct RawSendError {
+    pub pre_write: bool,
+    pub message: String,
+}
+
+impl std::fmt::Display for RawSendError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for RawSendError {}
+
 /// Submit raw bytes (ESC/POS, ZPL, TSPL) to a printer through the spooler
 /// with the RAW datatype. Returns the spooler job id.
 pub fn print_raw(printer: &str, title: &str, bytes: &[u8]) -> Result<u32, String> {
+    print_raw_phased(printer, title, bytes).map_err(|e| e.message)
+}
+
+/// `print_raw` with the failure phase attached (see RawSendError).
+pub fn print_raw_phased(printer: &str, title: &str, bytes: &[u8]) -> Result<u32, RawSendError> {
+    let pre = |message: String| RawSendError {
+        pre_write: true,
+        message,
+    };
     let name = wide(printer);
     let mut handle: Handle = std::ptr::null_mut();
     let ok = unsafe { OpenPrinterW(name.as_ptr(), &mut handle, std::ptr::null_mut()) };
     if ok == 0 || handle.is_null() {
-        return Err(last_error());
+        return Err(pre(last_error()));
     }
     let result = unsafe {
         let doc_name = wide(title);
@@ -1364,12 +1394,13 @@ pub fn print_raw(printer: &str, title: &str, bytes: &[u8]) -> Result<u32, String
         };
         let job_id = StartDocPrinterW(handle, 1, &doc);
         if job_id == 0 {
-            Err(last_error())
+            Err(pre(last_error()))
         } else if StartPagePrinter(handle) == 0 {
             // Capture the error BEFORE EndDocPrinter can clobber it.
+            // No payload byte was written yet: still pre-write.
             let err = last_error();
             EndDocPrinter(handle);
-            Err(err)
+            Err(pre(err))
         } else {
             // WritePrinter may accept fewer bytes than requested;
             // loop until the whole payload is in the spooler. On any
@@ -1400,7 +1431,12 @@ pub fn print_raw(printer: &str, title: &str, bytes: &[u8]) -> Result<u32, String
             }
             if let Some(err) = failure {
                 AbortPrinter(handle);
-                Err(err)
+                // A write-phase failure is ambiguous by definition
+                // (ADR-0004): bytes may already be on paper.
+                Err(RawSendError {
+                    pre_write: false,
+                    message: err,
+                })
             } else {
                 EndPagePrinter(handle);
                 EndDocPrinter(handle);
