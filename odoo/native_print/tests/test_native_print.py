@@ -94,6 +94,18 @@ class TestNativePrintJobLog(TransactionCase):
         with self.assertRaises(UserError):
             job.action_reprint()
 
+    def _plain_print_user(self, extra_group_ids=()):
+        """A non-admin user who may read the job log but holds no
+        special report group (plus any groups the caller adds)."""
+        groups = [self.env.ref("base.group_user").id,
+                  self.env.ref("native_print.group_native_print_user").id]
+        groups.extend(extra_group_ids)
+        return self.env["res.users"].create({
+            "name": "NP Plain Cashier",
+            "login": "np_plain_cashier",
+            "group_ids": [(6, 0, groups)],
+        })
+
     def test_action_reprint_respects_report_groups(self):
         report, partners = self._report_on_partners()
         group = self.env["res.groups"].create({"name": "NP Restricted Reports"})
@@ -103,8 +115,46 @@ class TestNativePrintJobLog(TransactionCase):
             "report_id": report.id,
             "source_ids": str(partners.ids[0]),
         })
+        # A plain user without the report's group is still refused
+        # (the audit-L4 rule survives the 2026-11-05 fix).
         with self.assertRaises(UserError):
-            job.action_reprint()
+            job.with_user(self._plain_print_user()).action_reprint()
+
+    def test_action_reprint_allows_administrator(self):
+        # Field report, 2026-11-05: an Administrator was refused
+        # with "You do not have access to the report used by this
+        # job" because the old check used direct groups only.
+        report, partners = self._report_on_partners()
+        group = self.env["res.groups"].create({"name": "NP Admin Only Reports"})
+        report.group_ids = [(4, group.id)]
+        job = self._job()
+        job.with_context(native_print_status_sync=True).write({
+            "report_id": report.id,
+            "source_ids": str(partners.ids[0]),
+        })
+        admin = self.env.ref("base.user_admin")
+        self.assertTrue(admin._is_admin())
+        action = job.with_user(admin).action_reprint()
+        self.assertEqual(action.get("type"), "ir.actions.report")
+
+    def test_action_reprint_allows_implied_group_membership(self):
+        # Membership through an implying group is real membership:
+        # a user whose group implies the report's group qualifies.
+        report, partners = self._report_on_partners()
+        report_group = self.env["res.groups"].create({"name": "NP Implied Target"})
+        parent_group = self.env["res.groups"].create({
+            "name": "NP Implying Parent",
+            "implied_ids": [(4, report_group.id)],
+        })
+        report.group_ids = [(4, report_group.id)]
+        job = self._job()
+        job.with_context(native_print_status_sync=True).write({
+            "report_id": report.id,
+            "source_ids": str(partners.ids[0]),
+        })
+        user = self._plain_print_user(extra_group_ids=[parent_group.id])
+        action = job.with_user(user).action_reprint()
+        self.assertEqual(action.get("type"), "ir.actions.report")
 
     def test_action_reprint_without_source_fails_loudly(self):
         from odoo.exceptions import UserError

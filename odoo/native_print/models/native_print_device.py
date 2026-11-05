@@ -35,6 +35,17 @@ class NativePrintDevice(models.Model):
         default=lambda s: s.env.company,
         string="Company",
     )
+    # Capability snapshot (2026-11-05): the desktop app reports what
+    # the printer's own driver declares — protocol, class, paper
+    # forms and trays — so the printer arrives in Odoo WITH its sizes
+    # and trays attached. Read-only reference for people browsing the
+    # log; printing still resolves everything live on the PC and
+    # never reads these fields.
+    protocol = fields.Char(string="Protocol")
+    printer_class = fields.Char(string="Printer Class")
+    forms_summary = fields.Text(string="Paper Sizes")
+    trays_summary = fields.Text(string="Trays")
+    caps_synced_at = fields.Datetime(string="Capabilities Synced")
 
     _name_company_uniq = models.Constraint(
         "unique(name, company_id)",

@@ -6,15 +6,14 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Odoo Server 19.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-04 08:34+0000\n"
-"PO-Revision-Date: 2026-11-04 08:34+0000\n"
+"POT-Creation-Date: 2026-11-04 23:51+0000\n"
+"PO-Revision-Date: 2026-11-04 23:51+0000\n"
 "Last-Translator: \n"
 "Language-Team: \n"
-"Language: ar_001\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: \n"
-"Plural-Forms: nplurals=6; plural=(n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : n%100>=3 && n%100<=10 ? 3 : n%100>=11 && n%100<=99 ? 4 : 5);\n"
+"Plural-Forms: \n"
 
 #. module: native_print
 #. odoo-javascript
@@ -110,6 +109,21 @@ msgstr "الحجم (بايت)"
 #: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__canceled
 msgid "Canceled"
 msgstr "ملغاة"
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_device_list
+msgid "Capabilities"
+msgstr "القدرات"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_device__caps_synced_at
+msgid "Capabilities Synced"
+msgstr "آخر مزامنة للقدرات"
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_device_list
+msgid "Class"
+msgstr "الفئة"
 
 #. module: native_print
 #: model:ir.model.fields,field_description:native_print.field_native_print_job__color
@@ -254,6 +268,12 @@ msgid "Jobs"
 msgstr "سجل مهام الطباعة"
 
 #. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Label"
+msgstr "ملصقات"
+
+#. module: native_print
 #: model:ir.model.fields,field_description:native_print.field_native_print_device__write_uid
 #: model:ir.model.fields,field_description:native_print.field_native_print_job__write_uid
 msgid "Last Updated by"
@@ -264,6 +284,12 @@ msgstr "آخر تحديث بواسطة"
 #: model:ir.model.fields,field_description:native_print.field_native_print_job__write_date
 msgid "Last Updated on"
 msgstr "تاريخ آخر تحديث"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Local"
+msgstr "محلية"
 
 #. module: native_print
 #. odoo-javascript
@@ -312,8 +338,8 @@ msgid ""
 "Native Print could not print this receipt, and nothing was printed. Check "
 "the printer and try again."
 msgstr ""
-"تعذرت طباعة هذا الإيصال عبر الطباعة الأصلية، ولم يُطبع شيء. تحقق من "
-"الطابعة وحاول مرة أخرى."
+"تعذرت طباعة هذا الإيصال عبر الطباعة الأصلية، ولم يُطبع شيء. تحقق من الطابعة "
+"وحاول مرة أخرى."
 
 #. module: native_print
 #: model:ir.model,name:native_print.model_native_print_job
@@ -324,6 +350,18 @@ msgstr "الطباعة من Yaseir: سجل المهام"
 #: model:ir.model,name:native_print.model_native_print_device
 msgid "Native Print: printer seen in the job log"
 msgstr "الطباعة من Yaseir: طابعة ظاهرة في سجل المهام"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Network"
+msgstr "شبكة"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Office"
+msgstr "مكتبية"
 
 #. module: native_print
 #. odoo-javascript
@@ -359,6 +397,16 @@ msgstr "عدد الصفحات"
 #: model:ir.model.fields,field_description:native_print.field_native_print_job__paper
 msgid "Paper"
 msgstr "الورق"
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_device__forms_summary
+msgid "Paper Sizes"
+msgstr "مقاسات الورق"
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_device_form
+msgid "Paper Sizes (from the printer's driver)"
+msgstr "مقاسات الورق (من تعريف الطابعة)"
 
 #. module: native_print
 #: model:ir.actions.act_window,name:native_print.action_jobs
@@ -424,6 +472,11 @@ msgid "Printer (as reported)"
 msgstr "الطابعة (كما تم الإبلاغ عنها)"
 
 #. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_device__printer_class
+msgid "Printer Class"
+msgstr "فئة الطابعة"
+
+#. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "Printer Refresh Failed"
@@ -457,6 +510,12 @@ msgstr "جاري الطباعة"
 #: code:addons/native_print/static/src/js/native_print_handler.js:0
 msgid "Printing failed on \"%s\" (%s). Check the printer before reprinting."
 msgstr "فشلت الطباعة على \"%s\" (%s). افحص الطابعة قبل إعادة الطباعة."
+
+#. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_device__protocol
+#: model_terms:ir.ui.view,arch_db:native_print.view_device_list
+msgid "Protocol"
+msgstr "البروتوكول"
 
 #. module: native_print
 #: model:ir.model.fields.selection,name:native_print.selection__native_print_job__state__queued
@@ -521,9 +580,21 @@ msgstr ""
 
 #. module: native_print
 #. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Roll"
+msgstr "بكرة"
+
+#. module: native_print
+#. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_handler.js:0
 msgid "Sent \"%s\" to %s"
 msgstr "تم إرسال \"%s\" إلى %s"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Shared"
+msgstr "مشتركة"
 
 #. module: native_print
 #: model:ir.model.fields,field_description:native_print.field_native_print_job__source_model
@@ -584,6 +655,12 @@ msgstr ""
 "(Ctrl+Shift+Y)."
 
 #. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Thermal"
+msgstr "حرارية"
+
+#. module: native_print
 #. odoo-python
 #: code:addons/native_print/models/native_print_job.py:0
 msgid "This job cannot be reprinted: its report has no valid model."
@@ -621,6 +698,16 @@ msgid "Total Pages"
 msgstr "إجمالي الصفحات"
 
 #. module: native_print
+#: model:ir.model.fields,field_description:native_print.field_native_print_device__trays_summary
+msgid "Trays"
+msgstr "الأدراج"
+
+#. module: native_print
+#: model_terms:ir.ui.view,arch_db:native_print.view_device_form
+msgid "Trays (from the printer's driver)"
+msgstr "الأدراج (من تعريف الطابعة)"
+
+#. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
 msgid "Use this printer"
@@ -631,6 +718,12 @@ msgstr "استخدم هذه الطابعة"
 #: model_terms:ir.ui.view,arch_db:native_print.view_job_search
 msgid "User"
 msgstr "المستخدم"
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_systray.js:0
+msgid "Virtual"
+msgstr "افتراضية"
 
 #. module: native_print
 #. odoo-javascript

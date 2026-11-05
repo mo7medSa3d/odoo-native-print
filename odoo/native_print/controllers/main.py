@@ -1,6 +1,6 @@
 from psycopg2 import IntegrityError
 
-from odoo import http
+from odoo import fields, http
 from odoo.http import request
 
 JOB_STATES = {
@@ -255,6 +255,62 @@ class NativePrintController(http.Controller):
                     vals["source_model"] = parsed_model
             job.write(vals)
         return {"ok": True, "job_id": job.id, "state": job.state}
+
+    @http.route("/native_print/sync_device", type="jsonrpc", auth="user",
+                methods=["POST"], csrf=False)
+    def sync_device(self, name=None, protocol=None, printer_class=None,
+                    forms=None, trays=None, **kwargs):
+        """Attach a driver capability snapshot to a registry device.
+
+        The desktop app reports what the selected printer's driver
+        declares (paper forms + trays) so the printer is visible in
+        Odoo with its full sizes and trays (owner brief, 2026-11-05).
+        Upsert on the same (name, company) unique key the job sync
+        uses: the same physical printer can never register twice.
+        """
+        if not (request.env.user.has_group("native_print.group_native_print_user")
+                or request.env.user.has_group("native_print.group_native_print_manager")):
+            return {"ok": False, "error": "forbidden"}
+        if not name or not isinstance(name, str):
+            return {"ok": False, "error": "bad_request"}
+        device_name = str(name)[:256]
+
+        def _clean_list(val):
+            if not isinstance(val, list):
+                return []
+            return [str(item)[:160] for item in val[:80]
+                    if isinstance(item, str) and item.strip()]
+
+        forms_list = _clean_list(forms)
+        trays_list = _clean_list(trays)
+        vals = {
+            "protocol": str(protocol)[:32] if protocol else False,
+            "printer_class": str(printer_class)[:32] if printer_class else False,
+            "forms_summary": "\n".join(forms_list) or False,
+            "trays_summary": "\n".join(trays_list) or False,
+            "caps_synced_at": fields.Datetime.now(),
+        }
+        company = request.env.company.id
+        Device = request.env["native.print.device"].sudo()
+        printer = Device.search([
+            ("name", "=", device_name),
+            ("company_id", "=", company),
+        ], limit=1)
+        if not printer:
+            try:
+                with Device.env.cr.savepoint():
+                    printer = Device.create(dict(
+                        vals, name=device_name, company_id=company))
+            except IntegrityError:
+                printer = Device.search([
+                    ("name", "=", device_name),
+                    ("company_id", "=", company),
+                ], limit=1)
+        else:
+            printer.write(vals)
+        if not printer:
+            return {"ok": False, "error": "registration_failed"}
+        return {"ok": True, "device_id": printer.id}
 
     @http.route("/native_print/overview", type="jsonrpc", auth="user",
                 methods=["POST"], csrf=False)

@@ -241,6 +241,41 @@ class TestNativePrintControllers(HttpCase):
         self.assertEqual(overview["done_jobs"], 0)
         self.assertEqual(overview["failed_jobs"], 0)
 
+    def test_sync_device_upserts_capabilities_without_duplicates(self):
+        # The capability snapshot lands on the ONE registry row for
+        # the printer (unique name+company): syncing twice updates,
+        # never duplicates (owner brief, 2026-11-05).
+        Device = self.env["native.print.device"]
+        first = self._rpc("/native_print/sync_device", {
+            "name": "EPSON TM-T20",
+            "protocol": "escpos",
+            "printer_class": "thermal",
+            "forms": ["80mm Roll — 80×297mm"],
+            "trays": [],
+        })
+        self.assertTrue(first["ok"])
+        second = self._rpc("/native_print/sync_device", {
+            "name": "EPSON TM-T20",
+            "protocol": "escpos",
+            "printer_class": "thermal",
+            "forms": ["80mm Roll — 80×297mm", "58mm Roll — 58×297mm"],
+            "trays": ["Auto"],
+        })
+        self.assertTrue(second["ok"])
+        self.assertEqual(first["device_id"], second["device_id"])
+        rows = Device.search([("name", "=", "EPSON TM-T20")])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows.protocol, "escpos")
+        self.assertEqual(rows.printer_class, "thermal")
+        self.assertIn("58mm Roll", rows.forms_summary)
+        self.assertEqual(rows.trays_summary, "Auto")
+        self.assertTrue(rows.caps_synced_at)
+
+    def test_sync_device_validates_input(self):
+        res = self._rpc("/native_print/sync_device", {"protocol": "gdi"})
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["error"], "bad_request")
+
 
 @tagged("post_install", "-at_install")
 class TestNativePrintMultiUser(HttpCase):

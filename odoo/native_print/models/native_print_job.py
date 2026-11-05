@@ -113,12 +113,30 @@ class NativePrintJob(models.Model):
         # records are rendered — never the posted source_model — the
         # records must still exist and be readable by this user, and
         # a group-restricted report stays restricted here too.
-        if report.group_ids and not (
-            report.group_ids & self.env.user.group_ids
-        ):
-            raise UserError(_(
-                "You do not have access to the report used by this job."
-            ))
+        #
+        # Access is judged the way Odoo itself judges group
+        # membership (field report, 2026-11-05): the previous check
+        # intersected the report's groups with env.user.group_ids,
+        # which in Odoo 19 holds DIRECT groups only — so an
+        # Administrator, whose reach comes through implied groups,
+        # was refused for almost every restricted report ("You do
+        # not have access...") despite being Administrator.
+        # Administrators always qualify (the job log is their tool);
+        # everyone else is matched against their full group set,
+        # implied groups included.
+        if report.group_ids and not self.env.user._is_admin():
+            user_groups = self.env.user.group_ids
+            frontier = user_groups
+            while frontier:
+                implied = frontier.mapped("implied_ids") - user_groups
+                if not implied:
+                    break
+                user_groups |= implied
+                frontier = implied
+            if not (report.group_ids & user_groups):
+                raise UserError(_(
+                    "You do not have access to the report used by this job."
+                ))
         model = report.model
         if not model or model not in self.env:
             raise UserError(_(

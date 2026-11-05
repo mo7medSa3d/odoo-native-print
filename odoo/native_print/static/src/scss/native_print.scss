@@ -52,13 +52,13 @@
         height: 36px;
         flex: 0 0 36px;
         border-radius: 10px;
-        background: #0953de;
-        color: #fff;
+        background: transparent;
         display: flex;
         align-items: center;
         justify-content: center;
         font-size: 16px;
         box-shadow: 0 6px 14px -6px rgba(9, 83, 222, 0.65);
+        overflow: hidden;
     }
     .np-head-text {
         flex: 1 1 auto;
@@ -136,13 +136,35 @@
         background: #f2f6ff;
     }
     .np-printer-name {
-        flex: 1 1 auto;
-        min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
         font-size: 0.8rem;
         font-family: monospace;
+    }
+    .np-printer-text {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+    }
+    .np-printer-meta {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 0.68rem;
+        color: #64748b;
+    }
+    .np-systray-icon {
+        width: 20px;
+        height: 20px;
+        border-radius: 5px;
+    }
+    .np-brand-icon {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        border-radius: 8px;
     }
     .np-inuse-pill {
         flex: 0 0 auto;

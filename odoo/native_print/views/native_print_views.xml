@@ -225,15 +225,44 @@
         <field name="arch" type="xml">
             <list create="0" edit="0">
                 <field name="name"/>
+                <field name="printer_class" string="Class"/>
+                <field name="protocol" string="Protocol"/>
+                <field name="caps_synced_at" string="Capabilities"/>
                 <field name="company_id"/>
             </list>
+        </field>
+    </record>
+
+    <record id="view_device_form" model="ir.ui.view">
+        <field name="name">native.print.device.form</field>
+        <field name="model">native.print.device</field>
+        <field name="arch" type="xml">
+            <form create="0" edit="0" delete="0">
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <field name="printer_class" readonly="1"/>
+                        <field name="protocol" readonly="1"/>
+                        <field name="caps_synced_at" readonly="1"/>
+                        <field name="company_id" readonly="1"/>
+                    </group>
+                    <group string="Paper Sizes (from the printer's driver)">
+                        <field name="forms_summary" readonly="1" nolabel="1"/>
+                    </group>
+                    <group string="Trays (from the printer's driver)">
+                        <field name="trays_summary" readonly="1" nolabel="1"/>
+                    </group>
+                </sheet>
+            </form>
         </field>
     </record>
 
     <record id="action_devices" model="ir.actions.act_window">
         <field name="name">Printers</field>
         <field name="res_model">native.print.device</field>
-        <field name="view_mode">list</field>
+        <field name="view_mode">list,form</field>
         <field name="domain">[('company_id', 'in', allowed_company_ids)]</field>
         <field name="context">{'create': False}</field>
     </record>

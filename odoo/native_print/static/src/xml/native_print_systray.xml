@@ -6,7 +6,8 @@
                     class="dropdown-toggle o-no-caret btn d-flex align-items-center px-2"
                     t-att-title="labels.title"
                     t-on-click.stop="toggleMenu">
-                <i class="fa fa-print fa-lg" role="img" aria-label="Yaseir Print"/>
+                <img src="/native_print/static/description/icon.png"
+                     class="np-systray-icon" alt="Yaseir Print"/>
                 <span t-if="state.failedJobs &gt; 0"
                       class="badge rounded-pill text-bg-danger ms-1"
                       t-esc="state.failedJobs"/>
@@ -21,7 +22,7 @@
                  t-on-click.stop="">
                 <!-- Header: brand tile + name + mode pill -->
                 <div class="np-head">
-                    <div class="np-brand-tile"><i class="fa fa-print"/></div>
+                    <div class="np-brand-tile"><img src="/native_print/static/description/icon.png" class="np-brand-icon" alt=""/></div>
                     <div class="np-head-text">
                         <div class="np-brand-name">Yaseir Print</div>
                         <div class="np-head-sub" t-esc="state.bridgeActive ? labels.appActive : labels.browserMode"/>
@@ -64,7 +65,10 @@
                 <div t-if="state.bridgeActive and state.discoveredPrinters.length" class="np-printer-list">
                     <t t-foreach="state.discoveredPrinters" t-as="printer" t-key="printer.name">
                         <div class="np-printer-row">
-                            <span class="np-printer-name" dir="auto" t-esc="printer.name"/>
+                            <div class="np-printer-text">
+                                <span class="np-printer-name" dir="auto" t-esc="printer.name"/>
+                                <span t-if="printer.meta" class="np-printer-meta" dir="auto" t-esc="printer.meta"/>
+                            </div>
                             <span t-if="state.selectedPrinter === printer.name || (!state.selectedPrinter &amp;&amp; state.defaultPrinter === printer.name)" class="badge rounded-pill text-bg-primary np-inuse-pill">
                                 <i class="fa fa-star me-1"/><t t-esc="labels.inUse"/>
                             </span>
