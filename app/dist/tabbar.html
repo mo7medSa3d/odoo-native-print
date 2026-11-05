@@ -54,6 +54,13 @@
   }
   .tab .t-close:hover { background: rgba(220, 60, 60, .18); color: #e5484d; }
   .tab.active .t-close:hover { background: rgba(220, 60, 60, .14); }
+  .tab-add {
+    flex: 0 0 auto; width: 28px; height: 28px; border: 0; border-radius: 50%;
+    background: transparent; color: #aeb9c9; cursor: pointer; align-self: center;
+    display: flex; align-items: center; justify-content: center; margin: 0 2px;
+  }
+  .tab-add:hover { background: #232f45; color: #fff; }
+  .tab-add svg { width: 15px; height: 15px; }
   .tb-action {
     flex: 0 0 auto; height: 32px; border: 0; border-radius: 8px; cursor: pointer;
     display: flex; align-items: center; gap: 6px; padding: 0 10px;
@@ -81,13 +88,13 @@
 
   <div class="tabs" id="tabs"></div>
 
-  <button class="tb-action" id="btnNewTab" title="New tab / تبويب جديد">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    <span data-i18n="new_tab">تبويب جديد</span>
-  </button>
   <button class="tb-action brand" id="btnCc" title="Control Center / مركز التحكم">
     <img src="app-icon.png" alt=""/>
     <span data-i18n="cc">مركز التحكم</span>
+  </button>
+  <button class="tb-action" id="btnSettings" title="Settings / الإعدادات">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    <span data-i18n="settings">الإعدادات</span>
   </button>
 
 <script>
@@ -96,8 +103,8 @@
     return window.__TAURI_INTERNALS__.invoke(cmd, args || {});
   };
   var STR = {
-    ar: { new_tab: "تبويب جديد", cc: "مركز التحكم" },
-    en: { new_tab: "New Tab", cc: "Control Center" }
+    ar: { new_tab: "تبويب جديد", cc: "مركز التحكم", settings: "الإعدادات" },
+    en: { new_tab: "New Tab", cc: "Control Center", settings: "Settings" }
   };
   var lang = "ar";
   function applyLang() {
@@ -150,6 +157,21 @@
       });
       strip.appendChild(el);
     });
+    // The new-tab button lives INSIDE the strip, immediately
+    // after the last tab - the Chrome/Firefox convention the
+    // owner asked for (2026-11-05) - not beside the app actions.
+    var add = document.createElement("button");
+    add.className = "tab-add";
+    add.title = STR[lang].new_tab;
+    add.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    add.addEventListener("click", function () {
+      // An empty URL asks Rust for a fresh tab on the configured
+      // origin (the Control Center when none is configured).
+      invoke("tab_open", { url: "" }).then(refresh).catch(function () {
+        invoke("open_control_center", {}).catch(function () {});
+      });
+    });
+    strip.appendChild(add);
     var active = strip.querySelector(".tab.active");
     if (active && active.scrollIntoView) {
       active.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -168,12 +190,8 @@
   document.getElementById("btnReload").addEventListener("click", function () {
     invoke("nav_reload", {}).catch(function () {});
   });
-  document.getElementById("btnNewTab").addEventListener("click", function () {
-    // An empty URL asks Rust for a fresh tab on the configured
-    // origin (the Control Center when none is configured).
-    invoke("tab_open", { url: "" }).then(refresh).catch(function () {
-      invoke("open_control_center", {}).catch(function () {});
-    });
+  document.getElementById("btnSettings").addEventListener("click", function () {
+    invoke("open_settings", {}).catch(function () {});
   });
   document.getElementById("btnCc").addEventListener("click", function () {
     invoke("open_control_center", {}).catch(function () {});

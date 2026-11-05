@@ -102,13 +102,21 @@ const BRIDGE_JS: &str = r#"
     printerCapabilities: function (printer) {
       return invoke("printer_capabilities", { printer: printer });
     },
-    runTestPrint: function (printer, kind, paper) {
+    runTestPrint: function (printer, kind, paper, options) {
       // Test prints are a Control Center feature (Rust enforces
       // local-only too): never expose them to remote Odoo pages.
       if (!npIsLocalPage()) {
         return Promise.reject(new Error("runTestPrint is only available in the Control Center"));
       }
-      return invoke("run_test_print", { printer: printer, kind: kind, paper: paper || null });
+      var o = options || {};
+      return invoke("run_test_print", {
+        printer: printer, kind: kind, paper: paper || null,
+        options: {
+          tray: o.tray || null,
+          duplex: typeof o.duplex === "boolean" ? o.duplex : null,
+          color: typeof o.color === "boolean" ? o.color : null
+        }
+      });
     },
     retryJob: function (jobId) {
       return invoke("retry_job_cmd", { jobId: jobId });
@@ -795,6 +803,7 @@ pub fn run() {
             commands::tab_switch,
             commands::tab_close,
             commands::open_control_center,
+            commands::open_settings,
             commands::open_odoo_origin,
             commands::app_identity,
             commands::nav_back,

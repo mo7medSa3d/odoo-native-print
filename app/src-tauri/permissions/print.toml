@@ -38,6 +38,7 @@ identifier = "allow-app-shell"
 description = "App-shell action initiated by a user click, granted to the configured Odoo origin and the local Control Center: switch to the Control Center view, or open a new tab (Rust validates the tab URL against the configured origin)."
 commands.allow = [
     "open_control_center",
+    "open_settings",
     "tab_open",
 ]
 
@@ -60,6 +61,7 @@ commands.allow = [
     "tab_close",
     "app_identity",
     "open_control_center",
+    "open_settings",
     "open_odoo_origin",
 ]
 

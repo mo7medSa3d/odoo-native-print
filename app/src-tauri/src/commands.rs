@@ -794,6 +794,56 @@ pub fn probe_origin(webview: tauri::Webview, state: State<'_, AppState>) -> Resu
     Ok(false)
 }
 
+/// Find a form by name in a capabilities report (case-insensitive,
+/// as driver form names vary in casing between vendors).
+fn find_caps_form(
+    caps: &print_core::PrinterCapabilities,
+    name: &str,
+) -> Option<(String, f64, f64)> {
+    caps.forms
+        .iter()
+        .find(|f| f.name.eq_ignore_ascii_case(name.trim()))
+        .map(|f| (f.name.clone(), f.size.width_mm, f.size.height_mm))
+}
+
+/// The form a document test (or any automatic document job)
+/// belongs on for this printer: its A4 form when it has one, else
+/// Letter, else its largest sheet, else its roll width as a
+/// 297 mm strip. Nothing here assumes A4 exists — the choice is
+/// derived from what the driver actually reports.
+fn auto_document_form(caps: &print_core::PrinterCapabilities) -> Option<(String, f64, f64)> {
+    let sheets: Vec<&print_core::Form> = caps.forms.iter().filter(|f| !f.roll).collect();
+    for want in ["A4", "Letter"] {
+        if let Some(f) = sheets.iter().find(|f| f.name.eq_ignore_ascii_case(want)) {
+            return Some((f.name.clone(), f.size.width_mm, f.size.height_mm));
+        }
+    }
+    sheets
+        .iter()
+        .max_by(|a, b| {
+            (a.size.width_mm * a.size.height_mm)
+                .partial_cmp(&(b.size.width_mm * b.size.height_mm))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|f| (f.name.clone(), f.size.width_mm, f.size.height_mm))
+        .or_else(|| {
+            caps.forms
+                .iter()
+                .find(|f| f.roll)
+                .map(|f| (f.name.clone(), f.size.width_mm, 297.0))
+        })
+}
+
+/// Document options for a calibration/test print, grouped the
+/// same way the print commands group theirs.
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestPrintOptions {
+    pub tray: Option<String>,
+    pub duplex: Option<bool>,
+    pub color: Option<bool>,
+}
+
 #[tauri::command]
 pub fn run_test_print(
     webview: tauri::Webview,
@@ -801,7 +851,12 @@ pub fn run_test_print(
     printer: String,
     kind: String,
     paper: Option<String>,
+    options: Option<TestPrintOptions>,
 ) -> Result<String, String> {
+    let options = options.unwrap_or_default();
+    let tray = options.tray;
+    let duplex = options.duplex;
+    let color = options.color;
     check_origin(&webview, &state)?;
     // Test prints are a Control Center feature: the Odoo page must
     // never fire raw calibrations at local printers (audit B1).
@@ -944,19 +999,43 @@ pub fn run_test_print(
             )
         }
         "pdf-a4" | "pdf" | "gdi" => {
-            let pdf = print_render::calibration::calibration_pdf();
+            // The test page is generated AT the size it will print
+            // on — the form the user chose in the lab (by name,
+            // resolved against the printer's driver capabilities),
+            // else the paper saved for this printer in the Control
+            // Center, else the printer's automatic document form —
+            // never a hardcoded A4 (owner directive, 2026-11-05:
+            // test prints ignored every chosen size and always
+            // came out A4). The job carries the form's real name so
+            // the driver selects exactly that form, and the lab's
+            // tray/duplex/color ride along.
+            let caps = print_win::printer_capabilities(printer.trim()).ok();
+            let chosen = paper
+                .clone()
+                .filter(|n| !n.trim().is_empty() && !n.eq_ignore_ascii_case("auto"))
+                .or_else(|| {
+                    config::load_printer_settings(&state.config_dir)
+                        .get(printer.trim())
+                        .and_then(|s| s.paper.clone())
+                });
+            let form = chosen
+                .as_deref()
+                .and_then(|name| caps.as_ref().and_then(|c| find_caps_form(c, name)))
+                .or_else(|| caps.as_ref().and_then(auto_document_form))
+                .unwrap_or_else(|| ("A4".to_string(), 210.0, 297.0));
+            let pdf = print_render::calibration::calibration_pdf_sized(form.1, form.2);
             (
                 "pdf",
                 pdf,
                 JobOptions {
                     mode: "gdi".to_string(),
-                    paper: Some(paper.unwrap_or_else(|| "A4".to_string())),
+                    paper: Some(form.0),
                     copies: 1,
                     scale_policy: Some("custom_allowed".to_string()),
-                    duplex: false,
-                    color: false,
+                    duplex: duplex.unwrap_or(false),
+                    color: color.unwrap_or(false),
                     cut: false,
-                    tray: None,
+                    tray: tray.filter(|t| !t.trim().is_empty()),
                     media_roll_width_mm: None,
                     label_gap_mm: None,
                     source_width_mm: None,
@@ -1507,16 +1586,15 @@ pub fn set_printer_settings(
     Ok(map)
 }
 
-#[tauri::command]
-pub async fn open_control_center(
-    app: tauri::AppHandle,
-    webview: tauri::Webview,
-    state: State<'_, AppState>,
+/// Open one of the app's built-in local pages in its own tab
+/// (owner brief, 2026-11-05): if a tab already shows the page it
+/// is focused; opening never replaces the page the user was
+/// working on.
+async fn open_local_page(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    file: &str,
 ) -> Result<(), String> {
-    check_origin(&webview, &state)?;
-    // The Control Center lives in its own tab (owner brief,
-    // 2026-11-05): opening it never replaces the Odoo page the
-    // user was working on.
     let existing = {
         let tabs = state
             .tabs
@@ -1527,26 +1605,48 @@ pub async fn open_control_center(
             .find(|label| {
                 tabs.url_of(label)
                     .and_then(|u| tauri::Url::parse(u).ok())
-                    .map(|u| is_local_app_url(&u) && u.path().ends_with("index.html"))
+                    .map(|u| is_local_app_url(&u) && u.path().ends_with(file))
                     .unwrap_or(false)
             })
             .cloned()
     };
     if let Some(label) = existing {
-        crate::activate_tab(&app, &label);
+        crate::activate_tab(app, &label);
         return Ok(());
     }
     let local_url: tauri::Url = if cfg!(windows) {
-        "http://tauri.localhost/index.html"
+        format!("http://tauri.localhost/{file}")
             .parse()
             .map_err(|_| "bad_local_url".to_string())?
     } else {
-        "tauri://localhost/index.html"
+        format!("tauri://localhost/{file}")
             .parse()
             .map_err(|_| "bad_local_url".to_string())?
     };
-    open_tab_internal(&app, &state, local_url).await?;
+    open_tab_internal(app, state, local_url).await?;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn open_control_center(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    check_origin(&webview, &state)?;
+    open_local_page(&app, &state, "index.html").await
+}
+
+/// The browser-style Settings page (About + contact), opened from
+/// the tab bar next to the Control Center (owner, 2026-11-05).
+#[tauri::command]
+pub async fn open_settings(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    check_origin(&webview, &state)?;
+    open_local_page(&app, &state, "settings.html").await
 }
 
 #[tauri::command]
@@ -1665,6 +1765,37 @@ impl NativePrintBackend {
     /// worse than a clear error, but a valid printer is never
     /// refused for lacking one specific form flag (owner
     /// directive, 2026-11-05: POS prints to any printer, rendered
+    /// Control Center per-printer defaults, scoped so a default
+    /// can only fill fields that describe the job's own payload:
+    /// paper/duplex/color are DOCUMENT settings and apply to PDF
+    /// jobs only — a sheet paper saved for a printer must never
+    /// become a receipt's paper override (field incident,
+    /// 2026-11-05: receipts died with AUTO_MEDIA_UNAVAILABLE
+    /// because a saved "A4" reached receipt_width_dots). The tray
+    /// is a transport setting every GDI/IPP arm consumes and raw
+    /// arms ignore, so it fills for any kind. A job's own values
+    /// always win for paper/tray (fill-if-unspecified).
+    fn apply_printer_defaults(
+        opts: &mut JobOptions,
+        kind: &str,
+        defaults: &config::PrinterSettings,
+    ) {
+        if opts.tray.is_none() {
+            opts.tray = defaults.tray.clone();
+        }
+        if kind == "pdf" {
+            if opts.paper.is_none() {
+                opts.paper = defaults.paper.clone();
+            }
+            if let Some(d) = defaults.duplex {
+                opts.duplex = d;
+            }
+            if let Some(c) = defaults.color {
+                opts.color = c;
+            }
+        }
+    }
+
     /// to that printer's dimensions).
     fn receipt_width_dots(
         printer: &str,
@@ -1672,13 +1803,13 @@ impl NativePrintBackend {
         job_media_mm: Option<f64>,
         source_width_mm: Option<f64>,
     ) -> Result<u32, BackendError> {
-        if let Some(paper) = paper_override {
-            let dots = print_render::receipt_dots_for_paper(paper).ok_or_else(|| {
-                BackendError::fatal(
-                    "AUTO_MEDIA_UNAVAILABLE",
-                    &format!("unknown receipt paper {paper:?}; cannot derive a print width"),
-                )
-            })?;
+        // An override naming something that is not a receipt paper
+        // (a sheet form name like "A4" that leaked into a receipt
+        // job from a document-oriented setting) is IGNORED, never
+        // fatal: the evidence ladder below still sizes the receipt
+        // from real media evidence (2026-11-05 field incident).
+        if let Some(dots) = paper_override.and_then(print_render::receipt_dots_for_paper) {
+            let paper = paper_override.unwrap_or_default();
             // An explicit paper choice is verified against the driver's
             // reported roll forms when they are available: rendering an
             // 80mm receipt for a 58mm roll (or the reverse) clips or
@@ -2101,25 +2232,21 @@ impl PrintBackend for NativePrintBackend {
                 &format!("stored job options unreadable: {e}"),
             )
         })?;
-        // Per-printer defaults from the Control Center fill whatever
-        // this job did not specify (owner brief, 2026-11-05): the
-        // user configures each printer once; a document carrying
-        // its own paper/tray always wins.
-        if let Some(defaults) = config::load_printer_settings(&self.config_dir).get(&job.printer) {
-            if opts.paper.is_none() {
-                opts.paper = defaults.paper.clone();
-            }
-            if opts.tray.is_none() {
-                opts.tray = defaults.tray.clone();
-            }
-            if let Some(d) = defaults.duplex {
-                opts.duplex = d;
-            }
-            if let Some(c) = defaults.color {
-                opts.color = c;
-            }
+        // Per-printer defaults from the Control Center fill what
+        // this job did not specify (owner brief, 2026-11-05),
+        // applied through the scoped helper: a saved DOCUMENT
+        // paper must never land on a receipt job (field incident,
+        // 2026-11-05: a sheet paper saved for a POS printer in the
+        // Control Center reached receipt_width_dots as the paper
+        // override and killed every receipt with
+        // AUTO_MEDIA_UNAVAILABLE). Looked up by the job's target
+        // pattern here, and again by the resolved spooler name in
+        // the spooler branch below.
+        let settings_map = config::load_printer_settings(&self.config_dir);
+        if let Some(defaults) = settings_map.get(&job.printer) {
+            Self::apply_printer_defaults(&mut opts, &kind, defaults);
         }
-        let paper = opts.paper.as_deref();
+        let mut paper: Option<String> = opts.paper.clone();
         let title = job.report.as_deref().unwrap_or("Yaseir Print Job");
 
         // 1. Direct TCP 9100 transport (tcp://host:port or raw://host:port)
@@ -2143,7 +2270,7 @@ impl PrintBackend for NativePrintBackend {
                     &data,
                     RawRender {
                         mode: &opts.mode,
-                        paper,
+                        paper: paper.as_deref(),
                         target_width_dots: media_width_dots,
                         copies: opts.copies,
                         label_box: None,
@@ -2156,7 +2283,7 @@ impl PrintBackend for NativePrintBackend {
                     &data,
                     RawRender {
                         mode: &opts.mode,
-                        paper,
+                        paper: paper.as_deref(),
                         target_width_dots: media_width_dots,
                         copies: opts.copies,
                         label_box: None,
@@ -2326,6 +2453,19 @@ impl PrintBackend for NativePrintBackend {
         // applies instead of being skipped (fail-open edge).
         let target_kind = target_kind.or_else(|| Some(PrinterInfo::classify(&target_name, "")));
 
+        // Per-printer defaults, second lookup by the RESOLVED
+        // spooler name (the first lookup used the job's target
+        // pattern; a pattern resolves to a concrete queue whose
+        // Control Center settings live under its real name).
+        // Fill-if-unspecified semantics make this a no-op when the
+        // first lookup already applied the same entry.
+        if target_name != job.printer {
+            if let Some(defaults) = settings_map.get(&target_name) {
+                Self::apply_printer_defaults(&mut opts, &kind, defaults);
+                paper = opts.paper.clone();
+            }
+        }
+
         // A document (PDF or image) in a raw-language mode
         // addressed to a virtual writer is re-routed to GDI
         // printing — the pages render faithfully at the printer's
@@ -2379,7 +2519,7 @@ impl PrintBackend for NativePrintBackend {
             if opts.mode == "escpos" && matches!(kind.as_str(), "pdf" | "image-png") {
                 Some(Self::receipt_width_dots(
                     &target_name,
-                    paper,
+                    paper.as_deref(),
                     opts.media_roll_width_mm,
                     opts.source_width_mm,
                 )?)
@@ -2427,7 +2567,7 @@ impl PrintBackend for NativePrintBackend {
                     &data,
                     RawRender {
                         mode: &opts.mode,
-                        paper,
+                        paper: paper.as_deref(),
                         target_width_dots,
                         copies: opts.copies,
                         label_box,
@@ -2543,7 +2683,7 @@ impl PrintBackend for NativePrintBackend {
                     &data,
                     RawRender {
                         mode: &opts.mode,
-                        paper,
+                        paper: paper.as_deref(),
                         target_width_dots,
                         copies: opts.copies,
                         label_box,
@@ -2665,6 +2805,78 @@ pub fn spawn_worker_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn printer_defaults_never_poison_receipts() {
+        // The 2026-11-05 field incident: a sheet paper saved for
+        // a POS printer in the Control Center must not reach a
+        // receipt job (it killed receipts as an unknown paper
+        // override), while document jobs still inherit it.
+        let defaults = config::PrinterSettings {
+            paper: Some("A4".to_string()),
+            tray: Some("Tray 2".to_string()),
+            duplex: Some(true),
+            color: Some(false),
+        };
+        let mut receipt = JobOptions {
+            mode: "escpos".to_string(),
+            ..Default::default()
+        };
+        NativePrintBackend::apply_printer_defaults(&mut receipt, "image-png", &defaults);
+        assert!(receipt.paper.is_none(), "receipt paper must stay unset");
+        assert!(!receipt.duplex && receipt.color, "receipt flags untouched");
+        assert_eq!(receipt.tray.as_deref(), Some("Tray 2"));
+
+        let mut doc = JobOptions {
+            mode: "gdi".to_string(),
+            ..Default::default()
+        };
+        NativePrintBackend::apply_printer_defaults(&mut doc, "pdf", &defaults);
+        assert_eq!(doc.paper.as_deref(), Some("A4"));
+        assert!(doc.duplex && !doc.color);
+
+        // A document carrying its own paper keeps it.
+        let mut own = JobOptions {
+            mode: "gdi".to_string(),
+            paper: Some("A5".to_string()),
+            ..Default::default()
+        };
+        NativePrintBackend::apply_printer_defaults(&mut own, "pdf", &defaults);
+        assert_eq!(own.paper.as_deref(), Some("A5"));
+    }
+
+    #[test]
+    fn auto_document_form_is_derived_from_caps() {
+        let mk = |name: &str, w: f64, h: f64, roll: bool| print_core::Form {
+            name: name.to_string(),
+            size: print_core::PageSize::new(w, h),
+            roll,
+            paper_id: None,
+        };
+        let caps = print_core::PrinterCapabilities {
+            forms: vec![mk("A5", 148.0, 210.0, false), mk("A4", 210.0, 297.0, false)],
+            ..Default::default()
+        };
+        assert_eq!(auto_document_form(&caps).unwrap().0, "A4");
+        let caps = print_core::PrinterCapabilities {
+            forms: vec![
+                mk("Legal", 215.9, 355.6, false),
+                mk("A5", 148.0, 210.0, false),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(auto_document_form(&caps).unwrap().0, "Legal");
+        let caps = print_core::PrinterCapabilities {
+            forms: vec![mk("80mm Roll", 80.0, 3276.0, true)],
+            ..Default::default()
+        };
+        let f = auto_document_form(&caps).unwrap();
+        assert_eq!((f.0.as_str(), f.1, f.2), ("80mm Roll", 80.0, 297.0));
+        assert_eq!(
+            find_caps_form(&caps, "80MM ROLL").map(|f| f.0),
+            Some("80mm Roll".to_string())
+        );
+    }
+
     #[test]
     fn receipt_width_evidence_choice() {
         // Form evidence wins when it roughly agrees with the

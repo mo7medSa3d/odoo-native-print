@@ -315,14 +315,21 @@
   }
 
   .kpi-icon {
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
+    width: 48px;
+    height: 48px;
+    border-radius: 13px;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    color: #fff;
+    box-shadow: 0 4px 10px rgba(2, 6, 17, 0.18);
   }
+  .kpi-icon svg { width: 24px; height: 24px; }
+  .kpi-icon.info { background: linear-gradient(135deg, #2f7cf6, #0953de); }
+  .kpi-icon.warn { background: linear-gradient(135deg, #f5a623, #e07f00); }
+  .kpi-icon.ok { background: linear-gradient(135deg, #2fbf71, #149a54); }
+  .kpi-icon.err { background: linear-gradient(135deg, #f0564a, #d92d20); }
 
   .kpi-label {
     font-size: 0.82rem;
@@ -362,6 +369,15 @@
     gap: 0.75rem;
   }
 
+  .card-title svg {
+    background: rgba(9, 83, 222, 0.1);
+    border-radius: 8px;
+    padding: 4px;
+    width: 26px;
+    height: 26px;
+    color: #0953de;
+    flex-shrink: 0;
+  }
   .card-title {
     font-size: 1.05rem;
     font-weight: 600;
@@ -478,16 +494,17 @@
   }
 
   .printer-type-icon {
-    width: 42px;
-    height: 42px;
+    width: 44px;
+    height: 44px;
     border-radius: 12px;
-    background: var(--bg-subtle);
-    color: var(--brand-plum);
+    background: linear-gradient(135deg, rgba(9,83,222,.14), rgba(9,83,222,.05));
+    color: #0953de;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
   }
+  .printer-type-icon svg { width: 23px; height: 23px; }
 
   .printer-name {
     font-weight: 700;
@@ -834,7 +851,7 @@
             <div class="kpi-value" id="kpiPrintersCount">0</div>
             <div class="kpi-meta" id="kpiDefaultPrinter">—</div>
           </div>
-          <div class="kpi-icon" style="background:var(--status-info-bg);color:var(--status-info-fg);">
+          <div class="kpi-icon info">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
           </div>
         </div>
@@ -845,7 +862,7 @@
             <div class="kpi-value" id="kpiActiveCount">0</div>
             <div class="kpi-meta" data-i18n="kpi_active_sub">يُحفظ تلقائيًا</div>
           </div>
-          <div class="kpi-icon" style="background:var(--status-warn-bg);color:var(--status-warn-fg);">
+          <div class="kpi-icon warn">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
           </div>
         </div>
@@ -856,7 +873,7 @@
             <div class="kpi-value" id="kpiDoneCount">0</div>
             <div class="kpi-meta" id="kpiPdfiumStatus">PDFium: —</div>
           </div>
-          <div class="kpi-icon" style="background:var(--status-ok-bg);color:var(--status-ok-fg);">
+          <div class="kpi-icon ok">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
           </div>
         </div>
@@ -867,7 +884,7 @@
             <div class="kpi-value" id="kpiFailedCount">0</div>
             <div class="kpi-meta" id="kpiOriginMeta">—</div>
           </div>
-          <div class="kpi-icon" style="background:var(--status-err-bg);color:var(--status-err-fg);">
+          <div class="kpi-icon err">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
           </div>
         </div>
@@ -936,7 +953,7 @@
             <div class="form-group">
               <label class="form-label" for="customTestKind" data-i18n="lbl_test_type">نوع صفحة المعايرة والاختبار</label>
               <select id="customTestKind" class="select" onchange="updateCalWarning()">
-                <option value="pdf-a4" data-i18n="opt_calibration_pdf">A4 Calibration PDF (GDI + PDFium • rulers + 100×100 mm square + barcode)</option>
+                <option value="pdf-a4" data-i18n="opt_calibration_pdf">PDF test page (GDI + PDFium • rulers + sizing square + barcode)</option>
                 <option value="thermal-80mm" data-i18n="opt_cal_thermal80">Thermal 80mm Receipt Calibration (ESC/POS • 576 dots)</option>
                 <option value="thermal-58mm" data-i18n="opt_cal_thermal58">Thermal 58mm Receipt Calibration (ESC/POS • 384 dots)</option>
                 <option value="zpl-label" data-i18n="opt_cal_zpl">Label 100×150mm Calibration (ZPL II)</option>
@@ -950,6 +967,33 @@
               </button>
             </div>
           </div>
+          <div class="form-grid" style="align-items:end;margin-top:0.75rem;">
+            <div class="form-group">
+              <label class="form-label" for="labPaperSelect" data-i18n="lbl_lab_paper">مقاس ورق الاختبار</label>
+              <select id="labPaperSelect" class="select"></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="labTraySelect" data-i18n="lbl_lab_tray">درج الورق</label>
+              <select id="labTraySelect" class="select"></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="labDuplexSelect" data-i18n="lbl_lab_duplex">الطباعة على الوجهين</label>
+              <select id="labDuplexSelect" class="select">
+                <option value="" data-i18n="lab_auto">تلقائي (من الطابعة)</option>
+                <option value="on" data-i18n="ps_on">تشغيل</option>
+                <option value="off" data-i18n="ps_off">إيقاف</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="labColorSelect" data-i18n="lbl_lab_color">الألوان</label>
+              <select id="labColorSelect" class="select">
+                <option value="" data-i18n="lab_auto">تلقائي (من الطابعة)</option>
+                <option value="on" data-i18n="ps_on">تشغيل</option>
+                <option value="off" data-i18n="ps_off">إيقاف</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-help" data-i18n="lab_options_hint" style="margin-top:0.4rem;">تُستخدم هذه الخيارات مع صفحة اختبار PDF: المقاس يُبنى من مقاسات الطابعة المحددة فعليًا، و«تلقائي» يعني المقاس الافتراضي الذي تحدده الطابعة نفسها.</div>
           <div id="calVirtualWarning" class="form-error hidden" role="alert" style="margin-top:0.75rem;"></div>
         </div>
       </div>
@@ -1080,7 +1124,7 @@
       ps_error: "خطأ",
       ps_paused: "إيقاف مؤقت",
       ps_unknown: "غير معروفة",
-      qt_pdf: "PDF مكتبية (A4)",
+      qt_pdf: "PDF مكتبية",
       qt_escpos: "حراري ESC/POS 80مم",
       qt_zpl: "ملصق ZPL",
       qt_tspl: "ملصق TSPL",
@@ -1101,6 +1145,12 @@
       ps_off: "إيقاف",
       ps_save: "حفظ الإعدادات",
       ps_saved: "تم حفظ إعدادات الطابعة",
+      lbl_lab_paper: "مقاس ورق الاختبار",
+      lbl_lab_tray: "درج الورق",
+      lbl_lab_duplex: "الطباعة على الوجهين",
+      lbl_lab_color: "الألوان",
+      lab_auto: "تلقائي (من الطابعة)",
+      lab_options_hint: "تُستخدم هذه الخيارات مع صفحة اختبار PDF: المقاس يُبنى من مقاسات الطابعة المحددة فعليًا، و«تلقائي» يعني المقاس الافتراضي الذي تحدده الطابعة نفسها.",
       ps_hint: "تُستخدم عندما لا يحدد المستند إعداداته بنفسه.",
       cap_more_forms: "مقاسات إضافية",
       diag_placeholder: "لسه ما اتولّدتش حزمة تشخيص. اضغط «توليد الحزمة».",
@@ -1161,7 +1211,7 @@
       lbl_recovery_mode: "عند توقف مفاجئ",
       opt_recovery_safe: "آمن (افتراضي): عدم إعادة طباعة المهام الغامضة تلقائيًا",
       opt_recovery_auto: "إعادة الطباعة التلقائية للمهام قيد التنفيذ عند بدء التشغيل",
-      opt_calibration_pdf: "PDF معايرة A4 (GDI + PDFium • مساطر + مربع 100×100مم + باركود)",
+      opt_calibration_pdf: "صفحة اختبار PDF (GDI + PDFium • مساطر + مربع معايرة + باركود)",
       opt_cal_thermal80: "معايرة إيصالات حرارية 80مم (ESC/POS • 576 نقطة)",
       opt_cal_thermal58: "معايرة إيصالات حرارية 58مم (ESC/POS • 384 نقطة)",
       opt_cal_zpl: "معايرة ملصق 100×150مم (ZPL II)",
@@ -1207,7 +1257,7 @@
       ps_error: "Error",
       ps_paused: "Paused",
       ps_unknown: "Unknown",
-      qt_pdf: "A4 PDF (GDI)",
+      qt_pdf: "Office PDF (GDI)",
       qt_escpos: "80mm ESC/POS",
       qt_zpl: "ZPL Label",
       qt_tspl: "TSPL Label",
@@ -1228,6 +1278,12 @@
       ps_off: "Off",
       ps_save: "Save settings",
       ps_saved: "Printer settings saved",
+      lbl_lab_paper: "Test paper size",
+      lbl_lab_tray: "Paper tray",
+      lbl_lab_duplex: "Duplex",
+      lbl_lab_color: "Colour",
+      lab_auto: "Automatic (from the printer)",
+      lab_options_hint: "These options apply to the PDF test page: the size is built from the selected printer's real forms, and Automatic means the printer's own default form.",
       ps_hint: "Used when a document does not specify its own settings.",
       cap_more_forms: "more sizes",
       diag_placeholder: "No diagnostics bundle yet. Press Generate.",
@@ -1288,7 +1344,7 @@
       lbl_recovery_mode: "After a sudden stop",
       opt_recovery_safe: "Safe (default): never auto-reprint ambiguous jobs",
       opt_recovery_auto: "Auto-reprint in-flight jobs at startup",
-      opt_calibration_pdf: "A4 Calibration PDF (GDI + PDFium • rulers + 100×100 mm square + barcode)",
+      opt_calibration_pdf: "PDF test page (GDI + PDFium • rulers + sizing square + barcode)",
       opt_cal_thermal80: "Thermal 80mm Receipt Calibration (ESC/POS • 576 dots)",
       opt_cal_thermal58: "Thermal 58mm Receipt Calibration (ESC/POS • 384 dots)",
       opt_cal_zpl: "Label 100×150mm Calibration (ZPL II)",
@@ -1836,6 +1892,24 @@
     if (proto === "zpl" || proto === "tspl" || proto === "epl") return "label";
     return "office";
   }
+  // Card icon per printer class: a receipt for thermal/POS, a tag
+  // for label printers, a file for virtual writers, the printer
+  // glyph for office/document printers.
+  function ccClassIcon(p) {
+    const proto = ccProtocol(p);
+    const cls = String(p.printer_class || p.printerClass || "").toLowerCase();
+    const stroke = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+    if (proto === "escpos" || cls === "thermal" || cls === "receipt") {
+      return `<svg viewBox="0 0 24 24" ${stroke}><path d="M6 2h12v20l-2-1.5L14 22l-2-1.5L10 22l-2-1.5L6 22z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/></svg>`;
+    }
+    if (proto === "zpl" || proto === "tspl" || proto === "epl" || cls === "label") {
+      return `<svg viewBox="0 0 24 24" ${stroke}><path d="M20.59 13.41 11 3H4v7l9.59 9.59a2 2 0 0 0 2.82 0l4.18-4.18a2 2 0 0 0 0-2.82z"/><circle cx="7.5" cy="7.5" r="0.5"/></svg>`;
+    }
+    if (cls === "virtual") {
+      return `<svg viewBox="0 0 24 24" ${stroke}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>`;
+    }
+    return `<svg viewBox="0 0 24 24" ${stroke}><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>`;
+  }
   function ccClassLabel(p) {
     const cls = ccClass(p);
     const d = I18N[currentLang];
@@ -1881,6 +1955,7 @@
         capsCache.set(p.name, caps || {});
         capsVersion++;
         renderPrintersGrid(lastGridPrinters);
+        rebuildLabOptions();
       }).catch(() => { capsCache.set(p.name, {}); });
     }
   }
@@ -1915,48 +1990,56 @@
     const listOpts = (names, current) => opt("", !current, d.ps_driver_default) + names.map((n) => opt(n, current === n, n)).join("");
     const triOpts = (current) => opt("", current === undefined || current === null, d.ps_driver_default) +
       opt("on", current === true, d.ps_on) + opt("off", current === false, d.ps_off);
-    const row = (label, id, inner) => `<label style="display:flex;flex-direction:column;gap:0.2rem;flex:1 1 45%;min-width:120px;"><span style="color:var(--text-muted);">${escapeHtml(label)}</span><select id="${id}" class="input">${inner}</select></label>`;
+    // Every control is scoped to THIS card's wrapper and read back
+    // through it (classes, never document-wide ids): the grid
+    // re-renders as capabilities and health stream in, and an
+    // index-addressed read could silently pick up ANOTHER card's
+    // values — the field bug where saving one printer's settings
+    // saved them on its neighbour too (2026-11-05).
+    const row = (label, cls, inner) => `<label style="display:flex;flex-direction:column;gap:0.2rem;flex:1 1 45%;min-width:120px;"><span style="color:var(--text-muted);">${escapeHtml(label)}</span><select class="input ${cls}">${inner}</select></label>`;
     return `
-      <div style="margin-top:0.6rem;">
-        <button class="btn btn-sm btn-secondary" data-action="toggle-settings" data-idx="${idx}">
+      <div style="margin-top:0.6rem;" data-settings-wrap data-printer="${escapeHtml(p.name)}">
+        <button class="btn btn-sm btn-secondary" data-action="toggle-settings">
           ${escapeHtml(d.ps_title)}
         </button>
-        <div id="settings-box-${idx}" class="hidden" style="margin-top:0.5rem;font-size:0.76rem;background:var(--bg-subtle);padding:0.6rem;border-radius:8px;">
+        <div class="settings-box hidden" style="margin-top:0.5rem;font-size:0.76rem;background:var(--bg-subtle);padding:0.6rem;border-radius:8px;">
           <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-            ${row(d.ps_paper, `ps-paper-${idx}`, listOpts(formNames, cur.paper))}
-            ${bins.length ? row(d.ps_tray, `ps-tray-${idx}`, listOpts(bins, cur.tray)) : ""}
-            ${caps.duplex ? row(d.ps_duplex, `ps-duplex-${idx}`, triOpts(cur.duplex)) : ""}
-            ${caps.color ? row(d.ps_color, `ps-color-${idx}`, triOpts(cur.color)) : ""}
+            ${row(d.ps_paper, "ps-paper", listOpts(formNames, cur.paper))}
+            ${bins.length ? row(d.ps_tray, "ps-tray", listOpts(bins, cur.tray)) : ""}
+            ${caps.duplex ? row(d.ps_duplex, "ps-duplex", triOpts(cur.duplex)) : ""}
+            ${caps.color ? row(d.ps_color, "ps-color", triOpts(cur.color)) : ""}
           </div>
           <div style="color:var(--text-muted);margin-top:0.4rem;">${escapeHtml(d.ps_hint)}</div>
-          <button class="btn btn-sm btn-primary" style="margin-top:0.5rem;" data-action="save-settings" data-printer="${escapeHtml(p.name)}" data-idx="${idx}">
+          <button class="btn btn-sm btn-primary" style="margin-top:0.5rem;" data-action="save-settings">
             ${escapeHtml(d.ps_save)}
           </button>
         </div>
       </div>`;
   }
-  function toggleSettings(idx) {
-    const box = document.getElementById(`settings-box-${idx}`);
+  function toggleSettings(btn) {
+    const wrap = btn && btn.closest ? btn.closest("[data-settings-wrap]") : null;
+    const box = wrap ? wrap.querySelector(".settings-box") : null;
     if (box) box.classList.toggle("hidden");
   }
   async function saveSettings(btn) {
-    const idx = Number(btn.getAttribute("data-idx"));
-    const name = btn.getAttribute("data-printer");
+    const wrap = btn && btn.closest ? btn.closest("[data-settings-wrap]") : null;
+    if (!wrap) return;
+    const name = wrap.getAttribute("data-printer");
     const b = bridge();
     if (!b || typeof b.setPrinterSettings !== "function") return;
-    const val = (id) => {
-      const el = document.getElementById(id);
+    const val = (cls) => {
+      const el = wrap.querySelector("." + cls);
       return el ? el.value : "";
     };
     const tri = (v) => v === "on" ? true : v === "off" ? false : null;
     const settings = {};
-    const paper = val(`ps-paper-${idx}`);
+    const paper = val("ps-paper");
     if (paper) settings.paper = paper;
-    const trayEl = document.getElementById(`ps-tray-${idx}`);
+    const trayEl = wrap.querySelector(".ps-tray");
     if (trayEl && trayEl.value) settings.tray = trayEl.value;
-    const duplexEl = document.getElementById(`ps-duplex-${idx}`);
+    const duplexEl = wrap.querySelector(".ps-duplex");
     if (duplexEl) { const dv = tri(duplexEl.value); if (dv !== null) settings.duplex = dv; }
-    const colorEl = document.getElementById(`ps-color-${idx}`);
+    const colorEl = wrap.querySelector(".ps-color");
     if (colorEl) { const cv = tri(colorEl.value); if (cv !== null) settings.color = cv; }
     try {
       printerSettings = await b.setPrinterSettings(name, settings) || {};
@@ -2033,9 +2116,7 @@
       <div class="printer-card">
         <div class="printer-card-top">
           <div class="printer-identity">
-            <div class="printer-type-icon">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-            </div>
+            <div class="printer-type-icon">${ccClassIcon(p)}</div>
             <div>
               <div class="printer-name">${escapeHtml(p.name)}</div>
               <div style="display:flex;gap:0.35rem;margin-top:0.25rem;flex-wrap:wrap;">
@@ -2104,7 +2185,7 @@
     else if (action === "cancel-job") { btn.disabled = true; cancelJob(btn.getAttribute("data-job-id")).finally(() => { btn.disabled = false; }); }
     else if (action === "test-print") runPrinterTest(btn.getAttribute("data-printer"), btn.getAttribute("data-kind"));
     else if (action === "inspect-forms") inspectForms(btn.getAttribute("data-printer"), Number(btn.getAttribute("data-idx")));
-    else if (action === "toggle-settings") toggleSettings(Number(btn.getAttribute("data-idx")));
+    else if (action === "toggle-settings") toggleSettings(btn);
     else if (action === "save-settings") { btn.disabled = true; saveSettings(btn).finally(() => { btn.disabled = false; }); }
   });
 
@@ -2124,9 +2205,10 @@
     const show = !!printer && !!kindSel && isRawTestKind(kindSel.value) && isVirtualPrinterName(printer);
     warn.textContent = show ? I18N[currentLang].cal_virtual_warning : "";
     warn.classList.toggle("hidden", !show);
+    updateLabOptionsState();
   }
 
-  async function runPrinterTest(printerName, kind) {
+  async function runPrinterTest(printerName, kind, options) {
     if (isRawTestKind(kind) && isVirtualPrinterName(printerName)) {
       showToast(I18N[currentLang].cal_virtual_warning, true);
       return false;
@@ -2140,7 +2222,12 @@
     testBtns.forEach((x) => { x.disabled = true; });
     lockControls(["btnCustomTestPrint"]);
     try {
-      const id = await b.runTestPrint(printerName, kind, null);
+      const o = options || {};
+      const id = await b.runTestPrint(printerName, kind, o.paper || null, {
+        tray: o.tray || null,
+        duplex: typeof o.duplex === "boolean" ? o.duplex : null,
+        color: typeof o.color === "boolean" ? o.color : null,
+      });
       showToast(currentLang === "ar" ? `تمت جدولة اختبار الطباعة (${id})` : `Queued test print (${id})`);
       await refreshAll();
     } catch (e) {
@@ -2232,6 +2319,7 @@
     if (sel && uri) uri.classList.toggle("hidden", sel.value !== "__uri__");
     validateCustomPrinterUriField();
     rebuildTestKindOptions();
+    rebuildLabOptions();
   }
 
   function selectedTestPrinter() {
@@ -2253,7 +2341,75 @@
       document.getElementById("customPrinterUri").focus();
       return;
     }
-    await runPrinterTest(printer, kind);
+    // The lab's document options (paper / tray / duplex / colour)
+    // ride the PDF test: the page is generated at the chosen size
+    // and printed with exactly those settings (2026-11-05).
+    const options = {};
+    if (!isRawTestKind(kind)) {
+      const tri = (id) => {
+        const el = document.getElementById(id);
+        if (!el || el.disabled) return null;
+        return el.value === "on" ? true : el.value === "off" ? false : null;
+      };
+      const paperEl = document.getElementById("labPaperSelect");
+      if (paperEl && paperEl.value) options.paper = paperEl.value;
+      const trayEl = document.getElementById("labTraySelect");
+      if (trayEl && trayEl.value) options.tray = trayEl.value;
+      options.duplex = tri("labDuplexSelect");
+      options.color = tri("labColorSelect");
+    }
+    await runPrinterTest(printer, kind, options);
+  }
+
+  // Lab document options, populated from the SELECTED printer's
+  // driver capabilities: paper sizes and trays are the printer's
+  // own, "Automatic" defers to the printer — nothing is hardcoded
+  // to a fixed size (2026-11-05).
+  function rebuildLabOptions() {
+    const name = selectedTestPrinter();
+    const caps = name && !name.includes("://") ? capsCache.get(name) : null;
+    const ready = caps && caps !== "loading";
+    const d = I18N[currentLang];
+    const fill = (id, names) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const prev = el.value;
+      const sig = (ready ? "r" : "-") + "|" + names.join(",");
+      if (el.dataset.labSig === sig) return;
+      el.dataset.labSig = sig;
+      el.innerHTML = "";
+      const auto = document.createElement("option");
+      auto.value = "";
+      auto.textContent = d.lab_auto;
+      el.appendChild(auto);
+      for (const n of names) {
+        const o = document.createElement("option");
+        o.value = n;
+        o.textContent = n;
+        el.appendChild(o);
+      }
+      if (names.includes(prev)) el.value = prev;
+    };
+    const forms = ready ? [...new Set((caps.forms || []).map((f) => f && f.name).filter(Boolean))] : [];
+    const bins = ready ? (caps.bins || []).filter(Boolean) : [];
+    fill("labPaperSelect", forms);
+    fill("labTraySelect", bins);
+    updateLabOptionsState();
+  }
+  function updateLabOptionsState() {
+    const kindEl = document.getElementById("customTestKind");
+    const isDoc = kindEl ? !isRawTestKind(kindEl.value) : true;
+    const name = selectedTestPrinter();
+    const caps = name && !name.includes("://") ? capsCache.get(name) : null;
+    const ready = caps && caps !== "loading";
+    const set = (id, on) => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = !on;
+    };
+    set("labPaperSelect", isDoc);
+    set("labTraySelect", isDoc);
+    set("labDuplexSelect", isDoc && !!ready && !!caps.duplex);
+    set("labColorSelect", isDoc && !!ready && !!caps.color);
   }
 
   async function inspectForms(printerName, idx) {

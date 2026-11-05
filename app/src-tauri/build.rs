@@ -26,6 +26,7 @@ fn main() {
             "tab_switch",
             "tab_close",
             "open_control_center",
+            "open_settings",
             "open_odoo_origin",
             "app_identity",
             "nav_back",

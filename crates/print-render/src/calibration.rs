@@ -112,66 +112,81 @@ fn pdf_escape(s: &str) -> String {
         .replace(')', "\\)")
 }
 
-/// A one-page A4 calibration PDF (595.28 x 841.89 pt), generated with no
-/// external dependencies: page border, rulers on the top/left edges with
-/// ticks every 10 mm and longer ticks every 50 mm, an exact 100x100 mm
-/// square, a Code 39 barcode for TEST-2026, and instructions text.
+/// A one-page A4 calibration PDF (595.28 x 841.89 pt).
 pub fn calibration_pdf() -> Vec<u8> {
+    calibration_pdf_sized(210.0, 297.0)
+}
+
+/// A one-page calibration PDF at an arbitrary page size, generated
+/// with no external dependencies: page border, rulers on the
+/// top/left edges with ticks every 10 mm, an exact sizing square
+/// (100x100 mm when the page fits it, otherwise the largest that
+/// fits, with its size printed on the page), a Code 39 barcode for
+/// TEST-2026 scaled to the page width, the page size itself
+/// printed as text, and instructions. This is what lets the
+/// calibration lab test the size the user actually chose instead
+/// of always emitting A4 (owner directive, 2026-11-05).
+pub fn calibration_pdf_sized(width_mm: f64, height_mm: f64) -> Vec<u8> {
+    let w = width_mm.clamp(30.0, 1_500.0);
+    let h = height_mm.clamp(30.0, 1_500.0);
     let mm = 72.0f64 / 25.4;
+    let margin = if w.min(h) >= 60.0 { 10.0 } else { 5.0 };
     let mut c = String::new();
     c.push_str("2 J\n"); // line joins
-                         // Page border inset 10 mm.
-    let bx = 10.0 * mm;
+                         // Page border inset by the margin.
     c.push_str(&format!(
         "{:.2} {:.2} {:.2} {:.2} re S\n",
-        bx,
-        bx,
-        190.0 * mm,
-        277.0 * mm
+        margin * mm,
+        margin * mm,
+        (w - 2.0 * margin) * mm,
+        (h - 2.0 * margin) * mm
     ));
-    // Rulers: top edge from x=10mm, ticks every 10mm up to 190mm.
-    for i in 0..=19 {
-        let x = (10.0 + i as f64 * 10.0) * mm;
-        let len = if i % 5 == 0 { 8.0 * mm } else { 4.0 * mm };
+    // Rulers: top edge ticks every 10 mm across the usable width,
+    // left edge ticks every 10 mm across the usable height.
+    let tick_top_y = h - margin;
+    let mut tx = margin;
+    let mut i = 0;
+    while tx <= w - margin + 0.01 {
+        let len = if i % 5 == 0 { 8.0 } else { 4.0 } * mm;
         c.push_str(&format!(
-            "{x:.2} {:.2} m {x:.2} {:.2} l S\n",
-            287.0 * mm,
-            287.0 * mm - len
+            "{:.2} {:.2} m {:.2} {:.2} l S\n",
+            tx * mm,
+            tick_top_y * mm,
+            tx * mm,
+            tick_top_y * mm - len
         ));
+        tx += 10.0;
+        i += 1;
     }
-    for i in 0..=28 {
-        let y = (10.0 + i as f64 * 10.0) * mm;
-        let len = if i % 5 == 0 { 8.0 * mm } else { 4.0 * mm };
+    let mut ty = margin;
+    let mut j = 0;
+    while ty <= h - margin + 0.01 {
+        let len = if j % 5 == 0 { 8.0 } else { 4.0 } * mm;
         c.push_str(&format!(
-            "{:.2} {y:.2} m {:.2} {y:.2} l S\n",
-            10.0 * mm,
-            10.0 * mm + len
+            "{:.2} {:.2} m {:.2} {:.2} l S\n",
+            margin * mm,
+            ty * mm,
+            margin * mm + len,
+            ty * mm
         ));
+        ty += 10.0;
+        j += 1;
     }
-    // Exact 100 x 100 mm square starting at (40mm, 160mm) from bottom-left.
+    // Sizing square: 100 mm when it fits with room for the texts,
+    // otherwise the largest square the usable area holds.
+    let side = 100.0f64
+        .min((w - 2.0 * margin) * 0.55)
+        .min((h - 2.0 * margin) * 0.42)
+        .max(15.0);
+    let sq_x = (w - side) / 2.0;
+    let sq_y = h * 0.52;
     c.push_str(&format!(
         "{:.2} {:.2} {:.2} {:.2} re S\n",
-        40.0 * mm,
-        160.0 * mm,
-        100.0 * mm,
-        100.0 * mm
+        sq_x * mm,
+        sq_y * mm,
+        side * mm,
+        side * mm
     ));
-    // Barcode: Code 39 for TEST-2026, unit = 0.9mm, height 15mm, at y=60mm.
-    let unit = 0.9 * mm;
-    let mut x = 40.0 * mm;
-    let y0 = 60.0 * mm;
-    if let Ok(runs) = code39_runs("TEST-2026") {
-        for (is_bar, w) in runs {
-            let width = w as f64 * unit;
-            if is_bar {
-                c.push_str(&format!(
-                    "{x:.2} {y0:.2} {width:.2} {:.2} re f\n",
-                    15.0 * mm
-                ));
-            }
-            x += width;
-        }
-    }
     // Text (Helvetica, a PDF base-14 font: no embedding needed).
     let text = |x_mm: f64, y_mm: f64, size: u32, s: &str| -> String {
         format!(
@@ -181,31 +196,67 @@ pub fn calibration_pdf() -> Vec<u8> {
             pdf_escape(s)
         )
     };
-    c.push_str(&text(40.0, 270.0, 16, "Yaseir Print - Calibration Page"));
+    let title_size = if w < 120.0 { 12 } else { 16 };
+    let body_size = if w < 120.0 { 8 } else { 11 };
+    let tx0 = margin + 4.0;
     c.push_str(&text(
-        40.0,
-        150.0,
-        11,
-        "The square above must measure exactly 100 x 100 mm.",
+        tx0,
+        h - margin - 14.0,
+        title_size,
+        "Yaseir Print - Calibration Page",
     ));
     c.push_str(&text(
-        40.0,
-        144.0,
-        11,
+        tx0,
+        h - margin - 22.0,
+        body_size,
+        &format!("Page size: {:.0} x {:.0} mm", w, h),
+    ));
+    c.push_str(&text(
+        tx0,
+        sq_y - 8.0,
+        body_size,
+        &format!(
+            "The square above must measure exactly {:.0} x {:.0} mm.",
+            side, side
+        ),
+    ));
+    c.push_str(&text(
+        tx0,
+        sq_y - 14.0,
+        body_size,
         "Ruler ticks are 10 mm apart. Check nothing is clipped at the edges.",
     ));
-    c.push_str(&text(
-        40.0,
-        50.0,
-        11,
-        "Scan the barcode: it must read TEST-2026 plus one check character.",
-    ));
-    c.push_str(&text(
-        40.0,
-        44.0,
-        11,
-        "Arabic is validated via the Odoo receipt test (raster path) - see the hardware kit.",
-    ));
+    // Barcode: Code 39 for TEST-2026, unit scaled so the code fits
+    // the usable width, height 15 mm (or a quarter of the page).
+    if let Ok(runs) = code39_runs("TEST-2026") {
+        let total_units: u32 = runs.iter().map(|(_, n)| *n).sum();
+        if total_units > 0 {
+            let unit_mm = 0.9f64.min((w - 2.0 * margin - 8.0) / total_units as f64);
+            if unit_mm > 0.2 {
+                let unit = unit_mm * mm;
+                let bar_h = 15.0f64.min(h * 0.22);
+                let total_w = total_units as f64 * unit;
+                let mut x = (w * mm - total_w) / 2.0;
+                let y0 = (margin + 12.0) * mm;
+                for (is_bar, n) in runs {
+                    let width = n as f64 * unit;
+                    if is_bar {
+                        c.push_str(&format!(
+                            "{x:.2} {y0:.2} {width:.2} {:.2} re f\n",
+                            bar_h * mm
+                        ));
+                    }
+                    x += width;
+                }
+                c.push_str(&text(
+                    tx0,
+                    margin + 6.0,
+                    body_size,
+                    "Scan the barcode: it must read TEST-2026 plus one check character.",
+                ));
+            }
+        }
+    }
 
     let content = c.into_bytes();
     let mut out = Vec::new();
@@ -214,7 +265,12 @@ pub fn calibration_pdf() -> Vec<u8> {
     let objects: Vec<Vec<u8>> = vec![
         b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".to_vec(),
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {:.2} {:.2}] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+            w * mm,
+            h * mm
+        )
+        .into_bytes(),
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec(),
     ];
     for (i, obj) in objects.iter().enumerate() {
@@ -315,6 +371,21 @@ mod tests {
         let s = String::from_utf8_lossy(&pdf);
         assert!(s.contains("/MediaBox [0 0 595.28 841.89]"));
         assert!(s.contains("Calibration Page"));
+    }
+    #[test]
+    fn calibration_pdf_sized_carries_the_requested_page() {
+        // A5: the MediaBox must be the A5 size in points and the
+        // printed page-size line must name it, so a lab test at a
+        // chosen size is verifiable on the paper itself.
+        let pdf = calibration_pdf_sized(148.0, 210.0);
+        let s = String::from_utf8_lossy(&pdf);
+        assert!(s.contains("/MediaBox [0 0 419.53 595.28]"), "{s:.200}");
+        assert!(s.contains("Page size: 148 x 210 mm"));
+        // A label size still produces a valid, parseable one-pager.
+        let info = crate::pdf::parse_pdf_info(&calibration_pdf_sized(100.0, 150.0)).unwrap();
+        assert_eq!(info.pages.len(), 1);
+        assert!((info.pages[0].size.width_mm - 100.0).abs() < 1.0);
+        assert!((info.pages[0].size.height_mm - 150.0).abs() < 1.0);
     }
     #[test]
     fn thermal_calibration_bitmap_80_and_58() {
