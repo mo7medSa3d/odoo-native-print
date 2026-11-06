@@ -101,7 +101,14 @@ pub struct JobOptions {
     pub paper: Option<String>,
     pub copies: u16,
     pub scale_policy: Option<String>,
-    pub duplex: bool,
+    /// Duplex is tri-state (external review, 2026-11-07): None
+    /// means "nobody chose" and the print path must leave the
+    /// driver default untouched — a printer merely SUPPORTING
+    /// duplex must never turn a job double-sided. Stored job JSON
+    /// from older versions carries true/false, which deserializes
+    /// into Some(..) unchanged.
+    #[serde(default)]
+    pub duplex: Option<bool>,
     pub color: bool,
     pub cut: bool,
     #[serde(default)]
@@ -136,7 +143,7 @@ impl Default for JobOptions {
             paper: None,
             copies: 1,
             scale_policy: Some("custom_allowed".to_string()),
-            duplex: false,
+            duplex: None,
             color: true,
             cut: true,
             tray: None,
@@ -1006,6 +1013,32 @@ mod tests {
             attempts: 0,
             error_code: None,
         }
+    }
+    #[test]
+    fn job_options_duplex_tri_state_survives_stored_json() {
+        // Rows stored by <= 1.5.6 carry a bare boolean: it was an
+        // explicit value in the stored options and must load as
+        // Some(..) unchanged. Rows without the field (or with an
+        // explicit null from >= 1.5.7) load as None = driver
+        // default (2026-11-07).
+        let legacy_true: JobOptions = serde_json::from_str(
+            r#"{"mode":"gdi","duplex":true,"color":true,"copies":1,"cut":false}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy_true.duplex, Some(true));
+        let legacy_false: JobOptions = serde_json::from_str(
+            r#"{"mode":"gdi","duplex":false,"color":true,"copies":1,"cut":false}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy_false.duplex, Some(false));
+        let unset: JobOptions =
+            serde_json::from_str(r#"{"mode":"gdi","color":true,"copies":1,"cut":false}"#).unwrap();
+        assert_eq!(unset.duplex, None);
+        let null: JobOptions = serde_json::from_str(
+            r#"{"mode":"gdi","duplex":null,"color":true,"copies":1,"cut":false}"#,
+        )
+        .unwrap();
+        assert_eq!(null.duplex, None);
     }
     #[test]
     fn stale_failed_payloads_are_purged_but_rows_stay() {

@@ -89,6 +89,54 @@ export function reportSource(action) {
     };
 }
 
+/*
+ * Render a plain-text report as a PNG document (A4 width at
+ * 96 dpi, monospace, hard-wrapped) so it can print through GDI
+ * on office, label and virtual printers, which cannot interpret
+ * ESC/POS (2026-11-07). The desktop canvas path paginates a tall
+ * image across sheets, so one long PNG is the whole document.
+ * Throws when the canvas is unavailable; the caller falls back
+ * to Odoo's standard download.
+ */
+export async function textReportToPngBytes(text) {
+    const FONT_PX = 13;
+    const LINE_H = 17;
+    const PAD = 28;
+    const WIDTH = 794;
+    const scratch = document.createElement("canvas").getContext("2d");
+    scratch.font = FONT_PX + "px 'Courier New', monospace";
+    const charW = scratch.measureText("M").width || 7.8;
+    const maxChars = Math.max(20, Math.floor((WIDTH - PAD * 2) / charW));
+    const lines = [];
+    for (const rawLine of String(text).replace(/\f/g, "\n").split("\n")) {
+        const line = rawLine.replace(/\r$/, "").replace(/\t/g, "    ");
+        if (line.length <= maxChars) {
+            lines.push(line);
+        } else {
+            for (let i = 0; i < line.length; i += maxChars) {
+                lines.push(line.slice(i, i + maxChars));
+            }
+        }
+    }
+    const height = Math.min(32000, PAD * 2 + lines.length * LINE_H);
+    const canvas = document.createElement("canvas");
+    canvas.width = WIDTH;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, WIDTH, height);
+    ctx.fillStyle = "#000000";
+    ctx.font = FONT_PX + "px 'Courier New', monospace";
+    ctx.textBaseline = "top";
+    lines.forEach((line, idx) => {
+        const y = PAD + idx * LINE_H;
+        if (y < height - LINE_H) ctx.fillText(line, PAD, y);
+    });
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("text render failed");
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
+}
+
 export async function watchJobToCompletion(bridge, jobId, meta, env) {
     let lastState = "queued";
     let lastPages = meta.pages || 1;
@@ -285,6 +333,15 @@ async function handleReportSubmission(action, options, env, bridge) {
             `odoo-txt-${action.id || action.report_name}-${Date.now()}-` +
             Math.random().toString(36).slice(2, 10);
         const textSource = reportSource(action);
+        // ESC/POS is a thermal printer's language (external
+        // review, 2026-11-07): only a thermal target may receive
+        // the text as ESC/POS. An office, label or virtual target
+        // gets the same text rendered as a document image through
+        // GDI — readable output on its own paper — never raw
+        // bytes it cannot interpret. (The desktop worker refuses
+        // raw payloads to office/virtual targets as a second line
+        // of defence.)
+        const textAsEscpos = rule.mode === "escpos";
         await rpc("/native_print/job_status", {
             idempotency_key: textKey,
             state: "queued",
@@ -297,19 +354,32 @@ async function handleReportSubmission(action, options, env, bridge) {
             paper: rule.paper || undefined,
             duplex: !!rule.duplex,
             color: rule.color !== false,
-            mode: rule.mode || undefined,
+            mode: textAsEscpos ? "escpos" : "gdi",
             pages: 1,
             byte_size: textBytes,
         }).catch(() => {});
         try {
-            await bridge.printText({
-                idempotencyKey: textKey,
-                reportName: action.report_name,
-                printerPattern: rule.printer_pattern,
-                text,
-                cut: true,
-                copies: rule.copies || 1,
-            });
+            if (textAsEscpos) {
+                await bridge.printText({
+                    idempotencyKey: textKey,
+                    reportName: action.report_name,
+                    printerPattern: rule.printer_pattern,
+                    text,
+                    cut: true,
+                    copies: rule.copies || 1,
+                });
+            } else {
+                const pngBytes = await textReportToPngBytes(text);
+                await bridge.printImage({
+                    idempotencyKey: textKey,
+                    reportName: action.report_name,
+                    printerPattern: rule.printer_pattern,
+                    mode: "gdi",
+                    sourceWidthMm: 210,
+                    copies: rule.copies || 1,
+                    bytes: pngBytes,
+                });
+            }
             watchJobToCompletion(
                 bridge,
                 textKey,
@@ -396,7 +466,10 @@ async function handleReportSubmission(action, options, env, bridge) {
             mode: rule.mode,
             paper: rule.paper || null,
             copies: rule.copies,
-            duplex: !!rule.duplex,
+            // Tri-state: null leaves the driver default in
+            // charge; only an explicit choice (reprint prefill)
+            // or the app's saved per-printer default may set it.
+            duplex: typeof rule.duplex === "boolean" ? rule.duplex : null,
             color: rule.color !== false,
             tray: rule.tray || null,
             scalePolicy: rule.scale_policy,

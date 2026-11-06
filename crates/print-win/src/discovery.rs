@@ -9,7 +9,9 @@
 //! compiler, not a hand-computed offset, does the layout on Windows.
 
 use print_core::paper::Form;
-use print_core::printer::{PrinterInfo, PrinterKind};
+use print_core::printer::PrinterInfo;
+#[cfg(test)]
+use print_core::printer::PrinterKind;
 use print_core::PageSize;
 
 /// A raw level-2 record as read from Windows, before conversion.
@@ -70,13 +72,16 @@ impl From<&RawPrinterInfo2> for PrinterInfo {
 /// Is this a printer a user would expect to see (filters out the
 /// pseudo-printers some drivers register with no port)?
 pub fn is_usable(raw: &RawPrinterInfo2) -> bool {
-    // A UNC queue (\\\\server\\printer) is a printer shared by another
-    // workstation/server, not a device attached to this workstation.
-    // Keep directly installed network printers (TCP/IP, WSD, IPP ports):
-    // their local queue name is ordinary text and their port is network-backed.
-    !raw.printer_name.is_empty()
-        && !raw.port_name.is_empty()
-        && PrinterInfo::classify(&raw.printer_name, &raw.port_name) != PrinterKind::Shared
+    // A UNC queue (\\server\printer) is a printer shared by
+    // another workstation or a print server — a normal target in
+    // shops, where one printer serves several POS stations
+    // through Windows sharing (external review, 2026-11-07).
+    // Windows routes spooler, capabilities and DEVMODE calls for
+    // a connection queue to the hosting machine, so the full
+    // pipeline works for it; it is classified Shared and labelled
+    // as such everywhere it is shown. Only nameless/portless
+    // pseudo-printers are filtered out.
+    !raw.printer_name.is_empty() && !raw.port_name.is_empty()
 }
 
 /// Convert a driver-reported paper name and size (mm) into a `Form`,
@@ -251,11 +256,18 @@ mod tests {
         assert!(!is_usable(&r));
     }
     #[test]
-    fn excludes_remote_unc_shared_queues_but_keeps_local_network_queues() {
+    fn keeps_remote_unc_shared_queues_and_local_network_queues() {
+        // Windows-shared printers are first-class targets
+        // (2026-11-07): the filter keeps them, and classify marks
+        // them Shared so every surface can label them.
         let mut remote = raw(0, 0);
         remote.printer_name = r"\\print-server\receipt".into();
         remote.port_name = "Ne03:".into();
-        assert!(!is_usable(&remote));
+        assert!(is_usable(&remote));
+        assert_eq!(
+            PrinterInfo::classify(&remote.printer_name, &remote.port_name),
+            PrinterKind::Shared
+        );
 
         let mut network = raw(0, 0);
         network.printer_name = "Warehouse Receipt Printer".into();

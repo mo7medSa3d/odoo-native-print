@@ -113,6 +113,26 @@ function isIpLiteral(value) {
 
 /** Raw printers reachable at an IP print directly; everything else
  * goes through its installed Windows queue by name. */
+/*
+ * One-line-per-form summary of a capabilities payload, uploaded
+ * to the device registry so the Odoo record shows the sizes the
+ * driver offers. The bridge's forms nest their size
+ * ({ name, size: { width_mm, height_mm }, roll }); flat fields
+ * are accepted too so a differently-shaped payload degrades to
+ * real numbers instead of NaN (field bug found by the
+ * 2026-11-07 review: the systray read f.width_mm directly and
+ * the registry filled with "NaN×NaNmm").
+ */
+export function formatFormsSummary(forms, rollLabel) {
+    return (forms || []).map((f) => {
+        const size = f.size || f;
+        return (
+            `${f.name} — ${Math.round(size.width_mm)}×${Math.round(size.height_mm)}mm` +
+            (f.roll ? " (" + rollLabel + ")" : "")
+        );
+    });
+}
+
 export function printerPatternFor(printer, mode) {
     const rawModes = ["escpos", "zpl", "tspl", "epl"];
     const port = (printer && printer.port) || "";
@@ -193,7 +213,13 @@ export async function resolveBridgeTarget(bridge, options = {}) {
             paper: null,
             copies: 1,
             tray: null,
-            duplex: Boolean(capabilities && capabilities.duplex),
+            // Duplex is a CHOICE, not a capability (external
+            // review, 2026-11-07): a printer merely supporting
+            // duplex must not turn reports double-sided. null =
+            // nobody chose; the app then applies the saved
+            // per-printer default if one exists, else the driver
+            // default at the printer.
+            duplex: null,
             color: !capabilities || capabilities.color !== false,
             scale_policy: "custom_allowed",
             media: { roll_width_mm: rollWidthMm(capabilities) },

@@ -70,6 +70,10 @@ the bridge, before anything is queued): `bad_idempotency_key`,
 | `TCP9100_ERROR` | A direct network print (port 9100) failed. Ambiguous by nature: the job is NOT auto-retried, because the printer may have received it. | Check the printer before reprinting. |
 | `IPP_PRINT_ERROR` / `IPP_ATTRIBUTES_ERROR` / `IPP_FORMAT_UNSUPPORTED` | IPP printing failed / the printer rejected the attributes / the document format is unsupported over IPP. | Check the printer's IPP support or use its Windows queue instead. |
 | `UNKNOWN_MODE` | A job asked for a print mode the app does not implement. It fails loudly; bytes are never sent in a guessed format. | Update the app/addon pair (see the compatibility policy). |
+| `RAW_TO_VIRTUAL_PRINTER` | A job carries raw printer language (ESC/POS/ZPL/TSPL/EPL bytes) addressed to a virtual PDF/XPS writer, which would spool the bytes into a corrupt document file. Refused before any byte is sent. | Pick a physical printer for raw jobs; documents (PDF/images) print to virtual writers normally via GDI. |
+| `RAW_TO_OFFICE_PRINTER` | A job carries raw printer language addressed to an office printer, whose queue renders GDI only — the bytes could only print as garbage. Refused before any byte is sent (2026-11-07). | Pick a printer that speaks the job's language; documents print to office printers normally via GDI. |
+| `PRINTER_PAPER_OUT` | No paper: reported by the Windows spooler, or — for a TCP ESC/POS printer — by the printer's own paper-end sensor (DLE EOT) before the job is sent. | Load paper; the job retries, then can be reprinted. |
+| `PRINTER_CUTTER_ERROR` | A TCP ESC/POS printer's own sensor reports an auto-cutter error (DLE EOT) before the job is sent. | Clear the cutter jam on the device; the job retries. |
 
 ## Bridge, server and environment
 

@@ -243,7 +243,7 @@ fn build_printer_devmode(
     printer: &str,
     page_size: PageSize,
     matched_form: Option<(&Form, MatchKind)>,
-    duplex: bool,
+    duplex: Option<bool>,
     color: bool,
     tray: Option<&str>,
 ) -> Option<Vec<u8>> {
@@ -326,13 +326,16 @@ fn build_printer_devmode(
                     }
                 }
 
-                // Duplex & Color
-                dm.dm_duplex = if duplex {
-                    DMDUP_VERTICAL
-                } else {
-                    DMDUP_SIMPLEX
-                };
-                dm.dm_fields |= DM_DUPLEX;
+                // Duplex & Color. Duplex is tri-state: an
+                // unspecified duplex leaves the DEVMODE field
+                // untouched so the DRIVER DEFAULT applies — only
+                // an explicit choice (the user's, or a saved
+                // per-printer default) may turn a job double-sided
+                // or force it simplex (external review, 2026-11-07).
+                if let Some(d) = duplex {
+                    dm.dm_duplex = if d { DMDUP_VERTICAL } else { DMDUP_SIMPLEX };
+                    dm.dm_fields |= DM_DUPLEX;
+                }
                 dm.dm_color = if color {
                     DMCOLOR_COLOR
                 } else {
@@ -386,7 +389,7 @@ pub fn print_pdf_gdi_copies(
         mode,
         dpi,
         copies: copies.max(1),
-        duplex: false,
+        duplex: None,
         color: mode == print_render::RenderMode::Color,
         scale_policy: ScalePolicy::CustomAllowed,
         tray: None,

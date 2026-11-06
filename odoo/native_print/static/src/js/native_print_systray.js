@@ -4,7 +4,7 @@ import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
-import { getSelectedPrinter, setSelectedPrinter } from "./native_print_client";
+import { formatFormsSummary, getSelectedPrinter, setSelectedPrinter } from "./native_print_client";
 
 // One-line source description for a discovered printer (owner
 // brief, 2026-11-05): where it is attached and what it is, from the
@@ -194,9 +194,7 @@ export class NativePrintSystray extends Component {
         try {
             const caps = await bridge.printerCapabilities(target.name);
             if (!caps) return;
-            const forms = (caps.forms || []).map((f) =>
-                `${f.name} — ${Math.round(f.width_mm)}×${Math.round(f.height_mm)}mm` +
-                (f.roll ? " (" + _t("Roll") + ")" : ""));
+            const forms = formatFormsSummary(caps.forms, _t("Roll"));
             const trays = Array.isArray(caps.bins) ? caps.bins.slice() : [];
             const hash = JSON.stringify(
                 [target.protocol, target.printer_class, forms, trays]);

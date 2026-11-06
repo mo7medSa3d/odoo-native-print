@@ -516,6 +516,36 @@ pub fn raw_delivery_blocked(payload_kind: &str, mode: &str, printer: PrinterKind
     raw(payload_kind) || raw(mode)
 }
 
+/// The error code when a job must NOT be delivered to this printer
+/// class, or None when delivery may proceed. Two classes refuse
+/// raw printer language:
+/// - Virtual writers (the `raw_delivery_blocked` rule): raw bytes
+///   spooled into a document file corrupt it.
+/// - Office printers (external review, 2026-11-07): an office
+///   queue renders GDI only; raw ESC/POS/ZPL bytes delivered
+///   through the spooler can only print as garbage. This covers
+///   RAW PAYLOADS (printer-language bytes, e.g. a qweb-text
+///   report converted to ESC/POS); documents in a raw mode are
+///   not blocked here because `document_mode_downgrade` re-routes
+///   them to GDI first.
+pub fn raw_target_block(
+    payload_kind: &str,
+    mode: &str,
+    printer: PrinterKind,
+    printer_class: &str,
+) -> Option<&'static str> {
+    if raw_delivery_blocked(payload_kind, mode, printer) {
+        return Some("RAW_TO_VIRTUAL_PRINTER");
+    }
+    if printer_class == "office" {
+        let raw = |v: &str| matches!(v, "escpos" | "zpl" | "tspl" | "epl");
+        if raw(payload_kind) {
+            return Some("RAW_TO_OFFICE_PRINTER");
+        }
+    }
+    None
+}
+
 /// Whether a job should be re-routed to GDI printing instead of
 /// being rejected by `raw_delivery_blocked`. A DOCUMENT (PDF or
 /// image) addressed to a virtual printer in a raw-language mode
@@ -531,8 +561,18 @@ pub fn document_mode_downgrade(
     payload_kind: &str,
     mode: &str,
     printer: PrinterKind,
+    printer_class: &str,
 ) -> Option<&'static str> {
-    if printer != PrinterKind::Virtual {
+    // Virtual writers and office printers both render through
+    // GDI: a document addressed to either in a raw-language mode
+    // is re-routed to GDI instead of being converted to raw bytes
+    // the target cannot use (the virtual case is the owner's
+    // first-class-virtual rule, 2026-11-04; the office case is the
+    // same faithful-rendering argument, external review
+    // 2026-11-07 — a receipt or report prints on the office
+    // printer's paper, never as raw bytes). "Office" is a device
+    // CLASS (printer_class), not a connection kind.
+    if printer != PrinterKind::Virtual && printer_class != "office" {
         return None;
     }
     if !matches!(payload_kind, "pdf" | "image-png") {
@@ -787,43 +827,106 @@ mod tests {
         // writer re-routes to GDI instead of failing: the owner
         // ruled virtual printers first-class silent targets.
         assert_eq!(
-            document_mode_downgrade("image-png", "escpos", PrinterKind::Virtual),
+            document_mode_downgrade("image-png", "escpos", PrinterKind::Virtual, "virtual"),
             Some("gdi")
         );
         assert_eq!(
-            document_mode_downgrade("pdf", "escpos", PrinterKind::Virtual),
+            document_mode_downgrade("pdf", "escpos", PrinterKind::Virtual, "virtual"),
             Some("gdi")
         );
         assert_eq!(
-            document_mode_downgrade("pdf", "zpl", PrinterKind::Virtual),
+            document_mode_downgrade("pdf", "zpl", PrinterKind::Virtual, "virtual"),
             Some("gdi")
         );
         // Already-GDI documents need nothing.
         assert_eq!(
-            document_mode_downgrade("image-png", "gdi", PrinterKind::Virtual),
+            document_mode_downgrade("image-png", "gdi", PrinterKind::Virtual, "virtual"),
             None
         );
         assert_eq!(
-            document_mode_downgrade("pdf", "gdi", PrinterKind::Virtual),
+            document_mode_downgrade("pdf", "gdi", PrinterKind::Virtual, "virtual"),
             None
         );
         // Raw payloads are NOT downgraded: printer-language bytes
         // have no GDI rendering at all and stay hard-blocked.
         assert_eq!(
-            document_mode_downgrade("zpl", "zpl", PrinterKind::Virtual),
+            document_mode_downgrade("zpl", "zpl", PrinterKind::Virtual, "virtual"),
             None
         );
         assert_eq!(
-            document_mode_downgrade("escpos", "escpos", PrinterKind::Virtual),
+            document_mode_downgrade("escpos", "escpos", PrinterKind::Virtual, "virtual"),
             None
         );
         // Physical printers are never re-routed.
         assert_eq!(
-            document_mode_downgrade("image-png", "escpos", PrinterKind::Local),
+            document_mode_downgrade("image-png", "escpos", PrinterKind::Local, "thermal"),
             None
         );
         assert_eq!(
-            document_mode_downgrade("pdf", "escpos", PrinterKind::Network),
+            document_mode_downgrade("pdf", "escpos", PrinterKind::Network, "thermal"),
+            None
+        );
+        // Office printers render GDI only: a document in a raw
+        // mode re-routes to GDI there too (2026-11-07), while a
+        // raw PAYLOAD stays undowngraded and is refused by
+        // raw_target_block below.
+        assert_eq!(
+            document_mode_downgrade("image-png", "escpos", PrinterKind::Local, "office"),
+            Some("gdi")
+        );
+        assert_eq!(
+            document_mode_downgrade("pdf", "zpl", PrinterKind::Local, "office"),
+            Some("gdi")
+        );
+        assert_eq!(
+            document_mode_downgrade("escpos", "escpos", PrinterKind::Local, "office"),
+            None
+        );
+    }
+
+    #[test]
+    fn raw_target_block_covers_virtual_and_office() {
+        use super::raw_target_block;
+        // Virtual: unchanged hard block, raw payloads and raw
+        // modes alike.
+        assert_eq!(
+            raw_target_block("escpos", "escpos", PrinterKind::Virtual, "virtual"),
+            Some("RAW_TO_VIRTUAL_PRINTER")
+        );
+        assert_eq!(
+            raw_target_block("pdf", "escpos", PrinterKind::Virtual, "virtual"),
+            Some("RAW_TO_VIRTUAL_PRINTER")
+        );
+        assert_eq!(
+            raw_target_block("pdf", "gdi", PrinterKind::Virtual, "virtual"),
+            None
+        );
+        // Office: raw PAYLOADS are refused (they can only print as
+        // garbage); documents are not refused here — the downgrade
+        // above re-routes them to GDI before this check runs.
+        assert_eq!(
+            raw_target_block("escpos", "escpos", PrinterKind::Local, "office"),
+            Some("RAW_TO_OFFICE_PRINTER")
+        );
+        assert_eq!(
+            raw_target_block("zpl", "zpl", PrinterKind::Local, "office"),
+            Some("RAW_TO_OFFICE_PRINTER")
+        );
+        assert_eq!(
+            raw_target_block("pdf", "escpos", PrinterKind::Local, "office"),
+            None
+        );
+        assert_eq!(
+            raw_target_block("image-png", "gdi", PrinterKind::Local, "office"),
+            None
+        );
+        // Physical raw printers accept their payloads.
+        assert_eq!(
+            raw_target_block("escpos", "escpos", PrinterKind::Local, "thermal"),
+            None
+        );
+        assert_eq!(
+            raw_target_block("zpl", "zpl", PrinterKind::Network, "label"),
             None
         );
     }

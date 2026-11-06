@@ -214,6 +214,63 @@ pub fn decode_dle_eot_paper(status: u8) -> PaperStatus {
     }
 }
 
+/// The blocking live condition in a set of decoded DLE EOT
+/// frames, as (job error code, explanation) — or None when the
+/// printer's own sensors say it can print. This is the printer
+/// HARDWARE speaking (paper-end sensor, cutter switch, offline
+/// state), not a spooler or driver opinion: the distinction the
+/// 2026-11-07 review asked for. Near-end and auto-recoverable
+/// states (head temperature) deliberately do NOT block: the roll
+/// still has paper and the condition clears itself.
+pub fn blocking_condition(
+    paper: PaperStatus,
+    error: ErrorStatus,
+    printer: ThermalStatus,
+) -> Option<(&'static str, &'static str)> {
+    if paper.paper_end {
+        return Some((
+            "PRINTER_PAPER_OUT",
+            "the printer's paper-end sensor reports the roll is out (DLE EOT)",
+        ));
+    }
+    if error.cutter_error {
+        return Some((
+            "PRINTER_CUTTER_ERROR",
+            "the printer reports an auto-cutter error (DLE EOT)",
+        ));
+    }
+    if error.unrecoverable_error || error.mechanical_error {
+        return Some((
+            "PRINTER_ERROR",
+            "the printer reports a mechanical or unrecoverable error (DLE EOT)",
+        ));
+    }
+    if printer.offline || printer.error_occurred {
+        return Some((
+            "PRINTER_OFFLINE",
+            "the printer reports offline — cover open or an error state (DLE EOT)",
+        ));
+    }
+    None
+}
+
+/// Query a TCP thermal printer's live sensor state (DLE EOT
+/// frames 4, 3, 1) and return its blocking condition, if any.
+/// An Err means the printer did not answer the status protocol
+/// at all (many clones never do): callers must treat that as
+/// "unknown" and print anyway — a status probe may veto a job
+/// only on positive sensor evidence, never on silence.
+pub fn query_blocking_condition(
+    host: &str,
+    port: u16,
+    timeout: Duration,
+) -> std::io::Result<Option<(&'static str, &'static str)>> {
+    let paper = decode_dle_eot_paper(query_paper_status(host, port, timeout)?);
+    let error = decode_dle_eot_error(query_error_status(host, port, timeout)?);
+    let printer = decode_dle_eot_printer(query_printer_status(host, port, timeout)?);
+    Ok(blocking_condition(paper, error, printer))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,6 +293,69 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, SendPhaseError::Connect(_)), "{err:?}");
+    }
+
+    /// A loopback stand-in for a thermal printer: answers each
+    /// DLE EOT query with the byte scripted for that frame.
+    fn mock_printer(script: [u8; 5]) -> u16 {
+        use std::io::{Read, Write};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = match stream {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                let mut req = [0u8; 3];
+                if stream.read_exact(&mut req).is_err() {
+                    continue;
+                }
+                let n = req[2] as usize;
+                if (1..=4).contains(&n) {
+                    let _ = stream.write_all(&[script[n]]);
+                }
+            }
+        });
+        port
+    }
+
+    #[test]
+    fn live_probe_reports_paper_out_from_the_sensor() {
+        // Frame bytes carry the fixed DLE EOT frame bits (1 and
+        // 4) plus the condition bits: 0x72 = paper-end (bits 5-6)
+        // on the n=4 paper frame; other frames idle.
+        let port = mock_printer([0, 0x12, 0x12, 0x12, 0x72]);
+        let found = query_blocking_condition("127.0.0.1", port, Duration::from_secs(2))
+            .expect("the mock printer answers DLE EOT");
+        assert_eq!(found.map(|(code, _)| code), Some("PRINTER_PAPER_OUT"));
+    }
+
+    #[test]
+    fn live_probe_healthy_printer_blocks_nothing() {
+        let port = mock_printer([0, 0x12, 0x12, 0x12, 0x12]);
+        let found = query_blocking_condition("127.0.0.1", port, Duration::from_secs(2))
+            .expect("the mock printer answers DLE EOT");
+        assert_eq!(found, None);
+    }
+
+    #[test]
+    fn blocking_condition_ignores_near_end_and_heat() {
+        // Near-end (bits 2-3 on n=4) warns but must not block;
+        // an auto-recoverable error (bit 6 on n=3) clears itself.
+        let near = decode_dle_eot_paper(0x12 | 0x0C);
+        assert!(near.paper_near_end && !near.paper_end);
+        let hot = decode_dle_eot_error(0x12 | 0x40);
+        let idle = decode_dle_eot_printer(0x12);
+        assert_eq!(blocking_condition(near, hot, idle), None);
+        // Cover-open/offline on n=1 blocks.
+        let offline = decode_dle_eot_printer(0x12 | 0x08);
+        let ok_paper = decode_dle_eot_paper(0x12);
+        let ok_error = decode_dle_eot_error(0x12);
+        assert_eq!(
+            blocking_condition(ok_paper, ok_error, offline).map(|(c, _)| c),
+            Some("PRINTER_OFFLINE")
+        );
     }
 
     #[test]

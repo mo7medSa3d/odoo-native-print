@@ -350,8 +350,12 @@ pub struct PrintPdfRequest {
     pub paper: Option<String>,
     pub copies: u16,
     pub scale_policy: Option<String>,
+    /// Tri-state (2026-11-07): absent/null = nobody chose, and
+    /// the driver default applies at the printer; true/false are
+    /// explicit choices. Older pages send a boolean, which
+    /// deserializes as Some(..) — their behaviour is unchanged.
     #[serde(default)]
-    pub duplex: bool,
+    pub duplex: Option<bool>,
     #[serde(default = "default_true")]
     pub color: bool,
     #[serde(default)]
@@ -505,7 +509,7 @@ pub fn print_text(
         paper: None,
         copies: copies.max(1),
         scale_policy: None,
-        duplex: false,
+        duplex: None,
         color: false,
         cut: req.cut,
         tray: None,
@@ -604,7 +608,7 @@ pub async fn print_image(
         paper: req.paper,
         copies: copies.max(1),
         scale_policy: Some("custom_allowed".to_string()),
-        duplex: false,
+        duplex: None,
         color: false,
         cut: true,
         tray: None,
@@ -953,7 +957,7 @@ pub fn run_test_print(
                     paper: Some(paper.unwrap_or_else(|| default_paper.to_string())),
                     copies: 1,
                     scale_policy: Some("custom_allowed".to_string()),
-                    duplex: false,
+                    duplex: None,
                     color: false,
                     cut: true,
                     tray: None,
@@ -975,7 +979,7 @@ pub fn run_test_print(
                     paper: Some(paper.unwrap_or_else(|| "100x150mm".to_string())),
                     copies: 1,
                     scale_policy: Some("custom_allowed".to_string()),
-                    duplex: false,
+                    duplex: None,
                     color: false,
                     cut: false,
                     tray: None,
@@ -1000,7 +1004,7 @@ pub fn run_test_print(
                     paper: Some(paper.unwrap_or_else(|| "100x150mm".to_string())),
                     copies: 1,
                     scale_policy: Some("custom_allowed".to_string()),
-                    duplex: false,
+                    duplex: None,
                     color: false,
                     cut: false,
                     tray: None,
@@ -1045,7 +1049,7 @@ pub fn run_test_print(
                     paper: Some(form.0),
                     copies: 1,
                     scale_policy: Some("custom_allowed".to_string()),
-                    duplex: duplex.unwrap_or(false),
+                    duplex,
                     color: color.unwrap_or(false),
                     cut: false,
                     tray: tray.filter(|t| !t.trim().is_empty()),
@@ -1822,8 +1826,10 @@ impl NativePrintBackend {
             if opts.paper.is_none() {
                 opts.paper = defaults.paper.clone();
             }
-            if let Some(d) = defaults.duplex {
-                opts.duplex = d;
+            if opts.duplex.is_none() {
+                if let Some(d) = defaults.duplex {
+                    opts.duplex = Some(d);
+                }
             }
             if let Some(c) = defaults.color {
                 opts.color = c;
@@ -2365,6 +2371,22 @@ impl PrintBackend for NativePrintBackend {
         // 1. Direct TCP 9100 transport (tcp://host:port or raw://host:port)
         if job.printer.starts_with("tcp://") || job.printer.starts_with("raw://") {
             let (host, port, _) = Self::parse_host_port(&job.printer, 9100)?;
+            // Live sensor check for ESC/POS printers (2026-11-07):
+            // ask the hardware itself (DLE EOT) before sending —
+            // paper-end, a cutter fault or an offline/cover-open
+            // state fail here with the sensor's own code instead of
+            // vanishing into the printer. A printer that does not
+            // answer the status protocol is NOT blocked: the probe
+            // may veto only on positive evidence, never on silence.
+            if opts.mode == "escpos" {
+                if let Ok(Some((code, message))) = print_raw::tcp9100::query_blocking_condition(
+                    &host,
+                    port,
+                    Duration::from_millis(700),
+                ) {
+                    return Err(BackendError::retryable(code, message));
+                }
+            }
             // No local driver exists for a raw network printer:
             // the job's media width (resolved page-side from the
             // printer's synced driver forms) is the media truth;
@@ -2486,7 +2508,7 @@ impl PrintBackend for NativePrintBackend {
                     }
                 }
             }
-            if opts.duplex {
+            if opts.duplex == Some(true) {
                 let sides = "two-sided-long-edge";
                 if !caps.sides_supported.is_empty()
                     && !caps.sides_supported.iter().any(|x| x == sides)
@@ -2542,8 +2564,10 @@ impl PrintBackend for NativePrintBackend {
             BackendError::retryable("SPOOLER_UNAVAILABLE", &format!("discover_printers: {e}"))
         })?;
         let mut target_kind: Option<PrinterKind> = None;
+        let mut target_class: Option<String> = None;
         let target_name = if let Some(matched) = resolve_printer(&job.printer, &discovered) {
             target_kind = Some(matched.kind);
+            target_class = Some(matched.printer_class.clone());
             // Virtual writers have no paper, door or toner: their
             // spooler status words carry writer-app state bits that
             // decode as blocking conditions and would dead-end jobs
@@ -2571,6 +2595,16 @@ impl PrintBackend for NativePrintBackend {
         // from the name so the raw-to-virtual guard below still
         // applies instead of being skipped (fail-open edge).
         let target_kind = target_kind.or_else(|| Some(PrinterInfo::classify(&target_name, "")));
+        // The device class drives the raw-language target guard
+        // (office printers render GDI only). From the matched
+        // queue when there is one; otherwise detected from the
+        // queue name, the same evidence the page had.
+        let target_class = target_class.unwrap_or_else(|| {
+            let kind = target_kind.unwrap_or(PrinterKind::Local);
+            print_core::printer::detect_protocol(&target_name, "", kind)
+                .1
+                .to_string()
+        });
 
         // Per-printer defaults, second lookup by the RESOLVED
         // spooler name (the first lookup used the job's target
@@ -2596,21 +2630,28 @@ impl PrintBackend for NativePrintBackend {
         // printer-language bytes — keep the hard block below.
         if let Some(pk) = target_kind {
             if let Some(downgraded) =
-                print_core::printer::document_mode_downgrade(&kind, &opts.mode, pk)
+                print_core::printer::document_mode_downgrade(&kind, &opts.mode, pk, &target_class)
             {
                 opts.mode = downgraded.to_string();
             }
         }
 
         // Raw printer language can never go to a virtual PDF/XPS
-        // writer: the spooler would write the raw bytes into a
-        // document file, producing a corrupt, unopenable "PDF".
+        // writer (the spooler would write the raw bytes into a
+        // document file, producing a corrupt, unopenable "PDF") nor
+        // to an office printer (a GDI-only queue can only print the
+        // bytes as garbage). Documents never reach this check in a
+        // raw mode: the downgrade above re-routed them to GDI.
         if let Some(pk) = target_kind {
-            if print_core::printer::raw_delivery_blocked(&kind, &opts.mode, pk) {
-                return Err(BackendError::fatal(
-                    "RAW_TO_VIRTUAL_PRINTER",
-                    "raw printer language (ESC/POS / ZPL / TSPL / EPL) cannot be sent to a virtual PDF/XPS printer; choose a physical printer",
-                ));
+            if let Some(code) =
+                print_core::printer::raw_target_block(&kind, &opts.mode, pk, &target_class)
+            {
+                let message = if code == "RAW_TO_OFFICE_PRINTER" {
+                    "raw printer language (ESC/POS / ZPL / TSPL / EPL) cannot be printed by an office printer; choose a printer that speaks this language"
+                } else {
+                    "raw printer language (ESC/POS / ZPL / TSPL / EPL) cannot be sent to a virtual PDF/XPS printer; choose a physical printer"
+                };
+                return Err(BackendError::fatal(code, message));
             }
         }
 
@@ -2933,7 +2974,10 @@ mod tests {
         };
         NativePrintBackend::apply_printer_defaults(&mut receipt, "image-png", &defaults);
         assert!(receipt.paper.is_none(), "receipt paper must stay unset");
-        assert!(!receipt.duplex && receipt.color, "receipt flags untouched");
+        assert!(
+            receipt.duplex.is_none() && receipt.color,
+            "receipt flags untouched"
+        );
         assert_eq!(receipt.tray.as_deref(), Some("Tray 2"));
 
         let mut doc = JobOptions {
@@ -2942,7 +2986,7 @@ mod tests {
         };
         NativePrintBackend::apply_printer_defaults(&mut doc, "pdf", &defaults);
         assert_eq!(doc.paper.as_deref(), Some("A4"));
-        assert!(doc.duplex && !doc.color);
+        assert!(doc.duplex == Some(true) && !doc.color);
 
         // A document carrying its own paper keeps it.
         let mut own = JobOptions {

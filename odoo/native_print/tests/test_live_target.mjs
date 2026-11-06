@@ -97,4 +97,31 @@ t = await m.resolveBridgeTarget(bridge);
 eq(t.printer.name, "HP LaserJet", "stale selection falls back to default");
 t = await m.resolveBridgeTarget({ listPrinters: async () => [] });
 eq(t, null, "no printers -> null");
+
+// Duplex is a choice, not a capability (2026-11-07): even a
+// duplex-CAPABLE printer's rule must leave duplex unset, so the
+// driver default (or a saved per-printer default in the app)
+// decides — never the capability probe.
+const duplexBridge = {
+    listPrinters: async () => printers,
+    printerCapabilities: async () => ({ forms: [], duplex: true, color: true }),
+};
+m.setSelectedPrinter(null);
+t = await m.resolveBridgeTarget(duplexBridge);
+eq(t.rule.duplex, null, "capable printer still leaves duplex unchosen");
+
+// forms_summary shape (2026-11-07): the bridge nests sizes
+// under f.size; the summary must show real numbers, never NaN.
+const summary = m.formatFormsSummary(
+    [
+        { name: "A4", size: { width_mm: 210.2, height_mm: 296.8 }, roll: false },
+        { name: "Roll 80", size: { width_mm: 80, height_mm: 297 }, roll: true },
+        { name: "Letter", width_mm: 216, height_mm: 279, roll: false },
+    ],
+    "Roll",
+);
+eq(summary[0], "A4 — 210×297mm", "nested size summary");
+eq(summary[1], "Roll 80 — 80×297mm (Roll)", "roll suffix");
+eq(summary[2], "Letter — 216×279mm", "flat size tolerated");
+eq(m.formatFormsSummary(undefined, "Roll").length, 0, "no forms -> empty");
 console.log("JS LIVE TARGET TESTS: ALL PASS");
