@@ -400,34 +400,45 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
 
 }
 
+// A declined POS attempt (no printer, capture failure, enqueue
+// rejection) creates no desktop job, so without this post it
+// leaves NO trace anywhere — not in the Control Center, not in
+// the server log — and every failure looked identical (owner
+// field loop, 2026-11-06). Post it to the job log with its reason
+// code, exactly like a real job's failure, so the cause is
+// readable in Odoo's Print Jobs afterwards.
+function postPosDeclined(key, code, safeRef, userId, deviceName, mode) {
+    if (!key) {
+        return;
+    }
+    const params = {
+        idempotency_key: key,
+        state: "failed",
+        error_code: code,
+        report_name: POS_RECEIPT_SOURCE,
+        source_type: "pos_receipt",
+        copies: 1,
+        pages: 1,
+        byte_size: 0,
+    };
+    if (deviceName) {
+        params.device = deviceName;
+    }
+    if (mode) {
+        params.mode = mode;
+    }
+    rpc("/native_print/job_status", params, { silent: true }).catch(() => {});
+    // The attempt is over: rotate the key so the cashier's next
+    // click is a fresh attempt (the posted row is terminal).
+    clearPosReceiptKey(safeRef, userId);
+}
+
 async function printPosReceiptNatively(contextObj, explicitOrder = null) {
-    // Returns null on success, or the failure reason to show the
-    // cashier. Enqueue rejections throw (the wrapper reports them).
+    // Returns null on success, or {reason, code, key, safeRef,
+    // userId, device, mode} describing the decline for the wrapper
+    // to log and show. Enqueue rejections throw with npKey/npRef
+    // attached (the wrapper logs and reports them).
     const bridge = nativeBridge();
-    if (!bridge || typeof bridge.printImage !== "function") {
-        return POS_FAIL_NO_PRINTER;
-    }
-    let target = await resolveBridgeTarget(
-        bridge, { preferClasses: ["thermal", "label"] },
-    ).catch(() => null);
-    if (!target) {
-        // One retry: printer discovery rides the Windows spooler,
-        // whose first answer after app start / spooler restart can
-        // be empty or errored while printers exist.
-        await new Promise((resolve) => setTimeout(resolve, 700));
-        target = await resolveBridgeTarget(
-            bridge, { preferClasses: ["thermal", "label"] },
-        ).catch(() => null);
-    }
-    if (!target) {
-        return POS_FAIL_NO_PRINTER; // No printer on this PC right now.
-    }
-    // Virtual printers are first-class targets (owner,
-    // 2026-11-04): the receipt renders through GDI exactly like an
-    // office printer — OneNote opens with the printed receipt, a
-    // PDF writer produces the page — with no warning and no
-    // printer-choice prompt. The detection in
-    // native_print_client.js already routes them to gdi mode.
     const order =
         explicitOrder ||
         (contextObj && contextObj.currentOrder) ||
@@ -449,9 +460,35 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
         (order && order.user_id && (order.user_id.id || order.user_id)) ||
         0;
     const userId = String(cashierRaw).replace(/[^0-9]/g, "") || "0";
+    const idempotencyKey = posReceiptKey(safeRef, userId);
+    if (!bridge || typeof bridge.printImage !== "function") {
+        return { reason: POS_FAIL_NO_PRINTER, code: "POS_NO_PRINTER", key: idempotencyKey, safeRef, userId };
+    }
+    let target = await resolveBridgeTarget(
+        bridge, { preferClasses: ["thermal", "label"] },
+    ).catch(() => null);
+    if (!target) {
+        // One retry: printer discovery rides the Windows spooler,
+        // whose first answer after app start / spooler restart can
+        // be empty or errored while printers exist.
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        target = await resolveBridgeTarget(
+            bridge, { preferClasses: ["thermal", "label"] },
+        ).catch(() => null);
+    }
+    if (!target) {
+        // No printer on this PC right now.
+        return { reason: POS_FAIL_NO_PRINTER, code: "POS_NO_PRINTER", key: idempotencyKey, safeRef, userId };
+    }
+    // Virtual printers are first-class targets (owner,
+    // 2026-11-04): the receipt renders through GDI exactly like an
+    // office printer — OneNote opens with the printed receipt, a
+    // PDF writer produces the page — with no warning and no
+    // printer-choice prompt. The detection in
+    // native_print_client.js already routes them to gdi mode.
     const element = findReceiptElement(order ? rawRef : null);
     if (!element) {
-        return POS_FAIL_NO_RECEIPT;
+        return { reason: POS_FAIL_NO_RECEIPT, code: "POS_RECEIPT_NOT_ON_SCREEN", key: idempotencyKey, safeRef, userId, device: target.printer.name, mode: target.rule.mode };
     }
     // The receipt's own physical width (CSS px render at 96 dpi):
     // the last width evidence for the native renderer when
@@ -471,10 +508,9 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
         try {
             bytes = await elementToPngBytes(element, 1);
         } catch (_secondCaptureError) {
-            return POS_FAIL_CAPTURE;
+            return { reason: POS_FAIL_CAPTURE, code: "POS_CAPTURE_FAILED", key: idempotencyKey, safeRef, userId, device: target.printer.name, mode: target.rule.mode };
         }
     }
-    const idempotencyKey = posReceiptKey(safeRef, userId);
     const rule = target.rule;
     // The mode comes from the TARGET printer's detection (thermal
     // -> escpos, label languages, office/virtual -> gdi). The
@@ -502,8 +538,15 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
     } catch (err) {
         // The enqueue itself failed: rotate the idempotency record so
         // an immediate deliberate reprint is a fresh attempt instead
-        // of deduping into the dead job inside the 15 s window.
+        // of deduping into the dead job inside the 15 s window. The
+        // key rides on the error so the wrapper can still log the
+        // declined attempt under it.
         clearPosReceiptKey(safeRef, userId);
+        try {
+            err.npKey = idempotencyKey;
+            err.npDevice = target.printer.name;
+            err.npMode = effectiveMode;
+        } catch (_ignored) { /* non-object error: nothing to attach */ }
         throw err;
     }
     rpc(
@@ -560,9 +603,13 @@ function wrapPosStorePrintReceipt(posStore) {
             if (!failure) {
                 return true;
             }
-            notifyPosNativeFailure(posStore, failure);
+            postPosDeclined(failure.key, failure.code, failure.safeRef, failure.userId, failure.device, failure.mode);
+            notifyPosNativeFailure(posStore, failure.reason);
         } catch (error) {
             console.warn("Native Print: POS receipt capture failed.", error);
+            if (error && error.npKey) {
+                postPosDeclined(error.npKey, "POS_ENQUEUE_FAILED", null, null, error.npDevice, error.npMode);
+            }
             notifyPosNativeFailure(
                 posStore,
                 _t("Reason: the print job could not be queued.") +
@@ -606,9 +653,13 @@ patch(ReceiptScreen.prototype, {
             if (!failure) {
                 return true;
             }
-            notifyPosNativeFailure(this, failure);
+            postPosDeclined(failure.key, failure.code, failure.safeRef, failure.userId, failure.device, failure.mode);
+            notifyPosNativeFailure(this, failure.reason);
         } catch (error) {
             console.warn("Native Print: POS receipt capture failed.", error);
+            if (error && error.npKey) {
+                postPosDeclined(error.npKey, "POS_ENQUEUE_FAILED", null, null, error.npDevice, error.npMode);
+            }
             notifyPosNativeFailure(
                 this,
                 _t("Reason: the print job could not be queued.") +

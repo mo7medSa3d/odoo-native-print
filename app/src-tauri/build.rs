@@ -24,6 +24,7 @@ fn main() {
             "tab_open",
             "tab_list",
             "tab_switch",
+            "tab_move",
             "tab_close",
             "open_control_center",
             "open_settings",

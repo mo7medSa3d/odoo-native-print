@@ -801,6 +801,7 @@ pub fn run() {
             commands::tab_open,
             commands::tab_list,
             commands::tab_switch,
+            commands::tab_move,
             commands::tab_close,
             commands::open_control_center,
             commands::open_settings,

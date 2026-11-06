@@ -102,6 +102,19 @@ impl TabsState {
         self.urls.insert(label.to_string(), url.to_string());
     }
 
+    /// Move a tab to a new position in the strip (drag-and-drop
+    /// reorder from the tab bar). The index is clamped to the
+    /// strip; moving a tab never changes which tab is active.
+    pub fn move_to(&mut self, label: &str, to_index: usize) -> bool {
+        let Some(from) = self.order.iter().position(|l| l == label) else {
+            return false;
+        };
+        let item = self.order.remove(from);
+        let at = to_index.min(self.order.len());
+        self.order.insert(at, item);
+        true
+    }
+
     pub fn url_of(&self, label: &str) -> Option<&str> {
         self.urls.get(label).map(|s| s.as_str())
     }
@@ -1310,6 +1323,28 @@ pub fn tab_switch(
     }
     crate::activate_tab(&app, &label);
     Ok(())
+}
+
+/// Reorder a tab (tab bar only, drag-and-drop): the tab bar owns
+/// the strip's arrangement exactly like a browser's — the user
+/// drags a tab to its new position and the strip follows.
+#[tauri::command]
+pub fn tab_move(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    label: String,
+    to_index: usize,
+) -> Result<(), String> {
+    check_local_only(&webview)?;
+    let mut tabs = state
+        .tabs
+        .write()
+        .map_err(|_| "tabs_lock_poisoned".to_string())?;
+    if tabs.move_to(&label, to_index) {
+        Ok(())
+    } else {
+        Err("unknown_tab".to_string())
+    }
 }
 
 /// Close a tab (tab bar only). The window never drops to zero

@@ -12,5 +12,5 @@
     "test": "node --test tests/control-center.test.mjs",
     "check-ui": "node --test tests/control-center.test.mjs"
   },
-  "version": "1.5.5"
+  "version": "1.5.6"
 }

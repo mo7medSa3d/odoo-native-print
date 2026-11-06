@@ -42,6 +42,9 @@
   }
   [dir="rtl"] .tab { padding: 0 10px 0 6px; }
   .tab:hover { background: #e2e9f4; color: #17202e; }
+  .tab { cursor: grab; }
+  .tab.dragging { opacity: .45; cursor: grabbing; }
+  .tab.drop-hint { background: #d7e5fd; color: #17202e; border-color: #0953de; }
   .tab.active { background: #ffffff; color: #17202e; border-color: #cfd9e6;
     box-shadow: inset 0 -2px 0 #0953de; font-weight: 600; }
   .tab .t-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
@@ -76,6 +79,11 @@
 </style>
 </head>
 <body>
+  <div class="tabs" id="tabs"></div>
+
+  <!-- Navigation lives with the app actions, not at the start of
+       the strip (owner, 2026-11-06): back / forward / reload sit
+       immediately beside Control Center and Settings. -->
   <div class="nav-group">
     <button class="tb-btn" id="btnBack" title="Back / رجوع">
       <svg class="flip-rtl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
@@ -87,8 +95,6 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>
     </button>
   </div>
-
-  <div class="tabs" id="tabs"></div>
 
   <button class="tb-action brand" id="btnCc" title="Control Center / مركز التحكم">
     <img src="app-icon.png" alt=""/>
@@ -123,18 +129,77 @@
     }
   }
   var lastSignature = "";
+  var currentTabs = [];
+  var dragLabel = null;
+  // Where would the dragged tab land if dropped on the tab at
+  // array index i, with the pointer at clientX over that tab's
+  // rect? Array order runs right-to-left in RTL, so the "after"
+  // half of a tab is its left half there.
+  function dropIndexFor(i, clientX, rect) {
+    var width = rect.width || 1;
+    var frac = (clientX - rect.left) / width;
+    var after = document.documentElement.dir === "rtl" ? frac < 0.5 : frac >= 0.5;
+    var idx = i + (after ? 1 : 0);
+    var from = -1;
+    currentTabs.forEach(function (t, j) { if (t.label === dragLabel) from = j; });
+    if (from > -1 && from < idx) idx -= 1;
+    return idx;
+  }
+  function clearDropHints(strip) {
+    strip.querySelectorAll(".tab.drop-hint").forEach(function (n) {
+      n.classList.remove("drop-hint");
+    });
+  }
   function render(tabs) {
     var sig = lang + "|" + tabs.map(function (t) {
       return t.label + ":" + t.title + ":" + (t.active ? 1 : 0) + ":" + (t.is_pos ? 1 : 0);
     }).join("|");
     if (sig === lastSignature) return;
     lastSignature = sig;
+    currentTabs = tabs;
     var strip = document.getElementById("tabs");
     strip.innerHTML = "";
-    tabs.forEach(function (t) {
+    tabs.forEach(function (t, tabIndex) {
       var el = document.createElement("div");
       el.className = "tab" + (t.active ? " active" : "");
       el.title = t.url || "";
+      el.draggable = true;
+      el.setAttribute("data-label", t.label);
+      // Browser-style drag-and-drop reordering (owner,
+      // 2026-11-06): drag a tab along the strip and drop it where
+      // it belongs; Rust keeps the order via tab_move.
+      el.addEventListener("dragstart", function (ev) {
+        dragLabel = t.label;
+        el.classList.add("dragging");
+        if (ev.dataTransfer) {
+          try { ev.dataTransfer.setData("text/plain", t.label); } catch (e) {}
+          ev.dataTransfer.effectAllowed = "move";
+        }
+      });
+      el.addEventListener("dragend", function () {
+        dragLabel = null;
+        el.classList.remove("dragging");
+        clearDropHints(strip);
+      });
+      el.addEventListener("dragover", function (ev) {
+        if (!dragLabel || dragLabel === t.label) return;
+        ev.preventDefault();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+        clearDropHints(strip);
+        el.classList.add("drop-hint");
+      });
+      el.addEventListener("dragleave", function () {
+        el.classList.remove("drop-hint");
+      });
+      el.addEventListener("drop", function (ev) {
+        if (!dragLabel) return;
+        ev.preventDefault();
+        var idx = dropIndexFor(tabIndex, ev.clientX || 0, el.getBoundingClientRect());
+        var label = dragLabel;
+        dragLabel = null;
+        clearDropHints(strip);
+        invoke("tab_move", { label: label, toIndex: idx }).then(refresh).catch(function () {});
+      });
       var title = document.createElement("span");
       title.className = "t-title";
       title.textContent = t.title;
@@ -183,6 +248,24 @@
     applyLang();
     invoke("tab_list", {}).then(render).catch(function () {});
   }
+  var stripEl = document.getElementById("tabs");
+  stripEl.addEventListener("dragover", function (ev) {
+    // Dropping on the strip's empty tail moves the tab to the
+    // end; drops on a tab itself are handled by that tab.
+    if (dragLabel && ev.target === stripEl) {
+      ev.preventDefault();
+      if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+    }
+  });
+  stripEl.addEventListener("drop", function (ev) {
+    if (!dragLabel || ev.target !== stripEl) return;
+    ev.preventDefault();
+    var label = dragLabel;
+    dragLabel = null;
+    clearDropHints(stripEl);
+    invoke("tab_move", { label: label, toIndex: currentTabs.length })
+      .then(refresh).catch(function () {});
+  });
   document.getElementById("btnBack").addEventListener("click", function () {
     invoke("nav_back", {}).catch(function () {});
   });

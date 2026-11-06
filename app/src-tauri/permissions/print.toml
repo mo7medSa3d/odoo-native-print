@@ -58,6 +58,7 @@ commands.allow = [
     "nav_reload",
     "tab_list",
     "tab_switch",
+    "tab_move",
     "tab_close",
     "app_identity",
     "open_control_center",
