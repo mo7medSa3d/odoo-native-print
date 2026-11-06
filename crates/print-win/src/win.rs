@@ -699,7 +699,9 @@ fn print_canvas_gdi_with_caps(
         printer,
         media_page_size,
         Some((&matched.form, matched.kind)),
-        false,
+        // Canvas (receipt/image) jobs carry no duplex choice:
+        // None leaves the driver default untouched.
+        None,
         false,
         tray,
     )
