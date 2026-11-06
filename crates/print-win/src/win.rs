@@ -556,6 +556,92 @@ pub fn print_canvas_gdi_configured(
     if canvas.width == 0 || canvas.height == 0 {
         return Err(GdiPrintError::setup("empty image canvas".to_string()));
     }
+    match print_canvas_gdi_with_caps(printer, title, canvas, copies, tray, roll_width_mm) {
+        Ok(pages) => Ok(pages),
+        Err(error) if !error.ambiguous => {
+            // Setup-stage failure only: capabilities unreadable, no
+            // forms reported, the chosen form not applicable, the
+            // DC refused — the signature of quirky virtual writers
+            // (OneNote / PDF printers) whose drivers reject forced
+            // forms but print perfectly well at their own defaults.
+            // Nothing reached paper, so printing the same image on
+            // the driver's default media cannot duplicate it
+            // (ADR-0004-safe): the image is scaled to the printable
+            // area and paginated, exactly like a browser printing a
+            // long receipt (owner field report, 2026-11-06: a POS
+            // receipt to a virtual printer died in setup).
+            eprintln!(
+                "Yaseir Print: caps-based canvas print to {printer:?} failed in setup ({}); retrying on the driver's default media",
+                error.message
+            );
+            print_canvas_gdi_default_media(printer, title, canvas, copies)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Print a canvas on the driver's OWN default media: no forced
+/// form, no custom devmode — CreateDC with a null DEVMODE, then
+/// the shared sheet pagination over the DC's printable area. The
+/// last-resort path for drivers that cannot report or apply forms.
+fn print_canvas_gdi_default_media(
+    printer: &str,
+    title: &str,
+    canvas: &print_render::bitmap::Canvas,
+    copies: u16,
+) -> Result<usize, GdiPrintError> {
+    let name = wide(printer);
+    let dc = unsafe {
+        CreateDCW(
+            std::ptr::null(),
+            name.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    };
+    if dc.is_null() {
+        return Err(GdiPrintError::setup(format!(
+            "CreateDC for {printer:?}: {}",
+            last_error()
+        )));
+    }
+    let doc_name = wide(title);
+    let info = DocInfoW {
+        size: std::mem::size_of::<DocInfoW>() as i32,
+        doc_name: doc_name.as_ptr(),
+        output: std::ptr::null(),
+        datatype: std::ptr::null(),
+        fw_type: 0,
+    };
+    if unsafe { StartDocW(dc, &info) } <= 0 {
+        let err = last_error();
+        unsafe { DeleteDC(dc) };
+        return Err(GdiPrintError::setup(format!("StartDoc: {err}")));
+    }
+    match print_canvas_pages(dc, canvas, copies.max(1)) {
+        Ok(pages) => {
+            unsafe { EndDoc(dc) };
+            unsafe { DeleteDC(dc) };
+            Ok(pages)
+        }
+        Err(error) => {
+            // The document started; pages may already be written —
+            // ambiguous per ADR-0004, like the caps path.
+            unsafe { AbortDoc(dc) };
+            unsafe { DeleteDC(dc) };
+            Err(GdiPrintError::mid_print(error))
+        }
+    }
+}
+
+fn print_canvas_gdi_with_caps(
+    printer: &str,
+    title: &str,
+    canvas: &print_render::bitmap::Canvas,
+    copies: u16,
+    tray: Option<&str>,
+    roll_width_mm: Option<f64>,
+) -> Result<usize, GdiPrintError> {
     let page = print_render::RenderedPage {
         width_px: canvas.width,
         height_px: canvas.height,

@@ -2509,7 +2509,13 @@ impl PrintBackend for NativePrintBackend {
         let mut target_kind: Option<PrinterKind> = None;
         let target_name = if let Some(matched) = resolve_printer(&job.printer, &discovered) {
             target_kind = Some(matched.kind);
-            if needs_intervention(matched.status) {
+            // Virtual writers have no paper, door or toner: their
+            // spooler status words carry writer-app state bits that
+            // decode as blocking conditions and would dead-end jobs
+            // that print perfectly well (POS receipt to OneNote,
+            // owner field report 2026-11-06). For a virtual target
+            // the GDI/spooler call itself is the real check.
+            if matched.kind != PrinterKind::Virtual && needs_intervention(matched.status) {
                 return Err(BackendError::retryable(
                     Self::status_code(matched.status),
                     &format!("printer {:?} status is {:?}", matched.name, matched.status),
@@ -2580,16 +2586,20 @@ impl PrintBackend for NativePrintBackend {
         // the discovery-time status checked above as the gate
         // rather than failing the job on a transient spooler
         // read error; a failed read is never reported as Ready.
-        if let Ok(health) = print_win::printer_health(&target_name) {
-            if health.blocks_printing() {
-                let status = health.primary_status();
-                return Err(BackendError::retryable(
-                    Self::status_code(status),
-                    &format!(
-                        "printer {target_name:?} health blocks printing: {:?}",
-                        health.conditions
-                    ),
-                ));
+        // Skipped for virtual writers (no physical conditions —
+        // see the status gate above).
+        if target_kind != Some(PrinterKind::Virtual) {
+            if let Ok(health) = print_win::printer_health(&target_name) {
+                if health.blocks_printing() {
+                    let status = health.primary_status();
+                    return Err(BackendError::retryable(
+                        Self::status_code(status),
+                        &format!(
+                            "printer {target_name:?} health blocks printing: {:?}",
+                            health.conditions
+                        ),
+                    ));
+                }
             }
         }
 
@@ -2688,7 +2698,7 @@ impl PrintBackend for NativePrintBackend {
                     &canvas,
                     opts.copies.max(1),
                     opts.tray.as_deref(),
-                    opts.media_roll_width_mm,
+                    opts.media_roll_width_mm.or(opts.source_width_mm),
                 )
                 .map_err(|e| {
                     if e.ambiguous {
