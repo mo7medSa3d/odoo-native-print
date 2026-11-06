@@ -43,18 +43,26 @@ function notificationEnv(contextObj) {
     );
 }
 
-function notifyPosNativeFailure(contextObj) {
+function notifyPosNativeFailure(contextObj, reason) {
     // One clear message when native receipt printing gives up
     // inside the desktop app. Nothing was printed: the receipt
     // stays on screen and the cashier can fix the cause and click
     // Print again. Identical repeats are deduped inside notifyUser,
     // so the two wrapper layers below can never stack this toast.
-    notifyUser(
-        notificationEnv(contextObj),
-        _t("Native Print could not print this receipt, and nothing was printed. Check the printer and try again."),
-        "warning",
-    );
+    // The reason rides along (owner field loop, 2026-11-06): the
+    // generic toast alone made every failure class — no printer,
+    // capture failure, enqueue rejection, job failure — look
+    // identical, including in screenshots sent for support.
+    let message = _t("Native Print could not print this receipt, and nothing was printed. Check the printer and try again.");
+    if (reason) {
+        message += " " + reason;
+    }
+    notifyUser(notificationEnv(contextObj), message, "warning");
 }
+
+const POS_FAIL_NO_PRINTER = _t("Reason: no printer is available on this computer.");
+const POS_FAIL_NO_RECEIPT = _t("Reason: the receipt is not on screen.");
+const POS_FAIL_CAPTURE = _t("Reason: the receipt could not be captured as an image.");
 
 function findReceiptElement(orderRef) {
     if (orderRef) {
@@ -114,6 +122,16 @@ async function fetchAsDataUrl(url) {
     }
 }
 
+// A 1x1 transparent PNG: the stand-in for an image that could not
+// be inlined. An external URL left in the serialized receipt is
+// fatal, not cosmetic — the receipt is rasterized as an SVG image,
+// and SVG-as-image cannot load external resources, so one
+// unfetchable logo/QR makes the whole capture throw and the
+// receipt never reaches a printer (owner field report,
+// 2026-11-06). Dropping the one image keeps the receipt printable.
+const TRANSPARENT_PIXEL =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
 async function inlineMedia(source, clone) {
     const sourceImgs = source.querySelectorAll("img");
     const cloneImgs = clone.querySelectorAll("img");
@@ -121,9 +139,7 @@ async function inlineMedia(source, clone) {
         const src = sourceImgs[i].currentSrc || sourceImgs[i].src;
         if (src && !src.startsWith("data:")) {
             const dataUrl = await fetchAsDataUrl(src);
-            if (dataUrl) {
-                cloneImgs[i].setAttribute("src", dataUrl);
-            }
+            cloneImgs[i].setAttribute("src", dataUrl || TRANSPARENT_PIXEL);
         }
     }
     const sourceCanvases = source.querySelectorAll("canvas");
@@ -152,6 +168,10 @@ async function inlineMedia(source, clone) {
             const dataUrl = await fetchAsDataUrl(match[1]);
             if (dataUrl) {
                 cloneAll[i].style.backgroundImage = `url("${dataUrl}")`;
+            } else {
+                // Same rule as <img>: an external background URL
+                // left in the SVG can fail the whole capture.
+                cloneAll[i].style.backgroundImage = "none";
             }
         }
     }
@@ -381,15 +401,26 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
 }
 
 async function printPosReceiptNatively(contextObj, explicitOrder = null) {
+    // Returns null on success, or the failure reason to show the
+    // cashier. Enqueue rejections throw (the wrapper reports them).
     const bridge = nativeBridge();
     if (!bridge || typeof bridge.printImage !== "function") {
-        return false;
+        return POS_FAIL_NO_PRINTER;
     }
-    const target = await resolveBridgeTarget(
+    let target = await resolveBridgeTarget(
         bridge, { preferClasses: ["thermal", "label"] },
     ).catch(() => null);
     if (!target) {
-        return false; // No printer on this PC right now.
+        // One retry: printer discovery rides the Windows spooler,
+        // whose first answer after app start / spooler restart can
+        // be empty or errored while printers exist.
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        target = await resolveBridgeTarget(
+            bridge, { preferClasses: ["thermal", "label"] },
+        ).catch(() => null);
+    }
+    if (!target) {
+        return POS_FAIL_NO_PRINTER; // No printer on this PC right now.
     }
     // Virtual printers are first-class targets (owner,
     // 2026-11-04): the receipt renders through GDI exactly like an
@@ -420,7 +451,7 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
     const userId = String(cashierRaw).replace(/[^0-9]/g, "") || "0";
     const element = findReceiptElement(order ? rawRef : null);
     if (!element) {
-        return false;
+        return POS_FAIL_NO_RECEIPT;
     }
     // The receipt's own physical width (CSS px render at 96 dpi):
     // the last width evidence for the native renderer when
@@ -430,7 +461,19 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
     const sourceWidthMm = element.offsetWidth
         ? Math.round((element.offsetWidth * 25.4) / 96 * 10) / 10
         : undefined;
-    const bytes = await elementToPngBytes(element, 2);
+    let bytes;
+    try {
+        bytes = await elementToPngBytes(element, 2);
+    } catch (_firstCaptureError) {
+        // A capture can fail on canvas size alone (a very long
+        // receipt at scale 2); retry once at scale 1 before
+        // reporting a capture failure.
+        try {
+            bytes = await elementToPngBytes(element, 1);
+        } catch (_secondCaptureError) {
+            return POS_FAIL_CAPTURE;
+        }
+    }
     const idempotencyKey = posReceiptKey(safeRef, userId);
     const rule = target.rule;
     // The mode comes from the TARGET printer's detection (thermal
@@ -488,7 +531,7 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
         // (clears it again when the job fails). (Audit L7.)
         order._printed = true;
     }
-    return true;
+    return null;
 }
 
 function wrapPosStorePrintReceipt(posStore) {
@@ -513,13 +556,18 @@ function wrapPosStorePrintReceipt(posStore) {
         // way; the on-screen receipt is rasterized either way, so
         // the basic/full distinction does not change the output.
         try {
-            if (await printPosReceiptNatively(posStore, opts && opts.order)) {
+            const failure = await printPosReceiptNatively(posStore, opts && opts.order);
+            if (!failure) {
                 return true;
             }
-            notifyPosNativeFailure(posStore);
+            notifyPosNativeFailure(posStore, failure);
         } catch (error) {
             console.warn("Native Print: POS receipt capture failed.", error);
-            notifyPosNativeFailure(posStore);
+            notifyPosNativeFailure(
+                posStore,
+                _t("Reason: the print job could not be queued.") +
+                    " " + String((error && error.message) || error || ""),
+            );
         }
         return true;
     };
@@ -554,13 +602,18 @@ patch(ReceiptScreen.prototype, {
         // moot now that the original is never called after an
         // attempt.)
         try {
-            if (await printPosReceiptNatively(this, opts && opts.order)) {
+            const failure = await printPosReceiptNatively(this, opts && opts.order);
+            if (!failure) {
                 return true;
             }
-            notifyPosNativeFailure(this);
+            notifyPosNativeFailure(this, failure);
         } catch (error) {
             console.warn("Native Print: POS receipt capture failed.", error);
-            notifyPosNativeFailure(this);
+            notifyPosNativeFailure(
+                this,
+                _t("Reason: the print job could not be queued.") +
+                    " " + String((error && error.message) || error || ""),
+            );
         }
         return true;
     },

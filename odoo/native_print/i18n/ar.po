@@ -759,3 +759,23 @@ msgstr "ليس لديك صلاحية الوصول إلى التقرير المس
 #: model_terms:ir.ui.view,arch_db:native_print.view_job_kanban
 msgid "page(s)"
 msgstr "صفحة"
+
+#. module: native_print
+#: code:addons/native_print/static/src/js/pos_native_print.js:0
+msgid "Reason: no printer is available on this computer."
+msgstr "السبب: لا توجد طابعة متاحة على هذا الجهاز."
+
+#. module: native_print
+#: code:addons/native_print/static/src/js/pos_native_print.js:0
+msgid "Reason: the receipt is not on screen."
+msgstr "السبب: الإيصال غير ظاهر على الشاشة."
+
+#. module: native_print
+#: code:addons/native_print/static/src/js/pos_native_print.js:0
+msgid "Reason: the receipt could not be captured as an image."
+msgstr "السبب: تعذر التقاط صورة الإيصال."
+
+#. module: native_print
+#: code:addons/native_print/static/src/js/pos_native_print.js:0
+msgid "Reason: the print job could not be queued."
+msgstr "السبب: تعذر وضع مهمة الطباعة في الانتظار."
