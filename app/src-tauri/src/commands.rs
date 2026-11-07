@@ -41,6 +41,18 @@ fn lock_queue(queue: &Mutex<Queue>) -> std::sync::MutexGuard<'_, Queue> {
     }
 }
 
+/// TCP 9100 transport budgets: a connect that takes longer is
+/// a printer that is off or unreachable (its failure proves zero
+/// bytes were sent, so the job may retry); the write budget
+/// covers a full document stream to a slow printer (a failure
+/// inside it is ambiguous, ADR-0004).
+const TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const TCP_WRITE_TIMEOUT: Duration = Duration::from_secs(20);
+/// DLE EOT live-status probe budget per frame query: long
+/// enough for a healthy printer to answer, short enough to
+/// never noticeably delay the job it guards.
+const DLE_PROBE_TIMEOUT: Duration = Duration::from_millis(700);
+
 pub struct AppState {
     pub queue: Arc<Mutex<Queue>>,
     pub configured_origin: RwLock<Option<String>>,
@@ -2379,11 +2391,9 @@ impl PrintBackend for NativePrintBackend {
             // answer the status protocol is NOT blocked: the probe
             // may veto only on positive evidence, never on silence.
             if opts.mode == "escpos" {
-                if let Ok(Some((code, message))) = print_raw::tcp9100::query_blocking_condition(
-                    &host,
-                    port,
-                    Duration::from_millis(700),
-                ) {
+                if let Ok(Some((code, message))) =
+                    print_raw::tcp9100::query_blocking_condition(&host, port, DLE_PROBE_TIMEOUT)
+                {
                     return Err(BackendError::retryable(code, message));
                 }
             }
@@ -2442,8 +2452,8 @@ impl PrintBackend for NativePrintBackend {
                 &host,
                 port,
                 &raw_bytes,
-                Duration::from_secs(5),
-                Duration::from_secs(20),
+                TCP_CONNECT_TIMEOUT,
+                TCP_WRITE_TIMEOUT,
             )
             .map_err(|e| match e {
                 print_raw::tcp9100::SendPhaseError::Connect(io) => {

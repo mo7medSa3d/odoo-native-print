@@ -3,7 +3,7 @@ import { ReceiptScreen } from "@point_of_sale/app/screens/receipt_screen/receipt
 import { patch } from "@web/core/utils/patch";
 import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
-import { notifyUser, resolveBridgeTarget } from "./native_print_client";
+import { JOB_TERMINAL_STATES as TERMINAL_STATES, notifyUser, resolveBridgeTarget } from "./native_print_client";
 
 /*
  * Native Print for POS receipts (Odoo 17, 18, and 19 compatible).
@@ -26,7 +26,8 @@ import { notifyUser, resolveBridgeTarget } from "./native_print_client";
  */
 
 const POS_RECEIPT_SOURCE = "point_of_sale.receipt";
-const TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);
+// TERMINAL_STATES is imported from native_print_client (the
+// shared job-state contract).
 
 function nativeBridge() {
     return window.__NATIVE_PRINT__ || null;

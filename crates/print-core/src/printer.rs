@@ -449,12 +449,6 @@ pub fn detect_protocol(
     if THERMAL_TOKENS.iter().any(|t| signature.contains(t)) {
         return ("escpos", "thermal");
     }
-    // "pos-58"/"pos-80" from the JS table are substring tokens for
-    // generic receipt printers; they stay substring matches there,
-    // so they stay substring matches here.
-    if signature.contains("pos-58") || signature.contains("pos-80") {
-        return ("escpos", "thermal");
-    }
     if kind == PrinterKind::Network && (signature.contains("ipp") || signature.contains("airprint"))
     {
         return ("gdi", "office");

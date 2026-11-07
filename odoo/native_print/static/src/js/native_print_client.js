@@ -9,6 +9,20 @@ import { _t } from "@web/core/l10n/translation";
 
 const SELECTION_KEY = "native_print.selected_printer";
 
+/*
+ * The terminal job states — one half of the job-state contract
+ * (the states themselves are identical in the page, the Rust
+ * queue and the server log). Single-sourced here (2026-11-07):
+ * the report handler and the POS patch each kept a private
+ * copy, and a drift between them would make reports and
+ * receipts disagree about when a job is finished. `failed` and
+ * `dead_letter` belong to the set even though the desktop
+ * worker may re-queue such a job: each watcher decides for
+ * itself whether to stop there or keep observing for the
+ * re-entry, but the state vocabulary is shared.
+ */
+export const JOB_TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);
+
 export function getSelectedPrinter() {
     try {
         return window.localStorage.getItem(SELECTION_KEY) || null;

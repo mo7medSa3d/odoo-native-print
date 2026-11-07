@@ -2,7 +2,7 @@
 import { registry } from "@web/core/registry";
 import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
-import { notifyUser, resolveBridgeTarget } from "./native_print_client";
+import { JOB_TERMINAL_STATES as TERMINAL_STATES, notifyUser, resolveBridgeTarget } from "./native_print_client";
 
 /*
  * Native Print report handler (API contract v1, docs/api-contract.md).
@@ -21,8 +21,8 @@ import { notifyUser, resolveBridgeTarget } from "./native_print_client";
  *   Odoo's standard download happens.
  */
 
-const TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);
-// Only these end the watch. `failed` and `dead_letter` are
+// TERMINAL_STATES is imported from native_print_client (the
+// shared job-state contract). `failed` and `dead_letter` are
 // retryable outcomes (the desktop worker re-queues a failed job
 // and the operator may retry a dead-letter job): the watcher
 // keeps polling after them so the retry's outcome, not the

@@ -124,4 +124,49 @@ eq(summary[0], "A4 — 210×297mm", "nested size summary");
 eq(summary[1], "Roll 80 — 80×297mm (Roll)", "roll suffix");
 eq(summary[2], "Letter — 216×279mm", "flat size tolerated");
 eq(m.formatFormsSummary(undefined, "Roll").length, 0, "no forms -> empty");
+
+// Protocol-detection parity (2026-11-07): the thermal token
+// table and the label rules exist in TWO languages — this page
+// fallback and print-core's detect_protocol (the primary, which
+// ships on every PrinterInfo). They are one business rule; a
+// hand-sync comment is not enforcement, so this suite compares
+// the two mechanically and fails on any drift.
+const rustSrc = readFileSync(
+    new URL("../../../crates/print-core/src/printer.rs", import.meta.url),
+    "utf8",
+);
+const stringsIn = (block) => [...block.matchAll(/"([^"]*)"/g)].map((x) => x[1]);
+const rustTokens = stringsIn(rustSrc.match(/const THERMAL_TOKENS[^=]*= \[([\s\S]*?)\];/)[1]).sort();
+const jsTokens = stringsIn(src.match(/const thermalTokens = \[([\s\S]*?)\];/)[1]).sort();
+eq(rustTokens.length, 45, "rust thermal token count");
+eq(
+    JSON.stringify(jsTokens),
+    JSON.stringify(rustTokens),
+    "JS and Rust thermal token tables must be identical: " +
+        "js-only=" + jsTokens.filter((t) => !rustTokens.includes(t)) +
+        " rust-only=" + rustTokens.filter((t) => !jsTokens.includes(t)),
+);
+for (const tok of ['"zdesigner"', '"zebra"', '"zpl"', '"tspl"', '"tsc"', '"epl"']) {
+    if (!rustSrc.includes(tok)) throw new Error("rust detect_protocol lost label token " + tok);
+    if (!src.includes(tok)) throw new Error("JS detectPrinterType lost label token " + tok);
+}
+// The terminal-state contract is single-sourced in the client:
+// neither consumer may keep a private copy.
+eq(
+    JSON.stringify([...m.JOB_TERMINAL_STATES].sort()),
+    JSON.stringify(["canceled", "dead_letter", "done", "failed"]),
+    "terminal states contract",
+);
+for (const consumer of ["native_print_handler.js", "pos_native_print.js"]) {
+    const consumerSrc = readFileSync(
+        new URL("../static/src/js/" + consumer, import.meta.url),
+        "utf8",
+    );
+    if (consumerSrc.includes("const TERMINAL_STATES = new Set")) {
+        throw new Error(consumer + " re-declares a private TERMINAL_STATES copy");
+    }
+    if (!consumerSrc.includes("JOB_TERMINAL_STATES as TERMINAL_STATES")) {
+        throw new Error(consumer + " must import the shared JOB_TERMINAL_STATES");
+    }
+}
 console.log("JS LIVE TARGET TESTS: ALL PASS");
