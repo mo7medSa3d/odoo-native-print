@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "allow-print-pdf"
-description = "Allow the configured Odoo origin to submit print jobs and test prints."
+description = "Allow the configured Odoo origin to submit print jobs."
 commands.allow = [
     "print_pdf",
     "print_text",
@@ -56,6 +56,7 @@ commands.allow = [
     "nav_back",
     "nav_forward",
     "nav_reload",
+    "tab_open",
     "tab_list",
     "tab_switch",
     "tab_move",

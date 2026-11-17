@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 /// One printer model's known quirks (spec section 5: clipping offsets,
 /// dithering, rotation). Keyed in the database by driver/model.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PrinterQuirks {
     /// Content shift needed to compensate for this model's clipping, mm.
     pub offset_x_mm: f64,
@@ -15,15 +15,15 @@ pub struct PrinterQuirks {
     pub notes: String,
 }
 
-impl Default for PrinterQuirks {
-    fn default() -> Self {
-        Self {
-            offset_x_mm: 0.0,
-            offset_y_mm: 0.0,
-            rotate_180: false,
-            force_threshold: false,
-            notes: String::new(),
+impl PrinterQuirks {
+    fn sanitized(mut self) -> Self {
+        if !self.offset_x_mm.is_finite() {
+            self.offset_x_mm = 0.0;
         }
+        if !self.offset_y_mm.is_finite() {
+            self.offset_y_mm = 0.0;
+        }
+        self
     }
 }
 
@@ -49,17 +49,24 @@ impl ProfileDb {
         // Deterministic: the LONGEST (most specific) matching key
         // wins. HashMap iteration order must never decide which quirk
         // set a printer gets (e.g. "EPSON" vs "EPSON TM-T88").
-        let mut keys: Vec<&String> = self.by_driver.keys().collect();
+        let mut keys: Vec<&String> = self
+            .by_driver
+            .keys()
+            .filter(|k| !k.trim().is_empty())
+            .collect();
         keys.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
         keys.into_iter()
             .find(|k| d.contains(&k.to_ascii_lowercase()))
             .and_then(|k| self.by_driver.get(k))
             .cloned()
+            .map(PrinterQuirks::sanitized)
             .unwrap_or_default()
     }
     pub fn merge_overrides(&mut self, overrides: ProfileDb) {
         for (k, v) in overrides.by_driver {
-            self.by_driver.insert(k, v);
+            if !k.trim().is_empty() {
+                self.by_driver.insert(k, v.sanitized());
+            }
         }
         self.version = self.version.max(overrides.version);
     }
@@ -108,5 +115,34 @@ mod tests {
         // Round-trip through JSON (the on-disk format).
         let db2 = ProfileDb::from_json(&db.to_json()).unwrap();
         assert_eq!(db2.lookup("EPSON TM-T88").offset_x_mm, -2.0);
+    }
+
+    #[test]
+    fn non_finite_offsets_sanitize_to_zero() {
+        let mut db = ProfileDb::new();
+        db.by_driver.insert(
+            "BadDriver".into(),
+            PrinterQuirks {
+                offset_x_mm: f64::NAN,
+                offset_y_mm: f64::INFINITY,
+                ..Default::default()
+            },
+        );
+        let q = db.lookup("BadDriver v1");
+        assert_eq!(q.offset_x_mm, 0.0);
+        assert_eq!(q.offset_y_mm, 0.0);
+    }
+
+    #[test]
+    fn empty_driver_key_never_matches_all_printers() {
+        let mut db = ProfileDb::new();
+        db.by_driver.insert(
+            "".into(),
+            PrinterQuirks {
+                offset_x_mm: 5.0,
+                ..Default::default()
+            },
+        );
+        assert_eq!(db.lookup("Any Printer").offset_x_mm, 0.0);
     }
 }

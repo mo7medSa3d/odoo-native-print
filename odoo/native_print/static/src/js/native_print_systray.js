@@ -4,7 +4,7 @@ import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
-import { formatFormsSummary, getSelectedPrinter, setSelectedPrinter } from "./native_print_client";
+import { formatFormsSummary, getSelectedPosPrinter, getSelectedPrinter, setSelectedPosPrinter, setSelectedPrinter } from "./native_print_client";
 
 // One-line source description for a discovered printer (owner
 // brief, 2026-11-05): where it is attached and what it is, from the
@@ -78,6 +78,7 @@ export class NativePrintSystray extends Component {
             defaultPrinter: null,
             discoveredPrinters: [],
             selectedPrinter: null,
+            selectedPosPrinter: null,
             syncingPrinters: false,
             activeJobs: 0,
             doneJobs: 0,
@@ -94,7 +95,9 @@ export class NativePrintSystray extends Component {
             defaultPrinter: _t("Default Printer"),
             browserNote: _t("Standard browser session: reports download normally unless opened inside the Yaseir Print app."),
             inUse: _t("In use"),
-            usePrinter: _t("Use this printer"),
+            usePrinter: _t("Use for Reports"),
+            inUsePos: _t("POS"),
+            usePosPrinter: _t("Use for POS"),
             discovering: _t("Discovering printers…"),
             refreshPrinters: _t("Refresh desktop printers"),
             activeJobs: _t("Active jobs"),
@@ -156,6 +159,7 @@ export class NativePrintSystray extends Component {
             this.state.discoveredPrinters = printers.map(
                 (p) => ({ ...p, meta: printerMeta(p) }));
             this.state.selectedPrinter = getSelectedPrinter();
+            this.state.selectedPosPrinter = getSelectedPosPrinter();
             this.maybeSyncDeviceCaps(printers);
             if (showNotice) this.notification.add(
                 _t("%s printer(s) found on this PC.", printers.length),
@@ -270,6 +274,15 @@ export class NativePrintSystray extends Component {
         this.notification.add(
             _t("%s will be used for printing from this PC.", printer.name),
             { title: _t("Printer Selected"), type: "success" },
+        );
+    }
+
+    selectPosPrinter(printer) {
+        setSelectedPosPrinter(printer.name);
+        this.state.selectedPosPrinter = printer.name;
+        this.notification.add(
+            _t("%s will be used for POS receipts on this PC.", printer.name),
+            { title: _t("POS Printer Selected"), type: "success" },
         );
     }
 

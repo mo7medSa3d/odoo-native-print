@@ -7,6 +7,7 @@ pub mod health;
 pub mod page;
 pub mod paper;
 pub mod printer;
+pub mod profiles;
 pub mod queue;
 pub mod routing;
 pub mod security;
@@ -15,8 +16,12 @@ pub mod worker;
 
 pub use health::{HealthCondition, HealthSource, PrinterHealth};
 pub use page::{PageSize, Rotation};
-pub use paper::{match_paper, Form, MatchKind, PaperError, ScalePolicy};
+pub use paper::{
+    match_paper, match_paper_auto, pick_sheet_form, Form, MatchKind, PaperError, PaperMatch,
+    ScalePolicy,
+};
 pub use printer::{PrinterCapabilities, PrinterInfo, PrinterKind, PrinterStatus};
+pub use profiles::{PrinterQuirks, ProfileDb};
 pub use queue::{Job, JobOptions, Queue, QueueError};
 pub use routing::{printer_pattern_matches, resolve_printer};
 pub use state::{JobState, TransitionError};

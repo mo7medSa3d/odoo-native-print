@@ -41,8 +41,8 @@ impl DibImage {
 
 /// Bytes per DIB row for a width and bit depth (4-byte aligned).
 pub fn dib_row_bytes(width: u32, bit_count: u16) -> usize {
-    let bits = (width as usize) * (bit_count as usize);
-    bits.div_ceil(32) * 4
+    let bits = (width as u64) * (bit_count as u64);
+    (bits.div_ceil(32) * 4) as usize
 }
 
 fn header(width: u32, height: u32, bit_count: u16, image_bytes: usize) -> [u8; 40] {
@@ -54,7 +54,7 @@ fn header(width: u32, height: u32, bit_count: u16, image_bytes: usize) -> [u8; 4
     h[12..14].copy_from_slice(&1u16.to_le_bytes()); // biPlanes
     h[14..16].copy_from_slice(&bit_count.to_le_bytes()); // biBitCount
                                                          // biCompression = 0 (BI_RGB) at offset 16: already zero.
-    h[20..24].copy_from_slice(&(image_bytes as u32).to_le_bytes()); // biSizeImage
+    h[20..24].copy_from_slice(&u32::try_from(image_bytes).unwrap_or(0).to_le_bytes()); // biSizeImage
     h
 }
 
@@ -62,8 +62,13 @@ fn repack_rows(src: &[u8], src_row_bytes: usize, w: u32, h: u32, bit_count: u16)
     let dst_row = dib_row_bytes(w, bit_count);
     let mut out = vec![0u8; dst_row * h as usize];
     for row in 0..h as usize {
-        out[row * dst_row..row * dst_row + src_row_bytes]
-            .copy_from_slice(&src[row * src_row_bytes..(row + 1) * src_row_bytes]);
+        let src_start = row * src_row_bytes;
+        if src_start >= src.len() {
+            break;
+        }
+        let copy_len = (src.len() - src_start).min(src_row_bytes).min(dst_row);
+        out[row * dst_row..row * dst_row + copy_len]
+            .copy_from_slice(&src[src_start..src_start + copy_len]);
     }
     out
 }

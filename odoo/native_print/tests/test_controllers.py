@@ -208,8 +208,25 @@ class TestNativePrintControllers(HttpCase):
         self.assertEqual(job.copies, 3)
         self.assertEqual(job.paper, "A5")
         self.assertTrue(job.duplex)
+        self.assertTrue(job.duplex_configured)
         self.assertFalse(job.color)
         self.assertEqual(job.mode, "gdi")
+
+    def test_job_status_keeps_unspecified_duplex_unconfigured(self):
+        self._rpc("/native_print/job_status", {
+            "idempotency_key": JOB_KEY, "state": "queued",
+        })
+        job = self.env["native.print.job"].search([("name", "=", JOB_KEY)])
+        self.assertFalse(job.duplex)
+        self.assertFalse(job.duplex_configured)
+
+    def test_job_status_records_explicit_simplex_choice(self):
+        self._rpc("/native_print/job_status", {
+            "idempotency_key": JOB_KEY, "state": "queued", "duplex": False,
+        })
+        job = self.env["native.print.job"].search([("name", "=", JOB_KEY)])
+        self.assertFalse(job.duplex)
+        self.assertTrue(job.duplex_configured)
 
     def test_late_posts_update_never_duplicate(self):
         # Terminal outcome first (the creating post was lost), then

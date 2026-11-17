@@ -79,6 +79,60 @@ def _safe_int(val, default=None):
         return default
 
 
+_STATUS_LOCK_FIELDS = (
+    "state", "user_id", "company_id", "attempts", "device", "device_id",
+    "source_ids", "source_model", "duplex", "duplex_configured",
+)
+
+def _lock_status_job(job):
+    """Serialize status updates and refresh the ORM cache after the lock.
+
+    `_table` is the model's fixed ORM metadata (not request input). The
+    lock closes the search/check/write race: after waiting for another
+    updater, the next request must validate against its committed state.
+    """
+    if not job:
+        return job
+    job.flush_recordset(_STATUS_LOCK_FIELDS)
+    job.env.cr.execute(
+        f'SELECT id FROM "{job._table}" WHERE id = %s FOR UPDATE',
+        [job.id],
+    )
+    if not job.env.cr.fetchone():
+        return job.browse()
+    job.invalidate_recordset(_STATUS_LOCK_FIELDS)
+    return job
+
+
+def _has_print_access():
+    user = request.env.user
+    return (
+        user.has_group("native_print.group_native_print_user")
+        or user.has_group("native_print.group_native_print_manager")
+    )
+
+
+def _get_or_create_device(device_name, company_id, vals=None):
+    Device = request.env["native.print.device"].sudo()
+    printer = Device.search([
+        ("name", "=", device_name),
+        ("company_id", "=", company_id),
+    ], limit=1)
+    if not printer:
+        create_vals = dict(vals or {}, name=device_name, company_id=company_id)
+        try:
+            with Device.env.cr.savepoint():
+                printer = Device.create(create_vals)
+        except IntegrityError:
+            printer = Device.search([
+                ("name", "=", device_name),
+                ("company_id", "=", company_id),
+            ], limit=1)
+    elif vals:
+        printer.write(vals)
+    return printer
+
+
 class NativePrintController(http.Controller):
     """Job log endpoints for the Yaseir Print app (API v1).
 
@@ -100,12 +154,12 @@ class NativePrintController(http.Controller):
                    source_type=None, source_model=None, source_ids=None,
                    copies=None, paper=None, duplex=None, color=None,
                    mode=None, **kwargs):
-        if not (request.env.user.has_group("native_print.group_native_print_user")
-                or request.env.user.has_group("native_print.group_native_print_manager")):
+        if not _has_print_access():
             return {"ok": False, "error": "forbidden"}
         if (
             not idempotency_key
             or not isinstance(idempotency_key, str)
+            or not idempotency_key.strip()
             or len(idempotency_key) > 128
             or state not in JOB_STATES
         ):
@@ -117,6 +171,7 @@ class NativePrintController(http.Controller):
             ("name", "=", idempotency_key),
             ("company_id", "=", company),
         ], limit=1)
+        job = _lock_status_job(job)
         if job and job.user_id and job.user_id.id != request.env.user.id:
             return {"ok": False, "error": "forbidden"}
         if job and job.state in TERMINAL_STATES:
@@ -130,39 +185,25 @@ class NativePrintController(http.Controller):
             # canceling a job that is already printing).
             return {"ok": True, "job_id": job.id, "state": job.state,
                     "ignored": "illegal_transition"}
-        device_name = str(device)[:256] if device else None
+        device_name = (str(device).strip()[:256] or None) if device else None
         vals = {
             "state": state,
             "error_code": str(error_code)[:128] if error_code else False,
             "device": device_name or (job.device if job else False),
         }
+        # `duplex=None` means leave the driver default in force. Only a
+        # JSON boolean is an explicit choice (including False/simplex).
+        if isinstance(duplex, bool) and (not job or not job.duplex_configured):
+            vals["duplex"] = duplex
+            vals["duplex_configured"] = True
         if device_name:
             # Keep the printer registry in sync with reality: the
             # first job from a printer registers it, so the log's
             # printer field is a pickable Many2one, never free text
             # the user has to type or memorise.
-            Device = request.env["native.print.device"].sudo()
-            printer = Device.search([
-                ("name", "=", device_name),
-                ("company_id", "=", company),
-            ], limit=1)
-            if not printer:
-                # Race-safe registration: two jobs reporting the same
-                # new printer at the same moment must still produce
-                # ONE registry row (unique name+company) - on a
-                # conflict, roll back to the savepoint and re-read
-                # the row the other post created.
-                try:
-                    with Device.env.cr.savepoint():
-                        printer = Device.create({
-                            "name": device_name,
-                            "company_id": company,
-                        })
-                except IntegrityError:
-                    printer = Device.search([
-                        ("name", "=", device_name),
-                        ("company_id", "=", company),
-                    ], limit=1)
+            # Race-safe registration: two jobs reporting the same new
+            # printer at the same moment must still produce ONE row.
+            printer = _get_or_create_device(device_name, company)
             if printer and (not job or not job.device_id):
                 vals["device_id"] = printer.id
         parsed_attempts = _safe_int(attempts)
@@ -186,7 +227,7 @@ class NativePrintController(http.Controller):
                 report = request.env["ir.actions.report"].sudo().search(
                     [("report_name", "=", report_name)], limit=1)
             parsed_bytes = _safe_int(byte_size, 0)
-            vals.update({
+            create_vals = dict(vals, **{
                 "name": idempotency_key,
                 "report_id": report.id if report else False,
                 "report_name": str(report_name)[:256] if report_name else False,
@@ -197,7 +238,8 @@ class NativePrintController(http.Controller):
                 "copies": parsed_copies,
                 "paper": str(paper)[:64] if isinstance(paper, str)
                          and paper else False,
-                "duplex": bool(duplex),
+                "duplex": bool(duplex) if isinstance(duplex, bool) else False,
+                "duplex_configured": isinstance(duplex, bool),
                 "color": bool(color) if color is not None else True,
                 "mode": mode if mode in PRINT_MODES else False,
                 "pages": parsed_pages if (parsed_pages and parsed_pages > 0) else 1,
@@ -213,13 +255,14 @@ class NativePrintController(http.Controller):
             # 500 (its state/device/attempts updates still apply).
             try:
                 with Job.env.cr.savepoint():
-                    job = Job.create(vals)
+                    job = Job.create(create_vals)
                 created = True
             except IntegrityError:
                 job = Job.search([
                     ("name", "=", idempotency_key),
                     ("company_id", "=", company),
                 ], limit=1)
+                job = _lock_status_job(job)
                 if not job:
                     # The winning transaction has not committed yet
                     # (READ COMMITTED): there is no row to update, so
@@ -253,6 +296,13 @@ class NativePrintController(http.Controller):
                 parsed_model = _safe_model_name(source_model)
                 if parsed_model:
                     vals["source_model"] = parsed_model
+            if not job.report_name and report_name and isinstance(report_name, str):
+                vals["report_name"] = str(report_name)[:256]
+            if not job.report_id and report_name and isinstance(report_name, str):
+                report = request.env["ir.actions.report"].sudo().search(
+                    [("report_name", "=", report_name)], limit=1)
+                if report:
+                    vals["report_id"] = report.id
             job.write(vals)
         return {"ok": True, "job_id": job.id, "state": job.state}
 
@@ -268,12 +318,11 @@ class NativePrintController(http.Controller):
         Upsert on the same (name, company) unique key the job sync
         uses: the same physical printer can never register twice.
         """
-        if not (request.env.user.has_group("native_print.group_native_print_user")
-                or request.env.user.has_group("native_print.group_native_print_manager")):
+        if not _has_print_access():
             return {"ok": False, "error": "forbidden"}
-        if not name or not isinstance(name, str):
+        if not name or not isinstance(name, str) or not name.strip():
             return {"ok": False, "error": "bad_request"}
-        device_name = str(name)[:256]
+        device_name = name.strip()[:256]
 
         def _clean_list(val):
             if not isinstance(val, list):
@@ -291,23 +340,7 @@ class NativePrintController(http.Controller):
             "caps_synced_at": fields.Datetime.now(),
         }
         company = request.env.company.id
-        Device = request.env["native.print.device"].sudo()
-        printer = Device.search([
-            ("name", "=", device_name),
-            ("company_id", "=", company),
-        ], limit=1)
-        if not printer:
-            try:
-                with Device.env.cr.savepoint():
-                    printer = Device.create(dict(
-                        vals, name=device_name, company_id=company))
-            except IntegrityError:
-                printer = Device.search([
-                    ("name", "=", device_name),
-                    ("company_id", "=", company),
-                ], limit=1)
-        else:
-            printer.write(vals)
+        printer = _get_or_create_device(device_name, company, vals)
         if not printer:
             return {"ok": False, "error": "registration_failed"}
         return {"ok": True, "device_id": printer.id}
@@ -316,8 +349,7 @@ class NativePrintController(http.Controller):
                 methods=["POST"], csrf=False)
     def overview(self, **kwargs):
         """Job counters for the Native Print systray widget."""
-        if not (request.env.user.has_group("native_print.group_native_print_user")
-                or request.env.user.has_group("native_print.group_native_print_manager")):
+        if not _has_print_access():
             return {"ok": False, "error": "forbidden"}
         # Counters are company-wide for every role: the systray
         # labels them "Completed Print Jobs" / "Failed Print Jobs",

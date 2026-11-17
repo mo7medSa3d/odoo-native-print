@@ -1,6 +1,9 @@
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::io::{ErrorKind, Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
+
+const WRITE_CHUNK_SIZE: usize = 16 * 1024;
+const MIN_IO_TIMEOUT: Duration = Duration::from_millis(1);
 
 /// Which phase of a raw TCP send failed. The distinction decides
 /// whether a retry is safe: a connect-phase failure proves ZERO
@@ -22,6 +25,26 @@ impl std::fmt::Display for SendPhaseError {
 }
 
 impl std::error::Error for SendPhaseError {}
+
+fn connect_any(host: &str, port: u16, timeout: Duration) -> std::io::Result<TcpStream> {
+    let bare_host = host.trim().trim_start_matches('[').trim_end_matches(']');
+    let addrs: Vec<_> = (bare_host, port).to_socket_addrs()?.collect();
+    if addrs.is_empty() {
+        return Err(std::io::Error::new(
+            ErrorKind::AddrNotAvailable,
+            "no address",
+        ));
+    }
+    let timeout = timeout.max(MIN_IO_TIMEOUT);
+    let mut last_err = None;
+    for addr in addrs {
+        match TcpStream::connect_timeout(&addr, timeout) {
+            Ok(stream) => return Ok(stream),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| std::io::Error::new(ErrorKind::AddrNotAvailable, "no address")))
+}
 
 /// Raw TCP 9100 (JetDirect) transport: connect, write all bytes, close.
 /// Closing the connection is the end-of-job signal for these printers.
@@ -47,32 +70,29 @@ pub fn send_raw_phased(
     connect_timeout: Duration,
     io_timeout: Duration,
 ) -> Result<(), SendPhaseError> {
-    let addr = (host, port)
-        .to_socket_addrs()
-        .map_err(SendPhaseError::Connect)?
-        .next()
-        .ok_or_else(|| {
-            SendPhaseError::Connect(std::io::Error::new(
-                std::io::ErrorKind::AddrNotAvailable,
-                "no address",
-            ))
-        })?;
     let mut stream =
-        TcpStream::connect_timeout(&addr, connect_timeout).map_err(SendPhaseError::Connect)?;
+        connect_any(host, port, connect_timeout).map_err(SendPhaseError::Connect)?;
+    let io_timeout = io_timeout.max(MIN_IO_TIMEOUT);
     stream
         .set_write_timeout(Some(io_timeout))
-        .map_err(SendPhaseError::Write)?;
+        .map_err(SendPhaseError::Connect)?;
     stream
         .set_read_timeout(Some(io_timeout))
-        .map_err(SendPhaseError::Write)?;
-    stream.write_all(bytes).map_err(SendPhaseError::Write)?;
-    stream
-        .shutdown(std::net::Shutdown::Write)
-        .map_err(SendPhaseError::Write)?;
+        .map_err(SendPhaseError::Connect)?;
+    for chunk in bytes.chunks(WRITE_CHUNK_SIZE) {
+        stream.write_all(chunk).map_err(SendPhaseError::Write)?;
+    }
+    stream.flush().map_err(SendPhaseError::Write)?;
+    // Some printer firmwares close the socket immediately upon seeing the
+    // end-of-job command; ignore NotConnected on half-close after all bytes
+    // were written.
+    if let Err(e) = stream.shutdown(std::net::Shutdown::Write) {
+        if e.kind() != ErrorKind::NotConnected {
+            return Err(SendPhaseError::Write(e));
+        }
+    }
     Ok(())
 }
-
-use std::net::ToSocketAddrs;
 
 /// ESC/POS real-time status request (DLE EOT n) — the "sensor read" for
 /// thermal printers that support it. Per Epson's DLE EOT spec the
@@ -106,13 +126,12 @@ pub fn query_paper_status(host: &str, port: u16, timeout: Duration) -> std::io::
 }
 
 fn query_dle_eot(host: &str, port: u16, n: u8, timeout: Duration) -> std::io::Result<u8> {
-    let addr = (host, port)
-        .to_socket_addrs()?
-        .next()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "no address"))?;
-    let mut stream = TcpStream::connect_timeout(&addr, timeout)?;
+    let mut stream = connect_any(host, port, timeout)?;
+    let timeout = timeout.max(MIN_IO_TIMEOUT);
+    stream.set_write_timeout(Some(timeout))?;
     stream.set_read_timeout(Some(timeout))?;
     stream.write_all(&[0x10, 0x04, n])?;
+    stream.flush()?;
     // A status byte has fixed bits (bit 1 and bit 4 set; bits 0 and 7
     // clear). Unsolicited ASB frames or line noise can precede the real
     // response, so skip up to 4 bytes looking for a valid frame instead
@@ -125,7 +144,7 @@ fn query_dle_eot(host: &str, port: u16, n: u8, timeout: Duration) -> std::io::Re
         }
     }
     Err(std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
+        ErrorKind::InvalidData,
         "no valid DLE EOT status frame in response",
     ))
 }
@@ -298,7 +317,6 @@ mod tests {
     /// A loopback stand-in for a thermal printer: answers each
     /// DLE EOT query with the byte scripted for that frame.
     fn mock_printer(script: [u8; 5]) -> u16 {
-        use std::io::{Read, Write};
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         std::thread::spawn(move || {
@@ -424,6 +442,30 @@ mod tests {
         .unwrap();
         assert_eq!(server.join().unwrap(), b"RAW-PRINT-BYTES");
     }
+
+    #[test]
+    fn send_large_chunked_payload_and_zero_timeout_safe() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let payload = vec![0x5Au8; WRITE_CHUNK_SIZE * 3 + 123];
+        let expected = payload.clone();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut buf = Vec::new();
+            s.read_to_end(&mut buf).unwrap();
+            buf
+        });
+        send_raw(
+            "127.0.0.1",
+            port,
+            &payload,
+            Duration::ZERO,
+            Duration::ZERO,
+        )
+        .unwrap();
+        assert_eq!(server.join().unwrap(), expected);
+    }
+
     #[test]
     fn status_round_trip() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -442,6 +484,7 @@ mod tests {
         assert!(!st.drawer_pin_high);
         assert_eq!(st.raw, 0x1A);
     }
+
     #[test]
     fn unreachable_printer_errors_fast() {
         let t = std::time::Instant::now();
@@ -454,5 +497,18 @@ mod tests {
         );
         assert!(r.is_err());
         assert!(t.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn bracketed_ipv6_connects_or_errors_without_invalid_syntax() {
+        let err = send_raw_phased(
+            "[::1]",
+            1,
+            b"x",
+            Duration::from_millis(200),
+            Duration::from_millis(200),
+        )
+        .unwrap_err();
+        assert!(matches!(err, SendPhaseError::Connect(_)), "{err:?}");
     }
 }

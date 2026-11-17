@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from odoo import _, fields, models
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError
 
 
 class NativePrintJob(models.Model):
@@ -61,6 +61,10 @@ class NativePrintJob(models.Model):
     copies = fields.Integer(default=1, string="Copies")
     paper = fields.Char(string="Paper")
     duplex = fields.Boolean(string="Duplex")
+    # False in duplex is a real, explicit simplex choice only when this
+    # marker is true. Older records and print paths that never set duplex
+    # must preserve the printer driver's default when reprinted.
+    duplex_configured = fields.Boolean(default=False, copy=False)
     color = fields.Boolean(default=True, string="Color")
     mode = fields.Char(string="Print Mode")
     user_id = fields.Many2one(
@@ -97,17 +101,24 @@ class NativePrintJob(models.Model):
         no payload copies by design.)
         """
         self.ensure_one()
+        # Public model methods do not automatically enforce the caller's
+        # ACLs/record rules merely because a recordset was obtained.
+        self.check_access("read")
         ids = []
         if self.source_ids:
             ids = [int(x) for x in self.source_ids.split(",")
                    if x.strip().isdigit()]
-        if not self.report_id or not ids:
+        report = self.report_id
+        if not report and self.report_name:
+            report = self.env["ir.actions.report"].sudo().search(
+                [("report_name", "=", self.report_name)], limit=1)
+        if not report or not ids:
             raise UserError(_(
                 "This job cannot be reprinted: the original report "
                 "or its records were not recorded for it (for "
                 "example, POS receipts are reprinted from the POS)."
             ))
-        report = self.report_id
+        report.check_access("read")
         # The log row is client-reported, so nothing on it is trusted
         # on its own (audit L4): the report's OWN model decides which
         # records are rendered — never the posted source_model — the
@@ -148,13 +159,21 @@ class NativePrintJob(models.Model):
                 "This job cannot be reprinted: the original records "
                 "no longer exist or are not accessible."
             ))
+        try:
+            records.check_access("read")
+        except AccessError:
+            raise UserError(_(
+                "This job cannot be reprinted: the original records "
+                "no longer exist or are not accessible."
+            )) from None
         ids = records.ids
         settings = {}
-        if self.copies:
+        if self.copies and self.copies > 0:
             settings["copies"] = self.copies
         if self.paper:
             settings["paper"] = self.paper
-        settings["duplex"] = bool(self.duplex)
+        if self.duplex_configured:
+            settings["duplex"] = bool(self.duplex)
         settings["color"] = bool(self.color)
         printer_name = (self.device_id.name if self.device_id
                         else self.device)
@@ -189,6 +208,7 @@ class NativePrintJob(models.Model):
         trail, so pruning is an explicit admin decision, never a
         silent default (audit M2). Active jobs are never pruned:
         their outcome is still owed to someone."""
+        days = max(1, int(days))
         cutoff = fields.Datetime.now() - timedelta(days=days)
         old = self.sudo().search([
             ("state", "in", ["done", "failed", "canceled", "dead_letter"]),

@@ -49,14 +49,37 @@ def main():
             perms[m.group(1)] = set(re.findall(rf'"({NAME})"', m.group(2)))
     granted = set().union(*perms.values()) if perms else set()
     caps = {}
+    cap_data = {}
     for capfile in sorted((SRC / "capabilities").glob("*.json")):
         data = json.loads(capfile.read_text(encoding="utf-8"))
+        cap_data[capfile.name] = data
         caps[capfile.name] = set()
         caps[capfile.name + ":groups"] = set(data["permissions"])
         for p in data["permissions"]:
             caps[capfile.name] |= perms.get(p, set())
 
     problems = []
+    # Tauri v2 capability matching is OR-based: a matching window
+    # applies to every WebView in that window, even when `webviews`
+    # is also present. On a multi-WebView window, scope by webview
+    # label only. `local` defaults to true, so the remote capability
+    # must explicitly opt out of bundled/local content.
+    expected_scopes = {
+        "main.json": (True, ["tab-*"]),
+        "remote.json": (False, ["tab-*"]),
+        "toolbar.json": (True, ["tabbar"]),
+    }
+    for name, (expected_local, expected_webviews) in expected_scopes.items():
+        data = cap_data.get(name)
+        if data is None:
+            problems.append(f"missing required capability {name}")
+            continue
+        if "windows" in data:
+            problems.append(f"{name} must not set windows on the multi-WebView main window")
+        if data.get("local", True) is not expected_local:
+            problems.append(f"{name} local scope must be {expected_local}")
+        if data.get("webviews") != expected_webviews:
+            problems.append(f"{name} webview scope must be {expected_webviews}, got {data.get('webviews')}")
     if handler != manifest:
         problems.append(f"lib.rs handler != build.rs manifest: only-handler={sorted(handler - manifest)} only-manifest={sorted(manifest - handler)}")
     if handler != granted:
@@ -80,6 +103,13 @@ def main():
     leaked = caps["remote.json"] & admin
     if leaked:
         problems.append(f"remote capability leaks queue-admin commands: {sorted(leaked)}")
+    expected_remote = perms.get("allow-print-pdf", set()) | perms.get("allow-print-status", set()) | perms.get("allow-app-shell", set())
+    if caps.get("remote.json") != expected_remote:
+        problems.append(
+            "remote capability must grant exactly print-pdf, print-status and app-shell: "
+            f"missing={sorted(expected_remote - caps.get('remote.json', set()))} "
+            f"extra={sorted(caps.get('remote.json', set()) - expected_remote)}"
+        )
     # The toolbar capability (for a future child webview) may only ever
     # carry its own group; anything else appearing there is a leak the
     # old gate could not see.
@@ -100,13 +130,54 @@ def main():
     unknown_calls = called - handler
     if unknown_calls:
         problems.append(f"JS invokes commands missing from the handler: {sorted(unknown_calls)}")
+    # Every exported Tauri command must perform an explicit origin or
+    # local-app guard. A registered command without either guard is a
+    # security regression even if capabilities currently hide it.
+    commands_rs = (SRC / "src" / "commands.rs").read_text(encoding="utf-8")
+    command_decls = list(re.finditer(
+        r"#\[tauri::command(?:\([^]]*\))?\]\s*pub\s+(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)",
+        commands_rs,
+    ))
+    guarded = set()
+    unguarded = []
+    for index, match in enumerate(command_decls):
+        end = command_decls[index + 1].start() if index + 1 < len(command_decls) else len(commands_rs)
+        command_chunk = commands_rs[match.start():end]
+        name = match.group(1)
+        if "check_origin(" in command_chunk or "check_local_only(" in command_chunk:
+            guarded.add(name)
+        else:
+            unguarded.append(name)
+    if unguarded:
+        problems.append(f"Tauri commands missing check_origin/check_local_only: {sorted(unguarded)}")
+    if guarded != handler:
+        problems.append(
+            f"Rust command guards != registered handler: missing-guards={sorted(handler - guarded)} "
+            f"guarded-not-registered={sorted(guarded - handler)}"
+        )
+    # Per-webview ACL check: each local page must only invoke commands
+    # permitted by its own capability file.
+    surface_caps = {
+        "tabbar.html": "toolbar.json",
+        "boot.html": "main.json",
+        "index.html": "main.json",
+        "settings.html": "main.json",
+    }
+    for page_name, cap_name in surface_caps.items():
+        page_path = SRC.parent / "dist" / page_name
+        if not page_path.exists() or cap_name not in caps:
+            continue
+        page_calls = set(re.findall(rf"invoke\(\s*[\"']([a-zA-Z0-9_|:|-]+)[\"']", page_path.read_text(encoding="utf-8")))
+        denied = sorted(page_calls - caps[cap_name])
+        if denied:
+            problems.append(f"{page_name} invokes commands denied by {cap_name}: {denied}")
 
     if problems:
         print("COMMAND SURFACE INCONSISTENT:")
         for p in problems:
             print(" -", p)
         return 1
-    print(f"command surface consistent: {len(handler)} commands, remote reaches {len(caps['remote.json'])}, admin stays local")
+    print(f"command surface consistent: {len(handler)} commands guarded, remote reaches {len(caps['remote.json'])}, admin stays local")
     return 0
 
 

@@ -16,23 +16,25 @@ pub struct TsplLabel {
 impl TsplLabel {
     /// width_mm x height_mm label, gap_mm between labels.
     pub fn new(width_mm: u32, height_mm: u32, gap_mm: u32) -> Self {
+        let w = width_mm.max(1);
+        let h = height_mm.max(1);
         let mut buf = Vec::new();
-        buf.extend_from_slice(format!("SIZE {width_mm} mm,{height_mm} mm\r\n").as_bytes());
+        buf.extend_from_slice(format!("SIZE {w} mm,{h} mm\r\n").as_bytes());
         buf.extend_from_slice(format!("GAP {gap_mm} mm,0 mm\r\n").as_bytes());
         buf.extend_from_slice(b"CLS\r\n");
         Self { buf }
     }
     /// BITMAP x,y,width(bytes per row),height,mode(0 = overwrite),<inverted data>
     pub fn bitmap(mut self, x: u32, y: u32, bm: &MonoBitmap) -> Self {
+        let bpr = bm.bytes_per_row();
+        let expected = bpr.saturating_mul(bm.height_dots as usize);
+        if expected == 0 || bm.data.len() < expected {
+            return self;
+        }
         self.buf.extend_from_slice(
-            format!(
-                "BITMAP {x},{y},{},{},0,",
-                bm.bytes_per_row(),
-                bm.height_dots
-            )
-            .as_bytes(),
+            format!("BITMAP {x},{y},{bpr},{},0,", bm.height_dots).as_bytes(),
         );
-        for &b in &bm.data {
+        for &b in &bm.data[..expected] {
             self.buf.push(!b);
         }
         self.buf.extend_from_slice(b"\r\n");
@@ -54,6 +56,8 @@ impl TsplLabel {
         self
     }
     pub fn print(mut self, sets: u32, copies: u32) -> Vec<u8> {
+        let sets = sets.max(1);
+        let copies = copies.max(1);
         self.buf
             .extend_from_slice(format!("PRINT {sets},{copies}\r\n").as_bytes());
         self.buf
@@ -183,5 +187,19 @@ mod tests {
         assert!(out.ends_with(b"PRINT 1,2\r\n"));
         // TSPL 0=black / 1=white: inverted from MonoBitmap's 1=black ([0xFF, 0x00, 0x00, 0xFF] -> [0x00, 0xFF, 0xFF, 0x00]).
         assert!(out.windows(4).any(|w| w == [0x00, 0xFF, 0xFF, 0x00]));
+    }
+
+    #[test]
+    fn truncated_bitmap_is_skipped_and_zero_counts_clamped() {
+        let bad_bm = MonoBitmap {
+            width_dots: 16,
+            height_dots: 4,
+            data: vec![0xFF; 2], // too short for 2 * 4 = 8 bytes
+        };
+        let out = TsplLabel::new(0, 0, 0).bitmap(0, 0, &bad_bm).print(0, 0);
+        let text = String::from_utf8_lossy(&out);
+        assert!(!text.contains("BITMAP"));
+        assert!(text.starts_with("SIZE 1 mm,1 mm\r\n"));
+        assert!(text.ends_with("PRINT 1,1\r\n"));
     }
 }

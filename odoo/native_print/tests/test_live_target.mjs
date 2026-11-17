@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import vm from "node:vm";
 
 const src = readFileSync(
     new URL("../static/src/js/native_print_client.js", import.meta.url),
@@ -28,6 +29,8 @@ eq(m.detectPrinterType({ name: "EPSON TM-T88VII" }).printerClass, "thermal", "ep
 eq(m.detectPrinterType({ name: "ZDesigner ZT230", driver: "ZDesigner" }).mode, "zpl", "zebra");
 eq(m.detectPrinterType({ name: "HP LaserJet", driver: "HP PCL" }).mode, "gdi", "hp");
 eq(m.detectPrinterType({ name: "Microsoft Print to PDF", kind: "virtual" }).printerClass, "virtual", "virtual");
+eq(m.detectPrinterType({ name: "Microsoft Print to PDF", kind: "virtual", protocol: "escpos", printer_class: "thermal" }).mode, "gdi", "virtual overrides conflicting raw protocol");
+eq(m.detectPrinterType({ name: "Microsoft XPS Document Writer", kind: "virtual", protocol: "zpl", printer_class: "label" }).printerClass, "virtual", "virtual overrides conflicting label class");
 eq(m.printerPatternFor({ name: "EPSON TM-T88VII", port: "192.168.1.50" }, "escpos"), "tcp://192.168.1.50:9100", "tcp pattern");
 eq(m.printerPatternFor({ name: "HP LaserJet", port: "192.168.1.51" }, "gdi"), "HP LaserJet", "spooler pattern");
 // Audit L9/L10 hardening: IPv6 ports are bracketed, invalid IPv4
@@ -136,9 +139,14 @@ const rustSrc = readFileSync(
     "utf8",
 );
 const stringsIn = (block) => [...block.matchAll(/"([^"]*)"/g)].map((x) => x[1]);
+const htmlSrc = readFileSync(
+    new URL("../../../app/dist/index.html", import.meta.url),
+    "utf8",
+);
 const rustTokens = stringsIn(rustSrc.match(/const THERMAL_TOKENS[^=]*= \[([\s\S]*?)\];/)[1]).sort();
 const jsTokens = stringsIn(src.match(/const thermalTokens = \[([\s\S]*?)\];/)[1]).sort();
-eq(rustTokens.length, 45, "rust thermal token count");
+const htmlTokens = stringsIn(htmlSrc.match(/const thermal = \[([\s\S]*?)\];/)[1]).sort();
+eq(rustTokens.length, 67, "rust thermal token count");
 eq(
     JSON.stringify(jsTokens),
     JSON.stringify(rustTokens),
@@ -146,6 +154,35 @@ eq(
         "js-only=" + jsTokens.filter((t) => !rustTokens.includes(t)) +
         " rust-only=" + rustTokens.filter((t) => !jsTokens.includes(t)),
 );
+eq(JSON.stringify(htmlTokens), JSON.stringify(rustTokens), "HTML and Rust thermal token tables must be identical");
+const rustTspl = stringsIn(rustSrc.match(/const TSPL_LABEL_MODELS[^=]*= \[([\s\S]*?)\];/)[1]).sort();
+const jsTspl = stringsIn(src.match(/const tsplLabelModels = \[([\s\S]*?)\];/)[1]).sort();
+const htmlTspl = stringsIn(htmlSrc.match(/const tsplModels = \[([\s\S]*?)\];/)[1]).sort();
+eq(JSON.stringify(jsTspl), JSON.stringify(rustTspl), "JS and Rust TSPL model tables must be identical");
+eq(JSON.stringify(htmlTspl), JSON.stringify(rustTspl), "HTML and Rust TSPL model tables must be identical");
+const rustOffice = stringsIn(rustSrc.match(/const OFFICE_EXCLUSIONS[^=]*= \[([\s\S]*?)\];/)[1]).sort();
+const jsOffice = stringsIn(src.match(/const officeExclusions = \[([\s\S]*?)\];/)[1]).sort();
+const htmlOffice = stringsIn(htmlSrc.match(/const officeExclusions = \[([\s\S]*?)\];/)[1]).sort();
+eq(JSON.stringify(jsOffice), JSON.stringify(rustOffice), "JS and Rust office-exclusion tables must be identical");
+eq(JSON.stringify(htmlOffice), JSON.stringify(rustOffice), "HTML and Rust office-exclusion tables must be identical");
+
+// Run the Control Center fallback functions themselves against a hostile
+// virtual-printer payload, not just a source-text assertion.
+const functionSlice = (source, startName, nextName) => {
+    const start = source.indexOf(`function ${startName}(`);
+    const end = source.indexOf(`function ${nextName}(`, start);
+    if (start < 0 || end < 0) throw new Error(`cannot extract ${startName}`);
+    return source.slice(start, end);
+};
+const ccSandbox = {};
+vm.runInNewContext(
+    functionSlice(htmlSrc, "ccProtocol", "ccClass") + "\n" +
+    functionSlice(htmlSrc, "ccClass", "ccClassIcon") +
+    "\nglobalThis.out = { ccProtocol, ccClass };",
+    ccSandbox,
+);
+eq(ccSandbox.out.ccProtocol({ kind: "virtual", protocol: "escpos" }), "gdi", "Control Center virtual protocol override");
+eq(ccSandbox.out.ccClass({ kind: "virtual", printer_class: "thermal" }), "virtual", "Control Center virtual class override");
 for (const tok of ['"zdesigner"', '"zebra"', '"zpl"', '"tspl"', '"tsc"', '"epl"']) {
     if (!rustSrc.includes(tok)) throw new Error("rust detect_protocol lost label token " + tok);
     if (!src.includes(tok)) throw new Error("JS detectPrinterType lost label token " + tok);
@@ -169,4 +206,16 @@ for (const consumer of ["native_print_handler.js", "pos_native_print.js"]) {
         throw new Error(consumer + " must import the shared JOB_TERMINAL_STATES");
     }
 }
+eq(m.detectPrinterType({ name: "Xprinter XP-365B", driver: "XP-365B" }).mode, "tspl", "xprinter 365b is tspl label");
+eq(m.detectPrinterType({ name: "Xprinter XP-365B", driver: "XP-365B" }).printerClass, "label", "xprinter 365b is label class");
+eq(m.detectPrinterType({ name: "Gprinter GP-1324D", driver: "Gprinter" }).mode, "tspl", "gprinter 1324 is tspl label");
+eq(m.detectPrinterType({ name: "HP LaserJet Receipt", driver: "HP PCL" }).mode, "gdi", "office laserjet with receipt in name stays gdi");
+m.setSelectedPrinter("HP LaserJet");
+m.setSelectedPosPrinter("EPSON TM-T88VII");
+t = await m.resolveBridgeTarget(bridge, { isPos: true, preferClasses: ["thermal", "label"] });
+eq(t.printer.name, "EPSON TM-T88VII", "dedicated pos printer wins for pos even when report printer is selected");
+t = await m.resolveBridgeTarget(bridge);
+eq(t.printer.name, "HP LaserJet", "report printer stays HP LaserJet");
+m.setSelectedPosPrinter(null);
+m.setSelectedPrinter(null);
 console.log("JS LIVE TARGET TESTS: ALL PASS");

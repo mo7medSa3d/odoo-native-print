@@ -6,9 +6,6 @@
   "permissions": [
     "allow-toolbar"
   ],
-  "windows": [
-    "main"
-  ],
   "webviews": [
     "tabbar"
   ]

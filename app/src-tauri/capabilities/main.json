@@ -12,9 +12,6 @@
     "allow-web-data-reset",
     "allow-toolbar"
   ],
-  "windows": [
-    "main"
-  ],
   "webviews": [
     "tab-*"
   ]

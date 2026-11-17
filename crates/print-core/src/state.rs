@@ -57,7 +57,9 @@ impl JobState {
                 | (Printing, Done) | (Printing, Failed)
                 | (Failed, Queued)   // retry
                 | (Failed, DeadLetter)
+                | (Failed, Canceled)
                 | (DeadLetter, Queued) // one-click retry from dead letter
+                | (DeadLetter, Canceled)
         )
     }
     pub fn transition_to(&self, next: JobState) -> Result<JobState, TransitionError> {
@@ -106,5 +108,9 @@ mod tests {
         assert!(JobState::Failed.transition_to(JobState::Queued).is_ok());
         assert!(JobState::Failed.transition_to(JobState::DeadLetter).is_ok());
         assert!(JobState::DeadLetter.transition_to(JobState::Queued).is_ok());
+        assert!(JobState::Failed.transition_to(JobState::Canceled).is_ok());
+        assert!(JobState::DeadLetter.transition_to(JobState::Canceled).is_ok());
+        assert!(JobState::Done.transition_to(JobState::Canceled).is_err());
+        assert!(JobState::Printing.transition_to(JobState::Canceled).is_err());
     }
 }

@@ -2,7 +2,7 @@
 //! All wide strings are NUL-terminated UTF-16; every handle opened here is
 //! closed on every path out of its function.
 
-use crate::{GdiJobOptions, GdiPrintError};
+use crate::{GdiJobOptions, GdiPrintError, RawSendError};
 use print_core::paper::{
     match_paper, match_paper_auto, pick_sheet_form, Form, MatchKind, PaperMatch, ScalePolicy,
 };
@@ -13,6 +13,26 @@ use std::os::windows::ffi::OsStrExt;
 
 type Handle = *mut c_void;
 type Bool = i32;
+
+struct PrinterHandle(Handle);
+
+impl Drop for PrinterHandle {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe { ClosePrinter(self.0) };
+        }
+    }
+}
+
+struct PrinterDc(Hdc);
+
+impl Drop for PrinterDc {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe { DeleteDC(self.0) };
+        }
+    }
+}
 
 #[repr(C)]
 struct DocInfo1W {
@@ -184,7 +204,7 @@ fn resolve_printer_bin_id(printer_wide: &[u16], tray_spec: &str) -> Option<i16> 
     if count <= 0 {
         return None;
     }
-    let n = count as usize;
+    let n = (count as usize).min(4096);
     let mut bin_ids = vec![0u16; n];
     let got_ids = unsafe {
         DeviceCapabilitiesW(
@@ -239,6 +259,10 @@ fn resolve_printer_bin_id(printer_wide: &[u16], tray_spec: &str) -> Option<i16> 
 /// `matched_form`, `duplex`, `color`, and optional `tray` using the 3-step
 /// Microsoft Learn `DocumentPropertiesW` pattern. Returns `None` if the driver
 /// does not expose a modifiable `DEVMODEW` (caller falls back to default `CreateDCW`).
+fn aligned_byte_buf(bytes: usize) -> Vec<u64> {
+    vec![0u64; bytes.div_ceil(std::mem::size_of::<u64>())]
+}
+
 fn build_printer_devmode(
     printer: &str,
     page_size: PageSize,
@@ -246,17 +270,18 @@ fn build_printer_devmode(
     duplex: Option<bool>,
     color: bool,
     tray: Option<&str>,
-) -> Option<Vec<u8>> {
+) -> Option<Vec<u64>> {
     let name = wide(printer);
-    let mut handle: Handle = std::ptr::null_mut();
-    let ok = unsafe { OpenPrinterW(name.as_ptr(), &mut handle, std::ptr::null_mut()) };
-    if ok == 0 || handle.is_null() {
+    let mut raw_handle: Handle = std::ptr::null_mut();
+    let ok = unsafe { OpenPrinterW(name.as_ptr(), &mut raw_handle, std::ptr::null_mut()) };
+    if ok == 0 || raw_handle.is_null() {
         return None;
     }
-    let result = unsafe {
+    let handle = PrinterHandle(raw_handle);
+    unsafe {
         let needed = DocumentPropertiesW(
             std::ptr::null_mut(),
-            handle,
+            handle.0,
             name.as_ptr(),
             std::ptr::null_mut(),
             std::ptr::null(),
@@ -265,22 +290,23 @@ fn build_printer_devmode(
         if needed < std::mem::size_of::<DevModePrefixW>() as i32 {
             None
         } else {
-            let mut buf = vec![0u8; needed as usize];
+            let mut buf = aligned_byte_buf(needed as usize);
             let got = DocumentPropertiesW(
                 std::ptr::null_mut(),
-                handle,
+                handle.0,
                 name.as_ptr(),
-                buf.as_mut_ptr(),
+                buf.as_mut_ptr() as *mut u8,
                 std::ptr::null(),
                 DM_OUT_BUFFER,
             );
             if got < 0 {
                 None
             } else {
-                #[allow(clippy::cast_ptr_alignment)]
                 let dm = &mut *(buf.as_mut_ptr() as *mut DevModePrefixW);
-                // Orientation
-                dm.dm_orientation = if page_size.is_landscape() {
+                let is_roll = matches!(matched_form, Some((_, MatchKind::Roll)));
+                // Orientation: roll printers feed continuous media lengthwise
+                // and cannot rotate 90 degrees even for short receipts (e.g. 80x50mm).
+                dm.dm_orientation = if !is_roll && page_size.is_landscape() {
                     DMORIENT_LANDSCAPE
                 } else {
                     DMORIENT_PORTRAIT
@@ -292,12 +318,34 @@ fn build_printer_devmode(
                 let unrotated_w = page_size.width_mm.min(page_size.height_mm);
                 let unrotated_h = page_size.width_mm.max(page_size.height_mm);
                 match matched_form {
+                    Some((form, MatchKind::Roll)) => {
+                        if let Some(pid) = form.paper_id {
+                            dm.dm_paper_size = pid as i16;
+                            dm.dm_fields =
+                                (dm.dm_fields & !(DM_PAPERWIDTH | DM_PAPERLENGTH)) | DM_PAPERSIZE;
+                        } else {
+                            dm.dm_paper_size = DMPAPER_USER;
+                            dm.dm_paper_width =
+                                (form.size.width_mm * 10.0).round().clamp(100.0, 32000.0) as i16;
+                            dm.dm_paper_length =
+                                (page_size.height_mm * 10.0).round().clamp(100.0, 32000.0) as i16;
+                            dm.dm_fields |= DM_PAPERSIZE | DM_PAPERWIDTH | DM_PAPERLENGTH;
+                        }
+                        if !form.name.is_empty() && form.name != "Custom" {
+                            dm.dm_form_name = [0u16; 32];
+                            for (idx, ch) in form.name.encode_utf16().take(31).enumerate() {
+                                dm.dm_form_name[idx] = ch;
+                            }
+                            dm.dm_fields |= DM_FORMNAME;
+                        }
+                    }
                     Some((
                         form,
                         MatchKind::Exact
                         | MatchKind::NearestLargerCentered
                         | MatchKind::NearestLargerFit,
                     )) if !form.name.is_empty() && form.name != "Custom" => {
+                        dm.dm_fields &= !(DM_PAPERWIDTH | DM_PAPERLENGTH);
                         if let Some(pid) = form.paper_id {
                             dm.dm_paper_size = pid as i16;
                             dm.dm_fields |= DM_PAPERSIZE;
@@ -314,7 +362,7 @@ fn build_printer_devmode(
                             (unrotated_w * 10.0).round().clamp(100.0, 32000.0) as i16;
                         dm.dm_paper_length =
                             (unrotated_h * 10.0).round().clamp(100.0, 32000.0) as i16;
-                        dm.dm_fields |= DM_PAPERSIZE | DM_PAPERWIDTH | DM_PAPERLENGTH;
+                        dm.dm_fields = (dm.dm_fields & !DM_FORMNAME) | DM_PAPERSIZE | DM_PAPERWIDTH | DM_PAPERLENGTH;
                     }
                 }
 
@@ -345,10 +393,10 @@ fn build_printer_devmode(
 
                 let merged = DocumentPropertiesW(
                     std::ptr::null_mut(),
-                    handle,
+                    handle.0,
                     name.as_ptr(),
-                    buf.as_mut_ptr(),
-                    buf.as_ptr(),
+                    buf.as_mut_ptr() as *mut u8,
+                    buf.as_ptr() as *const u8,
                     DM_IN_BUFFER | DM_OUT_BUFFER,
                 );
                 if merged < 0 {
@@ -358,9 +406,7 @@ fn build_printer_devmode(
                 }
             }
         }
-    };
-    unsafe { ClosePrinter(handle) };
-    result
+    }
 }
 
 /// Print a PDF through GDI: each page is rendered to a bitmap by the
@@ -437,8 +483,16 @@ pub fn print_pdf_gdi_detailed(
         );
     }
     let subjobs = split_subjobs(&page_sizes);
-    let capabilities =
-        printer_capabilities(printer).map_err(|e| GdiPrintError::setup(e.to_string()))?;
+    let capabilities = match printer_capabilities(printer) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            if opts.scale_policy == ScalePolicy::Strict {
+                return Err(GdiPrintError::setup(e));
+            }
+            eprintln!("Yaseir Print: capabilities unreadable for {printer:?} ({e}); falling back to driver defaults");
+            None
+        }
+    };
     let name = wide(printer);
     let mut total_sent = 0usize;
 
@@ -450,28 +504,37 @@ pub fn print_pdf_gdi_detailed(
                 message,
                 ambiguous: sent > 0,
             };
-            let matched = if capabilities.forms.is_empty() && !capabilities.custom_size_supported {
-                None
-            } else if opts.scale_policy == ScalePolicy::CustomAllowed {
-                Some(
-                    match_paper_auto(sub.size, &capabilities)
-                        .map_err(|e| stage_err(e.to_string(), total_sent))?,
-                )
-            } else {
-                Some(
-                    match_paper(sub.size, &capabilities.forms, opts.scale_policy)
-                        .map_err(|e| stage_err(e.to_string(), total_sent))?,
-                )
+            let matched = match &capabilities {
+                None => None,
+                Some(caps) if caps.forms.is_empty() && !caps.custom_size_supported => None,
+                Some(caps) if opts.scale_policy == ScalePolicy::CustomAllowed => {
+                    match match_paper_auto(sub.size, caps) {
+                        Ok(m) => Some(m),
+                        Err(e) => {
+                            eprintln!("Yaseir Print: paper match fallback for {printer:?} ({e})");
+                            None
+                        }
+                    }
+                }
+                Some(caps) => match match_paper(sub.size, &caps.forms, opts.scale_policy) {
+                    Ok(m) => Some(m),
+                    Err(e) => {
+                        if opts.scale_policy == ScalePolicy::Strict {
+                            return Err(stage_err(e.to_string(), total_sent));
+                        }
+                        eprintln!("Yaseir Print: paper match fallback for {printer:?} ({e})");
+                        None
+                    }
+                },
             };
             let match_ref = matched.as_ref().map(|m| (&m.form, m.kind));
-            let match_kind = matched.as_ref().map(|m| m.kind).unwrap_or(MatchKind::Exact);
-            let media_size = matched
+            let mut match_kind = matched
                 .as_ref()
-                .map(|selection| selection.form.size)
-                .unwrap_or(sub.size);
+                .map(|m| m.kind)
+                .unwrap_or(MatchKind::NearestLargerFit);
             let devmode = build_printer_devmode(
                 printer,
-                media_size,
+                sub.size,
                 match_ref,
                 opts.duplex,
                 opts.color,
@@ -481,16 +544,32 @@ pub fn print_pdf_gdi_detailed(
                 .as_ref()
                 .map(|b| b.as_ptr() as *const c_void)
                 .unwrap_or(std::ptr::null());
-            let dc =
+            let mut dc =
                 unsafe { CreateDCW(std::ptr::null(), name.as_ptr(), std::ptr::null(), init_ptr) };
+            if dc.is_null() && !init_ptr.is_null() {
+                eprintln!(
+                    "Yaseir Print: CreateDC with custom DEVMODE failed for {printer:?} ({}); retrying with driver defaults",
+                    last_error()
+                );
+                dc = unsafe {
+                    CreateDCW(
+                        std::ptr::null(),
+                        name.as_ptr(),
+                        std::ptr::null(),
+                        std::ptr::null(),
+                    )
+                };
+                match_kind = MatchKind::NearestLargerFit;
+            }
             if dc.is_null() {
                 return Err(stage_err(
                     format!("CreateDC for {printer:?}: {}", last_error()),
                     total_sent,
                 ));
             }
+            let dc = PrinterDc(dc);
             let sub_result = print_subjob_gdi(
-                dc,
+                dc.0,
                 &doc,
                 title,
                 sub.start_page,
@@ -500,7 +579,6 @@ pub fn print_pdf_gdi_detailed(
                 opts.mode,
                 opts.dpi,
             );
-            unsafe { DeleteDC(dc) };
             match sub_result {
                 Ok(sent) => total_sent += sent,
                 Err(mut e) => {
@@ -547,7 +625,6 @@ pub fn print_canvas_gdi_detailed(
 /// width exactly (the raster's own DPI is only a fallback), so a
 /// POS receipt lands on paper of its real width — a matching roll
 /// form, a custom size, or the closest larger form.
-#[allow(clippy::too_many_arguments)]
 pub fn print_canvas_gdi_configured(
     printer: &str,
     title: &str,
@@ -577,7 +654,7 @@ pub fn print_canvas_gdi_configured(
                 "Yaseir Print: caps-based canvas print to {printer:?} failed in setup ({}); retrying on the driver's default media",
                 error.message
             );
-            print_canvas_gdi_default_media(printer, title, canvas, copies)
+            print_canvas_gdi_default_media(printer, title, canvas, copies, roll_width_mm)
         }
         Err(error) => Err(error),
     }
@@ -592,6 +669,7 @@ fn print_canvas_gdi_default_media(
     title: &str,
     canvas: &print_render::bitmap::Canvas,
     copies: u16,
+    roll_width_mm: Option<f64>,
 ) -> Result<usize, GdiPrintError> {
     let name = wide(printer);
     let dc = unsafe {
@@ -608,6 +686,7 @@ fn print_canvas_gdi_default_media(
             last_error()
         )));
     }
+    let dc = PrinterDc(dc);
     let doc_name = wide(title);
     let info = DocInfoW {
         size: std::mem::size_of::<DocInfoW>() as i32,
@@ -616,22 +695,20 @@ fn print_canvas_gdi_default_media(
         datatype: std::ptr::null(),
         fw_type: 0,
     };
-    if unsafe { StartDocW(dc, &info) } <= 0 {
-        let err = last_error();
-        unsafe { DeleteDC(dc) };
-        return Err(GdiPrintError::setup(format!("StartDoc: {err}")));
+    if unsafe { StartDocW(dc.0, &info) } <= 0 {
+        return Err(GdiPrintError::setup(format!("StartDoc: {}", last_error())));
     }
-    match print_canvas_pages(dc, canvas, copies.max(1)) {
+    match print_canvas_pages(dc.0, canvas, copies.max(1), roll_width_mm) {
         Ok(pages) => {
-            unsafe { EndDoc(dc) };
-            unsafe { DeleteDC(dc) };
+            if unsafe { EndDoc(dc.0) } <= 0 {
+                return Err(GdiPrintError::mid_print(format!("EndDoc: {}", last_error())));
+            }
             Ok(pages)
         }
         Err(error) => {
             // The document started; pages may already be written —
             // ambiguous per ADR-0004, like the caps path.
-            unsafe { AbortDoc(dc) };
-            unsafe { DeleteDC(dc) };
+            unsafe { AbortDoc(dc.0) };
             Err(GdiPrintError::mid_print(error))
         }
     }
@@ -645,14 +722,6 @@ fn print_canvas_gdi_with_caps(
     tray: Option<&str>,
     roll_width_mm: Option<f64>,
 ) -> Result<usize, GdiPrintError> {
-    let page = print_render::RenderedPage {
-        width_px: canvas.width,
-        height_px: canvas.height,
-        mode: print_render::RenderMode::Grayscale,
-        dpi: 203,
-        pixels: canvas.px.clone(),
-    };
-    let dib = crate::dib::build_dib(&page);
 
     // POS/kitchen PNG jobs that use GDI must obey the same media contract as
     // PDF jobs: derive the physical page geometry from the 203-DPI raster,
@@ -720,6 +789,7 @@ fn print_canvas_gdi_with_caps(
             last_error()
         )));
     }
+    let dc = PrinterDc(dc);
     let doc_name = wide(title);
     let info = DocInfoW {
         size: std::mem::size_of::<DocInfoW>() as i32,
@@ -728,11 +798,9 @@ fn print_canvas_gdi_with_caps(
         datatype: std::ptr::null(),
         fw_type: 0,
     };
-    let started = unsafe { StartDocW(dc, &info) };
+    let started = unsafe { StartDocW(dc.0, &info) };
     if started <= 0 {
-        let err = last_error();
-        unsafe { DeleteDC(dc) };
-        return Err(GdiPrintError::setup(format!("StartDoc: {err}")));
+        return Err(GdiPrintError::setup(format!("StartDoc: {}", last_error())));
     }
     // Pagination decision: a receipt strip taller than the chosen
     // sheet is sliced across pages (the office/virtual printer
@@ -744,13 +812,32 @@ fn print_canvas_gdi_with_caps(
     let mut sent = 0usize;
     let mut failure: Option<String> = None;
     if paginate {
-        match print_canvas_pages(dc, canvas, copies.max(1)) {
+        match print_canvas_pages(dc.0, canvas, copies.max(1), roll_width_mm) {
             Ok(pages) => sent = pages,
             Err(error) => failure = Some(error),
         }
     } else {
+        // A short receipt on an office sheet (e.g. 80x120mm on A4) must
+        // print at its real physical width instead of stretching 2.6x across
+        // the full A4 width.
+        let blit_kind = if !matched.form.roll
+            && matched.kind == MatchKind::NearestLargerFit
+            && page_size.width_mm <= 120.0
+        {
+            MatchKind::NearestLargerCentered
+        } else {
+            matched.kind
+        };
+        let page = print_render::RenderedPage {
+            width_px: canvas.width,
+            height_px: canvas.height,
+            mode: print_render::RenderMode::Grayscale,
+            dpi: 203,
+            pixels: canvas.px.clone(),
+        };
+        let dib = crate::dib::build_dib(&page);
         for _ in 0..copies.max(1) {
-            match blit_dib_page(dc, &dib, Some(page_size), matched.kind) {
+            match blit_dib_page(dc.0, &dib, Some(page_size), blit_kind) {
                 Ok(()) => sent += 1,
                 Err(error) => {
                     failure = Some(error);
@@ -760,11 +847,10 @@ fn print_canvas_gdi_with_caps(
         }
     }
     if failure.is_some() {
-        unsafe { AbortDoc(dc) };
-    } else {
-        unsafe { EndDoc(dc) };
+        unsafe { AbortDoc(dc.0) };
+    } else if unsafe { EndDoc(dc.0) } <= 0 {
+        failure = Some(format!("EndDoc: {}", last_error()));
     }
-    unsafe { DeleteDC(dc) };
     match failure {
         // The document started; earlier copies may be on paper even
         // though AbortDoc was called — ambiguous per ADR-0004.
@@ -783,13 +869,25 @@ fn print_canvas_pages(
     dc: Hdc,
     canvas: &print_render::bitmap::Canvas,
     copies: u16,
+    max_width_mm: Option<f64>,
 ) -> Result<usize, String> {
     let area_w = unsafe { GetDeviceCaps(dc, HORZRES) };
     let area_h = unsafe { GetDeviceCaps(dc, VERTRES) };
     if area_w <= 0 || area_h <= 0 || canvas.width == 0 {
         return Err(format!("GetDeviceCaps: {}", last_error()));
     }
-    let scale = area_w as f64 / canvas.width as f64;
+    let target_w = match max_width_mm {
+        Some(mm) if mm > 0.0 && mm <= 120.0 => {
+            let dpi_x = unsafe { GetDeviceCaps(dc, LOGPIXELSX) };
+            if dpi_x > 0 {
+                (((mm / 25.4) * dpi_x as f64).round() as i32).clamp(1, area_w)
+            } else {
+                area_w
+            }
+        }
+        _ => area_w,
+    };
+    let scale = target_w as f64 / canvas.width as f64;
     let rows_per_page = ((area_h as f64 / scale).floor() as u32).max(1);
     let chunks = print_render::bitmap::page_row_chunks(canvas.height, rows_per_page);
     if chunks.is_empty() {
@@ -810,7 +908,7 @@ fn print_canvas_pages(
             let drawn_h = ((chunk.height as f64 * scale).round() as u32)
                 .min(area_h as u32)
                 .max(1);
-            blit_dib_top(dc, &dib, area_w as u32, drawn_h)?;
+            blit_dib_rect(dc, &dib, 0, 0, target_w as u32, drawn_h)?;
             sent += 1;
         }
     }
@@ -820,12 +918,23 @@ fn print_canvas_pages(
 /// Draw one DIB as a full-width, top-aligned page (StartPage ..
 /// EndPage): the chunk blit for paginated receipt strips, where
 /// vertical centering (fit_to_page) would misplace every slice.
-fn blit_dib_top(
+fn blit_dib_rect(
     dc: Hdc,
     dib: &crate::dib::DibImage,
+    x: i32,
+    y: i32,
     dest_w: u32,
     dest_h: u32,
 ) -> Result<(), String> {
+    if dib.width == 0 || dib.height == 0 || dib.bits.is_empty() || dest_w == 0 || dest_h == 0 {
+        return Err("StretchDIBits: empty DIB or destination rectangle".to_string());
+    }
+    let (dw, dh, sw, sh) = (
+        i32::try_from(dest_w).map_err(|_| "StretchDIBits: dest_w overflow".to_string())?,
+        i32::try_from(dest_h).map_err(|_| "StretchDIBits: dest_h overflow".to_string())?,
+        i32::try_from(dib.width).map_err(|_| "StretchDIBits: src_w overflow".to_string())?,
+        i32::try_from(dib.height).map_err(|_| "StretchDIBits: src_h overflow".to_string())?,
+    );
     if unsafe { StartPage(dc) } <= 0 {
         return Err(format!("StartPage: {}", last_error()));
     }
@@ -833,25 +942,27 @@ fn blit_dib_top(
     let drawn = unsafe {
         StretchDIBits(
             dc,
+            x,
+            y,
+            dw,
+            dh,
             0,
             0,
-            dest_w as i32,
-            dest_h as i32,
-            0,
-            0,
-            dib.width as i32,
-            dib.height as i32,
+            sw,
+            sh,
             dib.bits.as_ptr() as *const c_void,
             info.as_ptr() as *const c_void,
             DIB_RGB_COLORS,
             SRCCOPY,
         )
     };
-    let end = unsafe { EndPage(dc) };
     if drawn == GDI_ERROR || drawn == 0 {
-        return Err(format!("StretchDIBits: {}", last_error()));
+        // Capture GetLastError before EndPage can overwrite it.
+        let err = last_error();
+        unsafe { EndPage(dc) };
+        return Err(format!("StretchDIBits: {err}"));
     }
-    if end <= 0 {
+    if unsafe { EndPage(dc) } <= 0 {
         return Err(format!("EndPage: {}", last_error()));
     }
     Ok(())
@@ -895,8 +1006,8 @@ fn print_subjob_gdi(
     }
     if failure.is_some() {
         unsafe { AbortDoc(dc) };
-    } else {
-        unsafe { EndDoc(dc) };
+    } else if unsafe { EndDoc(dc) } <= 0 {
+        failure = Some(format!("EndDoc: {}", last_error()));
     }
     match failure {
         // The document started and earlier pages of it were ended:
@@ -940,43 +1051,17 @@ fn blit_dib_page(
             let dpi_y = unsafe { GetDeviceCaps(dc, LOGPIXELSY) }.max(72) as f64;
             let target_w = ((ps.width_mm / 25.4) * dpi_x).round().max(1.0) as u32;
             let target_h = ((ps.height_mm / 25.4) * dpi_y).round().max(1.0) as u32;
-            let w = target_w.min(area_w as u32);
-            let h = target_h.min(area_h as u32);
-            let x = ((area_w as u32).saturating_sub(w) / 2) as i32;
-            let y = ((area_h as u32).saturating_sub(h) / 2) as i32;
-            (x, y, w, h)
+            if target_w <= area_w as u32 && target_h <= area_h as u32 {
+                let x = ((area_w as u32 - target_w) / 2) as i32;
+                let y = ((area_h as u32 - target_h) / 2) as i32;
+                (x, y, target_w, target_h)
+            } else {
+                crate::dib::fit_to_page(target_w, target_h, area_w as u32, area_h as u32)
+            }
         }
         _ => crate::dib::fit_to_page(dib.width, dib.height, area_w as u32, area_h as u32),
     };
-    if unsafe { StartPage(dc) } <= 0 {
-        return Err(format!("StartPage: {}", last_error()));
-    }
-    let info = dib.bitmap_info();
-    let drawn = unsafe {
-        StretchDIBits(
-            dc,
-            x,
-            y,
-            w as i32,
-            h as i32,
-            0,
-            0,
-            dib.width as i32,
-            dib.height as i32,
-            dib.bits.as_ptr() as *const c_void,
-            info.as_ptr() as *const c_void,
-            DIB_RGB_COLORS,
-            SRCCOPY,
-        )
-    };
-    let end = unsafe { EndPage(dc) };
-    if drawn == GDI_ERROR || drawn == 0 {
-        return Err(format!("StretchDIBits: {}", last_error()));
-    }
-    if end <= 0 {
-        return Err(format!("EndPage: {}", last_error()));
-    }
-    Ok(())
+    blit_dib_rect(dc, dib, x, y, w, h)
 }
 
 #[repr(C)]
@@ -1028,26 +1113,28 @@ const PRINTER_ENUM_LOCAL: u32 = 0x0000_0002;
 const PRINTER_ENUM_CONNECTIONS: u32 = 0x0000_0004;
 
 unsafe fn read_wide(ptr: *const u16) -> String {
+    const MAX_WIDE_LEN: usize = 32_768;
     if ptr.is_null() {
         return String::new();
     }
-    let mut len = 0usize;
-    while *ptr.add(len) != 0 {
-        len += 1;
+    let mut units = Vec::new();
+    for len in 0..MAX_WIDE_LEN {
+        let ch = ptr.add(len).read_unaligned();
+        if ch == 0 {
+            break;
+        }
+        units.push(ch);
     }
-    String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len))
+    String::from_utf16_lossy(&units)
 }
 
 unsafe fn convert_info2(info: &PrinterInfo2W) -> crate::discovery::RawPrinterInfo2 {
     crate::discovery::RawPrinterInfo2 {
-        server_name: read_wide(info.server_name),
         printer_name: read_wide(info.printer_name),
-        share_name: read_wide(info.share_name),
         port_name: read_wide(info.port_name),
         driver_name: read_wide(info.driver_name),
         attributes: info.attributes,
         status: info.status,
-        job_count: info.c_jobs,
     }
 }
 
@@ -1087,13 +1174,14 @@ fn discover_printers_uncached() -> Result<Vec<print_core::PrinterInfo>, String> 
         }
         return Ok(Vec::new());
     }
-    let mut buf = vec![0u8; needed as usize];
+    let mut buf = aligned_byte_buf(needed as usize);
+    let buf_bytes = buf.len() * std::mem::size_of::<u64>();
     let ok = unsafe {
         EnumPrintersW(
             PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS,
             std::ptr::null(),
             2,
-            buf.as_mut_ptr(),
+            buf.as_mut_ptr() as *mut u8,
             needed,
             &mut needed,
             &mut returned,
@@ -1103,11 +1191,14 @@ fn discover_printers_uncached() -> Result<Vec<print_core::PrinterInfo>, String> 
         return Err(last_error());
     }
     let stride = std::mem::size_of::<PrinterInfo2W>();
+    let max_entries = buf_bytes / stride;
+    let count = (returned as usize).min(max_entries);
     let mut out = Vec::new();
-    for i in 0..returned as usize {
+    for i in 0..count {
         let info = unsafe {
-            let ptr = buf.as_ptr().add(i * stride) as *const PrinterInfo2W;
-            convert_info2(&*ptr)
+            let ptr = (buf.as_ptr() as *const u8).add(i * stride) as *const PrinterInfo2W;
+            let record = ptr.read_unaligned();
+            convert_info2(&record)
         };
         if crate::discovery::is_usable(&info) {
             out.push(crate::discovery::convert(&info));
@@ -1119,34 +1210,10 @@ fn discover_printers_uncached() -> Result<Vec<print_core::PrinterInfo>, String> 
 /// Spooler-reported status for one printer: open it and read its
 /// level-2 status via GetPrinter. This is the driver/spooler's view
 /// of the device (it can be delayed or incomplete), NOT a direct
-/// physical sensor read. (A DLE EOT status library exists in
-/// print-raw but is not wired into the app, so no physical sensor
-/// state is sensed today.)
+/// physical sensor read (network printers use TCP 9100 DLE EOT / ZPL / TSPL
+/// or IPP probes separately in `print-raw` / `print-ipp`).
 pub fn printer_status(printer: &str) -> Result<print_core::PrinterStatus, String> {
-    let name = wide(printer);
-    let mut handle: Handle = std::ptr::null_mut();
-    let ok = unsafe { OpenPrinterW(name.as_ptr(), &mut handle, std::ptr::null_mut()) };
-    if ok == 0 || handle.is_null() {
-        return Err(last_error());
-    }
-    let result = unsafe {
-        let mut needed: u32 = 0;
-        GetPrinterW(handle, 2, std::ptr::null_mut(), 0, &mut needed);
-        if needed == 0 {
-            Err(last_error())
-        } else {
-            let mut buf = vec![0u8; needed as usize];
-            let ok2 = GetPrinterW(handle, 2, buf.as_mut_ptr(), needed, &mut needed);
-            if ok2 == 0 {
-                Err(last_error())
-            } else {
-                let info = &*(buf.as_ptr() as *const PrinterInfo2W);
-                Ok(crate::discovery::convert(&convert_info2(info)).status)
-            }
-        }
-    };
-    unsafe { ClosePrinter(handle) };
-    result
+    printer_health(printer).map(|h| h.primary_status())
 }
 
 /// Full multi-condition health observation for one printer (same
@@ -1155,32 +1222,33 @@ pub fn printer_status(printer: &str) -> Result<print_core::PrinterStatus, String
 /// fabricated `Ready`: callers must treat it as unknown/stale.
 pub fn printer_health(printer: &str) -> Result<print_core::PrinterHealth, String> {
     let name = wide(printer);
-    let mut handle: Handle = std::ptr::null_mut();
-    let ok = unsafe { OpenPrinterW(name.as_ptr(), &mut handle, std::ptr::null_mut()) };
-    if ok == 0 || handle.is_null() {
+    let mut raw_handle: Handle = std::ptr::null_mut();
+    let ok = unsafe { OpenPrinterW(name.as_ptr(), &mut raw_handle, std::ptr::null_mut()) };
+    if ok == 0 || raw_handle.is_null() {
         return Err(last_error());
     }
-    let result = unsafe {
+    let handle = PrinterHandle(raw_handle);
+    unsafe {
         let mut needed: u32 = 0;
-        GetPrinterW(handle, 2, std::ptr::null_mut(), 0, &mut needed);
+        GetPrinterW(handle.0, 2, std::ptr::null_mut(), 0, &mut needed);
         if needed == 0 {
             Err(last_error())
         } else {
-            let mut buf = vec![0u8; needed as usize];
-            let ok2 = GetPrinterW(handle, 2, buf.as_mut_ptr(), needed, &mut needed);
+            let mut buf = aligned_byte_buf(needed as usize);
+            let ok2 = GetPrinterW(handle.0, 2, buf.as_mut_ptr() as *mut u8, needed, &mut needed);
             if ok2 == 0 {
                 Err(last_error())
+            } else if (needed as usize) < std::mem::size_of::<PrinterInfo2W>() {
+                Err("GetPrinterW returned truncated PRINTER_INFO_2W".to_string())
             } else {
-                let info = &*(buf.as_ptr() as *const PrinterInfo2W);
-                match crate::discovery::convert(&convert_info2(info)).health {
+                let info = (buf.as_ptr() as *const PrinterInfo2W).read_unaligned();
+                match crate::discovery::convert(&convert_info2(&info)).health {
                     Some(health) => Ok(health),
                     None => Err("spooler status produced no health observation".to_string()),
                 }
             }
         }
-    };
-    unsafe { ClosePrinter(handle) };
-    result
+    }
 }
 
 fn wide(s: &str) -> Vec<u16> {
@@ -1214,9 +1282,8 @@ pub fn default_printer_name() -> Result<String, String> {
     if ok == 0 {
         return Err(last_error());
     }
-    Ok(String::from_utf16_lossy(&buf)
-        .trim_end_matches('\0')
-        .to_string())
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    Ok(String::from_utf16_lossy(&buf[..end]))
 }
 
 /// Paper forms for a printer, via DeviceCapabilities (DC_PAPERS,
@@ -1233,10 +1300,13 @@ pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
             std::ptr::null(),
         )
     };
-    if count <= 0 {
+    if count < 0 {
         return Err(last_error());
     }
-    let n = count as usize;
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    let n = (count as usize).min(4096);
     let mut paper_ids = vec![0u16; n];
     let got_ids = unsafe {
         DeviceCapabilitiesW(
@@ -1335,7 +1405,12 @@ pub fn printer_capabilities(printer: &str) -> Result<print_core::PrinterCapabili
         Some(copies_raw.clamp(1, u16::MAX as i32) as u16)
     };
 
-    let resolution_count = count(DC_ENUMRESOLUTIONS).clamp(0, 128) as usize;
+    let raw_res_count = count(DC_ENUMRESOLUTIONS);
+    let resolution_count = if (1..=4096).contains(&raw_res_count) {
+        raw_res_count as usize
+    } else {
+        0
+    };
     let mut resolution_pairs = vec![0i32; resolution_count * 2];
     let got_resolutions = if resolution_count == 0 {
         0
@@ -1361,20 +1436,11 @@ pub fn printer_capabilities(printer: &str) -> Result<print_core::PrinterCapabili
     resolutions_dpi.sort_unstable();
     resolutions_dpi.dedup();
 
-    let bin_count = count(DC_BINS).clamp(0, 128) as usize;
-    let mut bin_ids = vec![0u16; bin_count];
-    let got_bins = if bin_count == 0 {
-        0
+    let raw_bin_count = count(DC_BINNAMES);
+    let bin_count = if (1..=4096).contains(&raw_bin_count) {
+        raw_bin_count as usize
     } else {
-        unsafe {
-            DeviceCapabilitiesW(
-                name.as_ptr(),
-                std::ptr::null(),
-                DC_BINS,
-                bin_ids.as_mut_ptr() as *mut c_void,
-                std::ptr::null(),
-            )
-        }
+        0
     };
     let mut bin_names = vec![0u16; bin_count * 24];
     let got_bin_names = if bin_count == 0 {
@@ -1390,9 +1456,7 @@ pub fn printer_capabilities(printer: &str) -> Result<print_core::PrinterCapabili
             )
         }
     };
-    let valid_bins = (got_bins.max(0) as usize)
-        .min(got_bin_names.max(0) as usize)
-        .min(bin_count);
+    let valid_bins = (got_bin_names.max(0) as usize).min(bin_count);
     let bins: Vec<String> = (0..valid_bins)
         .filter_map(|i| {
             let block = &bin_names[i * 24..(i + 1) * 24];
@@ -1436,27 +1500,6 @@ pub fn printer_capabilities(printer: &str) -> Result<print_core::PrinterCapabili
     ))
 }
 
-/// A failed raw spooler send, classified by HOW FAR the payload
-/// got (ADR-0004): `pre_write` failures (the queue could not be
-/// opened, or the spooler/driver refused the RAW document before
-/// any payload byte was accepted — the signature of a GDI-only
-/// POS driver) prove nothing was printed, so the caller may retry
-/// or re-render through GDI. A failure inside WritePrinter is
-/// ambiguous: part of the stream may already be on paper.
-#[derive(Debug)]
-pub struct RawSendError {
-    pub pre_write: bool,
-    pub message: String,
-}
-
-impl std::fmt::Display for RawSendError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl std::error::Error for RawSendError {}
-
 /// Submit raw bytes (ESC/POS, ZPL, TSPL) to a printer through the spooler
 /// with the RAW datatype. Returns the spooler job id.
 pub fn print_raw(printer: &str, title: &str, bytes: &[u8]) -> Result<u32, String> {
@@ -1470,12 +1513,13 @@ pub fn print_raw_phased(printer: &str, title: &str, bytes: &[u8]) -> Result<u32,
         message,
     };
     let name = wide(printer);
-    let mut handle: Handle = std::ptr::null_mut();
-    let ok = unsafe { OpenPrinterW(name.as_ptr(), &mut handle, std::ptr::null_mut()) };
-    if ok == 0 || handle.is_null() {
+    let mut raw_handle: Handle = std::ptr::null_mut();
+    let ok = unsafe { OpenPrinterW(name.as_ptr(), &mut raw_handle, std::ptr::null_mut()) };
+    if ok == 0 || raw_handle.is_null() {
         return Err(pre(last_error()));
     }
-    let result = unsafe {
+    let handle = PrinterHandle(raw_handle);
+    unsafe {
         let doc_name = wide(title);
         let datatype = wide("RAW");
         let doc = DocInfo1W {
@@ -1483,14 +1527,14 @@ pub fn print_raw_phased(printer: &str, title: &str, bytes: &[u8]) -> Result<u32,
             output_file: std::ptr::null(),
             datatype: datatype.as_ptr(),
         };
-        let job_id = StartDocPrinterW(handle, 1, &doc);
+        let job_id = StartDocPrinterW(handle.0, 1, &doc);
         if job_id == 0 {
             Err(pre(last_error()))
-        } else if StartPagePrinter(handle) == 0 {
-            // Capture the error BEFORE EndDocPrinter can clobber it.
+        } else if StartPagePrinter(handle.0) == 0 {
+            // Capture the error BEFORE AbortPrinter can clobber it.
             // No payload byte was written yet: still pre-write.
             let err = last_error();
-            EndDocPrinter(handle);
+            AbortPrinter(handle.0);
             Err(pre(err))
         } else {
             // WritePrinter may accept fewer bytes than requested;
@@ -1505,36 +1549,39 @@ pub fn print_raw_phased(printer: &str, title: &str, bytes: &[u8]) -> Result<u32,
                 let chunk = &bytes[offset..];
                 let mut written: u32 = 0;
                 let w_ok = WritePrinter(
-                    handle,
+                    handle.0,
                     chunk.as_ptr() as *const c_void,
                     u32::try_from(chunk.len()).unwrap_or(u32::MAX),
                     &mut written,
                 );
-                let err = last_error();
                 if w_ok == 0 || written == 0 {
+                    let err = last_error();
                     failure = Some(format!(
                         "WritePrinter failed at byte {offset} of {}: {err}",
                         bytes.len()
                     ));
                     break;
                 }
-                offset += written as usize;
+                offset += (written as usize).min(chunk.len());
             }
             if let Some(err) = failure {
-                AbortPrinter(handle);
+                AbortPrinter(handle.0);
                 // A write-phase failure is ambiguous by definition
                 // (ADR-0004): bytes may already be on paper.
                 Err(RawSendError {
                     pre_write: false,
                     message: err,
                 })
+            } else if EndPagePrinter(handle.0) == 0 || EndDocPrinter(handle.0) == 0 {
+                let err = last_error();
+                AbortPrinter(handle.0);
+                Err(RawSendError {
+                    pre_write: false,
+                    message: format!("EndDocPrinter failed: {err}"),
+                })
             } else {
-                EndPagePrinter(handle);
-                EndDocPrinter(handle);
                 Ok(job_id)
             }
         }
-    };
-    unsafe { ClosePrinter(handle) };
-    result
+    }
 }

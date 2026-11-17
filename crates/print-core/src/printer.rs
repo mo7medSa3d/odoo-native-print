@@ -92,13 +92,16 @@ pub fn decode_printer_status(flags: u32) -> PrinterStatus {
 }
 
 fn is_ipv4(s: &str) -> bool {
-    let parts: Vec<&str> = s.split('.').collect();
-    parts.len() == 4
-        && parts.iter().all(|p| {
-            !p.is_empty()
-                && p.chars().all(|c| c.is_ascii_digit())
-                && p.parse::<u16>().map(|v| v <= 255).unwrap_or(false)
-        })
+    s.parse::<std::net::Ipv4Addr>().is_ok()
+}
+
+fn is_ipv6_endpoint(s: &str) -> bool {
+    if let Some(rest) = s.strip_prefix('[') {
+        if let Some((ip, _)) = rest.split_once(']') {
+            return ip.parse::<std::net::Ipv6Addr>().is_ok();
+        }
+    }
+    s.parse::<std::net::Ipv6Addr>().is_ok()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -226,13 +229,20 @@ pub fn preferred_raw_render_dpi(resolutions_dpi: &[u32]) -> u32 {
 /// name or model match alone.
 pub fn stable_printer_id(driver: &str, port: &str) -> Option<String> {
     let p = port.trim().to_ascii_uppercase();
+    let host_part = p.split(':').next().unwrap_or("");
     let endpoint = p.starts_with("USB")
         || p.starts_with("COM")
         || p.starts_with("LPT")
+        || p.starts_with("TCP")
+        || p.starts_with("RAW")
+        || p.starts_with("HTTP")
+        || p.starts_with("\\\\")
         || p.contains("IP_")
         || p.contains("WSD")
         || p.contains("IPP")
-        || is_ipv4(&p);
+        || is_ipv4(&p)
+        || is_ipv4(host_part)
+        || is_ipv6_endpoint(&p);
     if !endpoint {
         return None;
     }
@@ -296,17 +306,23 @@ impl PrinterCapabilities {
 impl PrinterCapabilities {
     /// Can this printer physically take a custom size of `size`?
     pub fn custom_size_ok(&self, size: crate::PageSize) -> bool {
-        if !self.custom_size_supported {
+        if !self.custom_size_supported
+            || !size.width_mm.is_finite()
+            || !size.height_mm.is_finite()
+            || size.width_mm <= 0.0
+            || size.height_mm <= 0.0
+        {
             return false;
         }
+        const EPS: f64 = 0.1;
         let fits_orientation = |width: f64, height: f64| {
             if let Some((min_w, min_h)) = self.min_custom_mm {
-                if width < min_w || height < min_h {
+                if width + EPS < min_w || height + EPS < min_h {
                     return false;
                 }
             }
             if let Some((max_w, max_h)) = self.max_custom_mm {
-                if width > max_w || height > max_h {
+                if width > max_w + EPS || height > max_h + EPS {
                     return false;
                 }
             }
@@ -379,11 +395,29 @@ pub fn detect_protocol(
     if signature.contains("zdesigner") || signature.contains("zebra") || has_word("zpl") {
         return ("zpl", "label");
     }
-    if has_word("tsc") || has_word("tspl") {
+    // Xprinter / Gprinter TSPL barcode/label models (must be checked BEFORE
+    // generic "xprinter" / "gprinter" thermal tokens below).
+    const TSPL_LABEL_MODELS: [&str; 14] = [
+        "xp-235", "xp-350", "xp-365", "xp-370", "xp-420", "xp-450", "xp-460",
+        "xp-470", "xp-490", "gp-1124", "gp-1324", "gp-1924", "gp-2120", "gp-3120",
+    ];
+    if has_word("tsc")
+        || has_word("tspl")
+        || TSPL_LABEL_MODELS.iter().any(|m| signature.contains(m))
+    {
         return ("tspl", "label");
     }
     if has_word("epl") {
         return ("epl", "label");
+    }
+    // Office printer families must never be misclassified as thermal POS
+    // even if a queue is named "Receipt LaserJet".
+    const OFFICE_EXCLUSIONS: [&str; 12] = [
+        "laserjet", "deskjet", "officejet", "inkjet", "ecosys", "bizhub",
+        "ricoh", "xerox", "kyocera", "brother hl", "brother dcp", "brother mfc",
+    ];
+    if OFFICE_EXCLUSIONS.iter().any(|t| signature.contains(t)) {
+        return ("gdi", "office");
     }
     // Kept in sync with the fallback heuristic in the addon's
     // native_print_client.js (this Rust detection is the primary:
@@ -392,13 +426,17 @@ pub fn detect_protocol(
     // clone drivers very often identify only as "POS Printer" /
     // "POS80" / "Thermal Printer", and missing them routed real
     // POS printers to GDI (owner report, 2026-11-05).
-    const THERMAL_TOKENS: [&str; 45] = [
+    const THERMAL_TOKENS: [&str; 67] = [
         "epson tm-",
         "epson tm ",
         "xprinter",
         "rongta",
         "bixolon",
         "star tsp",
+        "star micronics",
+        "tsp100",
+        "tsp143",
+        "tsp650",
         "citizen ct-",
         "citizen",
         "sewoo",
@@ -411,6 +449,7 @@ pub fn detect_protocol(
         "pos printer",
         "pos-58",
         "pos-80",
+        "pos-90",
         "pos58",
         "pos80",
         "tm-t",
@@ -431,17 +470,27 @@ pub fn detect_protocol(
         "mc-print",
         "xp-80",
         "xp-58",
-        // Bare media widths in a printer's name/driver are
-        // receipt hardware by definition — no office printer is
-        // named after a 58/80 mm roll (2026-11-06 expansion from
-        // the real-world POS ecosystem: clone drivers often carry
-        // nothing but the width and a generic word).
+        "xp-q",
+        "xp-n",
+        "xp-v",
+        "xp-c",
+        "xp-t",
+        "rp80",
+        "rp326",
+        "tp80",
+        "zkp80",
+        "gp-u80",
+        "gp-l80",
+        "sam4s",
+        "metapace",
+        "hoin",
+        "ocom",
+        "goojprt",
+        "zonerich",
         "58mm",
         "80mm",
         "usb thermal",
         "mini printer",
-        // Clone drivers frequently report Chinese identities:
-        // thermal / receipt / small-ticket printer.
         "热敏",
         "票据",
         "小票",
@@ -449,16 +498,12 @@ pub fn detect_protocol(
     if THERMAL_TOKENS.iter().any(|t| signature.contains(t)) {
         return ("escpos", "thermal");
     }
-    if kind == PrinterKind::Network && (signature.contains("ipp") || signature.contains("airprint"))
-    {
-        return ("gdi", "office");
-    }
     ("gdi", "office")
 }
 
 impl PrinterInfo {
     pub fn classify(name: &str, port: &str) -> PrinterKind {
-        let p = port.to_ascii_uppercase();
+        let p = port.trim().to_ascii_uppercase();
         let n = name.to_ascii_lowercase();
         // Virtual writers render into a file or another app instead
         // of paper: PDF/XPS writers, the save-prompt port, OneNote
@@ -469,11 +514,21 @@ impl PrinterInfo {
         if n.contains("print to pdf")
             || n.contains("xps")
             || n.contains("onenote")
+            || n.contains("foxit")
+            || n.contains("adobe pdf")
+            || n.contains("cutepdf")
+            || n.contains("bullzip")
+            || n.contains("pdfcreator")
+            || n.contains("dopdf")
+            || n.contains("nitro pdf")
+            || n.contains("primopdf")
             || p.starts_with("PORTPROMPT")
+            || p == "NUL"
             || p.starts_with("NUL:")
+            || p.starts_with("SHRFAX:")
         {
             PrinterKind::Virtual
-        } else if name.starts_with("\\\\") {
+        } else if name.trim().starts_with("\\\\") || p.starts_with("\\\\") {
             PrinterKind::Shared
         } else if p.starts_with("USB")
             || p.starts_with("COM")
@@ -483,7 +538,10 @@ impl PrinterInfo {
             // Physical local ports and print-to-file: the ':' in
             // "COM1:" / "FILE:" must not read as a network endpoint.
             PrinterKind::Local
-        } else if p.contains("IP_")
+        } else if p.starts_with("TCP")
+            || p.starts_with("RAW")
+            || p.starts_with("HTTP")
+            || p.contains("IP_")
             || p.contains("IPP")
             || p.contains("WSD")
             || p.contains(':')
@@ -502,12 +560,12 @@ impl PrinterInfo {
 /// go to a physical printer. A virtual PDF/XPS writer would spool the
 /// raw bytes into a document file, producing a corrupt, unopenable
 /// "PDF" instead of a page (field report, 2026-11-04).
+fn is_raw_language(v: &str) -> bool {
+    matches!(v, "escpos" | "zpl" | "tspl" | "epl")
+}
+
 pub fn raw_delivery_blocked(payload_kind: &str, mode: &str, printer: PrinterKind) -> bool {
-    if printer != PrinterKind::Virtual {
-        return false;
-    }
-    let raw = |v: &str| matches!(v, "escpos" | "zpl" | "tspl" | "epl");
-    raw(payload_kind) || raw(mode)
+    printer == PrinterKind::Virtual && (is_raw_language(payload_kind) || is_raw_language(mode))
 }
 
 /// The error code when a job must NOT be delivered to this printer
@@ -531,11 +589,8 @@ pub fn raw_target_block(
     if raw_delivery_blocked(payload_kind, mode, printer) {
         return Some("RAW_TO_VIRTUAL_PRINTER");
     }
-    if printer_class == "office" {
-        let raw = |v: &str| matches!(v, "escpos" | "zpl" | "tspl" | "epl");
-        if raw(payload_kind) {
-            return Some("RAW_TO_OFFICE_PRINTER");
-        }
+    if printer_class == "office" && is_raw_language(payload_kind) {
+        return Some("RAW_TO_OFFICE_PRINTER");
     }
     None
 }
@@ -572,10 +627,7 @@ pub fn document_mode_downgrade(
     if !matches!(payload_kind, "pdf" | "image-png") {
         return None;
     }
-    match mode {
-        "escpos" | "zpl" | "tspl" | "epl" => Some("gdi"),
-        _ => None,
-    }
+    is_raw_language(mode).then_some("gdi")
 }
 
 #[cfg(test)]
@@ -681,6 +733,8 @@ mod tests {
         assert!(caps.custom_size_ok(crate::PageSize::label_100x150()));
         assert!(!caps.custom_size_ok(crate::PageSize::new(300.0, 300.0)));
         assert!(!caps.custom_size_ok(crate::PageSize::new(10.0, 100.0)));
+        assert!(!caps.custom_size_ok(crate::PageSize::new(f64::NAN, 100.0)));
+        assert!(!caps.custom_size_ok(crate::PageSize::new(0.0, 100.0)));
     }
 
     #[test]
@@ -698,6 +752,10 @@ mod tests {
         );
         assert_eq!(
             PrinterInfo::classify("Discard Queue", "NUL:"),
+            PrinterKind::Virtual
+        );
+        assert_eq!(
+            PrinterInfo::classify("Discard Queue", "NUL"),
             PrinterKind::Virtual
         );
         // The established cases keep their kinds.
@@ -940,6 +998,8 @@ mod tests {
         // A different port is a different endpoint; virtual/file ports
         // have no endpoint identity at all and never merge.
         assert_ne!(a, stable_printer_id("EPSON TM-T88VII", "USB002").unwrap());
+        assert!(stable_printer_id("EPSON TM-T88VII", "192.168.1.50:9100").is_some());
+        assert!(stable_printer_id("EPSON TM-T88VII", "[fd00::25]:9100").is_some());
         assert_eq!(
             stable_printer_id("Microsoft Print To PDF", "PORTPROMPT:"),
             None
@@ -1021,5 +1081,62 @@ mod tests {
         ));
         assert!(!raw_delivery_blocked("zpl", "zpl", PrinterKind::Network));
         assert!(!raw_delivery_blocked("pdf", "escpos", PrinterKind::Shared));
+    }
+
+    #[test]
+    fn shared_unc_and_ipp_printers_classify_id_and_route_cleanly() {
+        assert_eq!(
+            PrinterInfo::classify(r"\\POS-PC\XP-80C", r"\\POS-PC\XP-80C"),
+            PrinterKind::Shared
+        );
+        assert_eq!(
+            PrinterInfo::classify("Receipt Printer", r"\\POS-PC\XP-80C"),
+            PrinterKind::Shared
+        );
+        assert_eq!(
+            PrinterInfo::classify("Office IPP", "http://192.168.1.50:631/ipp/print"),
+            PrinterKind::Network
+        );
+        assert_eq!(
+            PrinterInfo::classify("Office IPP", "ipp://printer.local/ipp/print"),
+            PrinterKind::Network
+        );
+        assert_eq!(
+            PrinterInfo::classify("LAN Thermal", "TCP_192.168.1.50"),
+            PrinterKind::Network
+        );
+        assert_eq!(
+            PrinterInfo::classify("LAN Thermal", "RAW_9100"),
+            PrinterKind::Network
+        );
+        assert!(stable_printer_id("Generic / Text Only", r"\\POS-PC\XP-80C").is_some());
+        assert!(
+            stable_printer_id("Microsoft IPP Class Driver", "http://192.168.1.50:631/ipp/print")
+                .is_some()
+        );
+        assert_eq!(
+            detect_protocol(r"\\POS-PC\XP-80C", "POS Printer Driver", PrinterKind::Shared),
+            ("escpos", "thermal")
+        );
+        assert_eq!(
+            detect_protocol(
+                r"\\POS-PC\Zebra ZD230",
+                "ZDesigner ZD230-203dpi ZPL",
+                PrinterKind::Shared
+            ),
+            ("zpl", "label")
+        );
+        assert_eq!(
+            raw_target_block("escpos", "escpos", PrinterKind::Shared, "thermal"),
+            None
+        );
+        assert_eq!(
+            raw_target_block("escpos", "escpos", PrinterKind::Shared, "office"),
+            Some("RAW_TO_OFFICE_PRINTER")
+        );
+        assert_eq!(
+            document_mode_downgrade("pdf", "escpos", PrinterKind::Shared, "office"),
+            Some("gdi")
+        );
     }
 }

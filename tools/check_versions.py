@@ -23,10 +23,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def main():
-    conf = json.loads((ROOT / "app/src-tauri/tauri.conf.json").read_text())
-    pkg = json.loads((ROOT / "app/package.json").read_text())
-    lock = json.loads((ROOT / "app/package-lock.json").read_text())
-    cargo = (ROOT / "app/src-tauri/Cargo.toml").read_text()
+    conf = json.loads((ROOT / "app/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
+    pkg = json.loads((ROOT / "app/package.json").read_text(encoding="utf-8"))
+    lock = json.loads((ROOT / "app/package-lock.json").read_text(encoding="utf-8"))
+    cargo = (ROOT / "app/src-tauri/Cargo.toml").read_text(encoding="utf-8")
     m = re.search(r'^version\s*=\s*"([^"]+)"', cargo, re.M)
     versions = {
         "tauri.conf.json": conf["version"],
@@ -35,7 +35,7 @@ def main():
         "package-lock packages['']": (lock.get("packages") or {}).get("", {}).get("version"),
         "Cargo.toml": m.group(1) if m else None,
     }
-    manifest = (ROOT / "odoo/native_print/__manifest__.py").read_text()
+    manifest = (ROOT / "odoo/native_print/__manifest__.py").read_text(encoding="utf-8")
     am = re.search(r'"version":\s*"([^"]+)"', manifest)
     if not am:
         print("ADDON MANIFEST UNPARSEABLE: no version string found")

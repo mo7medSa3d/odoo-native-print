@@ -1,14 +1,17 @@
 use crate::mono::MonoBitmap;
+use std::fmt::Write as _;
 
 /// ZPL ^GFA graphic field: ^GFA,<total_bytes>,<total_bytes>,<bytes_per_row>,<hex data>
 /// Hex is uppercase ASCII, one nibble pair per byte, no compression (correct
 /// first; compression is an optimisation, not a correctness feature).
 pub fn zpl_graphic_field(bm: &MonoBitmap) -> String {
-    let total = bm.data.len();
     let bpr = bm.bytes_per_row();
+    let expected = bpr.saturating_mul(bm.height_dots as usize);
+    let data = &bm.data[..expected.min(bm.data.len())];
+    let total = data.len();
     let mut hex = String::with_capacity(total * 2);
-    for b in &bm.data {
-        hex.push_str(&format!("{b:02X}"));
+    for b in data {
+        let _ = write!(hex, "{b:02X}");
     }
     format!("^GFA,{total},{total},{bpr},{hex}")
 }
@@ -116,6 +119,9 @@ pub fn parse_host_status(response: &str) -> Option<ZplHostStatus> {
             .unwrap_or_default()
     };
     let s1 = fields(0);
+    if s1.len() < 2 {
+        return None;
+    }
     let s2 = fields(1);
     fn get<'a>(v: &[&'a str], i: usize) -> Option<&'a str> {
         v.get(i).copied()
@@ -173,6 +179,7 @@ mod tests {
     fn host_status_tolerates_short_and_empty_responses() {
         assert_eq!(parse_host_status(""), None);
         assert_eq!(parse_host_status("\n\n"), None);
+        assert_eq!(parse_host_status("garbage response"), None);
         // One short line: missing fields read as clear, never panic.
         let st = parse_host_status("000,1").unwrap();
         assert!(st.paper_out);

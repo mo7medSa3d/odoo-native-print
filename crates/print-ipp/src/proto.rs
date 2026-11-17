@@ -9,6 +9,8 @@ pub mod tag {
     pub const INTEGER: u8 = 0x21;
     pub const BOOLEAN: u8 = 0x22;
     pub const ENUM: u8 = 0x23;
+    pub const TEXT_WITH_LANGUAGE: u8 = 0x35;
+    pub const NAME_WITH_LANGUAGE: u8 = 0x36;
     pub const TEXT: u8 = 0x41;
     pub const NAME: u8 = 0x42;
     pub const KEYWORD: u8 = 0x44;
@@ -120,19 +122,21 @@ fn base_operation_attrs(printer_uri: &str) -> Vec<Attr> {
 }
 
 fn write_attr(out: &mut Vec<u8>, attr: &Attr) {
+    let name_bytes = &attr.name.as_bytes()[..attr.name.len().min(u16::MAX as usize)];
     for (i, value) in attr.values.iter().enumerate() {
         out.push(value.tag());
         if i == 0 {
-            out.extend_from_slice(&(attr.name.len() as u16).to_be_bytes());
-            out.extend_from_slice(attr.name.as_bytes());
+            out.extend_from_slice(&(name_bytes.len() as u16).to_be_bytes());
+            out.extend_from_slice(name_bytes);
         } else {
             // Additional values: zero-length name (RFC 8010 section 3.1.4).
             out.extend_from_slice(&0u16.to_be_bytes());
         }
         let mut vb = Vec::new();
         value.encode(&mut vb);
-        out.extend_from_slice(&(vb.len() as u16).to_be_bytes());
-        out.extend_from_slice(&vb);
+        let val_len = vb.len().min(u16::MAX as usize);
+        out.extend_from_slice(&(val_len as u16).to_be_bytes());
+        out.extend_from_slice(&vb[..val_len]);
     }
 }
 
@@ -215,14 +219,11 @@ impl IppMessage {
         self.attrs_in(group).find(|a| a.name == name)
     }
     pub fn texts(&self, group: u8, name: &str) -> Vec<String> {
-        match self.find(group, name) {
-            Some(a) => a
-                .values
-                .iter()
-                .filter_map(|v| v.as_text().map(|s| s.to_string()))
-                .collect(),
-            None => Vec::new(),
-        }
+        self.attrs_in(group)
+            .filter(|a| a.name == name)
+            .flat_map(|a| a.values.iter())
+            .filter_map(|v| v.as_text().map(|s| s.to_string()))
+            .collect()
     }
     pub fn int(&self, group: u8, name: &str) -> Option<i32> {
         self.find(group, name)
@@ -248,6 +249,24 @@ impl IppMessage {
     }
 }
 
+fn decode_with_language(raw: &[u8]) -> Option<String> {
+    if raw.len() < 4 {
+        return None;
+    }
+    let lang_len = u16::from_be_bytes([raw[0], raw[1]]) as usize;
+    let text_len_at = 2usize.checked_add(lang_len)?;
+    if text_len_at.checked_add(2)? > raw.len() {
+        return None;
+    }
+    let text_len = u16::from_be_bytes([raw[text_len_at], raw[text_len_at + 1]]) as usize;
+    let text_start = text_len_at + 2;
+    let text_end = text_start.checked_add(text_len)?;
+    if text_end > raw.len() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&raw[text_start..text_end]).to_string())
+}
+
 fn parse_value(vtag: u8, raw: &[u8]) -> Value {
     match vtag {
         tag::INTEGER if raw.len() == 4 => {
@@ -257,9 +276,17 @@ fn parse_value(vtag: u8, raw: &[u8]) -> Value {
             Value::Enum(i32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]))
         }
         tag::BOOLEAN if raw.len() == 1 => Value::Boolean(raw[0] != 0),
+        tag::TEXT_WITH_LANGUAGE | tag::NAME_WITH_LANGUAGE => {
+            let decoded = decode_with_language(raw)
+                .unwrap_or_else(|| String::from_utf8_lossy(raw).to_string());
+            Value::Text(vtag, decoded)
+        }
         t => Value::Text(t, String::from_utf8_lossy(raw).to_string()),
     }
 }
+
+const MAX_IPP_GROUPS: usize = 64;
+const MAX_IPP_ATTRS: usize = 4096;
 
 /// Parse a request or response. Never panics on hostile input; malformed
 /// messages return Err with the offset that failed.
@@ -274,6 +301,7 @@ pub fn parse_message(bytes: &[u8]) -> Result<IppMessage, String> {
     let mut groups: Vec<(u8, Vec<Attr>)> = Vec::new();
     let mut current_group: Option<u8> = None;
     let mut last_attr: Option<usize> = None; // index into current (last) group's attrs
+    let mut attr_count = 0usize;
     loop {
         if pos >= bytes.len() {
             return Err(format!("unterminated message at {pos}"));
@@ -285,6 +313,9 @@ pub fn parse_message(bytes: &[u8]) -> Result<IppMessage, String> {
         }
         // RFC 8010 section 3.5.1: delimiter tags are 0x00..=0x0F (0x03 is handled above).
         if (0x01..=0x0F).contains(&b) {
+            if groups.len() >= MAX_IPP_GROUPS {
+                return Err(format!("too many IPP groups at {pos}"));
+            }
             current_group = Some(b);
             groups.push((b, Vec::new()));
             last_attr = None;
@@ -295,20 +326,28 @@ pub fn parse_message(bytes: &[u8]) -> Result<IppMessage, String> {
         if current_group.is_none() {
             return Err(format!("attribute value before any group at {pos}"));
         };
+        attr_count += 1;
+        if attr_count > MAX_IPP_ATTRS {
+            return Err(format!("too many IPP attributes at {pos}"));
+        }
         let vtag = b;
         if pos + 3 > bytes.len() {
             return Err(format!("truncated attribute header at {pos}"));
         }
         let name_len = u16::from_be_bytes([bytes[pos + 1], bytes[pos + 2]]) as usize;
         let name_start = pos + 3;
-        let value_len_at = name_start + name_len;
-        if value_len_at + 2 > bytes.len() {
+        let value_len_at = name_start
+            .checked_add(name_len)
+            .ok_or_else(|| format!("attribute name overflow at {pos}"))?;
+        if value_len_at.checked_add(2).is_none_or(|end| end > bytes.len()) {
             return Err(format!("truncated attribute name at {pos}"));
         }
         let name = String::from_utf8_lossy(&bytes[name_start..value_len_at]).to_string();
         let value_len = u16::from_be_bytes([bytes[value_len_at], bytes[value_len_at + 1]]) as usize;
         let value_start = value_len_at + 2;
-        let value_end = value_start + value_len;
+        let value_end = value_start
+            .checked_add(value_len)
+            .ok_or_else(|| format!("attribute value overflow at {pos}"))?;
         if value_end > bytes.len() {
             return Err(format!("truncated attribute value at {pos}"));
         }
@@ -338,4 +377,39 @@ pub fn parse_message(bytes: &[u8]) -> Result<IppMessage, String> {
         groups,
         data: bytes[pos..].to_vec(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_name_and_text_with_language() {
+        // Compound value: 2-byte lang len + "en" + 2-byte text len + "OfficeJet"
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&2u16.to_be_bytes());
+        raw.extend_from_slice(b"en");
+        raw.extend_from_slice(&9u16.to_be_bytes());
+        raw.extend_from_slice(b"OfficeJet");
+        let val = parse_value(tag::NAME_WITH_LANGUAGE, &raw);
+        assert_eq!(val.as_text(), Some("OfficeJet"));
+        let val_text = parse_value(tag::TEXT_WITH_LANGUAGE, &raw);
+        assert_eq!(val_text.as_text(), Some("OfficeJet"));
+    }
+
+    #[test]
+    fn rejects_excessive_attribute_count() {
+        let mut msg = Vec::new();
+        write_header(&mut msg, 0x0000, 1);
+        msg.push(tag::GROUP_OPERATION);
+        for _ in 0..=MAX_IPP_ATTRS {
+            msg.push(tag::BOOLEAN);
+            msg.extend_from_slice(&1u16.to_be_bytes());
+            msg.push(b'x');
+            msg.extend_from_slice(&1u16.to_be_bytes());
+            msg.push(1);
+        }
+        msg.push(tag::END_OF_ATTRIBUTES);
+        assert!(parse_message(&msg).is_err());
+    }
 }

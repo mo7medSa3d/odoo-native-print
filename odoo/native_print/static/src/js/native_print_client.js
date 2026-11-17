@@ -8,6 +8,7 @@ import { _t } from "@web/core/l10n/translation";
 // ---------------------------------------------------------------------
 
 const SELECTION_KEY = "native_print.selected_printer";
+const POS_SELECTION_KEY = "native_print.selected_pos_printer";
 
 /*
  * The terminal job states — one half of the job-state contract
@@ -43,15 +44,39 @@ export function setSelectedPrinter(name) {
     }
 }
 
+export function getSelectedPosPrinter() {
+    try {
+        return window.localStorage.getItem(POS_SELECTION_KEY) || null;
+    } catch (_error) {
+        return null;
+    }
+}
+
+export function setSelectedPosPrinter(name) {
+    try {
+        if (name) {
+            window.localStorage.setItem(POS_SELECTION_KEY, name);
+        } else {
+            window.localStorage.removeItem(POS_SELECTION_KEY);
+        }
+    } catch (_error) {
+        // Selection is a convenience; printing must not depend on it.
+    }
+}
+
 /** Conservative protocol inference from the installed driver identity. */
 export function detectPrinterType(printer) {
     // The desktop bridge ships the app's own protocol detection on
-    // every printer (Rust print-core detect_protocol, present
-    // since app 1.4.11): when it is there it is the ONLY detection
-    // — a second name heuristic in the page disagreed with it in
-    // the field and valid POS printers were routed to the wrong
-    // mode and refused. The heuristic below remains only as a
-    // fallback for bridges too old to ship the fields.
+    // Virtual writers are an unconditional safety override. Even a
+    // stale or inconsistent bridge payload must never make a PDF/XPS
+    // writer look like a RAW thermal or label target.
+    const kind = (printer && printer.kind) || "local";
+    if (kind === "virtual") {
+        return { mode: "gdi", printerClass: "virtual" };
+    }
+    // Rust print-core detection is authoritative for non-virtual
+    // printers; the name heuristic below is only a fallback for older
+    // bridge payloads that do not include protocol/class fields.
     if (printer && printer.protocol) {
         return {
             mode: printer.protocol,
@@ -62,10 +87,6 @@ export function detectPrinterType(printer) {
     const signature =
         `${(printer && printer.name) || ""} ${(printer && printer.driver) || ""}`
             .toLowerCase();
-    const kind = (printer && printer.kind) || "local";
-    if (kind === "virtual") {
-        return { mode: "gdi", printerClass: "virtual" };
-    }
     // Short protocol tokens match on word boundaries only (audit
     // L10): a bare substring search classifies any name containing
     // "epl" (e.g. "Repl…") or "tsc" as a raw label printer, and an
@@ -76,25 +97,37 @@ export function detectPrinterType(printer) {
     if (["zdesigner", "zebra"].some((t) => signature.includes(t)) || hasWord("zpl")) {
         return { mode: "zpl", printerClass: "label" };
     }
-    if (hasWord("tsc") || hasWord("tspl")) {
+    const tsplLabelModels = [
+        "xp-235", "xp-350", "xp-365", "xp-370", "xp-420", "xp-450", "xp-460",
+        "xp-470", "xp-490", "gp-1124", "gp-1324", "gp-1924", "gp-2120", "gp-3120",
+    ];
+    if (hasWord("tsc") || hasWord("tspl") || tsplLabelModels.some((m) => signature.includes(m))) {
         return { mode: "tspl", printerClass: "label" };
     }
     if (hasWord("epl")) {
         return { mode: "epl", printerClass: "label" };
     }
+    const officeExclusions = [
+        "laserjet", "deskjet", "officejet", "inkjet", "ecosys", "bizhub",
+        "ricoh", "xerox", "kyocera", "brother hl", "brother dcp", "brother mfc",
+    ];
+    if (officeExclusions.some((t) => signature.includes(t))) {
+        return { mode: "gdi", printerClass: "office" };
+    }
     // Mirrors the Rust THERMAL_TOKENS table (print-core
-    // detect_protocol) — keep the two in sync. The generic
-    // identities matter as much as the brands: clone POS drivers
-    // very often identify only as "POS Printer" / "POS80" /
-    // "Thermal Printer".
+    // detect_protocol) — keep the two in sync.
     const thermalTokens = [
         "epson tm-", "epson tm ", "xprinter", "rongta", "bixolon",
-        "star tsp", "citizen ct-", "citizen", "sewoo", "esc/pos", "escpos",
+        "star tsp", "star micronics", "tsp100", "tsp143", "tsp650",
+        "citizen ct-", "citizen", "sewoo", "esc/pos", "escpos",
         "thermal receipt", "thermal printer", "receipt printer",
-        "receipt", "pos printer", "pos-58", "pos-80", "pos58", "pos80",
-        "tm-t", "tm-m", "tm-u", "sunmi", "munbyn", "hprt", "cashino",
-        "snbc", "gprinter", "sprt", "gainscha", "zjiang", "btp-",
-        "srp-", "posiflex", "mc-print", "xp-80", "xp-58",
+        "receipt", "pos printer", "pos-58", "pos-80", "pos-90",
+        "pos58", "pos80", "tm-t", "tm-m", "tm-u", "sunmi", "munbyn",
+        "hprt", "cashino", "snbc", "gprinter", "sprt", "gainscha",
+        "zjiang", "btp-", "srp-", "posiflex", "mc-print",
+        "xp-80", "xp-58", "xp-q", "xp-n", "xp-v", "xp-c", "xp-t",
+        "rp80", "rp326", "tp80", "zkp80", "gp-u80", "gp-l80",
+        "sam4s", "metapace", "hoin", "ocom", "goojprt", "zonerich",
         "58mm", "80mm", "usb thermal", "mini printer",
         "热敏", "票据", "小票",
     ];
@@ -184,6 +217,9 @@ export async function resolveBridgeTarget(bridge, options = {}) {
     const prefer = options.preferClasses || [];
     const classOf = (p) => detectPrinterType(p).printerClass;
     const selected = printers.find((p) => p.name === getSelectedPrinter()) || null;
+    const selectedPos = options.isPos
+        ? (printers.find((p) => p.name === getSelectedPosPrinter()) || null)
+        : null;
     let printer = null;
     // A reprint from the job log names the printer the job originally
     // ran on: when that printer is connected to this PC right now it
@@ -191,6 +227,11 @@ export async function resolveBridgeTarget(bridge, options = {}) {
     // falls through to the normal order below.
     if (options.preferPrinterName) {
         printer = printers.find((p) => p.name === options.preferPrinterName) || null;
+    }
+    // Dedicated POS printer selection (when explicitly configured) wins
+    // for POS jobs without affecting normal report printing.
+    if (!printer && selectedPos) {
+        printer = selectedPos;
     }
     // The owner's model (2026-11-04): the printer picked in the
     // panel is THE printer — for reports and receipts alike, real
@@ -205,7 +246,6 @@ export async function resolveBridgeTarget(bridge, options = {}) {
     }
     if (!printer) {
         printer =
-            selected ||
             printers.find((p) => p.is_default || p.isDefault) ||
             printers[0];
     }

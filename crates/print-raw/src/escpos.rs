@@ -51,7 +51,11 @@ impl EscPos {
         // must not panic on the slice below. Emit nothing in both
         // cases (audit L6/L7). In-app widths are ~1200 dots max, so
         // neither guard can trigger on a real print path.
-        if bpr > u16::MAX as usize || bm.data.len() < total_h as usize * bpr {
+        let Some(expected) = (total_h as usize).checked_mul(bpr) else {
+            debug_assert!(false, "bitmap not representable as ESC/POS raster");
+            return self;
+        };
+        if bpr > u16::MAX as usize || bm.data.len() < expected {
             debug_assert!(false, "bitmap not representable as ESC/POS raster");
             return self;
         }
@@ -82,17 +86,32 @@ impl EscPos {
         self.buf.extend_from_slice(&[0x1D, 0x56, 0x01]);
         self
     }
-    /// ESC p m t1 t2 — cash drawer kick on pin 2 (m=0), 25ms/250ms typical.
-    pub fn drawer_kick(mut self) -> Self {
-        self.buf.extend_from_slice(&[0x1B, 0x70, 0x00, 0x19, 0xFA]);
+    /// GS V 65 n — feed `n` motion units to cutter position, then full cut.
+    pub fn cut_full_feed(mut self, n: u8) -> Self {
+        self.buf.extend_from_slice(&[0x1D, 0x56, 0x41, n]);
         self
     }
-    /// Write one text line, stripping raw ESC (0x1B), FS (0x1C), GS (0x1D),
-    /// DLE (0x10), and NUL (0x00) control bytes so untrusted report text
-    /// can never inject raw ESC/POS hardware commands (e.g. cash drawer kick).
+    /// GS V 66 n — feed `n` motion units to cutter position, then partial cut.
+    pub fn cut_partial_feed(mut self, n: u8) -> Self {
+        self.buf.extend_from_slice(&[0x1D, 0x56, 0x42, n]);
+        self
+    }
+    /// ESC p m t1 t2 — cash drawer kick on pin 2 (m=0), 50ms on / 500ms off.
+    pub fn drawer_kick(self) -> Self {
+        self.drawer_kick_pin(0x00, 0x19, 0xFA)
+    }
+    /// ESC p m t1 t2 — cash drawer kick on specified pin (0 = pin 2, 1 = pin 5).
+    pub fn drawer_kick_pin(mut self, pin: u8, on_time_2ms: u8, off_time_2ms: u8) -> Self {
+        self.buf
+            .extend_from_slice(&[0x1B, 0x70, pin & 0x01, on_time_2ms, off_time_2ms]);
+        self
+    }
+    /// Write one text line, stripping all ASCII control bytes (0x00..=0x1F,
+    /// 0x7F) so untrusted report text can never inject raw ESC/POS hardware
+    /// commands (e.g. cash drawer kick, CAN, FF, or extra line breaks).
     pub fn text_line(mut self, line: &str) -> Self {
         for &b in line.as_bytes() {
-            if !matches!(b, 0x00 | 0x10 | 0x1B | 0x1C | 0x1D) {
+            if b >= 0x20 && b != 0x7F {
                 self.buf.push(b);
             }
         }
@@ -154,11 +173,20 @@ mod tests {
     }
     #[test]
     fn text_line_strips_esc_pos_control_injection() {
-        let out = EscPos::new().text_line("ITEM 1\x1Bp\x00\x19\u{fa}\x1DV\x00");
-        // Starts with ESC @ (2 bytes), then "ITEM 1", p, 0x19, 0xFA, V, LF — no injected ESC (0x1B) or GS (0x1D) after index 1.
-        assert!(!out.bytes()[2..].contains(&0x1B));
-        assert!(!out.bytes()[2..].contains(&0x1D));
-        assert!(!out.bytes()[2..].contains(&0x00));
+        let out = EscPos::new().text_line("ITEM 1\x1Bp\x00\x18\x0C\r\n\u{fa}\x1DV\x7F");
+        // Starts with ESC @ (2 bytes), ends with LF (0x0A); no control bytes in body.
+        let body = &out.bytes()[2..out.bytes().len() - 1];
+        assert!(body.iter().all(|&b| b >= 0x20 && b != 0x7F));
+        assert_eq!(out.bytes().last(), Some(&0x0A));
+    }
+    #[test]
+    fn cut_feed_and_drawer_commands() {
+        let full = EscPos::new().cut_full_feed(4);
+        assert!(full.bytes().ends_with(&[0x1D, 0x56, 0x41, 4]));
+        let partial = EscPos::new().cut_partial_feed(5);
+        assert!(partial.bytes().ends_with(&[0x1D, 0x56, 0x42, 5]));
+        let drawer = EscPos::new().drawer_kick();
+        assert!(drawer.bytes().ends_with(&[0x1B, 0x70, 0x00, 0x19, 0xFA]));
     }
     #[test]
     fn tcp_9100_mock_server_round_trip() {

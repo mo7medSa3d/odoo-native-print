@@ -74,6 +74,13 @@ pub struct PaperMatch {
 /// Tolerance per side for an "exact" match, in millimetres (ADR-0003).
 pub const EXACT_TOLERANCE_MM: f64 = 1.0;
 
+/// Tolerance for thermal roll width variance (e.g. 79.5±0.5mm vs 80mm, 57–58mm).
+pub const ROLL_WIDTH_TOLERANCE_MM: f64 = 2.0;
+
+/// Relative per-side tolerance for close sheet fallback in `match_paper_auto`
+/// (e.g. A4 210x297 vs US Letter 215.9x279.4, ~6% difference).
+const CLOSE_SHEET_REL_TOLERANCE: f64 = 0.10;
+
 fn close(a: f64, b: f64) -> bool {
     (a - b).abs() <= EXACT_TOLERANCE_MM
 }
@@ -91,14 +98,30 @@ pub struct PaperError {
     pub available: String,
 }
 
-/// The paper matching ladder (spec section 5). Never returns a smaller form,
-/// and never substitutes silently: every non-exact outcome is typed in MatchKind
-/// so the caller must log/render it accordingly.
+/// The paper matching ladder (spec section 5). Never returns a smaller form
+/// under `Strict`, and never substitutes silently: every non-exact outcome is
+/// typed in `MatchKind` so the caller can log/render it accordingly.
 pub fn match_paper(
     page: PageSize,
     forms: &[Form],
     policy: ScalePolicy,
 ) -> Result<PaperMatch, PaperError> {
+    if !page.width_mm.is_finite()
+        || !page.height_mm.is_finite()
+        || page.width_mm <= 0.0
+        || page.height_mm <= 0.0
+    {
+        return Err(PaperError {
+            page_width_mm: page.width_mm,
+            page_height_mm: page.height_mm,
+            policy,
+            available: forms
+                .iter()
+                .map(|f| f.name.clone())
+                .collect::<Vec<_>>()
+                .join(", "),
+        });
+    }
     // 1. Exact match.
     if let Some(f) = forms.iter().find(|f| !f.roll && same_size(f.size, page)) {
         return Ok(PaperMatch {
@@ -106,10 +129,21 @@ pub fn match_paper(
             form: f.clone(),
         });
     }
-    // 1b. Roll paper: width must match; height is free by definition.
+    // 1b. Roll paper: width must match within roll tolerance; height is free.
     if let Some(f) = forms
         .iter()
-        .find(|f| f.roll && close(f.size.width_mm, page.width_mm))
+        .filter(|f| {
+            f.roll
+                && f.size.width_mm.is_finite()
+                && f.size.width_mm > 0.0
+                && (f.size.width_mm - page.width_mm).abs() <= ROLL_WIDTH_TOLERANCE_MM
+        })
+        .min_by(|a, b| {
+            (a.size.width_mm - page.width_mm)
+                .abs()
+                .partial_cmp(&(b.size.width_mm - page.width_mm).abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     {
         return Ok(PaperMatch {
             kind: MatchKind::Roll,
@@ -165,6 +199,32 @@ pub fn match_paper(
                 form: (*f).clone(),
             });
         }
+        // 3b. Wider roll form when no sheet form fits.
+        if let Some(f) = forms
+            .iter()
+            .filter(|f| {
+                f.roll
+                    && f.size.width_mm.is_finite()
+                    && f.size.width_mm > 0.0
+                    && page.width_mm <= f.size.width_mm + ROLL_WIDTH_TOLERANCE_MM
+            })
+            .min_by(|a, b| {
+                a.size
+                    .width_mm
+                    .partial_cmp(&b.size.width_mm)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+        {
+            return Ok(PaperMatch {
+                kind: MatchKind::Roll,
+                form: Form {
+                    name: f.name.clone(),
+                    size: PageSize::new(f.size.width_mm, page.height_mm),
+                    roll: true,
+                    paper_id: f.paper_id,
+                },
+            });
+        }
     }
     // 4. Fail loudly. Never guess.
     Err(PaperError {
@@ -199,12 +259,22 @@ pub fn pick_sheet_form(forms: &[Form], page_width_mm: f64) -> Option<Form> {
     if page_width_mm <= 120.0 {
         let office = forms
             .iter()
-            .filter(|f| !f.roll && (200.0..=225.0).contains(&f.size.width_mm))
+            .filter(|f| {
+                let short_side = f.size.width_mm.min(f.size.height_mm);
+                !f.roll && (200.0..=225.0).contains(&short_side)
+            })
             .min_by(|a, b| {
-                a.size
-                    .width_mm
-                    .partial_cmp(&b.size.width_mm)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                let a_portrait = a.size.width_mm <= a.size.height_mm;
+                let b_portrait = b.size.width_mm <= b.size.height_mm;
+                b_portrait
+                    .cmp(&a_portrait)
+                    .then_with(|| {
+                        let a_short = a.size.width_mm.min(a.size.height_mm);
+                        let b_short = b.size.width_mm.min(b.size.height_mm);
+                        a_short
+                            .partial_cmp(&b_short)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
             });
         if let Some(form) = office {
             return Some(form.clone());
@@ -227,11 +297,30 @@ pub fn pick_sheet_form(forms: &[Form], page_width_mm: f64) -> Option<Form> {
 
 /// Select media without a user-specified paper name or scaling policy.
 /// Exact forms and compatible rolls win; custom size is used only inside
-/// driver-reported bounds; otherwise the smallest larger reported form is fit.
+/// driver-reported bounds; otherwise the smallest larger reported form is fit,
+/// with a tolerant close-sheet fallback (e.g. A4 <-> Letter).
 pub fn match_paper_auto(
     page: PageSize,
     capabilities: &PrinterCapabilities,
 ) -> Result<PaperMatch, PaperError> {
+    if !page.width_mm.is_finite()
+        || !page.height_mm.is_finite()
+        || page.width_mm <= 0.0
+        || page.height_mm <= 0.0
+    {
+        return Err(PaperError {
+            page_width_mm: page.width_mm,
+            page_height_mm: page.height_mm,
+            policy: ScalePolicy::NearestLargerFit,
+            available: capabilities
+                .forms
+                .iter()
+                .map(|f| f.name.clone())
+                .collect::<Vec<_>>()
+                .join(", "),
+        });
+    }
+
     // Exact sheet forms have priority.
     if let Some(form) = capabilities
         .forms
@@ -245,24 +334,32 @@ pub fn match_paper_auto(
     }
 
     // A roll can print a shorter/narrower raster without inventing another
-    // paper size. Keep the physical roll width in the selected DEVMODE and
-    // retain the job's own length.
-    if page.width_mm.is_finite() && page.width_mm > 0.0 {
-        if let Some(form) = capabilities
-            .forms
-            .iter()
-            .find(|form| form.roll && page.width_mm <= form.size.width_mm + EXACT_TOLERANCE_MM)
-        {
-            return Ok(PaperMatch {
-                kind: MatchKind::Roll,
-                form: Form {
-                    name: form.name.clone(),
-                    size: PageSize::new(form.size.width_mm, page.height_mm),
-                    roll: true,
-                    paper_id: form.paper_id,
-                },
-            });
-        }
+    // paper size. Pick the narrowest roll that fits; retain the job's length.
+    if let Some(form) = capabilities
+        .forms
+        .iter()
+        .filter(|form| {
+            form.roll
+                && form.size.width_mm.is_finite()
+                && form.size.width_mm > 0.0
+                && page.width_mm <= form.size.width_mm + ROLL_WIDTH_TOLERANCE_MM
+        })
+        .min_by(|a, b| {
+            a.size
+                .width_mm
+                .partial_cmp(&b.size.width_mm)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    {
+        return Ok(PaperMatch {
+            kind: MatchKind::Roll,
+            form: Form {
+                name: form.name.clone(),
+                size: PageSize::new(form.size.width_mm, page.height_mm),
+                roll: true,
+                paper_id: form.paper_id,
+            },
+        });
     }
 
     // Only use a custom size when both dimensions fit the driver's reported
@@ -278,7 +375,47 @@ pub fn match_paper_auto(
             },
         });
     }
-    match_paper(page, &capabilities.forms, ScalePolicy::NearestLargerFit)
+
+    match match_paper(page, &capabilities.forms, ScalePolicy::NearestLargerFit) {
+        Ok(matched) => Ok(matched),
+        Err(err) => {
+            // Tolerant close-sheet fallback (e.g. A4 <-> US Letter) so
+            // slightly different regional sheet standards scale-to-fit instead
+            // of failing the print job.
+            let within_rel = |a: f64, b: f64| (a - b).abs() / b.max(1.0) <= CLOSE_SHEET_REL_TOLERANCE;
+            let orient_delta = |f: &Form| -> Option<f64> {
+                let direct = within_rel(f.size.width_mm, page.width_mm)
+                    && within_rel(f.size.height_mm, page.height_mm);
+                let rotated = within_rel(f.size.width_mm, page.height_mm)
+                    && within_rel(f.size.height_mm, page.width_mm);
+                match (direct, rotated) {
+                    (true, _) => Some(
+                        (f.size.width_mm - page.width_mm).abs()
+                            + (f.size.height_mm - page.height_mm).abs(),
+                    ),
+                    (false, true) => Some(
+                        (f.size.width_mm - page.height_mm).abs()
+                            + (f.size.height_mm - page.width_mm).abs(),
+                    ),
+                    (false, false) => None,
+                }
+            };
+            if let Some(form) = capabilities
+                .forms
+                .iter()
+                .filter(|f| !f.roll)
+                .filter_map(|f| orient_delta(f).map(|d| (d, f)))
+                .min_by(|(da, _), (db, _)| da.partial_cmp(db).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(_, f)| f.clone())
+            {
+                return Ok(PaperMatch {
+                    kind: MatchKind::NearestLargerFit,
+                    form,
+                });
+            }
+            Err(err)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -298,6 +435,12 @@ mod tests {
         // smallest listed form (A5).
         let picked = pick_sheet_form(&forms(), 80.0).unwrap();
         assert_eq!(picked.name, "A4");
+        // Landscape-reported A4 form still matches office class.
+        let landscape = vec![Form::sheet("A4 Landscape", PageSize::a4().rotated())];
+        assert_eq!(
+            pick_sheet_form(&landscape, 80.0).unwrap().name,
+            "A4 Landscape"
+        );
         // No office-class sheet (a small label printer in GDI
         // mode): the narrowest sheet that fits the width wins.
         let label_forms = vec![
@@ -347,6 +490,18 @@ mod tests {
         .unwrap();
         assert_eq!(m.kind, MatchKind::Custom);
         assert_eq!(m.form.size, PageSize::label_100x150());
+        assert!(match_paper(
+            PageSize::new(f64::NAN, 100.0),
+            &forms(),
+            ScalePolicy::CustomAllowed,
+        )
+        .is_err());
+        assert!(match_paper(
+            PageSize::new(0.0, 100.0),
+            &forms(),
+            ScalePolicy::CustomAllowed,
+        )
+        .is_err());
     }
     #[test]
     fn nearest_larger_never_smaller() {
@@ -362,7 +517,6 @@ mod tests {
     }
     #[test]
     fn automatic_media_prefers_exact_then_supported_custom() {
-        use crate::printer::PrinterCapabilities;
         let caps = PrinterCapabilities {
             forms: forms(),
             resolutions_dpi: vec![300],
@@ -389,7 +543,6 @@ mod tests {
 
     #[test]
     fn automatic_media_fits_narrower_content_to_reported_roll_width() {
-        use crate::printer::PrinterCapabilities;
         let caps = PrinterCapabilities {
             forms: vec![Form::roll("80mm Roll", 80.0)],
             resolutions_dpi: vec![203],
@@ -410,8 +563,21 @@ mod tests {
     }
 
     #[test]
+    fn narrowest_roll_wins_when_multiple_rolls_present() {
+        let caps = PrinterCapabilities {
+            forms: vec![
+                Form::roll("80mm Roll", 80.0),
+                Form::roll("58mm Roll", 58.0),
+            ],
+            ..Default::default()
+        };
+        let selected = match_paper_auto(PageSize::new(57.5, 150.0), &caps).unwrap();
+        assert_eq!(selected.kind, MatchKind::Roll);
+        assert_eq!(selected.form.name, "58mm Roll");
+    }
+
+    #[test]
     fn automatic_media_uses_larger_form_when_custom_is_out_of_bounds() {
-        use crate::printer::PrinterCapabilities;
         let caps = PrinterCapabilities {
             forms: vec![Form::sheet("A4", PageSize::a4())],
             resolutions_dpi: vec![300],
@@ -433,6 +599,25 @@ mod tests {
             ..caps
         };
         assert!(match_paper_auto(PageSize::a4(), &no_match).is_err());
+    }
+
+    #[test]
+    fn a4_on_letter_only_and_letter_on_a4_only_succeed() {
+        let letter_only = PrinterCapabilities {
+            forms: vec![Form::sheet("Letter", PageSize::new(215.9, 279.4))],
+            ..Default::default()
+        };
+        let m1 = match_paper_auto(PageSize::a4(), &letter_only).unwrap();
+        assert_eq!(m1.kind, MatchKind::NearestLargerFit);
+        assert_eq!(m1.form.name, "Letter");
+
+        let a4_only = PrinterCapabilities {
+            forms: vec![Form::sheet("A4", PageSize::a4())],
+            ..Default::default()
+        };
+        let m2 = match_paper_auto(PageSize::new(215.9, 279.4), &a4_only).unwrap();
+        assert_eq!(m2.kind, MatchKind::NearestLargerFit);
+        assert_eq!(m2.form.name, "A4");
     }
 
     #[test]

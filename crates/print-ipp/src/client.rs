@@ -1,8 +1,10 @@
 use crate::proto::{self, op, tag, Attr, IppMessage, Value};
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 use thiserror::Error;
+
+const MIN_IPP_TIMEOUT: Duration = Duration::from_millis(1);
 
 #[derive(Debug, Error)]
 pub enum IppError {
@@ -188,41 +190,78 @@ pub struct IppClient {
     next_request_id: u32,
 }
 
+fn connect_any(host: &str, port: u16, timeout: Duration) -> std::io::Result<TcpStream> {
+    let addrs: Vec<_> = (host, port).to_socket_addrs()?.collect();
+    if addrs.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AddrNotAvailable,
+            "no address",
+        ));
+    }
+    let timeout = timeout.max(MIN_IPP_TIMEOUT);
+    let mut last_err = None;
+    for addr in addrs {
+        match TcpStream::connect_timeout(&addr, timeout) {
+            Ok(stream) => return Ok(stream),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "no address")
+    }))
+}
+
 impl IppClient {
     pub fn new(host: &str, port: u16) -> Self {
+        let bare_host = host.trim().trim_start_matches('[').trim_end_matches(']');
+        let uri_host = if bare_host.contains(':') {
+            format!("[{bare_host}]")
+        } else {
+            bare_host.to_string()
+        };
         Self {
-            host: host.to_string(),
+            host: bare_host.to_string(),
             port,
             path: "/ipp/print".to_string(),
-            printer_uri: format!("ipp://{host}:{port}/ipp/print"),
+            printer_uri: format!("ipp://{uri_host}:{port}/ipp/print"),
             timeout: Duration::from_secs(10),
             next_request_id: 1,
         }
     }
 
     fn post(&mut self, body: &[u8]) -> Result<Vec<u8>, IppError> {
-        let addr = (self.host.as_str(), self.port);
-        let sock: std::net::SocketAddr = std::net::ToSocketAddrs::to_socket_addrs(&addr)?
-            .next()
-            .ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "no address")
-            })?;
-        let mut stream = TcpStream::connect_timeout(&sock, self.timeout)?;
-        stream.set_read_timeout(Some(self.timeout))?;
-        stream.set_write_timeout(Some(self.timeout))?;
-        let host_hdr = if self.host.contains(':') && !self.host.starts_with('[') {
-            format!("[{}]:{}", self.host, self.port)
+        let bare_host = self
+            .host
+            .trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']');
+        if bare_host.is_empty()
+            || bare_host.chars().any(|c| c.is_control() || c.is_whitespace())
+            || self.path.chars().any(|c| c.is_control() || c.is_whitespace())
+        {
+            return Err(IppError::Parse("invalid host or path".into()));
+        }
+        let timeout = self.timeout.max(MIN_IPP_TIMEOUT);
+        let mut stream = connect_any(bare_host, self.port, timeout)?;
+        stream.set_read_timeout(Some(timeout))?;
+        stream.set_write_timeout(Some(timeout))?;
+        let host_hdr = if bare_host.contains(':') {
+            format!("[{bare_host}]:{}", self.port)
         } else {
-            format!("{}:{}", self.host, self.port)
+            format!("{bare_host}:{}", self.port)
+        };
+        let path = if self.path.starts_with('/') {
+            self.path.as_str()
+        } else {
+            "/ipp/print"
         };
         let request = format!(
-            "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/ipp\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            self.path,
-            host_hdr,
+            "POST {path} HTTP/1.1\r\nHost: {host_hdr}\r\nContent-Type: application/ipp\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
         );
         stream.write_all(request.as_bytes())?;
         stream.write_all(body)?;
+        stream.flush()?;
         // IPP attribute responses are small; cap the read so a
         // broken or hostile endpoint cannot stream forever and grow
         // memory without bound on the worker thread.
@@ -271,7 +310,7 @@ impl IppClient {
         let body = proto::encode_request(
             op::GET_PRINTER_ATTRIBUTES,
             id,
-            &self.printer_uri.clone(),
+            &self.printer_uri,
             &[requested],
             &[],
             None,
@@ -338,7 +377,7 @@ impl IppClient {
         let body = proto::encode_request(
             op::PRINT_JOB,
             id,
-            &self.printer_uri.clone(),
+            &self.printer_uri,
             &extra,
             &job_attrs,
             Some(document),
@@ -391,14 +430,23 @@ fn parse_http_response(mut raw: &[u8]) -> Result<Vec<u8>, IppError> {
         }
         let body = &raw[split + 4..];
         let lower = headers.to_lowercase();
-        return if lower.contains("transfer-encoding: chunked") {
-            dechunk(body).map_err(IppError::Parse)
-        } else if let Some(len) = lower
-            .lines()
-            .find(|l| l.starts_with("content-length:"))
-            .and_then(|l| l.split(':').nth(1))
-            .and_then(|v| v.trim().parse::<usize>().ok())
-        {
+        let is_chunked = lower.lines().any(|l| {
+            l.split_once(':')
+                .is_some_and(|(k, v)| k.trim() == "transfer-encoding" && v.contains("chunked"))
+        });
+        if is_chunked {
+            return dechunk(body).map_err(IppError::Parse);
+        }
+        let content_length = lower.lines().find_map(|l| {
+            l.split_once(':').and_then(|(k, v)| {
+                if k.trim() == "content-length" {
+                    v.trim().parse::<usize>().ok()
+                } else {
+                    None
+                }
+            })
+        });
+        return if let Some(len) = content_length {
             if body.len() < len {
                 return Err(IppError::Parse("short HTTP body".into()));
             }
@@ -425,9 +473,12 @@ fn dechunk(body: &[u8]) -> Result<Vec<u8>, String> {
             break;
         }
         let start = line_end + 2;
-        let end = start + size;
-        if end + 2 > body.len() {
+        let end = start.checked_add(size).ok_or("chunk size overflow")?;
+        if end > body.len() {
             return Err("truncated chunk".into());
+        }
+        if body.get(end..end + 2) != Some(b"\r\n") {
+            return Err("bad chunk terminator".into());
         }
         out.extend_from_slice(&body[start..end]);
         pos = end + 2;
@@ -589,6 +640,39 @@ mod tests {
     }
 
     #[test]
+    fn print_job_accepts_0x0001_0x0002_warnings_and_rejects_0x0400() {
+        for status_code in [0x0001u16, 0x0002u16] {
+            let job_response = encode_response(
+                status_code,
+                2,
+                &[(
+                    tag::GROUP_JOB,
+                    vec![
+                        Attr::integer("job-id", 42),
+                        Attr::enumeration("job-state", 5),
+                    ],
+                )],
+            );
+            let (port, server) = mock_printer(job_response);
+            let mut client = IppClient::new("127.0.0.1", port);
+            let info = client
+                .print_job(b"%PDF-1.4 test", "application/pdf", "Invoice", 1)
+                .expect("0x0000..=0x00FF status codes must succeed");
+            let _ = server.join().unwrap();
+            assert_eq!(info.job_id, Some(42));
+        }
+
+        let err_response = encode_response(0x0400, 3, &[]);
+        let (port, server) = mock_printer(err_response);
+        let mut client = IppClient::new("127.0.0.1", port);
+        let err = client
+            .print_job(b"%PDF-1.4 test", "application/pdf", "Invoice", 1)
+            .unwrap_err();
+        let _ = server.join().unwrap();
+        assert!(matches!(err, IppError::IppStatus(0x0400)));
+    }
+
+    #[test]
     fn print_job_accepts_0x0001_substituted_attributes_and_100_continue() {
         // Status 0x0001 = successful-ok-ignored-or-substituted-attributes
         let job_response = encode_response(
@@ -611,6 +695,18 @@ mod tests {
         let body = parse_http_response(&raw_http).unwrap();
         let parsed = parse_message(&body).unwrap();
         assert!(parsed.code <= 0x00FF);
+    }
+
+    #[test]
+    fn parse_chunked_http_response() {
+        let payload = b"helloipp";
+        let raw = format!(
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n",
+            payload.len(),
+            std::str::from_utf8(payload).unwrap()
+        );
+        let body = parse_http_response(raw.as_bytes()).unwrap();
+        assert_eq!(body, payload);
     }
 
     #[test]
@@ -715,5 +811,15 @@ mod tests {
         assert!(parse_message(b"").is_err());
         assert!(parse_message(b"\x01\x01\x00").is_err());
         assert!(parse_message(&[0xFF; 64]).is_err());
+        assert!(dechunk(b"5\r\nhelloXX0\r\n\r\n").is_err());
+    }
+
+    #[test]
+    fn post_rejects_crlf_in_host_or_path() {
+        let mut bad_host = IppClient::new("127.0.0.1\r\nEvil: 1", 631);
+        assert!(matches!(bad_host.get_printer_attributes(), Err(IppError::Parse(_))));
+        let mut bad_path = IppClient::new("127.0.0.1", 631);
+        bad_path.path = "/ipp/print\r\nEvil: 1".into();
+        assert!(matches!(bad_path.get_printer_attributes(), Err(IppError::Parse(_))));
     }
 }

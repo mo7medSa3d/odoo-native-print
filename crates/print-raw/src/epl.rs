@@ -24,20 +24,24 @@ pub fn epl_label_copies(bm: &MonoBitmap, copies: u16) -> Vec<u8> {
 /// job's gap in millimetres at the render DPI; 24 dots is 3 mm
 /// at 203 dpi.
 pub fn epl_label_copies_with_gap(bm: &MonoBitmap, copies: u16, gap_dots: u32) -> Vec<u8> {
+    let bpr = bm.bytes_per_row();
+    let expected = bpr.saturating_mul(bm.height_dots as usize);
+    if expected == 0 || bm.data.len() < expected {
+        return Vec::new();
+    }
     let copies = copies.max(1);
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(expected + 64);
     out.extend_from_slice(b"N\r\n");
     out.extend_from_slice(
         format!(
-            "q{}\r\nQ{},{gap_dots}\r\nGW0,0,{},{},",
+            "q{}\r\nQ{},{gap_dots}\r\nGW0,0,{bpr},{},",
             bm.width_dots.max(8),
             bm.height_dots.max(1),
-            bm.bytes_per_row(),
             bm.height_dots
         )
         .as_bytes(),
     );
-    for &b in &bm.data {
+    for &b in &bm.data[..expected] {
         out.push(!b);
     }
     out.extend_from_slice(format!("\r\nP{copies}\r\n").as_bytes());
@@ -64,5 +68,15 @@ mod tests {
         assert!(out.starts_with(b"N\r\nq8\r\nQ1,36\r\nGW0,0,1,1,"));
         // The default entry point keeps the 24-dot gap.
         assert!(epl_label_copies(&bm, 1).starts_with(b"N\r\nq8\r\nQ1,24\r\n"));
+    }
+
+    #[test]
+    fn epl_truncated_bitmap_returns_empty() {
+        let bad = MonoBitmap {
+            width_dots: 8,
+            height_dots: 4,
+            data: vec![0xAA; 1],
+        };
+        assert!(epl_label(&bad).is_empty());
     }
 }

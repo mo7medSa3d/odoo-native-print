@@ -68,7 +68,7 @@ w.showToast("third");
 w.showToast("fourth");
 ok("toast: capped at 3 visible", c.children.length === 3);
 ok("toast: newest on top", c.children[0].textContent.includes("fourth"));
-ok("toast: duplicate deduped", ![...c.children].some(el => el.textContent.includes("first info")) || c.children.length === 3);
+ok("toast: duplicate deduped", ![...c.children].some(el => el.textContent.includes("first info")) && [...c.children].filter(el => el.textContent.includes("boom error")).length === 1);
 ok("toast: has close button + icon", !!c.children[0].querySelector(".toast-close") && !!c.children[0].querySelector(".toast-icon"));
 c.children[0].querySelector(".toast-close").click();
 ok("toast: close button dismisses", c.children.length === 2);

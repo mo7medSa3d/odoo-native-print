@@ -4,137 +4,197 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Yaseir Print — Tabs</title>
+<link rel="stylesheet" href="theme.css"/>
 <style>
-  :root { color-scheme: light; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; overflow: hidden; }
   body {
-    font-family: "Segoe UI", Tahoma, Arial, sans-serif;
-    background: #ffffff;
-    color: #17202e;
-    border-bottom: 1px solid #e3e8f0;
-    display: flex; align-items: stretch; gap: 6px;
-    padding: 6px 8px;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 8px;
+    height: 46px;
     user-select: none; -webkit-user-select: none;
   }
-  .nav-group { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
-  .tb-btn {
-    width: 32px; height: 32px; border: 0; border-radius: 8px;
-    background: transparent; color: #eb6b29; cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-  }
-  .tb-btn:hover { background: #fdf0e7; color: #d55a1d; }
-  .tb-btn svg { width: 17px; height: 17px; }
-  [dir="rtl"] .flip-rtl { transform: scaleX(-1); }
   .tabs {
-    flex: 1 1 auto; display: flex; align-items: center; gap: 5px;
+    flex: 1 1 auto; display: flex; align-items: center; gap: 4px;
     overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
-    padding: 1px;
+    height: 100%; padding: 6px 2px;
   }
   .tabs::-webkit-scrollbar { display: none; }
   .tab {
-    flex: 0 1 190px; min-width: 92px; max-width: 190px; height: 32px;
+    flex: 0 1 196px; min-width: 96px; max-width: 196px; height: 32px;
     display: flex; align-items: center; gap: 6px;
-    padding: 0 6px 0 10px;
-    background: #eef1f6; color: #5b6472;
-    border: 1px solid #e3e8f0;
-    border-radius: 8px; cursor: pointer; white-space: nowrap;
+    padding-inline: 10px 6px;
+    background: transparent; color: var(--text-secondary);
+    border: 1px solid transparent;
+    border-radius: var(--radius-md); cursor: grab; white-space: nowrap;
+    transition: background-color .14s ease, color .14s ease, border-color .14s ease;
+    position: relative;
   }
-  [dir="rtl"] .tab { padding: 0 10px 0 6px; }
-  .tab:hover { background: #e2e9f4; color: #17202e; }
-  .tab { cursor: grab; }
+  .tab:hover { background: var(--bg-subtle); color: var(--text-primary); }
   .tab.dragging { opacity: .45; cursor: grabbing; }
-  .tab.drop-hint { background: #d7e5fd; color: #17202e; border-color: #0953de; }
-  .tab.active { background: #ffffff; color: #17202e; border-color: #cfd9e6;
-    box-shadow: inset 0 -2px 0 #0953de; font-weight: 600; }
+  .tab.drop-hint { background: var(--brand-soft); color: var(--text-primary); border-color: var(--brand); }
+  .tab.active {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-sm), inset 0 -2px 0 var(--brand);
+    font-weight: 600;
+  }
   .tab .t-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
   .tab .t-pos {
     flex: 0 0 auto; font-size: 9.5px; font-weight: 700; letter-spacing: .04em;
-    background: #0098d3; color: #fff; border-radius: 4px; padding: 1px 4px;
+    background: var(--accent-cyan); color: #fff; border-radius: 4px; padding: 1px 5px;
+    line-height: 1.3;
   }
   .tab .t-close {
     flex: 0 0 auto; width: 18px; height: 18px; border: 0; border-radius: 5px;
-    background: transparent; color: inherit; cursor: pointer; font-size: 13px;
+    background: transparent; color: var(--text-muted); cursor: pointer; font-size: 13px;
     display: flex; align-items: center; justify-content: center; line-height: 1;
+    transition: background-color .12s ease, color .12s ease;
   }
-  .tab .t-close:hover { background: rgba(220, 60, 60, .18); color: #e5484d; }
-  .tab.active .t-close:hover { background: rgba(220, 60, 60, .14); }
+  .tab .t-close:hover { background: var(--err-bg); color: var(--err-fg); }
   .tab-add {
-    flex: 0 0 auto; width: 28px; height: 28px; border: 0; border-radius: 50%;
-    background: transparent; color: #5b6472; cursor: pointer; align-self: center;
+    flex: 0 0 auto; width: 28px; height: 28px; border: 0; border-radius: var(--radius-md);
+    background: transparent; color: var(--text-secondary); cursor: pointer;
     display: flex; align-items: center; justify-content: center; margin: 0 2px;
+    transition: background-color .12s ease, color .12s ease;
   }
-  .tab-add:hover { background: #e2e9f4; color: #0953de; }
+  .tab-add:hover { background: var(--bg-subtle); color: var(--brand); }
   .tab-add svg { width: 15px; height: 15px; }
-  .tb-action {
-    flex: 0 0 auto; height: 32px; border: 0; border-radius: 8px; cursor: pointer;
-    display: flex; align-items: center; gap: 6px; padding: 0 10px;
-    background: #eef1f6; color: #3d4656; font-size: 12.5px; font-family: inherit;
+
+  .divider { width: 1px; height: 20px; background: var(--border); flex: 0 0 auto; margin: 0 2px; }
+
+  .nav-group { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+  .tb-btn {
+    width: 30px; height: 30px; border: 0; border-radius: var(--radius-md);
+    background: transparent; color: var(--text-secondary); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background-color .12s ease, color .12s ease;
   }
-  .tb-action:hover { background: #e2e9f4; color: #17202e; }
-  .tb-action.brand { background: #0953de; color: #fff; }
-  .tb-action.brand:hover { background: #0b47bd; }
-  .tb-action img { width: 17px; height: 17px; border-radius: 4px; }
-  .tb-action svg { width: 15px; height: 15px; }
+  .tb-btn:hover { background: var(--bg-subtle); color: var(--text-primary); }
+  .tb-btn svg { width: 16px; height: 16px; }
+
+  .tb-action {
+    flex: 0 0 auto; height: 30px; border: 1px solid var(--border); border-radius: var(--radius-md);
+    cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 0 10px;
+    background: var(--bg-subtle); color: var(--text-primary);
+    font-size: 12px; font-weight: 500; font-family: inherit;
+    transition: background-color .12s ease, border-color .12s ease;
+  }
+  .tb-action:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+  .tb-action.brand { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); }
+  .tb-action.brand:hover { background: var(--brand-hover); border-color: var(--brand-hover); }
+  .tb-action img { width: 16px; height: 16px; border-radius: 4px; }
+  .tb-action svg { width: 14px; height: 14px; }
 </style>
 </head>
 <body>
-  <div class="tabs" id="tabs"></div>
+  <div class="tabs" id="tabs" role="tablist"></div>
 
-  <!-- Navigation lives with the app actions, not at the start of
-       the strip (owner, 2026-11-06): back / forward / reload sit
-       immediately beside Control Center and Settings. -->
+  <div class="divider" aria-hidden="true"></div>
+
   <div class="nav-group">
-    <button class="tb-btn" id="btnBack" title="Back / رجوع">
-      <svg class="flip-rtl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="14 6 8 12 14 18"/></svg>
+    <button type="button" class="tb-btn" id="btnBack" title="رجوع" aria-label="رجوع">
+      <svg class="flip-rtl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
     </button>
-    <button class="tb-btn" id="btnForward" title="Forward / تقدم">
-      <svg class="flip-rtl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="10 6 16 12 10 18"/></svg>
+    <button type="button" class="tb-btn" id="btnForward" title="تقدّم" aria-label="تقدّم">
+      <svg class="flip-rtl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
     </button>
-    <button class="tb-btn" id="btnReload" title="Reload / إعادة تحميل">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>
+    <button type="button" class="tb-btn" id="btnReload" title="إعادة تحميل" aria-label="إعادة تحميل">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>
     </button>
   </div>
 
-  <button class="tb-action brand" id="btnCc" title="Control Center / مركز التحكم">
-    <img src="app-icon.png" alt=""/>
+  <div class="divider" aria-hidden="true"></div>
+
+  <button type="button" class="tb-btn" id="btnTabTheme" title="المظهر" aria-label="المظهر">
+    <svg id="iconSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+    <svg id="iconMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+  </button>
+  <button type="button" class="tb-btn" id="btnTabLang" title="Language / اللغة" aria-label="Switch language" style="width:auto;padding:0 8px;font-size:11.5px;font-weight:600;">EN</button>
+
+  <button type="button" class="tb-action brand" id="btnCc" title="مركز التحكم">
+    <img src="app-icon.png" alt="" aria-hidden="true"/>
     <span data-i18n="cc">مركز التحكم</span>
   </button>
-  <button class="tb-action" id="btnSettings" title="Settings / الإعدادات">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+  <button type="button" class="tb-action" id="btnSettings" title="الإعدادات">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     <span data-i18n="settings">الإعدادات</span>
   </button>
 
 <script>
   "use strict";
-  var invoke = function (cmd, args) {
+  function invoke(cmd, args) {
+    if (!window.__TAURI_INTERNALS__ || typeof window.__TAURI_INTERNALS__.invoke !== "function") {
+      return Promise.reject(new Error("tauri_internals_unavailable"));
+    }
     return window.__TAURI_INTERNALS__.invoke(cmd, args || {});
-  };
+  }
   var STR = {
-    ar: { new_tab: "تبويب جديد", cc: "مركز التحكم", settings: "الإعدادات" },
-    en: { new_tab: "New Tab", cc: "Control Center", settings: "Settings" }
+    ar: {
+      new_tab: "تبويب جديد", cc: "مركز التحكم", settings: "الإعدادات",
+      back: "رجوع", forward: "تقدّم", reload: "إعادة تحميل",
+      theme: "تبديل المظهر", lang_tip: "Switch to English", close_tab: "إغلاق التبويب"
+    },
+    en: {
+      new_tab: "New Tab", cc: "Control Center", settings: "Settings",
+      back: "Back", forward: "Forward", reload: "Reload",
+      theme: "Toggle theme", lang_tip: "التبديل للعربية", close_tab: "Close tab"
+    }
   };
-  var lang = "ar";
-  function applyLang() {
-    var saved = null;
-    try { saved = localStorage.getItem("np_cc_lang"); } catch (e) {}
-    var next = saved === "en" ? "en" : "ar";
-    if (next !== lang || !document.documentElement.lang) {
-      lang = next;
+  var lang = "";
+  var theme = "";
+  function applyPrefs() {
+    var savedLang = null, savedTheme = null;
+    try {
+      savedLang = localStorage.getItem("np_cc_lang");
+      savedTheme = localStorage.getItem("np_cc_theme");
+    } catch (e) {}
+    var nextLang = savedLang === "en" ? "en" : "ar";
+    if (nextLang !== lang || !document.documentElement.lang) {
+      lang = nextLang;
       document.documentElement.lang = lang;
       document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
       document.querySelectorAll("[data-i18n]").forEach(function (el) {
-        el.textContent = STR[lang][el.getAttribute("data-i18n")] || el.textContent;
+        var v = STR[lang][el.getAttribute("data-i18n")];
+        if (v) el.textContent = v;
       });
+      var tips = [
+        ["btnBack", STR[lang].back],
+        ["btnForward", STR[lang].forward],
+        ["btnReload", STR[lang].reload],
+        ["btnTabTheme", STR[lang].theme],
+        ["btnTabLang", STR[lang].lang_tip],
+        ["btnCc", STR[lang].cc],
+        ["btnSettings", STR[lang].settings]
+      ];
+      tips.forEach(function (pair) {
+        var b = document.getElementById(pair[0]);
+        if (b) { b.title = pair[1]; b.setAttribute("aria-label", pair[1]); }
+      });
+      var langBtn = document.getElementById("btnTabLang");
+      if (langBtn) langBtn.textContent = lang === "ar" ? "EN" : "ع";
+      if (currentTabs.length) render(currentTabs);
+    }
+    var nextTheme = savedTheme === "dark" ? "dark" : "light";
+    if (nextTheme !== theme || !document.documentElement.getAttribute("data-theme")) {
+      theme = nextTheme;
+      document.documentElement.setAttribute("data-theme", theme);
+      var sun = document.getElementById("iconSun");
+      var moon = document.getElementById("iconMoon");
+      if (sun && moon) {
+        sun.style.display = theme === "dark" ? "block" : "none";
+        moon.style.display = theme === "dark" ? "none" : "block";
+      }
     }
   }
   var lastSignature = "";
   var currentTabs = [];
   var dragLabel = null;
-  // Where would the dragged tab land if dropped on the tab at
-  // array index i, with the pointer at clientX over that tab's
-  // rect? Array order runs right-to-left in RTL, so the "after"
-  // half of a tab is its left half there.
+  var refreshing = false;
+
   function dropIndexFor(i, clientX, rect) {
     var width = rect.width || 1;
     var frac = (clientX - rect.left) / width;
@@ -151,6 +211,7 @@
     });
   }
   function render(tabs) {
+    if (!Array.isArray(tabs)) return;
     var sig = lang + "|" + tabs.map(function (t) {
       return t.label + ":" + t.title + ":" + (t.active ? 1 : 0) + ":" + (t.is_pos ? 1 : 0);
     }).join("|");
@@ -164,10 +225,10 @@
       el.className = "tab" + (t.active ? " active" : "");
       el.title = t.url || "";
       el.draggable = true;
+      el.setAttribute("role", "tab");
+      el.setAttribute("aria-selected", t.active ? "true" : "false");
+      el.setAttribute("tabindex", t.active ? "0" : "-1");
       el.setAttribute("data-label", t.label);
-      // Browser-style drag-and-drop reordering (owner,
-      // 2026-11-06): drag a tab along the strip and drop it where
-      // it belongs; Rust keeps the order via tab_move.
       el.addEventListener("dragstart", function (ev) {
         dragLabel = t.label;
         el.classList.add("dragging");
@@ -211,9 +272,11 @@
         el.appendChild(tag);
       }
       var close = document.createElement("button");
+      close.type = "button";
       close.className = "t-close";
       close.textContent = "×";
-      close.title = lang === "ar" ? "إغلاق التبويب" : "Close tab";
+      close.title = STR[lang].close_tab;
+      close.setAttribute("aria-label", STR[lang].close_tab + ": " + t.title);
       close.addEventListener("click", function (ev) {
         ev.stopPropagation();
         invoke("tab_close", { label: t.label }).then(refresh).catch(function () {});
@@ -222,18 +285,21 @@
       el.addEventListener("click", function () {
         invoke("tab_switch", { label: t.label }).then(refresh).catch(function () {});
       });
+      el.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          invoke("tab_switch", { label: t.label }).then(refresh).catch(function () {});
+        }
+      });
       strip.appendChild(el);
     });
-    // The new-tab button lives INSIDE the strip, immediately
-    // after the last tab - the Chrome/Firefox convention the
-    // owner asked for (2026-11-05) - not beside the app actions.
     var add = document.createElement("button");
+    add.type = "button";
     add.className = "tab-add";
     add.title = STR[lang].new_tab;
-    add.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    add.setAttribute("aria-label", STR[lang].new_tab);
+    add.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
     add.addEventListener("click", function () {
-      // An empty URL asks Rust for a fresh tab on the configured
-      // origin (the Control Center when none is configured).
       invoke("tab_open", { url: "" }).then(refresh).catch(function () {
         invoke("open_control_center", {}).catch(function () {});
       });
@@ -245,13 +311,15 @@
     }
   }
   function refresh() {
-    applyLang();
-    invoke("tab_list", {}).then(render).catch(function () {});
+    applyPrefs();
+    if (refreshing) return;
+    refreshing = true;
+    invoke("tab_list", {}).then(render).catch(function () {}).finally(function () {
+      refreshing = false;
+    });
   }
   var stripEl = document.getElementById("tabs");
   stripEl.addEventListener("dragover", function (ev) {
-    // Dropping on the strip's empty tail moves the tab to the
-    // end; drops on a tab itself are handled by that tab.
     if (dragLabel && ev.target === stripEl) {
       ev.preventDefault();
       if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
@@ -275,13 +343,22 @@
   document.getElementById("btnReload").addEventListener("click", function () {
     invoke("nav_reload", {}).catch(function () {});
   });
+  document.getElementById("btnTabTheme").addEventListener("click", function () {
+    try { localStorage.setItem("np_cc_theme", theme === "dark" ? "light" : "dark"); } catch (e) {}
+    applyPrefs();
+  });
+  document.getElementById("btnTabLang").addEventListener("click", function () {
+    try { localStorage.setItem("np_cc_lang", lang === "ar" ? "en" : "ar"); } catch (e) {}
+    applyPrefs();
+  });
   document.getElementById("btnSettings").addEventListener("click", function () {
     invoke("open_settings", {}).catch(function () {});
   });
   document.getElementById("btnCc").addEventListener("click", function () {
     invoke("open_control_center", {}).catch(function () {});
   });
-  applyLang();
+  window.addEventListener("storage", applyPrefs);
+  applyPrefs();
   refresh();
   window.setInterval(refresh, 700);
 </script>

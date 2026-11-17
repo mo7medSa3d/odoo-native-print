@@ -3,98 +3,212 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Yaseir Print — جارٍ الاتصال</title>
+<title>Yaseir Print — Connecting</title>
+<link rel="stylesheet" href="theme.css"/>
 <style>
-  :root { --brand: #0953de; --cyan: #00c7fc; --ink: #101219; --muted: #5b6472; --line: #e3e8f0; }
-  * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-         font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-         background: linear-gradient(160deg, #0953de 0%, #0098d3 100%); color: var(--ink); }
-  .card { width: min(92vw, 430px); background: #fff; border: 1px solid var(--line); border-radius: 20px;
-          box-shadow: 0 18px 50px rgba(16,18,25,.10); padding: 2rem 1.8rem; text-align: center; }
-  .logo { width: 64px; height: 64px; border-radius: 16px; margin-bottom: 1rem; }
-  h1 { font-size: 1.25rem; margin: 0 0 .4rem; }
-  p { color: var(--muted); font-size: .95rem; line-height: 1.7; margin: 0 0 1.2rem; }
-  .spinner { width: 38px; height: 38px; margin: 0 auto 1.1rem; border-radius: 50%;
-             border: 4px solid #dbe6fb; border-top-color: var(--brand); animation: spin 0.9s linear infinite; }
+  body {
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    background:
+      radial-gradient(800px 420px at 50% 0%, var(--brand-soft), transparent 70%),
+      var(--bg-canvas);
+    padding: 20px;
+  }
+  .card {
+    width: min(92vw, 440px);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    padding: 28px 26px;
+    text-align: center;
+  }
+  .logo-wrap {
+    width: 60px; height: 60px; margin: 0 auto 16px;
+    border-radius: 14px; padding: 4px;
+    background: var(--bg-subtle); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .logo { width: 100%; height: 100%; border-radius: 10px; display: block; }
+  .spinner {
+    width: 32px; height: 32px; margin: 0 auto 14px; border-radius: 50%;
+    border: 3px solid var(--border-strong); border-top-color: var(--brand);
+    animation: spin 0.85s linear infinite;
+  }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .origin { direction: ltr; font-weight: 600; color: var(--ink); word-break: break-all; }
-  .actions { display: none; flex-wrap: wrap; gap: .5rem; justify-content: center; }
+  h1 { font-size: 18px; font-weight: 700; margin: 0 0 8px; color: var(--text-primary); }
+  p { color: var(--text-secondary); font-size: 13.5px; line-height: 1.65; margin: 0 0 18px; }
+  .origin {
+    display: inline-block; direction: ltr; font-family: var(--font-mono);
+    font-size: 12.5px; font-weight: 600; color: var(--text-primary);
+    background: var(--bg-subtle); border: 1px solid var(--border);
+    padding: 2px 8px; border-radius: var(--radius-sm); word-break: break-all;
+    margin-top: 4px;
+  }
+  .actions { display: none; flex-wrap: wrap; gap: 8px; justify-content: center; }
   .actions.show { display: flex; }
-  button { border: 0; border-radius: 999px; padding: .65rem 1.25rem; font: inherit; font-size: .92rem;
-           cursor: pointer; background: #eef1f6; color: var(--ink); }
-  button.primary { background: var(--cyan); color: #fff; font-weight: 700; }
-  .count { font-size: .82rem; color: var(--muted); margin-top: .9rem; min-height: 1.2em; }
-  .credit { position: fixed; inset-inline: 0; bottom: 14px; text-align: center;
-            color: rgba(255,255,255,.85); font-size: .8rem; }
+  button {
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 8px 16px; font: inherit; font-size: 13px; font-weight: 500;
+    cursor: pointer; background: var(--bg-subtle); color: var(--text-primary);
+    transition: background-color .14s ease, border-color .14s ease, opacity .14s ease;
+  }
+  button:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-strong); }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
+  button.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); font-weight: 600; }
+  button.primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
+  .count { font-size: 12px; color: var(--text-muted); margin-top: 14px; min-height: 1.2em; font-variant-numeric: tabular-nums; }
+  .credit {
+    position: fixed; inset-inline: 0; bottom: 14px; text-align: center;
+    color: var(--text-muted); font-size: 11.5px;
+  }
 </style>
 </head>
 <body>
-  <div class="card">
-    <img class="logo" src="app-icon.png" alt=""/>
-    <div class="spinner" id="spinner"></div>
+  <main class="card" role="status" aria-live="polite">
+    <div class="logo-wrap"><img class="logo" src="app-icon.png" alt=""/></div>
+    <div class="spinner" id="spinner" aria-hidden="true"></div>
     <h1 id="title">جارٍ الاتصال بسيرفر Odoo</h1>
-    <p id="msg">بنجهّز مساحة العمل… <span class="origin" id="origin"></span></p>
+    <p id="msg">بنجهّز مساحة العمل… <br><span class="origin" id="origin"></span></p>
     <div class="actions" id="actions">
-      <button class="primary" id="retry">حاول الآن</button>
-      <button id="anyway">فتح Odoo على أي حال</button>
-      <button id="cc">مركز التحكم</button>
+      <button type="button" class="primary" id="retry">حاول الآن</button>
+      <button type="button" id="anyway">فتح Odoo على أي حال</button>
+      <button type="button" id="cc">مركز التحكم</button>
     </div>
-    <div class="count" id="count"></div>
-  </div>
-  <div class="credit">تطوير وتشغيل Yaseir.com — جميع الحقوق محفوظة © يسير</div>
+    <div class="count" id="count" aria-live="off"></div>
+  </main>
+  <div class="credit" id="credit">تطوير وتشغيل Yaseir.com — جميع الحقوق محفوظة © يسير</div>
 <script>
-  function invoke(cmd, args) { return window.__TAURI_INTERNALS__.invoke(cmd, args || {}); }
+  "use strict";
+  function invoke(cmd, args) {
+    if (!window.__TAURI_INTERNALS__ || typeof window.__TAURI_INTERNALS__.invoke !== "function") {
+      return Promise.reject(new Error("tauri_internals_unavailable"));
+    }
+    return window.__TAURI_INTERNALS__.invoke(cmd, args || {});
+  }
+  var STR = {
+    en: {
+      connecting: "Connecting to Odoo server",
+      preparing: "Preparing workspace…",
+      downTitle: "Odoo server is not responding",
+      downPre: "Could not reach the server at ",
+      downPost: ". Make sure the server is running and reachable on the network; we will retry automatically.",
+      redirTitle: "Server redirected to a different address",
+      redirPre: "The server responded, but redirected to an address different from the configured origin (",
+      redirPost: "). Review the address in the Control Center so it matches the actual server URL.",
+      retryIn: "Retrying in ",
+      secs: "s…",
+      retryBtn: "Retry now",
+      anywayBtn: "Open Odoo anyway",
+      ccBtn: "Control Center",
+      initFailTitle: "Could not start connection",
+      initFailMsg: "Open the Control Center to check your Odoo connection settings.",
+      credit: "Developed & operated by Yaseir.com — All rights reserved © Yaseir"
+    },
+    ar: {
+      connecting: "جارٍ الاتصال بسيرفر Odoo",
+      preparing: "بنجهّز مساحة العمل…",
+      downTitle: "سيرفر Odoo لا يستجيب",
+      downPre: "مش قادرين نوصل للسيرفر على ",
+      downPost: ". اتأكد إن السيرفر شغال وإن الشبكة واصلة، وهنحاول تاني تلقائيًا.",
+      redirTitle: "السيرفر بيحوّل لعنوان مختلف",
+      redirPre: "السيرفر ردّ لكنه بيحوّل الاتصال لعنوان غير العنوان المسجّل في الإعدادات (",
+      redirPost: "). راجع العنوان من مركز التحكم وخلّيه مطابق لعنوان السيرفر الفعلي.",
+      retryIn: "إعادة المحاولة بعد ",
+      secs: " ثوانٍ…",
+      retryBtn: "حاول الآن",
+      anywayBtn: "فتح Odoo على أي حال",
+      ccBtn: "مركز التحكم",
+      initFailTitle: "تعذّر بدء الاتصال",
+      initFailMsg: "افتح مركز التحكم لمراجعة إعدادات اتصال Odoo.",
+      credit: "تطوير وتشغيل Yaseir.com — جميع الحقوق محفوظة © يسير"
+    }
+  };
+  var lang = "ar";
+  var T = STR.ar;
+  var viewState = "connecting";
+
+  function applyPrefs() {
+    var savedLang = null, savedTheme = null;
+    try {
+      savedLang = localStorage.getItem("np_cc_lang");
+      savedTheme = localStorage.getItem("np_cc_theme");
+    } catch (e) {}
+    lang = savedLang === "en" ? "en" : "ar";
+    T = STR[lang];
+    document.documentElement.lang = lang;
+    document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
+    document.documentElement.setAttribute("data-theme", savedTheme === "dark" ? "dark" : "light");
+    document.getElementById("retry").textContent = T.retryBtn;
+    document.getElementById("anyway").textContent = T.anywayBtn;
+    document.getElementById("cc").textContent = T.ccBtn;
+    document.getElementById("credit").textContent = T.credit;
+    if (viewState === "connecting") {
+      document.getElementById("title").textContent = T.connecting;
+      var msgEl = document.getElementById("msg");
+      if (msgEl && msgEl.firstChild && msgEl.firstChild.nodeType === 3) {
+        msgEl.firstChild.nodeValue = T.preparing + " ";
+      }
+    }
+    else if (viewState === "down") showDown(true);
+    else if (viewState === "redirected") showRedirected();
+    else if (viewState === "initFail") showInitFail();
+  }
+
   var origin = null;
   var timer = null;
   var left = 0;
+  var probing = false;
 
-  function showDown() {
-    document.getElementById("spinner").style.display = "none";
-    document.getElementById("title").textContent = "سيرفر Odoo لا يستجيب";
-    // Built with textContent/createElement, not innerHTML: the
-    // configured origin is app data and must never become markup
-    // (audit JS-L1).
+  function setMsgWithOrigin(pre, post) {
     var msg = document.getElementById("msg");
-    msg.textContent = "مش قادرين نوصل للسيرفر على ";
+    msg.textContent = pre;
     var span = document.createElement("span");
     span.className = "origin";
     span.textContent = origin || "";
     msg.appendChild(span);
-    msg.appendChild(document.createTextNode(". اتأكد إن السيرفر شغال وإن الشبكة واصلة، وهنحاول تاني تلقائيًا."));
+    msg.appendChild(document.createTextNode(post));
+  }
+
+  function showDown(keepTimer) {
+    viewState = "down";
+    document.getElementById("spinner").style.display = "none";
+    document.getElementById("title").textContent = T.downTitle;
+    setMsgWithOrigin(T.downPre, T.downPost);
     document.getElementById("actions").classList.add("show");
-    startCountdown();
+    document.getElementById("anyway").style.display = "";
+    if (!keepTimer) startCountdown();
+    else if (left > 0) document.getElementById("count").textContent = T.retryIn + left + T.secs;
   }
   function showRedirected() {
-    // The probe connected, but after navigating the document never
-    // unloaded: the server redirected to a different origin than
-    // the configured one (HTTP→HTTPS upgrade, host canonicalization)
-    // and the app refuses cross-origin navigation. Without this the
-    // user stared at the connecting spinner forever (audit L4).
+    viewState = "redirected";
     disarmNavWatchdog();
     stopCountdown();
     document.getElementById("spinner").style.display = "none";
-    document.getElementById("title").textContent = "السيرفر بيحوّل لعنوان مختلف";
-    var msg = document.getElementById("msg");
-    msg.textContent = "السيرفر ردّ لكنه بيحوّل الاتصال لعنوان غير العنوان المسجّل في الإعدادات (";
-    var span = document.createElement("span");
-    span.className = "origin";
-    span.textContent = origin || "";
-    msg.appendChild(span);
-    msg.appendChild(document.createTextNode("). راجع العنوان من مركز التحكم وخلّيه مطابق لعنوان السيرفر الفعلي."));
+    document.getElementById("title").textContent = T.redirTitle;
+    setMsgWithOrigin(T.redirPre, T.redirPost);
     document.getElementById("actions").classList.add("show");
     document.getElementById("anyway").style.display = "none";
     document.getElementById("count").textContent = "";
+  }
+  function showInitFail() {
+    viewState = "initFail";
+    document.getElementById("title").textContent = T.initFailTitle;
+    document.getElementById("msg").textContent = T.initFailMsg;
+    document.getElementById("spinner").style.display = "none";
+    document.getElementById("actions").classList.add("show");
+    document.getElementById("retry").style.display = "none";
+    document.getElementById("anyway").style.display = "none";
   }
   function startCountdown() {
     stopCountdown();
     left = 5;
     var el = document.getElementById("count");
-    el.textContent = "إعادة المحاولة بعد " + left + " ثوانٍ…";
+    el.textContent = T.retryIn + left + T.secs;
     timer = window.setInterval(function () {
       left -= 1;
       if (left <= 0) { stopCountdown(); el.textContent = ""; tryProbe(); return; }
-      el.textContent = "إعادة المحاولة بعد " + left + " ثوانٍ…";
+      el.textContent = T.retryIn + left + T.secs;
     }, 1000);
   }
   function stopCountdown() { if (timer) { window.clearInterval(timer); timer = null; } }
@@ -106,37 +220,46 @@
   }
   function disarmNavWatchdog() { if (navTimer) { window.clearTimeout(navTimer); navTimer = null; } }
 
+  function isHttpOrigin(u) {
+    return typeof u === "string" && /^https?:\/\//i.test(u);
+  }
   function tryProbe() {
+    if (probing) return;
+    probing = true;
+    var retryBtn = document.getElementById("retry");
+    if (retryBtn) retryBtn.disabled = true;
     document.getElementById("spinner").style.display = "block";
     invoke("probe_origin", {}).then(function (ok) {
-      if (ok && origin) { armNavWatchdog(); window.location.replace(origin); }
-      else { showDown(); }
-    }).catch(function () { showDown(); });
+      probing = false;
+      if (retryBtn) retryBtn.disabled = false;
+      if (ok && isHttpOrigin(origin)) { armNavWatchdog(); window.location.replace(origin); }
+      else { showDown(false); }
+    }).catch(function () {
+      probing = false;
+      if (retryBtn) retryBtn.disabled = false;
+      showDown(false);
+    });
   }
 
   document.getElementById("retry").addEventListener("click", function () {
     stopCountdown(); document.getElementById("count").textContent = ""; tryProbe();
   });
   document.getElementById("anyway").addEventListener("click", function () {
-    if (origin) { armNavWatchdog(); window.location.replace(origin); }
+    if (isHttpOrigin(origin)) { armNavWatchdog(); window.location.replace(origin); }
   });
   document.getElementById("cc").addEventListener("click", function () {
     window.location.replace("index.html");
   });
 
+  window.addEventListener("storage", applyPrefs);
+  applyPrefs();
+
   invoke("app_overview", {}).then(function (ov) {
-    origin = ov && ov.odoo_origin ? ov.odoo_origin : null;
+    origin = ov && (ov.odooOrigin || ov.odoo_origin) ? (ov.odooOrigin || ov.odoo_origin) : null;
     if (!origin) { window.location.replace("index.html"); return; }
     document.getElementById("origin").textContent = origin;
     tryProbe();
-  }).catch(function () {
-    document.getElementById("title").textContent = "تعذّر بدء الاتصال";
-    document.getElementById("msg").textContent = "افتح مركز التحكم لمراجعة إعدادات اتصال Odoo.";
-    document.getElementById("spinner").style.display = "none";
-    document.getElementById("actions").classList.add("show");
-    document.getElementById("retry").style.display = "none";
-    document.getElementById("anyway").style.display = "none";
-  });
+  }).catch(showInitFail);
 </script>
 </body>
 </html>

@@ -77,7 +77,6 @@ impl HealthCondition {
                 | HealthCondition::Offline
                 | HealthCondition::Stopped
                 | HealthCondition::HardwareError
-                | HealthCondition::CommunicationError
                 | HealthCondition::UserIntervention
                 | HealthCondition::OtherError
         )
@@ -161,11 +160,17 @@ impl PrinterHealth {
         // observation): it is stale at every instant, including
         // before its own timestamp, so it can never be displayed
         // as a live reading.
-        self.ttl_secs == 0 || now_unix.saturating_sub(self.observed_at) > self.ttl_secs as i64
+        self.ttl_secs == 0 || i64::try_from(self.ttl_secs).is_ok_and(|ttl| now_unix.saturating_sub(self.observed_at) > ttl)
     }
 
     pub fn blocks_printing(&self) -> bool {
         self.conditions.iter().any(|c| c.blocks_printing())
+    }
+
+    /// Like [`Self::blocks_printing`], but ignores stale observations
+    /// past their TTL so an outdated error snapshot never blocks new work.
+    pub fn blocks_printing_if_fresh(&self, now_unix: i64) -> bool {
+        !self.is_stale(now_unix) && self.blocks_printing()
     }
 
     /// The single primary status, for consumers that need one value.
@@ -231,7 +236,7 @@ impl PrinterHealth {
         if flags & 0x0004_0000 != 0 {
             set.insert(HealthCondition::TonerEmpty);
         }
-        if flags & 0x0000_0080 != 0 || flags & 0x0000_1000 != 0 || work_offline {
+        if flags & 0x0000_0080 != 0 || work_offline {
             set.insert(HealthCondition::Offline);
         }
         if flags & 0x0010_0000 != 0 || flags & 0x0000_0020 != 0 || flags & 0x0000_0800 != 0 {
@@ -283,7 +288,7 @@ impl PrinterHealth {
                 "media-jam" => {
                     set.insert(HealthCondition::PaperJam);
                 }
-                "door-open" | "cover-open" => {
+                "door-open" | "cover-open" | "interlock-open" => {
                     set.insert(HealthCondition::CoverOpen);
                 }
                 "marker-supply-empty" => {
@@ -295,6 +300,21 @@ impl PrinterHealth {
                 "toner-empty" => {
                     set.insert(HealthCondition::TonerEmpty);
                 }
+                "ink-low" => {
+                    set.insert(HealthCondition::InkLow);
+                }
+                "ink-empty" => {
+                    set.insert(HealthCondition::InkEmpty);
+                }
+                "ribbon-low" => {
+                    set.insert(HealthCondition::RibbonLow);
+                }
+                "ribbon-empty" => {
+                    set.insert(HealthCondition::RibbonOut);
+                }
+                "warming-up" => {
+                    set.insert(HealthCondition::WarmingUp);
+                }
                 "offline" => {
                     set.insert(HealthCondition::Offline);
                 }
@@ -304,7 +324,16 @@ impl PrinterHealth {
                 "input-tray-missing" | "output-full" | "intervention-needed" => {
                     set.insert(HealthCondition::UserIntervention);
                 }
-                "media-needed" | "media-ready" | "none" => {}
+                "media-needed"
+                | "media-ready"
+                | "none"
+                | "other"
+                | "connecting-to-device"
+                | "moving-to-paused"
+                | "marker-waste-almost-full"
+                | "opc-near-eol"
+                | "toner-low-report"
+                | "spool-area-full" => {}
                 _ => {
                     set.insert(HealthCondition::OtherError);
                 }
@@ -539,5 +568,27 @@ mod tests {
         assert!(json.contains("paper_out"));
         let back: PrinterHealth = serde_json::from_str(&json).unwrap();
         assert_eq!(back, h);
+    }
+
+    #[test]
+    fn communication_error_and_benign_ipp_reasons_do_not_block() {
+        let mut set = BTreeSet::new();
+        set.insert(HealthCondition::CommunicationError);
+        let comm = PrinterHealth::new(set, HealthSource::Ipp, 1000, 30);
+        assert!(!comm.blocks_printing());
+        assert_eq!(comm.primary_status(), PrinterStatus::Unknown);
+
+        let warming = PrinterHealth::from_ipp(
+            3,
+            &["warming-up", "ink-low", "connecting-to-device", "other"],
+            Some(true),
+            1000,
+        );
+        assert!(!warming.blocks_printing());
+        assert!(warming.blocks_printing_if_fresh(1010) == false);
+
+        let stale_err = PrinterHealth::from_ipp(5, &["media-empty"], Some(false), 1000);
+        assert!(stale_err.blocks_printing_if_fresh(1010));
+        assert!(!stale_err.blocks_printing_if_fresh(1031));
     }
 }

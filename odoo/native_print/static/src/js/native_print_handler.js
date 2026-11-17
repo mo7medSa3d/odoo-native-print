@@ -181,18 +181,27 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
                 lastPages = pages;
                 lastAttempts = attempts;
                 lastProgressAt = Date.now();
+                const statusPayload = {
+                    idempotency_key: jobId,
+                    state,
+                    error_code: errorCode,
+                    device: meta.printerName || meta.printerPattern,
+                    report_name: meta.reportName,
+                    source_type: meta.sourceType || "report",
+                    pages,
+                    byte_size: meta.byteSize,
+                    attempts,
+                };
+                if (meta.sourceModel) statusPayload.source_model = meta.sourceModel;
+                if (meta.sourceIds) statusPayload.source_ids = meta.sourceIds;
+                if (meta.copies) statusPayload.copies = meta.copies;
+                if (meta.paper) statusPayload.paper = meta.paper;
+                if (typeof meta.duplex === "boolean") statusPayload.duplex = meta.duplex;
+                if (typeof meta.color === "boolean") statusPayload.color = meta.color;
+                if (meta.mode) statusPayload.mode = meta.mode;
                 await rpc(
                     "/native_print/job_status",
-                    {
-                        idempotency_key: jobId,
-                        state,
-                        error_code: errorCode,
-                        device: meta.printerName || meta.printerPattern,
-                        report_name: meta.reportName,
-                        pages,
-                        byte_size: meta.byteSize,
-                        attempts,
-                    },
+                    statusPayload,
                     { silent: true },
                 ).catch(() => {});
             }
@@ -233,7 +242,7 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
             // get no outcome and the server log no terminal state.
             // Give up only after several failures in a row; the poll
             // ladder itself is unchanged.
-            if (++consecutiveErrors >= 3) {
+            if (++consecutiveErrors >= 10) {
                 break;
             }
         }
@@ -352,12 +361,11 @@ async function handleReportSubmission(action, options, env, bridge) {
             source_ids: textSource.ids || undefined,
             copies: rule.copies || 1,
             paper: rule.paper || undefined,
-            duplex: !!rule.duplex,
             color: rule.color !== false,
             mode: textAsEscpos ? "escpos" : "gdi",
             pages: 1,
             byte_size: textBytes,
-        }).catch(() => {});
+        }, { silent: true }).catch(() => {});
         try {
             if (textAsEscpos) {
                 await bridge.printText({
@@ -387,6 +395,13 @@ async function handleReportSubmission(action, options, env, bridge) {
                     reportName: action.report_name,
                     printerPattern: rule.printer_pattern,
                     printerName: target.printer.name,
+                    sourceType: "report",
+                    sourceModel: textSource.model,
+                    sourceIds: textSource.ids || undefined,
+                    copies: rule.copies || 1,
+                    paper: rule.paper || undefined,
+                    color: rule.color !== false,
+                    mode: textAsEscpos ? "escpos" : "gdi",
                     byteSize: textBytes,
                     pages: 1,
                 },
@@ -430,7 +445,16 @@ async function handleReportSubmission(action, options, env, bridge) {
     // A 200 response is not necessarily a PDF: an expired session
     // answers with the login page's HTML. Never queue HTML as a
     // document; fall back to the standard download instead.
-    if (!(bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46)) {
+    const hasPdfMagic = (() => {
+        const limit = Math.min(bytes.length - 3, 16);
+        for (let i = 0; i < limit; i++) {
+            if (bytes[i] === 0x25 && bytes[i + 1] === 0x50 && bytes[i + 2] === 0x44 && bytes[i + 3] === 0x46) {
+                return true;
+            }
+        }
+        return false;
+    })();
+    if (!hasPdfMagic) {
         return undefined;
     }
     if (bytes.length > MAX_NATIVE_PAYLOAD_BYTES) {
@@ -453,11 +477,11 @@ async function handleReportSubmission(action, options, env, bridge) {
         source_ids: pdfSource.ids || undefined,
         copies: rule.copies || 1,
         paper: rule.paper || undefined,
-        duplex: !!rule.duplex,
+        duplex: typeof rule.duplex === "boolean" ? rule.duplex : null,
         color: rule.color !== false,
         mode: rule.mode || undefined,
         byte_size: bytes.length,
-    }).catch(() => {});
+    }, { silent: true }).catch(() => {});
     try {
         await bridge.printPdf({
             idempotencyKey,
@@ -475,7 +499,6 @@ async function handleReportSubmission(action, options, env, bridge) {
             scalePolicy: rule.scale_policy,
             mediaRollWidthMm:
                 (rule.media && rule.media.roll_width_mm) || undefined,
-            url,
             bytes,
         });
         watchJobToCompletion(
@@ -485,6 +508,14 @@ async function handleReportSubmission(action, options, env, bridge) {
                 reportName: action.report_name,
                 printerPattern: rule.printer_pattern,
                 printerName: target.printer.name,
+                sourceType: "report",
+                sourceModel: pdfSource.model,
+                sourceIds: pdfSource.ids || undefined,
+                copies: rule.copies || 1,
+                paper: rule.paper || undefined,
+                duplex: typeof rule.duplex === "boolean" ? rule.duplex : null,
+                color: rule.color !== false,
+                mode: rule.mode || undefined,
                 byteSize: bytes.length,
                 pages: 1,
             },

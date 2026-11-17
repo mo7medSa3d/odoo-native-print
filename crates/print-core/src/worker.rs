@@ -59,16 +59,16 @@ pub struct WorkerConfig {
 impl Default for WorkerConfig {
     fn default() -> Self {
         Self {
-            // Six attempts over ~15 s of backoff (0.5+1+2+4+8 s,
-            // capped): transient printer states — a network printer
-            // waking, a spooler momentarily busy, a brief offline —
-            // ride through instead of dead-lettering a printable job
-            // after ~4 s (owner practicality directive, 2026-11-05).
+            // Ten attempts over ~4 min of capped exponential backoff
+            // (1+2+4+8+16+32+60+60+60 s): transient printer states —
+            // a network printer waking, a spooler momentarily busy,
+            // paper reload, or a brief offline — ride through instead
+            // of dead-lettering a printable job prematurely.
             // Genuinely dead printers still fail, with the payload
             // kept for one-click retry.
-            max_attempts: 6,
-            backoff_base_ms: 500,
-            backoff_max_ms: 30_000,
+            max_attempts: 10,
+            backoff_base_ms: 1_000,
+            backoff_max_ms: 60_000,
         }
     }
 }
@@ -123,8 +123,17 @@ impl<'a, B: PrintBackend> Worker<'a, B> {
         // as ambiguous and never auto-reprints it. That is the safe
         // direction (no duplicates), at the cost of not separating
         // "never reached the printer" from "maybe printed".
-        self.queue.set_state(&job.id, JobState::Spooling, None)?;
-        self.queue.set_state(&job.id, JobState::Printing, None)?;
+        for next in [JobState::Spooling, JobState::Printing] {
+            match self.queue.set_state(&job.id, next, None) {
+                Ok(()) => {}
+                // User canceled the job on another connection between claim_next
+                // and Printing: stop cleanly without logging a spurious error.
+                Err(QueueError::Transition(ref t)) if t.from == JobState::Canceled => {
+                    return Ok(Outcome::Idle);
+                }
+                Err(e) => return Err(e),
+            }
+        }
         match self.backend.print(&job) {
             Ok(()) => {
                 self.queue.set_state(&job.id, JobState::Done, None)?;
@@ -144,7 +153,7 @@ impl<'a, B: PrintBackend> Worker<'a, B> {
                 // Failed, then re-queued after a durable backoff: the
                 // audit trail shows both transitions, and the worker
                 // thread is free to serve other printers meanwhile.
-                let delay = backoff_delay_ms(&self.cfg, job.attempts, self.entropy);
+                let delay = backoff_delay_ms(&self.cfg, job.attempts.saturating_sub(1), self.entropy);
                 self.queue.requeue_with_delay(&job.id, delay, &e.code)?;
                 Ok(Outcome::Retried(job.id))
             }
@@ -231,8 +240,8 @@ mod tests {
         q.enqueue(&job("1")).unwrap();
         let cfg = WorkerConfig {
             max_attempts: 2,
-            backoff_base_ms: 500,
-            backoff_max_ms: 5_000,
+            backoff_base_ms: 5_000,
+            backoff_max_ms: 10_000,
         };
         {
             let mut w = Worker {

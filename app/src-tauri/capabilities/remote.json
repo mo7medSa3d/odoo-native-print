@@ -2,6 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "description": "Remote Odoo origin capability: print submission and read-only status only (no queue admin, diagnostics or settings). URL patterns admit the origin families the policy allows; Rust validates the exact configured origin on every command call (ADR-0002: HTTPS for any host, or HTTP to an IP address).",
   "identifier": "remote-odoo-origin",
+  "local": false,
   "permissions": [
     "allow-print-pdf",
     "allow-print-status",
@@ -15,9 +16,6 @@
       "http://*:*/*"
     ]
   },
-  "windows": [
-    "main"
-  ],
   "webviews": [
     "tab-*"
   ]

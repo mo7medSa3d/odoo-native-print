@@ -3,7 +3,7 @@ name = "odoo-native-print-app"
 version = "1.5.7"
 edition = "2021"
 publish = false
-rust-version = "1.75"
+rust-version = "1.82"
 
 # Standalone workspace: this crate builds only on Windows (WebView2).
 [workspace]

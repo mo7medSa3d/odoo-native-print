@@ -4,84 +4,22 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Yaseir Print — Control Center</title>
+<link rel="stylesheet" href="theme.css" />
 <style>
-  /* Thmanyah Sans - the Yaseir family typeface (files in dist/fonts/). */
-  @font-face { font-family: "Thmanyah Sans"; src: url("fonts/thmanyahsans-Light.otf") format("opentype"); font-weight: 300; font-style: normal; font-display: swap; }
-  @font-face { font-family: "Thmanyah Sans"; src: url("fonts/thmanyahsans-Regular.otf") format("opentype"); font-weight: 400; font-style: normal; font-display: swap; }
-  @font-face { font-family: "Thmanyah Sans"; src: url("fonts/thmanyahsans-Medium.otf") format("opentype"); font-weight: 500; font-style: normal; font-display: swap; }
-  @font-face { font-family: "Thmanyah Sans"; src: url("fonts/thmanyahsans-Bold.otf") format("opentype"); font-weight: 700; font-style: normal; font-display: swap; }
-  @font-face { font-family: "Thmanyah Sans"; src: url("fonts/thmanyahsans-Black.otf") format("opentype"); font-weight: 900; font-style: normal; font-display: swap; }
-
-  :root {
-    /* Yaseir design tokens - ui.yaseir.site guide v2.1 */
-    --bg-app: #f6f8fc;
-    --bg-surface: #ffffff;
-    --bg-subtle: #eef3fb;
-    --bg-hover: #e1eaf7;
-    --text-primary: #101219;
-    --text-secondary: #3e4653;
-    --text-muted: #68707e;
-    --border-color: #d8e0ee;
-    --brand-plum: #0953de;
-    --brand-plum-dark: #0b47bd;
-    --brand-indigo: #0059ff;
-    --brand-teal: #00a9d7;
-    --status-ok-bg: #e2f4e8;
-    --status-ok-fg: #177245;
-    --status-warn-bg: #fff2cc;
-    --status-warn-fg: #8a6100;
-    --status-err-bg: #fbe7e2;
-    --status-err-fg: #b3261e;
-    --status-info-bg: #e2ecfd;
-    --status-info-fg: #0953de;
-    --shadow-sm: 0 1px 3px rgba(9, 35, 90, 0.06);
-    --shadow-md: 0 4px 14px rgba(9, 35, 90, 0.1);
-    --radius-md: 12px;
-    --radius-lg: 20px;
-  }
-
-  [data-theme="dark"] {
-    --bg-app: #0b0e14;
-    --bg-surface: #141926;
-    --bg-subtle: #1b2233;
-    --bg-hover: #242e47;
-    --text-primary: #f5f7fa;
-    --text-secondary: #c3cad6;
-    --text-muted: #8a93a5;
-    --border-color: #26314a;
-    --brand-plum: #5b93ff;
-    --brand-plum-dark: #7fa8ff;
-    --brand-indigo: #4d8dff;
-    --brand-teal: #00c7fc;
-    --status-ok-bg: rgba(23, 114, 69, 0.28);
-    --status-ok-fg: #4ade80;
-    --status-warn-bg: rgba(138, 97, 0, 0.3);
-    --status-warn-fg: #fbbf24;
-    --status-err-bg: rgba(179, 38, 30, 0.3);
-    --status-err-fg: #f87171;
-    --status-info-bg: rgba(9, 83, 222, 0.32);
-    --status-info-fg: #93b8ff;
-  }
-
-  * {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-  }
 
   body {
-    font-family: "Thmanyah Sans", "Segoe UI", -apple-system, BlinkMacSystemFont, Tahoma, sans-serif;
-    background: var(--bg-app);
+    font-family: var(--font-sans);
+    background: var(--bg-canvas);
     color: var(--text-primary);
     min-height: 100vh;
     display: flex;
     flex-direction: column;
-    line-height: 1.7;
+    line-height: 1.55;
   }
 
+  .hidden { display: none !important; }
+
   /* Top Navigation Bar */
-  /* App bar: full viewport width, edge to edge (owner spec). One
-     surface, ink text, brand reserved for the primary action. */
   .topbar {
     background: var(--bg-surface);
     color: var(--text-primary);
@@ -90,671 +28,331 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
     position: sticky;
     top: 0;
     z-index: 50;
     width: 100%;
   }
-
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 0.85rem;
-  }
-
+  .brand { display: flex; align-items: center; gap: 0.85rem; }
   .brand-logo {
-    width: 42px;
-    height: 42px;
-    border-radius: 12px;
-    background: var(--bg-subtle);
-    border: 1px solid var(--border-color);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
+    width: 40px; height: 40px; border-radius: 10px;
+    background: var(--bg-subtle); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    overflow: hidden;
   }
-
-  .brand-title {
-    font-size: 1.15rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .brand-subtitle {
-    font-size: 0.78rem;
-    color: var(--text-muted);
-  }
-
+  .brand-title { font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; }
   .version-pill {
-    font-size: 0.7rem;
-    font-weight: 500;
-    background: var(--bg-subtle);
-    color: var(--text-secondary);
-    padding: 0.12rem 0.5rem;
-    border-radius: 999px;
+    font-size: 0.72rem; font-weight: 600; font-family: var(--font-mono);
+    background: var(--bg-subtle); color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px;
+    direction: ltr;
   }
+  .brand-subtitle { font-size: 0.8rem; color: var(--text-muted); }
+  .topbar-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 
-  .topbar-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    flex-wrap: wrap;
-  }
-
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.45rem;
-    padding: 0.55rem 1.5rem;
-    min-height: 44px;
-    border-radius: 999px;
-    font-size: 0.85rem;
-    font-weight: 500;
-    cursor: pointer;
-    border: 1px solid transparent;
-    transition: all 0.15s ease;
-    font-family: inherit;
-    text-decoration: none;
-  }
-
-  .btn:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-
-  .btn-glass {
-    background: transparent;
-    color: var(--text-secondary);
-    border-color: var(--border-color);
-  }
-  .btn-glass:hover:not(:disabled) {
-    background: var(--bg-subtle);
-    color: var(--text-primary);
-  }
-
-  .btn-primary {
-    background: var(--brand-plum);
-    color: #ffffff;
-  }
-  .btn-primary:hover:not(:disabled) {
-    background: var(--brand-plum-dark);
-  }
-
-  .btn-secondary {
-    background: var(--bg-subtle);
-    color: var(--text-primary);
-    border-color: var(--border-color);
-  }
-  .btn-secondary:hover:not(:disabled) {
-    background: var(--bg-hover);
-  }
-
-  .btn-danger {
-    background: var(--status-err-bg);
-    color: var(--status-err-fg);
-    border-color: rgba(185, 28, 28, 0.2);
-  }
-  .btn-danger:hover:not(:disabled) {
-    filter: brightness(0.95);
-  }
-
-  .btn-sm {
-    padding: 0.3rem 0.9rem;
-    min-height: 36px;
-    font-size: 0.78rem;
-    border-radius: 999px;
-  }
-
-  /* Section navigation: its own full-width strip, visually separate
-     from the app bar above it; the tab row inside is centered in the
-     same 1360px column as the page content. */
-  .tabsbar {
-    background: var(--bg-subtle);
-    border-bottom: 1px solid var(--border-color);
-    width: 100%;
-  }
-  .nav-tabs {
-    max-width: 1360px;
-    margin: 0 auto;
-    padding: 0.55rem 1.5rem;
-    display: flex;
-    gap: 0.5rem;
-    justify-content: center;
-    overflow-x: auto;
-  }
-
-  .nav-tab {
-    background: transparent;
-    border: none;
-    border-bottom: 3px solid transparent;
-    color: var(--text-secondary);
-    padding: 0.85rem 1.1rem;
-    font-size: 0.9rem;
-    font-weight: 500;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-family: inherit;
-    white-space: nowrap;
-    transition: color 0.15s, border-color 0.15s;
-  }
-
-  .nav-tab:hover {
-    color: var(--text-primary);
-  }
-
-  .nav-tab.active {
-    color: var(--brand-plum);
-    border-bottom-color: var(--brand-plum);
-  }
-
-  /* Main Container */
-  .main-container {
-    max-width: 1360px;
-    width: 100%;
-    margin: 0 auto;
-    padding: 1.5rem;
-    flex: 1;
+  /* Workspace Shell: Sidebar + Main Canvas on Desktop */
+  .workspace-shell {
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    width: 100%;
+    max-width: 1440px;
+    margin: 0 auto;
   }
-
-  .main-container.is-stale { opacity: 0.55; }
-
-  /* Banner Alert */
-  .alert-banner {
-    padding: 0.9rem 1.15rem;
-    border-radius: var(--radius-md);
+  .tabsbar {
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0.5rem 1rem;
+  }
+  .nav-tabs {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    font-size: 0.88rem;
-    border: 1px solid transparent;
+    flex-direction: row;
+    gap: 0.35rem;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
-  .alert-warn {
-    background: var(--status-warn-bg);
-    color: var(--status-warn-fg);
-    border-color: rgba(180, 83, 9, 0.3);
+  .nav-tabs::-webkit-scrollbar { display: none; }
+  .nav-tab {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid transparent; border-radius: var(--radius-md);
+    background: transparent; color: var(--text-secondary);
+    font: inherit; font-size: 0.86rem; font-weight: 500;
+    cursor: pointer; white-space: nowrap; text-align: start;
+    transition: background-color .14s ease, color .14s ease, border-color .14s ease;
   }
-  .alert-info {
-    background: var(--status-info-bg);
-    color: var(--status-info-fg);
-    border-color: rgba(29, 78, 216, 0.25);
+  .nav-tab:hover { background: var(--bg-subtle); color: var(--text-primary); }
+  .nav-tab.active {
+    background: var(--brand-soft);
+    color: var(--brand);
+    border-color: var(--border);
+    font-weight: 600;
   }
-  .alert-ok {
-    background: var(--status-ok-bg);
-    color: var(--status-ok-fg);
-    border-color: rgba(21, 128, 61, 0.25);
+  .nav-tab svg { flex-shrink: 0; }
+
+  @media (min-width: 960px) {
+    .workspace-shell {
+      flex-direction: row;
+      align-items: flex-start;
+      padding: 1.25rem 1.5rem 2rem;
+      gap: 1.5rem;
+    }
+    .tabsbar {
+      flex: 0 0 236px;
+      background: transparent;
+      border-bottom: 0;
+      padding: 0;
+      position: sticky;
+      top: 76px;
+    }
+    .nav-tabs {
+      flex-direction: column;
+      gap: 0.25rem;
+      overflow-x: visible;
+    }
+    .nav-tab { width: 100%; white-space: normal; }
+  }
+
+  .main-container {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+    padding: 1rem;
+  }
+  @media (min-width: 960px) {
+    .main-container { padding: 0; }
+  }
+
+  .tab-pane { display: flex; flex-direction: column; gap: 1.15rem; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem;
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 0.5rem 0.9rem; font: inherit; font-size: 0.84rem; font-weight: 500;
+    cursor: pointer; background: var(--bg-subtle); color: var(--text-primary);
+    transition: background-color .14s ease, border-color .14s ease, opacity .14s ease;
+  }
+  .btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-strong); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-sm { padding: 0.35rem 0.7rem; font-size: 0.78rem; border-radius: var(--radius-sm); }
+  .btn-primary { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); font-weight: 600; }
+  .btn-primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
+  .btn-secondary { background: var(--bg-surface); border-color: var(--border-strong); color: var(--text-primary); }
+  .btn-secondary:hover:not(:disabled) { background: var(--bg-subtle); }
+  .btn-glass { background: var(--bg-subtle); border-color: var(--border); color: var(--text-primary); }
+  .btn-danger { background: var(--err-fg); border-color: var(--err-fg); color: #fff; font-weight: 600; }
+  .btn-danger:hover:not(:disabled) { opacity: 0.9; }
+  .btn.is-refreshing svg { animation: npSpin 0.8s linear infinite; }
+  @keyframes npSpin { to { transform: rotate(360deg); } }
+
+  /* Alert Banner */
+  .alert-banner {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+    padding: 0.8rem 1rem; border-radius: var(--radius-lg);
+    border: 1px solid var(--warn-border); background: var(--warn-bg); color: var(--warn-fg);
+    font-size: 0.86rem; font-weight: 500; margin-bottom: 1rem;
   }
 
   /* KPI Grid */
   .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-    gap: 1rem;
-  }
-
-  .kpi-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    padding: 1.15rem 1.25rem;
-    box-shadow: var(--shadow-sm);
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
     gap: 0.9rem;
   }
-
-  .kpi-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 13px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    color: #fff;
-    box-shadow: 0 4px 10px rgba(2, 6, 17, 0.18);
+  .kpi-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.1rem;
+    box-shadow: var(--shadow-sm);
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;
   }
-  .kpi-icon svg { width: 24px; height: 24px; }
-  .kpi-icon.info { background: linear-gradient(135deg, #0953de, #0098d3); }
-  .kpi-icon.warn { background: linear-gradient(135deg, #f5a623, #e07f00); }
-  .kpi-icon.ok { background: linear-gradient(135deg, #2fbf71, #149a54); }
-  .kpi-icon.err { background: linear-gradient(135deg, #f0564a, #d92d20); }
-
-  .kpi-label {
-    font-size: 0.82rem;
-    color: var(--text-secondary);
-    font-weight: 500;
-  }
-
+  .kpi-label { font-size: 0.78rem; color: var(--text-muted); font-weight: 600; }
   .kpi-value {
-    font-size: 1.65rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin: 0.15rem 0;
-    line-height: 1.2;
+    font-size: 1.65rem; font-weight: 700; color: var(--text-primary);
+    font-variant-numeric: tabular-nums; line-height: 1.25; margin: 0.25rem 0 0.2rem;
   }
-
-  .kpi-meta {
-    font-size: 0.76rem;
-    color: var(--text-muted);
+  .kpi-meta { font-size: 0.76rem; color: var(--text-secondary); word-break: break-word; }
+  .kpi-icon {
+    width: 38px; height: 38px; border-radius: var(--radius-md);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
+  .kpi-icon.info { background: var(--info-bg); color: var(--info-fg); }
+  .kpi-icon.warn { background: var(--warn-bg); color: var(--warn-fg); }
+  .kpi-icon.ok { background: var(--ok-bg); color: var(--ok-fg); }
+  .kpi-icon.err { background: var(--err-bg); color: var(--err-fg); }
 
-  /* Cards & Panels */
+  /* Cards */
   .card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
     overflow: hidden;
   }
-
   .card-header {
-    padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--border-color);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-  }
-
-  .card-title svg {
-    background: rgba(9, 83, 222, 0.1);
-    border-radius: 8px;
-    padding: 4px;
-    width: 26px;
-    height: 26px;
-    color: #0953de;
-    flex-shrink: 0;
+    padding: 0.9rem 1.15rem;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
+    background: var(--bg-surface);
   }
   .card-title {
-    font-size: 1.05rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+    display: flex; align-items: center; gap: 0.55rem;
+    font-size: 0.95rem; font-weight: 700; color: var(--text-primary);
+  }
+  .card-body { padding: 1.15rem; }
+
+  /* Filter Pills */
+  .filter-pills {
+    display: inline-flex; background: var(--bg-subtle); border: 1px solid var(--border);
+    border-radius: var(--radius-md); padding: 2px; gap: 2px; flex-wrap: wrap;
+  }
+  .filter-pill {
+    border: 0; background: transparent; color: var(--text-secondary); cursor: pointer;
+    font: inherit; font-size: 0.78rem; font-weight: 500;
+    padding: 0.3rem 0.65rem; border-radius: var(--radius-sm);
+    transition: background-color .12s ease, color .12s ease;
+  }
+  .filter-pill:hover { color: var(--text-primary); }
+  .filter-pill.active {
+    background: var(--bg-surface); color: var(--text-primary); font-weight: 600;
+    box-shadow: var(--shadow-sm);
   }
 
-  /* Consistent vertical rhythm between the blocks of every tab. */
-  .tab-pane > * + * {
-    margin-top: 1.25rem;
+  /* Table */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+  thead th {
+    text-align: start; font-weight: 600; font-size: 0.76rem; color: var(--text-muted);
+    padding: 0.65rem 1rem; border-bottom: 1px solid var(--border);
+    background: var(--bg-subtle); white-space: nowrap;
   }
-
-  .card-body {
-    padding: 1.25rem;
+  tbody td {
+    padding: 0.7rem 1rem; border-bottom: 1px solid var(--border);
+    color: var(--text-primary); vertical-align: middle;
   }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover { background: var(--bg-subtle); }
+  td.mono, .mono { font-family: var(--font-mono); font-size: 0.78rem; }
 
   /* Badges */
+  .main-container.is-stale { opacity: 0.72; transition: opacity .2s ease; }
   .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.2rem 0.6rem;
-    border-radius: 999px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    font-size: 0.72rem; font-weight: 600; padding: 0.18rem 0.55rem;
+    border-radius: 999px; border: 1px solid transparent; white-space: nowrap;
   }
-  .badge-ok { background: var(--status-ok-bg); color: var(--status-ok-fg); }
-  .badge-warn { background: var(--status-warn-bg); color: var(--status-warn-fg); }
-  .badge-err { background: var(--status-err-bg); color: var(--status-err-fg); }
-  .badge-info { background: var(--status-info-bg); color: var(--status-info-fg); }
-  .badge-neutral { background: var(--bg-subtle); color: var(--text-secondary); }
+  .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  .badge-ok { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-border); }
+  .badge-warn { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-border); }
+  .badge-err { background: var(--err-bg); color: var(--err-fg); border-color: var(--err-border); }
+  .badge-info { background: var(--info-bg); color: var(--info-fg); border-color: var(--info-border); }
+  .badge-neutral { background: var(--bg-subtle); color: var(--text-secondary); border-color: var(--border); }
 
-  .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: currentColor;
-  }
-
-  /* Tables */
-  .table-wrap {
-    width: 100%;
-    overflow-x: auto;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.86rem;
-  }
-
-  th, td {
-    padding: 0.75rem 1rem;
-    text-align: start;
-    border-bottom: 1px solid var(--border-color);
-  }
-
-  th {
-    background: var(--bg-subtle);
-    color: var(--text-secondary);
-    font-weight: 500;
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.02em;
-  }
-
-  tr:hover td {
-    background: var(--bg-subtle);
-  }
-
-  .mono {
-    font-family: "Cascadia Code", "Consolas", monospace;
-    font-size: 0.8rem;
-  }
-
-  /* Printer Cards Grid */
-  .printer-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-    gap: 1.1rem;
-    align-items: start;
-  }
-
-  .printer-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    padding: 1.15rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.9rem;
-    box-shadow: var(--shadow-sm);
-    transition: transform 0.15s, box-shadow 0.15s;
-  }
-
-  .printer-card:hover {
-    box-shadow: var(--shadow-md);
-  }
-
-  .printer-card-top {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 0.75rem;
-  }
-
-  .printer-identity {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-  }
-
-  .printer-type-icon {
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
-    background: linear-gradient(135deg, rgba(9,83,222,.14), rgba(9,83,222,.05));
-    color: #0953de;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-  .printer-type-icon svg { width: 23px; height: 23px; }
-
-  .printer-name {
-    font-weight: 700;
-    font-size: 0.96rem;
-    word-break: break-word;
-  }
-
-  .printer-meta-list {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
-    background: var(--bg-subtle);
-    padding: 0.65rem 0.8rem;
-    border-radius: 12px;
-    font-size: 0.78rem;
-  }
-
-  .printer-meta-item span {
-    color: var(--text-muted);
-    display: block;
-    font-size: 0.7rem;
-  }
-
-  .printer-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.45rem;
-    margin-top: auto;
-  }
-
-  /* Forms & Inputs */
+  /* Forms */
   .form-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1.1rem;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.9rem;
   }
-
-  .form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-
-  .form-label {
-    font-size: 0.84rem;
-    font-weight: 500;
-    color: var(--text-primary);
-  }
-
-  .form-help {
-    font-size: 0.76rem;
-    color: var(--text-muted);
-  }
-
+  .form-group { display: flex; flex-direction: column; gap: 0.35rem; }
+  .form-label { font-size: 0.82rem; font-weight: 600; color: var(--text-primary); }
   .input, .select {
-    padding: 0.6rem 1rem;
-    min-height: 44px;
-    border-radius: 12px;
-    border: 1px solid var(--border-color);
-    background: var(--bg-surface);
-    color: var(--text-primary);
-    font-size: 0.9rem;
-    font-family: inherit;
-    outline: none;
+    width: 100%; height: 36px; padding: 0 0.7rem;
+    border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+    background: var(--bg-surface); color: var(--text-primary);
+    font: inherit; font-size: 0.84rem;
+    transition: border-color .14s ease, box-shadow .14s ease;
   }
-
-  .input:focus, .select:focus {
-    border-color: var(--brand-plum);
-    box-shadow: 0 0 0 3px rgba(9, 83, 222, 0.18);
-  }
-
-  .filter-pills {
-    display: flex;
-    gap: 0.4rem;
-    flex-wrap: wrap;
-  }
-
-  .filter-pill {
-    padding: 0.3rem 0.75rem;
-    border-radius: 999px;
-    font-size: 0.78rem;
-    font-weight: 500;
-    border: 1px solid var(--border-color);
-    background: var(--bg-subtle);
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-family: inherit;
-  }
-
-  .filter-pill.active {
-    background: var(--brand-plum);
-    color: #ffffff;
-    border-color: var(--brand-plum);
-  }
-
-  .code-box {
-    background: #0f172a;
-    color: #e2e8f0;
-    padding: 1rem;
-    border-radius: 16px;
-    font-family: "Cascadia Code", "Consolas", monospace;
-    font-size: 0.8rem;
-    max-height: 360px;
-    overflow: auto;
-    white-space: pre-wrap;
-    direction: ltr;
-    text-align: left;
-  }
-
-  .toast-container {
-    position: fixed;
-    bottom: 1.25rem;
-    inset-inline-end: 1.25rem;
-    z-index: 100;
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-    width: min(380px, calc(100vw - 2rem));
-  }
-
-  .toast {
-    background: var(--bg-surface);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
-    border-inline-start: 4px solid var(--brand-plum);
-    padding: 0.8rem 1rem;
-    border-radius: 16px;
-    box-shadow: var(--shadow-md);
-    font-size: 0.84rem;
-    display: flex;
-    align-items: flex-start;
-    gap: 0.6rem;
-    animation: toast-in 0.18s ease-out;
-  }
-
-  .toast-success { border-inline-start-color: var(--status-ok-fg); }
-  .toast-error { border-inline-start-color: var(--status-err-fg); }
-  .toast-info { border-inline-start-color: var(--brand-plum); }
-
-  .toast-icon {
-    flex-shrink: 0;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.72rem;
-    font-weight: 700;
-    line-height: 1;
-    margin-top: 0.15rem;
-  }
-  .toast-success .toast-icon { background: var(--status-ok-bg); color: var(--status-ok-fg); }
-  .toast-error .toast-icon { background: var(--status-err-bg); color: var(--status-err-fg); }
-  .toast-info .toast-icon { background: var(--status-info-bg); color: var(--status-info-fg); }
-
-  .toast-msg {
-    flex: 1;
-    word-break: break-word;
-  }
-
-  .toast-close {
-    flex-shrink: 0;
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    font-size: 1.05rem;
-    line-height: 1;
-    padding: 0.1rem 0.3rem;
-    border-radius: 8px;
-    cursor: pointer;
-    font-family: inherit;
-  }
-  .toast-close:hover {
-    color: var(--text-primary);
-    background: var(--bg-subtle);
-  }
-
-  @keyframes toast-in {
-    from { opacity: 0; transform: translateY(6px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .input.invalid {
-    border-color: var(--status-err-fg);
-    box-shadow: 0 0 0 3px rgba(179, 38, 30, 0.15);
-  }
-
+  .input:focus, .select:focus { border-color: var(--brand); outline: none; box-shadow: 0 0 0 3px var(--brand-soft); }
+  .input.invalid, .select.invalid { border-color: var(--err-fg); }
+  .form-help { font-size: 0.76rem; color: var(--text-muted); line-height: 1.5; }
   .form-error {
-    color: var(--status-err-fg);
-    font-size: 0.78rem;
-    font-weight: 500;
+    font-size: 0.78rem; color: var(--err-fg); background: var(--err-bg);
+    border: 1px solid var(--err-border); border-radius: var(--radius-sm);
+    padding: 0.4rem 0.65rem; font-weight: 500;
   }
 
-  .btn:focus-visible, .input:focus-visible, .select:focus-visible,
-  .nav-tab:focus-visible, .filter-pill:focus-visible {
-    outline: 3px solid rgba(9, 83, 222, 0.45);
-    outline-offset: 3px;
+  /* Printer Cards */
+  .printer-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+    gap: 1rem;
+  }
+  .printer-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.05rem 1.15rem;
+    box-shadow: var(--shadow-sm);
+    display: flex; flex-direction: column; gap: 0.75rem;
+    transition: border-color .14s ease;
+  }
+  .printer-card:hover { border-color: var(--border-strong); }
+  .printer-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
+  .printer-identity { display: flex; align-items: flex-start; gap: 0.65rem; min-width: 0; }
+  .printer-type-icon {
+    width: 36px; height: 36px; border-radius: var(--radius-md);
+    background: var(--bg-subtle); border: 1px solid var(--border);
+    color: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .printer-type-icon svg { width: 18px; height: 18px; }
+  .printer-name { font-size: 0.94rem; font-weight: 700; color: var(--text-primary); word-break: break-word; }
+  .printer-meta-list { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.78rem; }
+  .printer-meta-item { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
+  .printer-meta-item span { color: var(--text-muted); flex-shrink: 0; }
+  .printer-meta-item strong { color: var(--text-secondary); font-weight: 600; text-align: end; word-break: break-word; }
+  .printer-actions { display: flex; gap: 0.45rem; flex-wrap: wrap; margin-top: auto; padding-top: 0.25rem; }
+
+  /* Code Box */
+  .code-box {
+    background: var(--bg-canvas); border: 1px solid var(--border);
+    border-radius: var(--radius-md); padding: 0.9rem 1rem;
+    font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.55;
+    color: var(--text-primary); max-height: 420px; overflow: auto;
+    direction: ltr; text-align: left; white-space: pre-wrap; word-break: break-word;
   }
 
-  .hidden {
-    display: none !important;
+  /* Toasts */
+  .toast-container {
+    position: fixed; bottom: 16px; inset-inline-end: 16px; z-index: 100;
+    display: flex; flex-direction: column; gap: 0.5rem; max-width: 380px; width: calc(100vw - 32px);
   }
+  .toast {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.7rem 0.9rem; border-radius: var(--radius-md);
+    background: var(--bg-elevated); color: var(--text-primary);
+    border: 1px solid var(--border-strong); box-shadow: var(--shadow-md);
+    font-size: 0.83rem; font-weight: 500;
+  }
+  .toast.toast-error { background: var(--err-bg); color: var(--err-fg); border-color: var(--err-border); }
+  .toast.toast-success { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-border); }
+  .toast-icon { font-weight: 700; flex-shrink: 0; }
+  .toast-msg { flex: 1 1 auto; }
+  .toast-close {
+    border: 0; background: transparent; color: inherit; cursor: pointer;
+    font-size: 1rem; line-height: 1; padding: 2px 4px; opacity: 0.75;
+  }
+  .toast-close:hover { opacity: 1; }
 
-
-  .nav-tab {
-    border: 1px solid transparent;
-    border-radius: 999px;
-    padding: 0.55rem 1.05rem;
-  }
-  .nav-tab:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-  .nav-tab.active {
-    background: var(--brand-plum);
-    color: #fff;
-    border-bottom-color: transparent;
-    box-shadow: 0 6px 16px -8px rgba(9, 83, 222, 0.45);
-  }
-  .btn:disabled { opacity: 0.55; cursor: wait; }
-  @keyframes np-spin { to { transform: rotate(360deg); } }
-  .is-refreshing svg { animation: np-spin 0.8s linear infinite; }
-
-  /* In-app confirmation dialog */
+  /* Modal */
   .modal-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 200;
-    background: rgba(16, 18, 25, 0.5);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 1rem;
+    position: fixed; inset: 0; background: rgba(10, 14, 22, 0.55);
+    backdrop-filter: blur(2px); z-index: 200;
+    display: flex; align-items: center; justify-content: center; padding: 1rem;
   }
   .modal-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
-    border-radius: 18px;
-    box-shadow: 0 24px 60px -12px rgba(16, 18, 25, 0.45);
-    max-width: 430px;
-    width: 100%;
-    padding: 1.35rem 1.4rem 1.2rem;
+    width: min(92vw, 420px); background: var(--bg-elevated);
+    border: 1px solid var(--border-strong); border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg); padding: 1.35rem;
+    display: flex; flex-direction: column; gap: 0.9rem;
   }
-  .modal-head { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.7rem; }
-  .modal-title { font-size: 1.02rem; font-weight: 700; color: var(--text-primary); }
-  .modal-message { font-size: 0.9rem; line-height: 1.65; color: var(--text-secondary); margin: 0 0 1.15rem; }
-  .modal-actions { display: flex; justify-content: flex-end; gap: 0.55rem; }
+  .modal-head { display: flex; align-items: center; gap: 0.75rem; }
+  .modal-title { font-size: 1rem; font-weight: 700; color: var(--text-primary); }
+  .modal-message { font-size: 0.86rem; color: var(--text-secondary); line-height: 1.6; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.25rem; }
 </style>
 </head>
 <body>
@@ -808,7 +406,8 @@
     </div>
   </header>
 
-  <!-- Navigation Tabs (separate strip under the app bar) -->
+  <div class="workspace-shell">
+  <!-- Navigation Tabs (sidebar on desktop, strip on narrow screens) -->
   <div class="tabsbar">
   <nav class="nav-tabs" role="tablist">
     <button class="nav-tab active" role="tab" aria-selected="true" aria-controls="tab-dashboard" data-tab="dashboard" onclick="switchTab('dashboard')">
@@ -834,7 +433,7 @@
   <main class="main-container">
 
     <!-- Status Alert Banner -->
-    <div id="originAlertBanner" class="alert-banner alert-warn hidden">
+    <div id="originAlertBanner" class="alert-banner hidden">
       <div style="display:flex;align-items:center;gap:0.65rem;">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
         <span id="originAlertText" data-i18n="origin_not_configured">لم يتم ضبط رابط Odoo بعد. أدخل عنوان IP والمنفذ من الإعدادات.</span>
@@ -843,7 +442,7 @@
     </div>
 
     <!-- TAB 1: DASHBOARD & QUEUE -->
-    <section id="tab-dashboard" class="tab-pane">
+    <section id="tab-dashboard" class="tab-pane" role="tabpanel">
       <div class="kpi-grid">
         <div class="kpi-card">
           <div>
@@ -899,10 +498,10 @@
           </div>
           <div style="display:flex;align-items:center;gap:0.65rem;flex-wrap:wrap;">
             <div class="filter-pills">
-              <button class="filter-pill active" data-filter="all" onclick="setJobFilter('all')" data-i18n="filter_all">الكل</button>
-              <button class="filter-pill" data-filter="active" onclick="setJobFilter('active')" data-i18n="filter_active">نشطة</button>
-              <button class="filter-pill" data-filter="attention" onclick="setJobFilter('attention')" data-i18n="filter_attention">فاشلة / Dead Letter</button>
-              <button class="filter-pill" data-filter="done" onclick="setJobFilter('done')" data-i18n="filter_done">مكتملة</button>
+              <button class="filter-pill active" data-filter="all" aria-pressed="true" onclick="setJobFilter('all')" data-i18n="filter_all">الكل</button>
+              <button class="filter-pill" data-filter="active" aria-pressed="false" onclick="setJobFilter('active')" data-i18n="filter_active">نشطة</button>
+              <button class="filter-pill" data-filter="attention" aria-pressed="false" onclick="setJobFilter('attention')" data-i18n="filter_attention">فاشلة / Dead Letter</button>
+              <button class="filter-pill" data-filter="done" aria-pressed="false" onclick="setJobFilter('done')" data-i18n="filter_done">مكتملة</button>
             </div>
             <button class="btn btn-sm btn-secondary" id="btnClearFinished" onclick="clearFinishedJobs()">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
@@ -933,7 +532,7 @@
     </section>
 
     <!-- TAB 2: PRINTERS & CALIBRATION LAB -->
-    <section id="tab-printers" class="tab-pane hidden">
+    <section id="tab-printers" class="tab-pane hidden" role="tabpanel">
       <div class="card">
         <div class="card-header">
           <div class="card-title">
@@ -958,6 +557,7 @@
                 <option value="thermal-58mm" data-i18n="opt_cal_thermal58">Thermal 58mm Receipt Calibration (ESC/POS • 384 dots)</option>
                 <option value="zpl-label" data-i18n="opt_cal_zpl">Label 100×150mm Calibration (ZPL II)</option>
                 <option value="tspl-label" data-i18n="opt_cal_tspl">Label 100×150mm Calibration (TSPL)</option>
+                <option value="epl-label" data-i18n="opt_cal_epl">Label 100×150mm Calibration (EPL)</option>
               </select>
             </div>
             <div>
@@ -1002,7 +602,7 @@
     </section>
 
     <!-- TAB 3: SETTINGS & SECURITY -->
-    <section id="tab-settings" class="tab-pane hidden">
+    <section id="tab-settings" class="tab-pane hidden" role="tabpanel">
       <div class="card">
         <div class="card-header">
           <div class="card-title">
@@ -1017,7 +617,7 @@
               <label class="form-label" for="inputOdooOrigin" data-i18n="lbl_odoo_origin">رابط Odoo</label>
               <input type="url" id="inputOdooOrigin" class="input mono" dir="ltr" placeholder="http://192.168.1.20:8069" autocomplete="url" spellcheck="false" aria-describedby="helpOdooOrigin originHttpWarning originError" />
               <div class="form-help" id="helpOdooOrigin" data-i18n="help_odoo_origin">الرابط كما يظهر في المتصفح. HTTPS لأي عنوان، أو HTTP لأي عنوان IP — مثل http://192.168.1.20:8069</div>
-              <div class="form-help hidden" id="originHttpWarning" data-i18n="origin_http_warning" style="color:var(--status-warn-fg);font-weight:600;" role="note">تنبيه: HTTP غير مشفّر. استخدمه للاختبار أو داخل شبكة موثوقة فقط.</div>
+              <div class="form-help hidden" id="originHttpWarning" data-i18n="origin_http_warning" style="color:var(--warn-fg);font-weight:600;" role="note">تنبيه: HTTP غير مشفّر. استخدمه للاختبار أو داخل شبكة موثوقة فقط.</div>
               <div class="form-error hidden" id="originError" role="alert"></div>
             </div>
 
@@ -1048,7 +648,7 @@
     </section>
 
     <!-- TAB 4: DIAGNOSTICS & SUPPORT -->
-    <section id="tab-diagnostics" class="tab-pane hidden">
+    <section id="tab-diagnostics" class="tab-pane hidden" role="tabpanel">
       <div class="card">
         <div class="card-header">
           <div class="card-title">
@@ -1088,6 +688,7 @@
     </section>
 
   </main>
+  </div>
 
   <div class="toast-container" id="toastContainer"></div>
 
@@ -1128,6 +729,7 @@
       qt_escpos: "حراري ESC/POS 80مم",
       qt_zpl: "ملصق ZPL",
       qt_tspl: "ملصق TSPL",
+      qt_epl: "ملصق EPL",
       cls_thermal: "حرارية · ESC/POS",
       cls_label: "ملصقات",
       cls_office: "مكتبية · GDI",
@@ -1216,6 +818,7 @@
       opt_cal_thermal58: "معايرة إيصالات حرارية 58مم (ESC/POS • 384 نقطة)",
       opt_cal_zpl: "معايرة ملصق 100×150مم (ZPL II)",
       opt_cal_tspl: "معايرة ملصق 100×150مم (TSPL)",
+      opt_cal_epl: "معايرة ملصق 100×150مم (EPL)",
       cal_virtual_warning: "تنبيه: الطابعة المختارة افتراضية (PDF/XPS). صفحات المعايرة الخام (ESC/POS / ZPL / TSPL) لا تصلح لها — ستُنشئ ملفًا تالفًا بدل صفحة مطبوعة. اختر طابعة حقيقية.",
       help_recovery_mode: "المهام التي لم تُرسل للطابعة تُستأنف دائمًا. المهام المُرسلة يحددها هذا الخيار.",
       btn_save_origin: "حفظ الإعدادات",
@@ -1261,6 +864,7 @@
       qt_escpos: "80mm ESC/POS",
       qt_zpl: "ZPL Label",
       qt_tspl: "TSPL Label",
+      qt_epl: "EPL Label",
       cls_thermal: "Thermal · ESC/POS",
       cls_label: "Label",
       cls_office: "Office · GDI",
@@ -1281,7 +885,7 @@
       lbl_lab_paper: "Test paper size",
       lbl_lab_tray: "Paper tray",
       lbl_lab_duplex: "Duplex",
-      lbl_lab_color: "Colour",
+      lbl_lab_color: "Color",
       lab_auto: "Automatic (from the printer)",
       lab_options_hint: "These options apply to the PDF test page: the size is built from the selected printer's real forms, and Automatic means the printer's own default form.",
       ps_hint: "Used when a document does not specify its own settings.",
@@ -1349,6 +953,7 @@
       opt_cal_thermal58: "Thermal 58mm Receipt Calibration (ESC/POS • 384 dots)",
       opt_cal_zpl: "Label 100×150mm Calibration (ZPL II)",
       opt_cal_tspl: "Label 100×150mm Calibration (TSPL)",
+      opt_cal_epl: "Label 100×150mm Calibration (EPL)",
       cal_virtual_warning: "Note: the selected printer is virtual (PDF/XPS). Raw calibration pages (ESC/POS / ZPL / TSPL) cannot go to it — they would create a corrupt file instead of a printed page. Choose a physical printer.",
       help_recovery_mode: "Jobs not yet sent to the printer always resume. Jobs already sent follow this choice.",
       btn_save_origin: "Save Settings",
@@ -1506,6 +1111,20 @@
     }
   }
 
+  function friendlyError(err) {
+    const raw = String(err && err.message ? err.message : (err || "")).trim();
+    if (!raw) return I18N[currentLang].toast_failed;
+    const ar = currentLang === "ar";
+    if (raw === "printer_required") return ar ? "اختر طابعة أولاً." : "Choose a printer first.";
+    if (raw === "locked_by_policy") return ar ? "الإعدادات مقفلة بواسطة مسؤول النظام." : "Settings are locked by administrator policy.";
+    if (raw === "no_origin_configured") return I18N[currentLang].origin_not_configured;
+    if (raw === "forbidden_origin" || raw === "local_control_center_only") {
+      return ar ? "هذا الإجراء متاح من مركز التحكم فقط." : "This action is only allowed from the Control Center.";
+    }
+    if (raw.length > 8 && raw.includes(" ")) return raw;
+    return I18N[currentLang].toast_failed;
+  }
+
   function escapeHtml(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;")
@@ -1578,6 +1197,7 @@
     if (refreshBtn) refreshBtn.title = I18N[currentLang].btn_refresh;
     const dict = I18N[currentLang];
     document.querySelectorAll("[data-i18n]").forEach((el) => {
+      if (el.id === "diagnosticsOutput" && diagnosticsGenerated) return;
       const k = el.getAttribute("data-i18n");
       if (dict[k]) el.textContent = dict[k];
     });
@@ -1597,7 +1217,9 @@
   function setJobFilter(f) {
     currentFilter = f;
     document.querySelectorAll(".filter-pill").forEach((b) => {
-      b.classList.toggle("active", b.getAttribute("data-filter") === f);
+      const active = b.getAttribute("data-filter") === f;
+      b.classList.toggle("active", active);
+      b.setAttribute("aria-pressed", active ? "true" : "false");
     });
     if (overviewState) renderJobsTable(overviewState.recentJobs || []);
   }
@@ -1707,7 +1329,7 @@
   }
 
   async function clearWebData() {
-    const api = window.__NATIVE_PRINT__;
+    const api = bridge();
     if (!api || typeof api.clearWebData !== "function") {
       showToast(currentLang === "ar" ? "الجسر المحلي غير متاح." : "Local bridge unavailable.", true);
       return;
@@ -1749,7 +1371,7 @@
       if (envSignature !== lastEnvSignature) {
         lastEnvSignature = envSignature;
         const fact = (label, ok, value) =>
-          `<div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid var(--border-color,#eef1f6);font-size:0.85rem;"><span style="color:var(--text-secondary);">${escapeHtml(label)}</span><strong style="color:${ok ? "#12713f" : "#b3261e"};">${escapeHtml(value)}</strong></div>`;
+          `<div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.85rem;"><span style="color:var(--text-secondary);">${escapeHtml(label)}</span><strong style="color:${ok ? "var(--ok-fg)" : "var(--err-fg)"};">${escapeHtml(value)}</strong></div>`;
         envEl.innerHTML =
           fact("Embedded Browser Runtime", !!data.webviewVersion, data.webviewVersion || "—") +
           fact("ES2022", !!env.es2022, env.es2022 ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
@@ -1758,18 +1380,17 @@
           fact("WebSocket", !!env.webSocket, env.webSocket ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
           fact(currentLang === "ar" ? "سياق آمن" : "Secure context", !!env.secureContext, env.secureContext ? "OK" : "HTTP");
         if (Array.isArray(env.errors) && env.errors.length) {
-          const esc = (x) => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;");
           const d = I18N[currentLang];
           envEl.innerHTML += env.errors.slice(0, 5).map((e) => {
             if (/fetching translations/i.test(e)) {
-              return `<div style="padding:0.45rem 0;border-bottom:1px solid var(--border-color,#eef1f6);font-size:0.82rem;">` +
-                `<div style="color:#b3261e;font-weight:700;">${esc(d.env_err_translations_t)}</div>` +
-                `<div style="color:var(--text-secondary);line-height:1.6;">${esc(d.env_err_translations_b)}</div>` +
-                `<div style="color:var(--text-muted);font-size:0.75rem;word-break:break-word;" dir="ltr">${esc(e)}</div></div>`;
+              return `<div style="padding:0.45rem 0;border-bottom:1px solid var(--border);font-size:0.82rem;">` +
+                `<div style="color:var(--err-fg);font-weight:700;">${escapeHtml(d.env_err_translations_t)}</div>` +
+                `<div style="color:var(--text-secondary);line-height:1.6;">${escapeHtml(d.env_err_translations_b)}</div>` +
+                `<div style="color:var(--text-muted);font-size:0.75rem;word-break:break-word;" dir="ltr">${escapeHtml(e)}</div></div>`;
             }
-            return `<div style="padding:0.3rem 0;border-bottom:1px solid var(--border-color,#eef1f6);font-size:0.8rem;">` +
-              `<span style="color:#b3261e;font-weight:600;">${esc(d.env_err_generic)}:</span> ` +
-              `<span style="color:var(--text-secondary);word-break:break-word;" dir="auto">${esc(e)}</span></div>`;
+            return `<div style="padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.8rem;">` +
+              `<span style="color:var(--err-fg);font-weight:600;">${escapeHtml(d.env_err_generic)}:</span> ` +
+              `<span style="color:var(--text-secondary);word-break:break-word;" dir="auto">${escapeHtml(e)}</span></div>`;
           }).join("");
         }
       }
@@ -1850,7 +1471,7 @@
           <td>${Number(j.pages) || 1}p • <span class="mono">${formatBytes(j.bytes)}</span></td>
           <td>${stateBadgeHtml(j.state)}</td>
           <td>${Number(j.attempts) || 0}</td>
-          <td class="mono" style="color:var(--status-err-fg);">${escapeHtml(j.error_code || "—")}</td>
+          <td class="mono" style="color:var(--err-fg);">${escapeHtml(j.error_code || "—")}</td>
           <td>
             <div style="display:flex;gap:0.35rem;">
               ${canRetry ? `<button class="btn btn-sm btn-primary" data-action="retry-job" data-job-id="${escapeHtml(j.id)}">${currentLang === "ar" ? "إعادة محاولة" : "Retry"}</button>` : ""}
@@ -1873,21 +1494,26 @@
   // the fallback mirrors the same table for older payloads.
   function ccProtocol(p) {
     if (!p) return "gdi";
-    if (p.protocol) return p.protocol;
+    // Virtual writers can never be upgraded to a RAW language by a
+    // stale or inconsistent protocol field in a printer payload.
     if (p.kind === "virtual") return "gdi";
+    if (p.protocol) return p.protocol;
     const sig = `${p.name || ""} ${p.driver || ""}`.toLowerCase();
     const hasWord = (tok) => new RegExp(`(^|[^a-z0-9])${tok}([^a-z0-9]|$)`).test(sig);
     if (sig.includes("zdesigner") || sig.includes("zebra") || hasWord("zpl")) return "zpl";
-    if (hasWord("tsc") || hasWord("tspl")) return "tspl";
+    const tsplModels = ["xp-235", "xp-350", "xp-365", "xp-370", "xp-420", "xp-450", "xp-460", "xp-470", "xp-490", "gp-1124", "gp-1324", "gp-1924", "gp-2120", "gp-3120"];
+    if (hasWord("tsc") || hasWord("tspl") || tsplModels.some((m) => sig.includes(m))) return "tspl";
     if (hasWord("epl")) return "epl";
-    const thermal = ["epson tm-", "epson tm ", "xprinter", "rongta", "bixolon", "star tsp", "citizen ct-", "sewoo", "esc/pos", "escpos", "thermal receipt", "receipt printer", "pos-58", "pos-80"];
+    const officeExclusions = ["laserjet", "deskjet", "officejet", "inkjet", "ecosys", "bizhub", "ricoh", "xerox", "kyocera", "brother hl", "brother dcp", "brother mfc"];
+    if (officeExclusions.some((t) => sig.includes(t))) return "gdi";
+    const thermal = ["epson tm-", "epson tm ", "xprinter", "rongta", "bixolon", "star tsp", "star micronics", "tsp100", "tsp143", "tsp650", "citizen ct-", "citizen", "sewoo", "esc/pos", "escpos", "thermal receipt", "thermal printer", "receipt printer", "receipt", "pos printer", "pos-58", "pos-80", "pos-90", "pos58", "pos80", "tm-t", "tm-m", "tm-u", "sunmi", "munbyn", "hprt", "cashino", "snbc", "gprinter", "sprt", "gainscha", "zjiang", "btp-", "srp-", "posiflex", "mc-print", "xp-80", "xp-58", "xp-q", "xp-n", "xp-v", "xp-c", "xp-t", "rp80", "rp326", "tp80", "zkp80", "gp-u80", "gp-l80", "sam4s", "metapace", "hoin", "ocom", "goojprt", "zonerich", "58mm", "80mm", "usb thermal", "mini printer", "热敏", "票据", "小票"];
     if (thermal.some((t) => sig.includes(t))) return "escpos";
     return "gdi";
   }
   function ccClass(p) {
+    if (p && p.kind === "virtual") return "virtual";
     if (p && p.printer_class) return p.printer_class;
     const proto = ccProtocol(p);
-    if (p && p.kind === "virtual") return "virtual";
     if (proto === "escpos") return "thermal";
     if (proto === "zpl" || proto === "tspl" || proto === "epl") return "label";
     return "office";
@@ -1897,16 +1523,16 @@
   // glyph for office/document printers.
   function ccClassIcon(p) {
     const proto = ccProtocol(p);
-    const cls = String(p.printer_class || p.printerClass || "").toLowerCase();
+    const cls = String((p && p.printer_class) || "").toLowerCase();
     const stroke = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+    if (cls === "virtual" || (p && p.kind === "virtual")) {
+      return `<svg viewBox="0 0 24 24" ${stroke}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>`;
+    }
     if (proto === "escpos" || cls === "thermal" || cls === "receipt") {
       return `<svg viewBox="0 0 24 24" ${stroke}><path d="M6 2h12v20l-2-1.5L14 22l-2-1.5L10 22l-2-1.5L6 22z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/></svg>`;
     }
     if (proto === "zpl" || proto === "tspl" || proto === "epl" || cls === "label") {
       return `<svg viewBox="0 0 24 24" ${stroke}><path d="M20.59 13.41 11 3H4v7l9.59 9.59a2 2 0 0 0 2.82 0l4.18-4.18a2 2 0 0 0 0-2.82z"/><circle cx="7.5" cy="7.5" r="0.5"/></svg>`;
-    }
-    if (cls === "virtual") {
-      return `<svg viewBox="0 0 24 24" ${stroke}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>`;
     }
     return `<svg viewBox="0 0 24 24" ${stroke}><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>`;
   }
@@ -1956,7 +1582,7 @@
         capsVersion++;
         renderPrintersGrid(lastGridPrinters);
         rebuildLabOptions();
-      }).catch(() => { capsCache.set(p.name, {}); });
+      }).catch(() => { capsCache.set(p.name, {}); capsVersion++; renderPrintersGrid(lastGridPrinters); });
     }
   }
 
@@ -1968,6 +1594,7 @@
   let printerSettings = {};
   let printerSettingsVersion = 0;
   let printerSettingsRequested = false;
+  const openSettingsPrinters = new Set();
   function loadPrinterSettings() {
     if (printerSettingsRequested) return;
     printerSettingsRequested = true;
@@ -1979,7 +1606,7 @@
       renderPrintersGrid(lastGridPrinters);
     }).catch(() => {});
   }
-  function printerSettingsHtml(p, idx) {
+  function printerSettingsHtml(p) {
     const caps = capsCache.get(p.name);
     if (!caps || caps === "loading") return "";
     const d = I18N[currentLang];
@@ -1999,10 +1626,10 @@
     const row = (label, cls, inner) => `<label style="display:flex;flex-direction:column;gap:0.2rem;flex:1 1 45%;min-width:120px;"><span style="color:var(--text-muted);">${escapeHtml(label)}</span><select class="input ${cls}">${inner}</select></label>`;
     return `
       <div style="margin-top:0.6rem;" data-settings-wrap data-printer="${escapeHtml(p.name)}">
-        <button class="btn btn-sm btn-secondary" data-action="toggle-settings">
+        <button class="btn btn-sm btn-secondary" data-action="toggle-settings" aria-expanded="${openSettingsPrinters.has(p.name) ? "true" : "false"}">
           ${escapeHtml(d.ps_title)}
         </button>
-        <div class="settings-box hidden" style="margin-top:0.5rem;font-size:0.76rem;background:var(--bg-subtle);padding:0.6rem;border-radius:8px;">
+        <div class="settings-box${openSettingsPrinters.has(p.name) ? "" : " hidden"}" style="margin-top:0.5rem;font-size:0.76rem;background:var(--bg-subtle);padding:0.6rem;border-radius:8px;">
           <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
             ${row(d.ps_paper, "ps-paper", listOpts(formNames, cur.paper))}
             ${bins.length ? row(d.ps_tray, "ps-tray", listOpts(bins, cur.tray)) : ""}
@@ -2019,7 +1646,14 @@
   function toggleSettings(btn) {
     const wrap = btn && btn.closest ? btn.closest("[data-settings-wrap]") : null;
     const box = wrap ? wrap.querySelector(".settings-box") : null;
-    if (box) box.classList.toggle("hidden");
+    const name = wrap ? wrap.getAttribute("data-printer") : null;
+    if (!box) return;
+    const isHidden = box.classList.toggle("hidden");
+    if (btn) btn.setAttribute("aria-expanded", isHidden ? "false" : "true");
+    if (name) {
+      if (isHidden) openSettingsPrinters.delete(name);
+      else openSettingsPrinters.add(name);
+    }
   }
   async function saveSettings(btn) {
     const wrap = btn && btn.closest ? btn.closest("[data-settings-wrap]") : null;
@@ -2047,7 +1681,7 @@
       showToast(I18N[currentLang].ps_saved);
       renderPrintersGrid(lastGridPrinters);
     } catch (e) {
-      showToast(String(e && e.message || e), true);
+      showToast(friendlyError(e), true);
     }
   }
 
@@ -2092,6 +1726,8 @@
   function renderPrintersGrid(printers) {
     const grid = document.getElementById("printersGrid");
     lastGridPrinters = printers;
+    const ae = document.activeElement;
+    if (ae && grid && grid.contains(ae) && (ae.tagName === "SELECT" || ae.tagName === "INPUT")) return;
     // Same skip-if-identical guard as the jobs table: an unchanged
     // printer set leaves the cards (and any open paper-forms box) alone.
     // Health conditions, staleness and the stable id are part of the
@@ -2143,7 +1779,7 @@
 
         ${healthChipsHtml(p)}
 
-        ${printerSettingsHtml(p, idx)}
+        ${printerSettingsHtml(p)}
 
         <div id="forms-box-${idx}" class="hidden" style="font-size:0.76rem;background:var(--bg-subtle);padding:0.6rem;border-radius:8px;max-height:110px;overflow:auto;"></div>
 
@@ -2160,7 +1796,10 @@
           ${ccProtocol(p) === "tspl" ? `<button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="tspl-label">
             ${I18N[currentLang].qt_tspl}
           </button>` : ""}
-          <button class="btn btn-sm btn-secondary" data-action="inspect-forms" data-printer="${escapeHtml(p.name)}" data-idx="${idx}">
+          ${ccProtocol(p) === "epl" ? `<button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="epl-label">
+            ${I18N[currentLang].qt_epl}
+          </button>` : ""}
+          <button class="btn btn-sm btn-secondary" data-action="inspect-forms" data-printer="${escapeHtml(p.name)}" data-idx="${idx}" aria-expanded="false">
             ${currentLang === "ar" ? "مقاسات الورق" : "Paper Forms"}
           </button>
         </div>
@@ -2231,7 +1870,7 @@
       showToast(currentLang === "ar" ? `تمت جدولة اختبار الطباعة (${id})` : `Queued test print (${id})`);
       await refreshAll();
     } catch (e) {
-      console.error(e); showToast(I18N[currentLang].toast_failed, true);
+      console.error(e); showToast(friendlyError(e), true);
     } finally {
       unlockControls(["btnCustomTestPrint"]);
       testBtns.forEach((x) => { x.disabled = false; });
@@ -2283,6 +1922,7 @@
     "thermal-58mm": "opt_cal_thermal58",
     "zpl-label": "opt_cal_zpl",
     "tspl-label": "opt_cal_tspl",
+    "epl-label": "opt_cal_epl",
   };
   function allowedTestKinds() {
     const all = Object.keys(TEST_KIND_I18N);
@@ -2296,6 +1936,7 @@
     if (proto === "escpos") kinds.push("thermal-80mm", "thermal-58mm");
     else if (proto === "zpl") kinds.push("zpl-label");
     else if (proto === "tspl") kinds.push("tspl-label");
+    else if (proto === "epl") kinds.push("epl-label");
     return kinds;
   }
   function rebuildTestKindOptions() {
@@ -2415,12 +2056,16 @@
   async function inspectForms(printerName, idx) {
     const box = document.getElementById(`forms-box-${idx}`);
     if (!box) return;
+    const btn = document.querySelector(`[data-action="inspect-forms"][data-idx="${idx}"]`);
     if (!box.classList.contains("hidden")) {
       box.classList.add("hidden");
+      if (btn) btn.setAttribute("aria-expanded", "false");
       return;
     }
     document.querySelectorAll('[id^="forms-box-"]').forEach((b) => b.classList.add("hidden"));
+    document.querySelectorAll('[data-action="inspect-forms"]').forEach((b) => b.setAttribute("aria-expanded", "false"));
     box.classList.remove("hidden");
+    if (btn) btn.setAttribute("aria-expanded", "true");
     // Tag the box with its printer: the grid can re-render while the
     // driver call is in flight, and the result must never land on a
     // card that now belongs to a different printer (audit JS-L10).
@@ -2461,7 +2106,7 @@
       showToast(currentLang === "ar" ? `تمت إعادة جدولة المهمة ${id}` : `Re-queued job ${id}`);
       await refreshAll();
     } catch (e) {
-      console.error(e); showToast(I18N[currentLang].toast_failed, true);
+      console.error(e); showToast(friendlyError(e), true);
     }
   }
 
@@ -2477,7 +2122,7 @@
       showToast(currentLang === "ar" ? `تم إلغاء المهمة ${id}` : `Canceled job ${id}`);
       await refreshAll();
     } catch (e) {
-      console.error(e); showToast(I18N[currentLang].toast_failed, true);
+      console.error(e); showToast(friendlyError(e), true);
     }
   }
 
@@ -2493,13 +2138,10 @@
       showToast(currentLang === "ar" ? `تم مسح ${n} مهمة مكتملة` : `Cleared ${n} finished job(s)`);
       await refreshAll();
     } catch (e) {
-      console.error(e); showToast(I18N[currentLang].toast_failed, true);
+      console.error(e); showToast(friendlyError(e), true);
     }
   }
 
-  // Mirrors print-core::security::origin_is_allowed (ADR-0002 amendment):
-  // HTTPS anywhere; HTTP only to a private / loopback / link-local IP.
-  // Mirrors Rust: HTTP with a valid IPv4/IPv6 literal only.
   function isAllowedOrigin(value) {
     // Mirrors print-core::security::origin_is_allowed (ADR-0002):
     // HTTPS for any host; HTTP for any IP literal (private or public).
@@ -2620,7 +2262,7 @@
       await refreshAll({ silent: true });
       return true;
     } catch (error) {
-      console.error(error); showToast(I18N[currentLang].toast_failed, true);
+      console.error(error); showToast(friendlyError(error), true);
       return false;
     } finally {
       unlockControls(["btnSaveOrigin", "btnSaveAndOpen"]);
@@ -2636,7 +2278,7 @@
       return false;
     }
     try { await api.openOdooOrigin(); return true; }
-    catch (error) { console.error(error); showToast(I18N[currentLang].toast_failed, true); return false; }
+    catch (error) { console.error(error); showToast(friendlyError(error), true); return false; }
   }
 
   async function saveAndOpenOdoo() {
@@ -2649,7 +2291,6 @@
 
   async function loadDiagnosticsBundle() {
     const output = document.getElementById("diagnosticsOutput");
-    const button = document.getElementById("btnGenerateDiagnostics");
     const api = bridge();
     if (!api || typeof api.exportDiagnostics !== "function") {
       diagnosticsGenerated = false;
@@ -2657,8 +2298,6 @@
       showToast(I18N[currentLang].native_bridge_unavailable, true);
       return false;
     }
-    const copyBtn = document.getElementById("btnCopyDiagnostics");
-    const dlBtn = document.getElementById("btnDownloadDiagnostics");
     lockControls(["btnGenerateDiagnostics", "btnCopyDiagnostics", "btnDownloadDiagnostics"]);
     try {
       const raw = await api.exportDiagnostics();
@@ -2759,6 +2398,14 @@
   // plain Arabic session never calls — set it unconditionally so it
   // does not stay in English (audit JS-L6).
   document.getElementById("btnRefresh").title = I18N[currentLang].btn_refresh;
+  window.addEventListener("storage", (ev) => {
+    if (ev.key === "np_cc_theme") {
+      document.documentElement.setAttribute("data-theme", ev.newValue === "dark" ? "dark" : "light");
+    } else if (ev.key === "np_cc_lang") {
+      const next = ev.newValue === "en" ? "en" : "ar";
+      if (next !== currentLang) { currentLang = next; applyLanguage(); }
+    }
+  });
   refreshAll();
   setInterval(() => refreshAll({ silent: true }), 5000);
 
@@ -2766,7 +2413,7 @@
 
   <!-- In-app confirmation dialog -->
   <div id="confirmOverlay" class="modal-overlay hidden" onclick="confirmOverlayClicked(event)">
-    <div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
       <div class="modal-head">
         <img src="app-icon.png" alt="" width="34" height="34" style="border-radius: 9px; display: block;"/>
         <div id="confirmTitle" class="modal-title">تأكيد الإجراء</div>

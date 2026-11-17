@@ -1,5 +1,7 @@
 /** @odoo-module **/
 import { ReceiptScreen } from "@point_of_sale/app/screens/receipt_screen/receipt_screen";
+import { PaymentScreen } from "@point_of_sale/app/screens/payment_screen/payment_screen";
+import { TicketScreen } from "@point_of_sale/app/screens/ticket_screen/ticket_screen";
 import { patch } from "@web/core/utils/patch";
 import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
@@ -18,10 +20,11 @@ import { JOB_TERMINAL_STATES as TERMINAL_STATES, notifyUser, resolveBridgeTarget
  * 1. In `ReceiptScreen.prototype.setup()`, we wrap `this.pos.printReceipt`
  *    on the PosStore instance/prototype (idempotently) so manual prints,
  *    auto-prints, and TicketScreen reprints all route through Native Print.
- * 2. When no `.pos-receipt` DOM exists in the document (e.g. a
- *    TicketScreen reprint before ReceiptScreen mounts), the native
- *    path declines (returns false) and Odoo's standard POS printing
- *    runs unchanged — there is no offscreen rendering path.
+ * 2. TicketScreen can render a past receipt offscreen and call
+ *    `pos.printer.printHtml(element)`. We wrap that explicit-element
+ *    entry point as well, capture the supplied DOM node, and route it
+ *    through the same native image queue. A missing receipt element
+ *    still declines cleanly so Odoo's standard path can handle it.
  * 3. We also patch `ReceiptScreen.prototype.printReceipt` for Odoo 17.
  */
 
@@ -65,21 +68,22 @@ const POS_FAIL_NO_PRINTER = _t("Reason: no printer is available on this computer
 const POS_FAIL_NO_RECEIPT = _t("Reason: the receipt is not on screen.");
 const POS_FAIL_CAPTURE = _t("Reason: the receipt could not be captured as an image.");
 
+const inFlightPosKeys = new Set();
+
 function findReceiptElement(orderRef) {
     if (orderRef) {
-        // Prefer the receipt that actually belongs to this order:
-        // after fast order switching the DOM can still hold the
-        // previous order's receipt, and printing it would put the
-        // wrong receipt on paper (audit L8).
+        const shortRef = String(orderRef).replace(/^Order\s+/i, "").trim();
         const candidates = document.querySelectorAll(".pos-receipt");
         for (const el of candidates) {
-            if (el.textContent && el.textContent.includes(orderRef)) {
+            const text = el.textContent || "";
+            if (text.includes(orderRef) || (shortRef && text.includes(shortRef))) {
                 return el;
             }
         }
+        if (candidates.length === 1) {
+            return candidates[0];
+        }
         if (candidates.length) {
-            // A receipt is on screen but it is not this order's:
-            // decline and let the standard POS printing handle it.
             return null;
         }
     }
@@ -88,6 +92,18 @@ function findReceiptElement(orderRef) {
         document.querySelector(".pos-receipt") ||
         document.querySelector(".pos-receipt-container")
     );
+}
+
+async function waitForReceiptElement(orderRef, timeoutMs = 1500) {
+    let el = findReceiptElement(orderRef);
+    if (el) return el;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        el = findReceiptElement(orderRef);
+        if (el) return el;
+    }
+    return null;
 }
 
 function inlineStyles(source, clone) {
@@ -179,6 +195,17 @@ async function inlineMedia(source, clone) {
 }
 
 async function elementToPngBytes(element, scale = 2) {
+    let offscreenHost = null;
+    if (!element.isConnected && document.body) {
+        offscreenHost = document.createElement("div");
+        offscreenHost.setAttribute(
+            "style",
+            "position:fixed;left:-99999px;top:0;width:300px;background:#fff;color:#000;pointer-events:none;z-index:-1;",
+        );
+        offscreenHost.appendChild(element);
+        document.body.appendChild(offscreenHost);
+    }
+    try {
     const width = element.offsetWidth || 320;
     const height = element.offsetHeight || element.scrollHeight || 480;
     if (!width || !height) {
@@ -215,10 +242,11 @@ async function elementToPngBytes(element, scale = 2) {
         throw new Error("receipt canvas produced no image");
     }
     return Array.from(new Uint8Array(await blob.arrayBuffer()));
-}
-
-function clearPosReceiptKey(safeRef, userId) {
-    try { sessionStorage.removeItem(`np.pos.key.${safeRef}.u${userId}`); } catch (_err) { /* ignore */ }
+    } finally {
+        if (offscreenHost) {
+            offscreenHost.remove();
+        }
+    }
 }
 
 function posReceiptKey(safeRef, userId) {
@@ -335,17 +363,16 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
                     if (safeRef) {
                         finishPosReceiptAttempt(safeRef, userId);
                     }
-                    // The order's printed flag follows the CONFIRMED
-                    // outcome, not the enqueue: it is pre-set at enqueue
-                    // so the POS flow can advance, and a failed job must
-                    // hand the order back as unprinted so the cashier's
-                    // normal reprint path stays available (audit L7).
-                    if (order) {
-                        if (state === "done") {
-                            order._printed = true;
-                        } else if (state === "failed" || state === "dead_letter") {
-                            order._printed = false;
-                        }
+                }
+                // Keep the POS order aligned with the latest confirmed
+                // outcome. A retryable failure may later reach `done`;
+                // the first outcome releases the cashier, but a later
+                // successful retry must still restore `_printed`.
+                if (order) {
+                    if (state === "done") {
+                        order._printed = true;
+                    } else if (state === "failed" || state === "dead_letter" || state === "canceled") {
+                        order._printed = false;
                     }
                 }
                 await rpc(
@@ -357,6 +384,8 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
                         device: printerName || rule.printer_pattern,
                         report_name: POS_RECEIPT_SOURCE,
                         source_type: "pos_receipt",
+                        copies: rule.copies || 1,
+                        mode: rule.mode || "gdi",
                         pages: 1,
                         byte_size: byteSize,
                         attempts,
@@ -386,7 +415,7 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
         } catch (_err) {
             // Same rule as report jobs: one flaky poll must not
             // orphan the job and hide its outcome from the cashier.
-            if (++consecutiveErrors >= 3) {
+            if (++consecutiveErrors >= 10) {
                 break;
             }
         }
@@ -431,10 +460,10 @@ function postPosDeclined(key, code, safeRef, userId, deviceName, mode) {
     rpc("/native_print/job_status", params, { silent: true }).catch(() => {});
     // The attempt is over: rotate the key so the cashier's next
     // click is a fresh attempt (the posted row is terminal).
-    clearPosReceiptKey(safeRef, userId);
+    if (safeRef) { finishPosReceiptAttempt(safeRef, userId); }
 }
 
-async function printPosReceiptNatively(contextObj, explicitOrder = null) {
+async function printPosReceiptNatively(contextObj, explicitOrder = null, explicitElement = null) {
     // Returns null on success, or {reason, code, key, safeRef,
     // userId, device, mode} describing the decline for the wrapper
     // to log and show. Enqueue rejections throw with npKey/npRef
@@ -444,13 +473,20 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
         explicitOrder ||
         (contextObj && contextObj.currentOrder) ||
         (contextObj && contextObj.getOrder ? contextObj.getOrder() : null) ||
+        (contextObj && contextObj.get_order ? contextObj.get_order() : null) ||
         (contextObj && contextObj.pos && contextObj.pos.getOrder
             ? contextObj.pos.getOrder()
+            : null) ||
+        (contextObj && contextObj.pos && contextObj.pos.get_order
+            ? contextObj.pos.get_order()
             : null);
-    const rawRef =
-        (order && (order.name || order.pos_reference || order.uid)) ||
+    const displayRef =
+        (order && (order.name || order.pos_reference || order.uid || order.uuid)) ||
+        null;
+    const keyRef =
+        (order && (order.uuid || order.uid || order.name || order.pos_reference)) ||
         "pos-order";
-    const safeRef = String(rawRef).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40);
+    const safeRef = String(keyRef).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40);
     // The cashier printing right now (audit H1): part of the job key
     // and of the in-flight record, because the server log scopes jobs
     // per user and one browser profile can serve several cashiers.
@@ -465,29 +501,25 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
     if (!bridge || typeof bridge.printImage !== "function") {
         return { reason: POS_FAIL_NO_PRINTER, code: "POS_NO_PRINTER", key: idempotencyKey, safeRef, userId };
     }
+    if (inFlightPosKeys.has(idempotencyKey)) {
+        return null;
+    }
+    inFlightPosKeys.add(idempotencyKey);
+    try {
     let target = await resolveBridgeTarget(
-        bridge, { preferClasses: ["thermal", "label"] },
+        bridge, { isPos: true, preferClasses: ["thermal", "label"] },
     ).catch(() => null);
     if (!target) {
-        // One retry: printer discovery rides the Windows spooler,
-        // whose first answer after app start / spooler restart can
-        // be empty or errored while printers exist.
         await new Promise((resolve) => setTimeout(resolve, 700));
         target = await resolveBridgeTarget(
-            bridge, { preferClasses: ["thermal", "label"] },
+            bridge, { isPos: true, preferClasses: ["thermal", "label"] },
         ).catch(() => null);
     }
     if (!target) {
         // No printer on this PC right now.
         return { reason: POS_FAIL_NO_PRINTER, code: "POS_NO_PRINTER", key: idempotencyKey, safeRef, userId };
     }
-    // Virtual printers are first-class targets (owner,
-    // 2026-11-04): the receipt renders through GDI exactly like an
-    // office printer — OneNote opens with the printed receipt, a
-    // PDF writer produces the page — with no warning and no
-    // printer-choice prompt. The detection in
-    // native_print_client.js already routes them to gdi mode.
-    const element = findReceiptElement(order ? rawRef : null);
+    const element = explicitElement || (await waitForReceiptElement(order ? displayRef : null));
     if (!element) {
         return { reason: POS_FAIL_NO_RECEIPT, code: "POS_RECEIPT_NOT_ON_SCREEN", key: idempotencyKey, safeRef, userId, device: target.printer.name, mode: target.rule.mode };
     }
@@ -542,9 +574,11 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
         // of deduping into the dead job inside the 15 s window. The
         // key rides on the error so the wrapper can still log the
         // declined attempt under it.
-        clearPosReceiptKey(safeRef, userId);
+        if (safeRef) { finishPosReceiptAttempt(safeRef, userId); }
         try {
             err.npKey = idempotencyKey;
+            err.npRef = safeRef;
+            err.npUserId = userId;
             err.npDevice = target.printer.name;
             err.npMode = effectiveMode;
         } catch (_ignored) { /* non-object error: nothing to attach */ }
@@ -570,16 +604,62 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null) {
         target.printer.name, notificationEnv(contextObj), userId, order,
     ).catch(() => {});
     if (order) {
-        // Provisional: lets the POS flow advance to the receipt
-        // screen. The watcher corrects it to the confirmed outcome
-        // (clears it again when the job fails). (Audit L7.)
         order._printed = true;
     }
     return null;
+    } finally {
+        inFlightPosKeys.delete(idempotencyKey);
+    }
+}
+
+function reportPosFailure(contextObj, failure) {
+    postPosDeclined(failure.key, failure.code, failure.safeRef, failure.userId, failure.device, failure.mode);
+    notifyPosNativeFailure(contextObj, failure.reason);
+}
+
+function reportPosException(contextObj, error, label) {
+    console.warn(`Native Print: POS ${label} capture failed.`, error);
+    if (error && error.npKey) {
+        postPosDeclined(error.npKey, "POS_ENQUEUE_FAILED", error.npRef || null, error.npUserId || null, error.npDevice, error.npMode);
+    }
+    notifyPosNativeFailure(
+        contextObj,
+        _t("Reason: the print job could not be queued.") +
+            " " + String((error && error.message) || error || ""),
+    );
+}
+
+function wrapPosPrinterService(posStore) {
+    const printer = posStore && posStore.printer;
+    if (!printer || printer.__nativePrintHtmlWrapped || typeof printer.printHtml !== "function") {
+        return;
+    }
+    const originalPrintHtml = printer.printHtml.bind(printer);
+    printer.printHtml = async function (el, options = {}) {
+        if (!nativeBridge()) {
+            return await originalPrintHtml(el, options);
+        }
+        try {
+            const explicitOrder = posStore.__pendingNativePrintOrder || null;
+            const failure = await printPosReceiptNatively(posStore, explicitOrder, el);
+            if (!failure) {
+                return true;
+            }
+            reportPosFailure(posStore, failure);
+        } catch (error) {
+            reportPosException(posStore, error, "printHtml");
+        }
+        return true;
+    };
+    printer.__nativePrintHtmlWrapped = true;
 }
 
 function wrapPosStorePrintReceipt(posStore) {
-    if (!posStore || posStore.__nativePrintWrapped || typeof posStore.printReceipt !== "function") {
+    if (!posStore) {
+        return;
+    }
+    wrapPosPrinterService(posStore);
+    if (posStore.__nativePrintWrapped || typeof posStore.printReceipt !== "function") {
         return;
     }
     const originalPrintReceipt = posStore.printReceipt.bind(posStore);
@@ -589,6 +669,7 @@ function wrapPosStorePrintReceipt(posStore) {
             // printing there is (owner's standing rule for browsers).
             return await originalPrintReceipt(opts);
         }
+        wrapPosPrinterService(posStore);
         // Inside the desktop app a receipt prints silently through
         // the bridge — or not at all. Odoo's standard flow ends in
         // the browser print dialog (PosStore.printReceipt passes
@@ -604,18 +685,21 @@ function wrapPosStorePrintReceipt(posStore) {
             if (!failure) {
                 return true;
             }
-            postPosDeclined(failure.key, failure.code, failure.safeRef, failure.userId, failure.device, failure.mode);
-            notifyPosNativeFailure(posStore, failure.reason);
-        } catch (error) {
-            console.warn("Native Print: POS receipt capture failed.", error);
-            if (error && error.npKey) {
-                postPosDeclined(error.npKey, "POS_ENQUEUE_FAILED", null, null, error.npDevice, error.npMode);
+            if (
+                failure.code === "POS_RECEIPT_NOT_ON_SCREEN" &&
+                posStore.printer &&
+                posStore.printer.__nativePrintHtmlWrapped
+            ) {
+                posStore.__pendingNativePrintOrder = (opts && opts.order) || null;
+                try {
+                    return await originalPrintReceipt(opts);
+                } finally {
+                    posStore.__pendingNativePrintOrder = null;
+                }
             }
-            notifyPosNativeFailure(
-                posStore,
-                _t("Reason: the print job could not be queued.") +
-                    " " + String((error && error.message) || error || ""),
-            );
+            reportPosFailure(posStore, failure);
+        } catch (error) {
+            reportPosException(posStore, error, "receipt");
         }
         return true;
     };
@@ -642,31 +726,39 @@ patch(ReceiptScreen.prototype, {
             }
             return false;
         }
-        // Desktop app: the same rule as the store wrapper — silent
-        // native printing or a clear failure message, never the
-        // browser print dialog. (Before this fix, a declined or
-        // failed attempt continued into the store's original method
-        // and that dialog; audit JS-L8's double-capture concern is
-        // moot now that the original is never called after an
-        // attempt.)
+        // Route through the wrapped PosStore.printReceipt when present so
+        // manual/auto/TicketScreen prints share one handler and fallback path.
+        if (this.pos && typeof this.pos.printReceipt === "function") {
+            wrapPosStorePrintReceipt(this.pos);
+            return await this.pos.printReceipt(...arguments);
+        }
         try {
             const failure = await printPosReceiptNatively(this, opts && opts.order);
             if (!failure) {
                 return true;
             }
-            postPosDeclined(failure.key, failure.code, failure.safeRef, failure.userId, failure.device, failure.mode);
-            notifyPosNativeFailure(this, failure.reason);
+            reportPosFailure(this, failure);
         } catch (error) {
-            console.warn("Native Print: POS receipt capture failed.", error);
-            if (error && error.npKey) {
-                postPosDeclined(error.npKey, "POS_ENQUEUE_FAILED", null, null, error.npDevice, error.npMode);
-            }
-            notifyPosNativeFailure(
-                this,
-                _t("Reason: the print job could not be queued.") +
-                    " " + String((error && error.message) || error || ""),
-            );
+            reportPosException(this, error, "receipt");
         }
         return true;
+    },
+});
+
+patch(PaymentScreen.prototype, {
+    setup() {
+        super.setup(...arguments);
+        if (this.pos) {
+            wrapPosStorePrintReceipt(this.pos);
+        }
+    },
+});
+
+patch(TicketScreen.prototype, {
+    setup() {
+        super.setup(...arguments);
+        if (this.pos) {
+            wrapPosStorePrintReceipt(this.pos);
+        }
     },
 });

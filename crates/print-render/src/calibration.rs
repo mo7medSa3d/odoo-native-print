@@ -127,8 +127,16 @@ pub fn calibration_pdf() -> Vec<u8> {
 /// calibration lab test the size the user actually chose instead
 /// of always emitting A4 (owner directive, 2026-11-05).
 pub fn calibration_pdf_sized(width_mm: f64, height_mm: f64) -> Vec<u8> {
-    let w = width_mm.clamp(30.0, 1_500.0);
-    let h = height_mm.clamp(30.0, 1_500.0);
+    let w = if width_mm.is_finite() {
+        width_mm.clamp(30.0, 1_500.0)
+    } else {
+        210.0
+    };
+    let h = if height_mm.is_finite() {
+        height_mm.clamp(30.0, 1_500.0)
+    } else {
+        297.0
+    };
     let mm = 72.0f64 / 25.4;
     let margin = if w.min(h) >= 60.0 { 10.0 } else { 5.0 };
     let mut c = String::new();

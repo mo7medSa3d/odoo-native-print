@@ -82,6 +82,31 @@ class TestNativePrintJobLog(TransactionCase):
         self.assertEqual(prefill["printer"], "EPSON TM-T88VII")
         self.assertEqual(prefill["settings"]["copies"], 2)
         self.assertEqual(prefill["settings"]["paper"], "A5")
+        self.assertNotIn("duplex", prefill["settings"])
+
+    def test_action_reprint_preserves_explicit_simplex_choice(self):
+        report, partners = self._report_on_partners()
+        job = self._job()
+        job.with_context(native_print_status_sync=True).write({
+            "report_id": report.id,
+            "source_ids": str(partners[0].id),
+            "duplex": False,
+            "duplex_configured": True,
+        })
+        settings = job.action_reprint()["context"]["native_print_prefill"]["settings"]
+        self.assertIs(settings["duplex"], False)
+
+    def test_action_reprint_preserves_explicit_duplex_choice(self):
+        report, partners = self._report_on_partners()
+        job = self._job()
+        job.with_context(native_print_status_sync=True).write({
+            "report_id": report.id,
+            "source_ids": str(partners[0].id),
+            "duplex": True,
+            "duplex_configured": True,
+        })
+        settings = job.action_reprint()["context"]["native_print_prefill"]["settings"]
+        self.assertIs(settings["duplex"], True)
 
     def test_action_reprint_rejects_missing_records(self):
         report, partners = self._report_on_partners()
@@ -157,7 +182,6 @@ class TestNativePrintJobLog(TransactionCase):
         self.assertEqual(action.get("type"), "ir.actions.report")
 
     def test_action_reprint_without_source_fails_loudly(self):
-        from odoo.exceptions import UserError
         job = self._job()
         with self.assertRaises(UserError):
             job.action_reprint()

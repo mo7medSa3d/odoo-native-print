@@ -14,6 +14,9 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileConfig {
@@ -30,9 +33,58 @@ pub struct ResolvedConfig {
     pub status_message: Option<String>,
 }
 
+/// Write-temp-then-rename with unique temp filenames and a brief retry
+/// on Windows sharing violations (e.g. antivirus or concurrent reader).
+fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
+    let parent = path.parent().ok_or_else(|| "invalid config path".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("config.json");
+    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = parent.join(format!("{name}.{}.{seq}.tmp", std::process::id()));
+    if let Err(e) = std::fs::write(&tmp, content) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+
+    let mut last_err = None;
+    for attempt in 0..5 {
+        match std::fs::rename(&tmp, path) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last_err = Some(e);
+                if attempt < 4 {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&tmp);
+    Err(last_err
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "failed to save config file".to_string()))
+}
+
 pub fn validate_origin(origin: &str) -> Result<String, String> {
-    let origin = origin.trim().trim_end_matches('/').to_string();
-    if !print_core::security::origin_is_allowed(&origin, &origin) {
+    let trimmed = origin.trim().trim_end_matches('/');
+    // If the admin/user pasted a full Odoo URL (e.g. https://erp.example.com/odoo
+    // or http://192.168.1.20:8069/web/login) without userinfo, normalize it
+    // down to its origin before validating.
+    let candidate = match tauri::Url::parse(trimmed) {
+        Ok(u) if u.username().is_empty() && u.password().is_none() => {
+            let serialized = u.origin().ascii_serialization();
+            if serialized == "null" {
+                trimmed.to_string()
+            } else {
+                serialized
+            }
+        }
+        _ => trimmed.to_string(),
+    };
+
+    if !print_core::security::origin_is_allowed(&candidate, &candidate) {
         return Err("invalid Odoo address (HTTPS, or HTTP to an IP address)".to_string());
     }
     if cfg!(not(debug_assertions)) {
@@ -41,7 +93,7 @@ pub fn validate_origin(origin: &str) -> Result<String, String> {
         // domains like notexample.com and example.corp.com. Only the
         // RFC 2606 example domains (and their subdomains) and the
         // .invalid TLD count as placeholders.
-        if let Some((host, _)) = print_core::security::origin_host_port(&origin) {
+        if let Some((host, _)) = print_core::security::origin_host_port(&candidate) {
             let h = host.to_ascii_lowercase();
             let placeholder = h == "invalid"
                 || h.ends_with(".invalid")
@@ -53,7 +105,7 @@ pub fn validate_origin(origin: &str) -> Result<String, String> {
             }
         }
     }
-    Ok(origin)
+    Ok(candidate)
 }
 
 #[cfg(windows)]
@@ -207,19 +259,13 @@ pub fn save_origin(config_dir: &Path, origin: &str, auto_reprint: bool) -> Resul
         return Err("Odoo origin is locked by Windows Group Policy".to_string());
     }
     let validated = validate_origin(origin)?;
-    std::fs::create_dir_all(config_dir).map_err(|e| e.to_string())?;
     let file = config_dir.join("config.json");
     let cfg = FileConfig {
         odoo_origin: validated.clone(),
         auto_reprint,
     };
     let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
-    // Write-temp-then-rename (audit I2): a crash or power loss
-    // mid-write must not leave a truncated config.json that reads
-    // as "no origin configured" on the next launch.
-    let tmp = config_dir.join("config.json.tmp");
-    std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &file).map_err(|e| e.to_string())?;
+    atomic_write(&file, &json)?;
     Ok(validated)
 }
 
@@ -256,14 +302,9 @@ pub fn save_printer_settings(
     config_dir: &Path,
     settings: &PrinterSettingsMap,
 ) -> Result<(), String> {
-    std::fs::create_dir_all(config_dir).map_err(|e| e.to_string())?;
     let file = config_dir.join("printer_settings.json");
     let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
-    // Same write-temp-then-rename discipline as save_origin (I2).
-    let tmp = config_dir.join("printer_settings.json.tmp");
-    std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &file).map_err(|e| e.to_string())?;
-    Ok(())
+    atomic_write(&file, &json)
 }
 
 #[cfg(test)]
@@ -273,6 +314,8 @@ mod tests {
     fn origin_validation() {
         assert!(validate_origin("http://192.168.1.20:8069").is_ok());
         assert!(validate_origin("http://192.168.1.20:8069/").is_ok());
+        assert!(validate_origin("http://192.168.1.20:8069/web/login").is_ok());
+        assert!(validate_origin("https://erp.company.local/odoo").is_ok());
         assert!(validate_origin("http://[::1]:8069").is_ok());
         assert!(validate_origin("https://192.168.1.20:8069").is_ok());
         assert!(validate_origin("https://odoo.company.local:8069").is_ok());

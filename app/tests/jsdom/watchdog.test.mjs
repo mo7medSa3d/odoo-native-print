@@ -5,7 +5,7 @@ const bridge = extractBridge();
 let pass = 0, fail = 0;
 const ok = (name, cond) => { cond ? pass++ : fail++; console.log((cond ? "PASS " : "FAIL ") + name); };
 const BOOTED = '<div class="o_web_client"><div class="o_action_manager"><div class="o_list_view">rows</div></div></div>';
-function makePage(path, bodyHtml, url) {
+function makePage(path, bodyHtml, url, beforeEval) {
   const dom = new JSDOM(`<!DOCTYPE html><html><body>${bodyHtml}</body></html>`, {
     url: url || ("http://68.221.27.248:8070" + path), runScripts: "outside-only", pretendToBeVisual: true,
   });
@@ -13,10 +13,22 @@ function makePage(path, bodyHtml, url) {
   w.__TAURI_INTERNALS__ = { invoke: async () => ({}) };
   w.__TAURI__ = { core: { invoke: async () => ({}) } };
   w.__NP_BOOT_DELAYS__ = { tickMs: 20, failAfter: 5 };
+  if (beforeEval) beforeEval(w);
   w.eval(bridge);
   return { dom, w };
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+// A0: any embedded Odoo page must suppress browser print, not just
+// POS receipts. Reports are routed through the native print pipeline.
+{
+  let browserPrintCalls = 0;
+  const { w } = makePage("/odoo", '<div class="o_web_client"></div>', undefined, (win) => {
+    Object.defineProperty(win, "print", { configurable: true, value: () => { browserPrintCalls++; } });
+  });
+  w.print();
+  ok("remote: window.print suppressed on non-receipt pages", browserPrintCalls === 0);
+  w.close();
+}
 // A: healthy boot (shell + action content) -> no overlay, and NO
 // floating nav pill (removed in 1.5.0: navigation lives in the
 // window's tab bar now — owner brief, 2026-11-05)

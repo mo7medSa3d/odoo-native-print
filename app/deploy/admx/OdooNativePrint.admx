@@ -5,6 +5,7 @@
                    xmlns="http://schemas.microsoft.com/GroupPolicy/2006/07/PolicyDefinitions">
   <policyNamespaces>
     <target prefix="odooNativePrint" namespace="Company.Policies.OdooNativePrint"/>
+    <using prefix="windows" namespace="Microsoft.Policies.Windows"/>
   </policyNamespaces>
   <resources minRequiredRevision="1.0"/>
   <categories>
@@ -13,7 +14,7 @@
   <policies>
     <policy name="OdooOrigin" class="Machine" displayName="$(string.OdooOrigin)"
             explainText="$(string.OdooOrigin_Explain)" key="Software\Policies\OdooNativePrint"
-            valueName="OdooOrigin" presentation="$(presentation.OdooOrigin)">
+            presentation="$(presentation.OdooOrigin)">
       <parentCategory ref="ONP_Category"/>
       <supportedOn ref="windows:SUPPORTED_Windows_10_0"/>
       <elements>

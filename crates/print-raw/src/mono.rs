@@ -47,7 +47,8 @@ impl MonoBitmap {
             });
         }
         let bpr = (width as usize).div_ceil(8);
-        let mut data = vec![0u8; bpr * height as usize];
+        let total = bpr.checked_mul(height as usize).ok_or(MonoError::BadInput)?;
+        let mut data = vec![0u8; total];
         for y in 0..height as usize {
             for x in 0..width as usize {
                 if gray[y * width as usize + x] < threshold {
@@ -71,7 +72,9 @@ impl MonoBitmap {
         if width_dots % 8 != 0 {
             return Err(MonoError::WidthNotMultipleOf8(width_dots));
         }
-        let expected = (width_dots as usize / 8) * height_dots as usize;
+        let expected = (width_dots as usize / 8)
+            .checked_mul(height_dots as usize)
+            .ok_or(MonoError::BadInput)?;
         if data.len() != expected {
             return Err(MonoError::LengthMismatch {
                 expected,
@@ -86,8 +89,18 @@ impl MonoBitmap {
     }
 
     pub fn pixel_is_black(&self, x: u32, y: u32) -> bool {
-        let idx = y as usize * self.bytes_per_row() + (x as usize / 8);
-        self.data[idx] & (0x80 >> (x % 8)) != 0
+        if x >= self.width_dots || y >= self.height_dots {
+            return false;
+        }
+        let Some(idx) = (y as usize)
+            .checked_mul(self.bytes_per_row())
+            .and_then(|row| row.checked_add(x as usize / 8))
+        else {
+            return false;
+        };
+        self.data
+            .get(idx)
+            .is_some_and(|b| b & (0x80 >> (x % 8)) != 0)
     }
 }
 
@@ -102,6 +115,8 @@ mod tests {
         assert_eq!(bm.data, vec![0b1010_1010]);
         assert!(bm.pixel_is_black(0, 0));
         assert!(!bm.pixel_is_black(1, 0));
+        assert!(!bm.pixel_is_black(8, 0));
+        assert!(!bm.pixel_is_black(0, 1));
     }
     #[test]
     fn width_padding_is_white() {

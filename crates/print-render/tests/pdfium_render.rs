@@ -139,6 +139,22 @@ fn renders_color_and_threshold_modes() {
 }
 
 #[test]
+fn renders_low_dpi_and_odd_receipt_page() {
+    let Some(pdfium) = pdfium_or_skip() else {
+        return;
+    };
+    // 80 x 200 mm receipt at 72 DPI must succeed without false ceiling errors.
+    let doc = pdfium
+        .load_document(&minimal_pdf(226.77, 566.93))
+        .expect("receipt PDF loads");
+    let page = doc
+        .render_page(0, RenderMode::Threshold, 72)
+        .expect("low-DPI receipt render");
+    assert_eq!(page.dpi, 72);
+    assert!(page.non_background_fraction() > 0.1);
+}
+
+#[test]
 fn huge_color_page_hits_the_memory_ceiling_loudly() {
     let Some(pdfium) = pdfium_or_skip() else {
         return;

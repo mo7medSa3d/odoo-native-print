@@ -41,6 +41,48 @@ fn lock_queue(queue: &Mutex<Queue>) -> std::sync::MutexGuard<'_, Queue> {
     }
 }
 
+/// Enqueue job + payload + options in one SQLite transaction; duplicate
+/// idempotency keys return the original job id untouched.
+fn enqueue_idempotent(
+    queue: &Mutex<Queue>,
+    job: &Job,
+    kind: &str,
+    bytes: &[u8],
+    opts: &JobOptions,
+) -> Result<String, String> {
+    let mut q = lock_queue(queue);
+    match q
+        .enqueue_with_payload(job, kind, bytes, opts)
+        .map_err(|e| e.to_string())?
+    {
+        Some(new_id) => Ok(new_id),
+        None => q
+            .job_id_for_key(&job.idempotency_key)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "queue_inconsistent".to_string()),
+    }
+}
+
+pub fn read_lock<T>(lock: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
+    match lock.read() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            eprintln!("Yaseir Print: RwLock (read) was poisoned; recovering the guard");
+            poisoned.into_inner()
+        }
+    }
+}
+
+pub fn write_lock<T>(lock: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
+    match lock.write() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            eprintln!("Yaseir Print: RwLock (write) was poisoned; recovering the guard");
+            poisoned.into_inner()
+        }
+    }
+}
+
 /// TCP 9100 transport budgets: a connect that takes longer is
 /// a printer that is off or unreachable (its failure proves zero
 /// bytes were sent, so the job may retry); the write budget
@@ -97,6 +139,7 @@ pub struct TabsState {
     pub active: Option<String>,
     pub next_id: u64,
     pub urls: std::collections::HashMap<String, String>,
+    pub pos_tabs: std::collections::HashSet<String>,
 }
 
 impl TabsState {
@@ -105,13 +148,22 @@ impl TabsState {
             self.order.push(label.to_string());
         }
         self.urls.insert(label.to_string(), url.to_string());
+        if is_pos_url(url) {
+            self.pos_tabs.insert(label.to_string());
+        }
         if self.active.is_none() {
             self.active = Some(label.to_string());
         }
     }
 
     pub fn set_url(&mut self, label: &str, url: &str) {
+        if !self.order.iter().any(|l| l == label) {
+            return;
+        }
         self.urls.insert(label.to_string(), url.to_string());
+        if is_pos_url(url) {
+            self.pos_tabs.insert(label.to_string());
+        }
     }
 
     /// Move a tab to a new position in the strip (drag-and-drop
@@ -132,7 +184,7 @@ impl TabsState {
     }
 
     pub fn is_pos_tab(&self, label: &str) -> bool {
-        self.url_of(label).map(is_pos_url).unwrap_or(false)
+        self.pos_tabs.contains(label) || self.url_of(label).map(is_pos_url).unwrap_or(false)
     }
 
     pub fn snapshot(&self) -> Vec<TabInfo> {
@@ -144,7 +196,7 @@ impl TabsState {
                 TabInfo {
                     label: label.clone(),
                     title: tab_title_for(&url),
-                    is_pos: is_pos_url(&url),
+                    is_pos: self.is_pos_tab(label),
                     is_local: parsed.as_ref().map(is_local_app_url).unwrap_or(false),
                     active: self.active.as_deref() == Some(label.as_str()),
                     url,
@@ -204,18 +256,25 @@ pub struct PrinterCache {
 }
 
 /// Printer enumeration through the 20s cache (see `PrinterCache`).
-fn cached_printers(state: &AppState) -> Result<(Vec<PrinterInfo>, Option<String>), String> {
+async fn cached_printers(state: &AppState) -> Result<(Vec<PrinterInfo>, Option<String>), String> {
     const TTL: Duration = Duration::from_secs(20);
-    if let Ok(guard) = state.printer_cache.read() {
+    {
+        let guard = read_lock(&state.printer_cache);
         if let Some(cache) = &*guard {
             if cache.at.elapsed() < TTL {
                 return Ok((cache.printers.clone(), cache.default.clone()));
             }
         }
     }
-    let printers = print_win::discover_printers().map_err(|e| e.to_string())?;
-    let default = print_win::default_printer_name().ok();
-    if let Ok(mut guard) = state.printer_cache.write() {
+    let (printers, default) = tauri::async_runtime::spawn_blocking(|| {
+        let printers = print_win::discover_printers().map_err(|e| e.to_string())?;
+        let default = print_win::default_printer_name().ok();
+        Ok::<_, String>((printers, default))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    {
+        let mut guard = write_lock(&state.printer_cache);
         *guard = Some(PrinterCache {
             at: Instant::now(),
             printers: printers.clone(),
@@ -277,9 +336,24 @@ where
 }
 
 fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
-    let clean: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+    let raw = if input.starts_with("data:") {
+        input
+            .split_once(";base64,")
+            .map(|(_, b)| b)
+            .unwrap_or(input)
+    } else {
+        input
+    };
+    let clean: Vec<u8> = raw.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
     if clean.is_empty() {
         return Ok(Vec::new());
+    }
+    let max_b64_len = (print_core::security::MAX_JOB_BYTES / 3 + 1) * 4;
+    if clean.len() > max_b64_len {
+        return Err("payload_too_large".to_string());
+    }
+    if clean.len() % 4 == 1 {
+        return Err("invalid base64 length".to_string());
     }
     let val = |b: u8| -> Result<u8, String> {
         match b {
@@ -292,13 +366,10 @@ fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
         }
     };
     let mut out = Vec::with_capacity(clean.len() * 3 / 4);
-    for chunk in clean.chunks(4) {
+    let num_chunks = clean.len().div_ceil(4);
+    for (idx, chunk) in clean.chunks(4).enumerate() {
         let a = val(chunk[0])?;
-        let b = if chunk.len() > 1 && chunk[1] != b'=' {
-            val(chunk[1])?
-        } else {
-            0
-        };
+        let b = val(chunk[1])?;
         out.push((a << 2) | (b >> 4));
         if chunk.len() > 2 && chunk[2] != b'=' {
             let c = val(chunk[2])?;
@@ -307,6 +378,8 @@ fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
                 let d = val(chunk[3])?;
                 out.push((c << 6) | d);
             }
+        } else if idx + 1 < num_chunks || (chunk.len() > 3 && chunk[3] != b'=') {
+            return Err("unexpected base64 padding".to_string());
         }
     }
     Ok(out)
@@ -323,16 +396,22 @@ pub fn is_local_app_url(url: &tauri::Url) -> bool {
     }
 }
 
+fn local_app_url(file: &str) -> Result<tauri::Url, String> {
+    let raw = if cfg!(windows) {
+        format!("http://tauri.localhost/{file}")
+    } else {
+        format!("tauri://localhost/{file}")
+    };
+    raw.parse().map_err(|_| "bad_local_url".to_string())
+}
+
 fn check_origin(webview: &tauri::Webview, state: &AppState) -> Result<(), String> {
     let url = webview.url().map_err(|e| e.to_string())?;
     if is_local_app_url(&url) {
         return Ok(());
     }
     let origin = url.origin().ascii_serialization();
-    let guard = state
-        .configured_origin
-        .read()
-        .map_err(|_| "config_lock_poisoned".to_string())?;
+    let guard = read_lock(&state.configured_origin);
     if let Some(configured) = guard.as_deref() {
         if origin_is_allowed(configured, &origin) {
             return Ok(());
@@ -378,8 +457,6 @@ pub struct PrintPdfRequest {
     /// the printer's 3 mm default. Only label modes use it.
     #[serde(default)]
     pub label_gap_mm: Option<f64>,
-    #[allow(dead_code)]
-    pub url: String,
     #[serde(deserialize_with = "deserialize_bytes")]
     pub bytes: Vec<u8>,
 }
@@ -400,60 +477,83 @@ pub async fn print_pdf(
     if !print_core::security::valid_idempotency_key(&req.idempotency_key) {
         return Err("bad_idempotency_key".to_string());
     }
-    print_core::security::validate_payload_limits(req.bytes.len(), req.copies)
+    if req.printer_pattern.trim().is_empty() {
+        return Err("printer_required".to_string());
+    }
+    let copies = req.copies.max(1);
+    print_core::security::validate_payload_limits(req.bytes.len(), copies)
         .map_err(|e| format!("{e:?}"))?;
-    let info = print_render::parse_pdf_info(&req.bytes).map_err(|e| e.to_string())?;
-    let pages = info.pages.len() as u32;
-    if pages == 0 {
-        return Err("empty_document".to_string());
-    }
-    for p in &info.pages {
-        validate_job_input(req.bytes.len(), pages, req.copies, p.size)
-            .map_err(|e| format!("{e:?}"))?;
-    }
-    let job = Job {
-        id: req.idempotency_key.clone(),
-        idempotency_key: req.idempotency_key.clone(),
-        printer: req.printer_pattern.clone(),
-        report: Some(req.report_name.clone()),
-        pages,
-        bytes: req.bytes.len() as u64,
-        priority: if req.mode == "escpos" { 10 } else { 0 },
-        state: JobState::Queued,
-        attempts: 0,
-        error_code: None,
-    };
-    let opts = JobOptions {
-        mode: req.mode.clone(),
-        paper: req.paper.clone(),
-        copies: req.copies.max(1),
-        scale_policy: req.scale_policy.clone(),
-        duplex: req.duplex,
-        color: req.color,
-        cut: true,
-        tray: req.tray.clone(),
-        media_roll_width_mm: req.media_roll_width_mm,
-        label_gap_mm: req.label_gap_mm,
-        source_width_mm: None,
-    };
-    let id = {
-        let mut queue = lock_queue(&state.queue);
-        // Duplicate submissions (same idempotency key) return the
-        // original job untouched: never overwrite its payload/options.
-        // Job + payload + options land in ONE SQLite transaction:
-        // a crash mid-submission leaves nothing behind, and a
-        // duplicate returns the original job untouched.
-        match queue
-            .enqueue_with_payload(&job, "pdf", &req.bytes, &opts)
-            .map_err(|e| e.to_string())?
-        {
-            Some(new_id) => new_id,
-            None => queue
-                .job_id_for_key(&job.idempotency_key)
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| "queue_inconsistent".to_string())?,
-        }
-    };
+    let queue_arc = Arc::clone(&state.queue);
+    let id = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let pages = match print_render::parse_pdf_info(&req.bytes) {
+            Ok(info) => {
+                let pages = info.pages.len() as u32;
+                if pages == 0 {
+                    return Err("empty_document".to_string());
+                }
+                for p in &info.pages {
+                    validate_job_input(req.bytes.len(), pages, copies, p.size)
+                        .map_err(|e| format!("{e:?}"))?;
+                }
+                pages
+            }
+            Err(parse_err) => {
+                // Lightweight parser can fail on compressed xref/object streams;
+                // fall back to PDFium (when loaded) or %PDF- header verification.
+                let has_magic = req.bytes.windows(5).take(1024).any(|w| w == b"%PDF-");
+                if !has_magic {
+                    return Err(parse_err.to_string());
+                }
+                if let Ok(pdfium) = print_render::Pdfium::load() {
+                    let doc = pdfium
+                        .load_document(&req.bytes)
+                        .map_err(|e| e.to_string())?;
+                    let count = doc.page_count() as u32;
+                    if count == 0 {
+                        return Err("empty_document".to_string());
+                    }
+                    if count > print_core::security::MAX_PAGES {
+                        return Err("TooManyPages".to_string());
+                    }
+                    count
+                } else {
+                    1
+                }
+            }
+        };
+        let job = Job {
+            id: req.idempotency_key.clone(),
+            idempotency_key: req.idempotency_key.clone(),
+            printer: req.printer_pattern.clone(),
+            report: Some(req.report_name.clone()),
+            pages,
+            bytes: req.bytes.len() as u64,
+            priority: if req.mode == "escpos" { 10 } else { 0 },
+            state: JobState::Queued,
+            attempts: 0,
+            error_code: None,
+        };
+        let opts = JobOptions {
+            mode: req.mode.clone(),
+            paper: req.paper.clone(),
+            copies,
+            scale_policy: req.scale_policy.clone(),
+            duplex: req.duplex,
+            color: req.color,
+            cut: true,
+            tray: req.tray.clone(),
+            media_roll_width_mm: req
+                .media_roll_width_mm
+                .filter(|w| w.is_finite() && (20.0..=500.0).contains(w)),
+            label_gap_mm: req
+                .label_gap_mm
+                .filter(|g| g.is_finite() && (0.0..=100.0).contains(g)),
+            source_width_mm: None,
+        };
+        enqueue_idempotent(&queue_arc, &job, "pdf", &req.bytes, &opts)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     state.notify_worker();
     Ok(id)
 }
@@ -484,10 +584,13 @@ pub fn print_text(
     if !print_core::security::valid_idempotency_key(&req.idempotency_key) {
         return Err("bad_idempotency_key".to_string());
     }
+    if req.printer_pattern.trim().is_empty() {
+        return Err("printer_required".to_string());
+    }
     if req.text.is_empty() || req.text.len() > 1_048_576 {
         return Err("bad_text_size".to_string());
     }
-    let copies = req.copies.unwrap_or(1);
+    let copies = req.copies.unwrap_or(1).max(1);
     validate_job_input(
         req.text.len(),
         1,
@@ -529,24 +632,7 @@ pub fn print_text(
         label_gap_mm: None,
         source_width_mm: None,
     };
-    let id = {
-        let mut queue = lock_queue(&state.queue);
-        // Duplicate submissions (same idempotency key) return the
-        // original job untouched: never overwrite its payload/options.
-        // Job + payload + options land in ONE SQLite transaction:
-        // a crash mid-submission leaves nothing behind, and a
-        // duplicate returns the original job untouched.
-        match queue
-            .enqueue_with_payload(&job, "escpos", &bytes, &opts)
-            .map_err(|e| e.to_string())?
-        {
-            Some(new_id) => new_id,
-            None => queue
-                .job_id_for_key(&job.idempotency_key)
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| "queue_inconsistent".to_string())?,
-        }
-    };
+    let id = enqueue_idempotent(&state.queue, &job, "escpos", &bytes, &opts)?;
     state.notify_worker();
     Ok(id)
 }
@@ -582,70 +668,65 @@ pub async fn print_image(
     req: PrintImageRequest,
 ) -> Result<String, String> {
     check_origin(&webview, &state)?;
-    let copies = req.copies.unwrap_or(1);
+    let copies = req.copies.unwrap_or(1).max(1);
     // Validate BEFORE decoding untrusted image bytes (see print_pdf).
     if !print_core::security::valid_idempotency_key(&req.idempotency_key) {
         return Err("bad_idempotency_key".to_string());
     }
+    if req.printer_pattern.trim().is_empty() {
+        return Err("printer_required".to_string());
+    }
     print_core::security::validate_payload_limits(req.bytes.len(), copies)
         .map_err(|e| format!("{e:?}"))?;
-    let _img = print_render::decode_png(&req.bytes).map_err(|e| e.to_string())?;
-    // Width evidence from the page is a hint, not truth: keep only
-    // plausible physical widths (a receipt wider than half a metre
-    // or narrower than 20 mm is a bug or an attack, not media).
-    let source_width_mm = req
-        .source_width_mm
-        .filter(|w| w.is_finite() && (20.0..=500.0).contains(w));
-    validate_job_input(
-        req.bytes.len(),
-        1,
-        copies,
-        print_core::PageSize::roll_80(200.0),
-    )
-    .map_err(|e| format!("{e:?}"))?;
-    let job = Job {
-        id: req.idempotency_key.clone(),
-        idempotency_key: req.idempotency_key.clone(),
-        printer: req.printer_pattern.clone(),
-        report: Some(req.report_name.clone()),
-        pages: 1,
-        bytes: req.bytes.len() as u64,
-        priority: 10,
-        state: JobState::Queued,
-        attempts: 0,
-        error_code: None,
-    };
-    let opts = JobOptions {
-        mode: req.mode.unwrap_or_else(|| "escpos".to_string()),
-        paper: req.paper,
-        copies: copies.max(1),
-        scale_policy: Some("custom_allowed".to_string()),
-        duplex: None,
-        color: false,
-        cut: true,
-        tray: None,
-        media_roll_width_mm: req.media_roll_width_mm,
-        label_gap_mm: req.label_gap_mm,
-        source_width_mm,
-    };
-    let id = {
-        let mut queue = lock_queue(&state.queue);
-        // Duplicate submissions (same idempotency key) return the
-        // original job untouched: never overwrite its payload/options.
-        // Job + payload + options land in ONE SQLite transaction:
-        // a crash mid-submission leaves nothing behind, and a
-        // duplicate returns the original job untouched.
-        match queue
-            .enqueue_with_payload(&job, "image-png", &req.bytes, &opts)
-            .map_err(|e| e.to_string())?
-        {
-            Some(new_id) => new_id,
-            None => queue
-                .job_id_for_key(&job.idempotency_key)
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| "queue_inconsistent".to_string())?,
-        }
-    };
+    let queue_arc = Arc::clone(&state.queue);
+    let id = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let _img = print_render::decode_png(&req.bytes).map_err(|e| e.to_string())?;
+        // Width evidence from the page is a hint, not truth: keep only
+        // plausible physical widths (a receipt wider than half a metre
+        // or narrower than 20 mm is a bug or an attack, not media).
+        let source_width_mm = req
+            .source_width_mm
+            .filter(|w| w.is_finite() && (20.0..=500.0).contains(w));
+        validate_job_input(
+            req.bytes.len(),
+            1,
+            copies,
+            print_core::PageSize::roll_80(200.0),
+        )
+        .map_err(|e| format!("{e:?}"))?;
+        let job = Job {
+            id: req.idempotency_key.clone(),
+            idempotency_key: req.idempotency_key.clone(),
+            printer: req.printer_pattern.clone(),
+            report: Some(req.report_name.clone()),
+            pages: 1,
+            bytes: req.bytes.len() as u64,
+            priority: 10,
+            state: JobState::Queued,
+            attempts: 0,
+            error_code: None,
+        };
+        let opts = JobOptions {
+            mode: req.mode.unwrap_or_else(|| "escpos".to_string()),
+            paper: req.paper,
+            copies: copies.max(1),
+            scale_policy: Some("custom_allowed".to_string()),
+            duplex: None,
+            color: false,
+            cut: true,
+            tray: None,
+            media_roll_width_mm: req
+                .media_roll_width_mm
+                .filter(|w| w.is_finite() && (20.0..=500.0).contains(w)),
+            label_gap_mm: req
+                .label_gap_mm
+                .filter(|g| g.is_finite() && (0.0..=100.0).contains(g)),
+            source_width_mm,
+        };
+        enqueue_idempotent(&queue_arc, &job, "image-png", &req.bytes, &opts)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     state.notify_worker();
     Ok(id)
 }
@@ -719,17 +800,12 @@ pub async fn app_overview(
     state: State<'_, AppState>,
 ) -> Result<AppOverviewResponse, String> {
     check_origin(&webview, &state)?;
-    let pdfium_ready = pdfium_ready();
-    let (printers, default_printer) = cached_printers(&state)?;
-    let origin = state
-        .configured_origin
-        .read()
-        .map_err(|_| "config_lock_poisoned".to_string())?
-        .clone();
-    let auto_reprint = *state
-        .auto_reprint
-        .read()
-        .map_err(|_| "config_lock_poisoned".to_string())?;
+    let pdfium_ready = tauri::async_runtime::spawn_blocking(pdfium_ready)
+        .await
+        .map_err(|e| e.to_string())?;
+    let (printers, default_printer) = cached_printers(&state).await?;
+    let origin = read_lock(&state.configured_origin).clone();
+    let auto_reprint = *read_lock(&state.auto_reprint);
     let bundle = {
         let queue = lock_queue(&state.queue);
         build_bundle_from_queue(&queue).map_err(|e| e.to_string())?
@@ -761,7 +837,7 @@ pub async fn list_printers(
     state: State<'_, AppState>,
 ) -> Result<Vec<PrinterInfo>, String> {
     check_origin(&webview, &state)?;
-    let (printers, _default) = cached_printers(&state)?;
+    let (printers, _default) = cached_printers(&state).await?;
     Ok(printers)
 }
 
@@ -772,8 +848,17 @@ pub async fn printer_forms(
     printer: String,
 ) -> Result<Vec<Form>, String> {
     check_origin(&webview, &state)?;
-    print_win::paper_forms(&printer).map_err(|e| e.to_string())
+    let trimmed = printer.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("printer_required".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        print_win::paper_forms(&trimmed).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
+
 #[tauri::command]
 pub async fn printer_capabilities(
     webview: tauri::Webview,
@@ -781,10 +866,15 @@ pub async fn printer_capabilities(
     printer: String,
 ) -> Result<print_core::PrinterCapabilities, String> {
     check_origin(&webview, &state)?;
-    if printer.trim().is_empty() {
+    let trimmed = printer.trim().to_string();
+    if trimmed.is_empty() {
         return Err("printer_required".to_string());
     }
-    print_win::printer_capabilities(printer.trim()).map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        print_win::printer_capabilities(&trimmed).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Boot-page reachability probe: TCP-connect to the configured
@@ -794,33 +884,37 @@ pub async fn printer_capabilities(
 /// server whose first family is dead must not read as "down" when
 /// the webview itself would connect via the other family.
 #[tauri::command]
-pub fn probe_origin(webview: tauri::Webview, state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn probe_origin(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
     check_local_only(&webview)?;
-    let origin = match state.configured_origin.read() {
-        Ok(guard) => guard.clone(),
-        Err(_) => None,
-    };
+    let origin = read_lock(&state.configured_origin).clone();
     let Some(origin) = origin else {
         return Ok(false);
     };
-    let Some((host, port)) = print_core::security::origin_host_port(&origin) else {
-        return Ok(false);
-    };
-    let addrs = match (host.as_str(), port).to_socket_addrs() {
-        Ok(a) => a,
-        Err(_) => return Ok(false),
-    };
-    let deadline = std::time::Instant::now() + Duration::from_secs(3);
-    for sock in addrs {
-        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-        if remaining.is_zero() {
-            break;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some((host, port)) = print_core::security::origin_host_port(&origin) else {
+            return false;
+        };
+        let addrs = match (host.as_str(), port).to_socket_addrs() {
+            Ok(a) => a,
+            Err(_) => return false,
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        for sock in addrs {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            if std::net::TcpStream::connect_timeout(&sock, remaining).is_ok() {
+                return true;
+            }
         }
-        if std::net::TcpStream::connect_timeout(&sock, remaining).is_ok() {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+        false
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Find a form by name in a capabilities report (case-insensitive,
@@ -874,7 +968,7 @@ pub struct TestPrintOptions {
 }
 
 #[tauri::command]
-pub fn run_test_print(
+pub async fn run_test_print(
     webview: tauri::Webview,
     state: State<'_, AppState>,
     printer: String,
@@ -882,23 +976,25 @@ pub fn run_test_print(
     paper: Option<String>,
     options: Option<TestPrintOptions>,
 ) -> Result<String, String> {
-    let options = options.unwrap_or_default();
-    let tray = options.tray;
-    let duplex = options.duplex;
-    let color = options.color;
-    check_origin(&webview, &state)?;
     // Test prints are a Control Center feature: the Odoo page must
     // never fire raw calibrations at local printers (audit B1).
     check_local_only(&webview)?;
     if printer.trim().is_empty() {
         return Err("printer_required".to_string());
     }
+    let config_dir = state.config_dir.clone();
+    let queue_arc = Arc::clone(&state.queue);
+    let id = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let options = options.unwrap_or_default();
+        let tray = options.tray;
+        let duplex = options.duplex;
+        let color = options.color;
     // Raw calibration pages (ESC/POS / ZPL / TSPL) sent to a virtual
     // PDF/XPS writer produce a corrupt file instead of a page; refuse
     // up front with the reason instead of enqueueing a doomed job.
     let raw_kind = matches!(
         kind.as_str(),
-        "thermal-80mm" | "thermal-58mm" | "escpos" | "zpl-label" | "zpl" | "tspl-label" | "tspl"
+        "thermal-80mm" | "thermal-58mm" | "escpos" | "zpl-label" | "zpl" | "tspl-label" | "tspl" | "epl-label" | "epl"
     );
     if raw_kind && !printer.contains("://") {
         // Fail closed: a raw calibration is refused whenever the
@@ -923,6 +1019,7 @@ pub fn run_test_print(
                 "thermal-80mm" | "thermal-58mm" | "escpos" => "escpos",
                 "zpl-label" | "zpl" => "zpl",
                 "tspl-label" | "tspl" => "tspl",
+                "epl-label" | "epl" => "epl",
                 _ => "",
             };
             if !wanted.is_empty() && f.protocol != wanted {
@@ -1027,6 +1124,28 @@ pub fn run_test_print(
                 5,
             )
         }
+        "epl-label" | "epl" => {
+            let bm = print_render::calibration::calibration_thermal_80mm();
+            let epl = print_raw::epl::epl_label(&bm);
+            (
+                "epl",
+                epl,
+                JobOptions {
+                    mode: "epl".to_string(),
+                    paper: Some(paper.unwrap_or_else(|| "100x150mm".to_string())),
+                    copies: 1,
+                    scale_policy: Some("custom_allowed".to_string()),
+                    duplex: None,
+                    color: false,
+                    cut: false,
+                    tray: None,
+                    media_roll_width_mm: None,
+                    label_gap_mm: None,
+                    source_width_mm: None,
+                },
+                5,
+            )
+        }
         "pdf-a4" | "pdf" | "gdi" => {
             // The test page is generated AT the size it will print
             // on — the form the user chose in the lab (by name,
@@ -1043,7 +1162,7 @@ pub fn run_test_print(
                 .clone()
                 .filter(|n| !n.trim().is_empty() && !n.eq_ignore_ascii_case("auto"))
                 .or_else(|| {
-                    config::load_printer_settings(&state.config_dir)
+                    config::load_printer_settings(&config_dir)
                         .get(printer.trim())
                         .and_then(|s| s.paper.clone())
                 });
@@ -1086,19 +1205,10 @@ pub fn run_test_print(
         attempts: 0,
         error_code: None,
     };
-    let id = {
-        let mut queue = lock_queue(&state.queue);
-        match queue
-            .enqueue_with_payload(&job, payload_kind, &payload_bytes, &opts)
-            .map_err(|e| e.to_string())?
-        {
-            Some(id) => id,
-            None => queue
-                .job_id_for_key(&job.idempotency_key)
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| "queue_inconsistent".to_string())?,
-        }
-    };
+        enqueue_idempotent(&queue_arc, &job, payload_kind, &payload_bytes, &opts)?
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     state.notify_worker();
     Ok(id)
 }
@@ -1109,7 +1219,6 @@ pub fn retry_job_cmd(
     state: State<'_, AppState>,
     job_id: String,
 ) -> Result<(), String> {
-    check_origin(&webview, &state)?;
     check_local_only(&webview)?;
     {
         let mut queue = lock_queue(&state.queue);
@@ -1125,7 +1234,6 @@ pub fn cancel_job_cmd(
     state: State<'_, AppState>,
     job_id: String,
 ) -> Result<(), String> {
-    check_origin(&webview, &state)?;
     check_local_only(&webview)?;
     let mut queue = lock_queue(&state.queue);
     queue.cancel_job(&job_id).map_err(|e| e.to_string())
@@ -1136,7 +1244,6 @@ pub fn clear_finished_cmd(
     webview: tauri::Webview,
     state: State<'_, AppState>,
 ) -> Result<u64, String> {
-    check_origin(&webview, &state)?;
     check_local_only(&webview)?;
     let mut queue = lock_queue(&state.queue);
     queue.clear_finished().map_err(|e| e.to_string())
@@ -1147,7 +1254,6 @@ pub fn export_diagnostics(
     webview: tauri::Webview,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    check_origin(&webview, &state)?;
     check_local_only(&webview)?;
     let queue = lock_queue(&state.queue);
     let bundle = build_bundle_from_queue(&queue).map_err(|e| e.to_string())?;
@@ -1236,16 +1342,14 @@ pub async fn open_tab_internal(
     state: &AppState,
     url: tauri::Url,
 ) -> Result<String, String> {
-    let label = {
-        let mut tabs = state
-            .tabs
-            .write()
-            .map_err(|_| "tabs_lock_poisoned".to_string())?;
+    let (label, prev_active) = {
+        let mut tabs = write_lock(&state.tabs);
+        let prev_active = tabs.active.clone();
         tabs.next_id += 1;
         let label = format!("tab-{}", tabs.next_id);
         tabs.register(&label, url.as_str());
         tabs.active = Some(label.clone());
-        label
+        (label, prev_active)
     };
     let web_url = if is_local_app_url(&url) {
         let path = url.path().trim_start_matches('/');
@@ -1253,7 +1357,16 @@ pub async fn open_tab_internal(
     } else {
         tauri::WebviewUrl::External(url.clone())
     };
-    crate::create_tab_webview(app, &label, web_url)?;
+    if let Err(err) = crate::create_tab_webview(app, &label, web_url) {
+        let mut tabs = write_lock(&state.tabs);
+        tabs.order.retain(|l| l != &label);
+        tabs.urls.remove(&label);
+        tabs.pos_tabs.remove(&label);
+        if tabs.active.as_deref() == Some(label.as_str()) {
+            tabs.active = prev_active;
+        }
+        return Err(err);
+    }
     crate::activate_tab(app, &label);
     Ok(label)
 }
@@ -1264,9 +1377,11 @@ pub async fn open_tab_internal(
 #[tauri::command]
 pub async fn tab_open(
     app: tauri::AppHandle,
+    webview: tauri::Webview,
     state: State<'_, AppState>,
     url: String,
 ) -> Result<String, String> {
+    check_origin(&webview, &state)?;
     // An empty URL is the tab bar's "new tab" action: a fresh tab
     // on the configured origin (the Control Center when none is
     // configured yet).
@@ -1276,20 +1391,21 @@ pub async fn tab_open(
             .read()
             .map_err(|_| "config_lock_poisoned".to_string())?
             .clone();
-        let target = match origin {
-            Some(origin) => origin,
-            None => {
-                if cfg!(windows) {
-                    "http://tauri.localhost/index.html".to_string()
-                } else {
-                    "tauri://localhost/index.html".to_string()
-                }
-            }
+        let parsed = match origin {
+            Some(origin) => tauri::Url::parse(&origin).map_err(|_| "bad_tab_url".to_string())?,
+            None => local_app_url("index.html")?,
         };
-        let parsed = tauri::Url::parse(&target).map_err(|_| "bad_tab_url".to_string())?;
         return open_tab_internal(&app, &state, parsed).await;
     }
-    let parsed = tauri::Url::parse(&url).map_err(|_| "bad_tab_url".to_string())?;
+    let parsed = if url.starts_with('/') {
+        let configured = read_lock(&state.configured_origin)
+            .clone()
+            .ok_or_else(|| "no_origin_configured".to_string())?;
+        let base = tauri::Url::parse(&configured).map_err(|_| "bad_tab_url".to_string())?;
+        base.join(&url).map_err(|_| "bad_tab_url".to_string())?
+    } else {
+        tauri::Url::parse(&url).map_err(|_| "bad_tab_url".to_string())?
+    };
     if !is_local_app_url(&parsed) {
         let configured = state
             .configured_origin
@@ -1386,6 +1502,7 @@ pub async fn tab_close(
         let was_active = tabs.active.as_deref() == Some(label.as_str());
         tabs.order.remove(idx);
         tabs.urls.remove(&label);
+        tabs.pos_tabs.remove(&label);
         let neighbor = if tabs.order.is_empty() {
             None
         } else {
@@ -1415,8 +1532,7 @@ pub async fn tab_close(
                         open_tab_internal(&app, &state, url).await?;
                     }
                     None => {
-                        let url = tauri::Url::parse("tauri://localhost/index.html")
-                            .map_err(|_| "bad_local_url".to_string())?;
+                        let url = local_app_url("index.html")?;
                         open_tab_internal(&app, &state, url).await?;
                     }
                 }
@@ -1665,15 +1781,7 @@ async fn open_local_page(
         crate::activate_tab(app, &label);
         return Ok(());
     }
-    let local_url: tauri::Url = if cfg!(windows) {
-        format!("http://tauri.localhost/{file}")
-            .parse()
-            .map_err(|_| "bad_local_url".to_string())?
-    } else {
-        format!("tauri://localhost/{file}")
-            .parse()
-            .map_err(|_| "bad_local_url".to_string())?
-    };
+    let local_url = local_app_url(file)?;
     open_tab_internal(app, state, local_url).await?;
     Ok(())
 }
@@ -1734,9 +1842,6 @@ pub async fn open_odoo_origin(
     };
     if let Some(label) = existing {
         crate::activate_tab(&app, &label);
-        if let Some(wv) = app.get_webview(&label) {
-            wv.navigate(url).map_err(|e| e.to_string())?;
-        }
         return Ok(());
     }
     if caller_is_tab {
@@ -1796,36 +1901,13 @@ impl NativePrintBackend {
         ((dots as u64 * dpi as u64 + 101) / 203) as u32
     }
 
-    /// Resolve the ESC/POS raster width (dots) for a receipt job
-    /// from the best width evidence available, in order:
-    /// 1. an explicit paper choice on the job (verified against
-    ///    the driver's roll forms when it reports any);
-    /// 2. the roll width the page resolved from this printer's
-    ///    driver capabilities at click time (rides on the job);
-    /// 3. the driver's own forms read here: a roll form first,
-    ///    else the narrowest receipt-range form — a POS queue
-    ///    whose driver reports its roll as a plain sheet form
-    ///    ("80 x 297 mm") still yields its real width;
-    /// 4. the receipt's own physical width (its rendered width,
-    ///    sent by the page).
-    ///
-    /// When both (3) and (4) exist but disagree wildly, the
-    /// receipt's own width wins: the form list then plainly does
-    /// not describe receipt media. Only a job with NO width
-    /// evidence at all fails — printing at an invented width is
-    /// worse than a clear error, but a valid printer is never
-    /// refused for lacking one specific form flag (owner
-    /// directive, 2026-11-05: POS prints to any printer, rendered
-    /// Control Center per-printer defaults, scoped so a default
-    /// can only fill fields that describe the job's own payload:
+    /// Apply Control Center per-printer defaults, scoped so a default
+    /// only fills fields that describe the job's own payload:
     /// paper/duplex/color are DOCUMENT settings and apply to PDF
     /// jobs only — a sheet paper saved for a printer must never
-    /// become a receipt's paper override (field incident,
-    /// 2026-11-05: receipts died with AUTO_MEDIA_UNAVAILABLE
-    /// because a saved "A4" reached receipt_width_dots). The tray
-    /// is a transport setting every GDI/IPP arm consumes and raw
-    /// arms ignore, so it fills for any kind. A job's own values
-    /// always win for paper/tray (fill-if-unspecified).
+    /// become a receipt's paper override. The tray is a transport
+    /// setting every GDI/IPP arm consumes and raw arms ignore, so
+    /// it fills for any kind. A job's own values always win.
     fn apply_printer_defaults(
         opts: &mut JobOptions,
         kind: &str,
@@ -1849,7 +1931,9 @@ impl NativePrintBackend {
         }
     }
 
-    /// to that printer's dimensions).
+    /// Resolve ESC/POS raster width (dots) for a receipt job from the
+    /// best available width evidence (paper override, driver roll form,
+    /// or rendered receipt width).
     fn receipt_width_dots(
         printer: &str,
         paper_override: Option<&str>,
@@ -2048,7 +2132,9 @@ impl NativePrintBackend {
     /// default when the job carries none. Negative gaps are
     /// clamped to 0 (continuous media).
     fn label_gap_mm(gap: Option<f64>) -> f64 {
-        gap.unwrap_or(3.0).max(0.0)
+        gap.filter(|g| g.is_finite())
+            .map(|g| g.clamp(0.0, 100.0))
+            .unwrap_or(3.0)
     }
 
     /// Configured label gap in dots at `dpi` (EPL `Q` parameter).
@@ -2349,6 +2435,32 @@ fn print_pdf_via_gdi(
     Ok(())
 }
 
+fn print_png_via_gdi(
+    target_name: &str,
+    title: &str,
+    data: &[u8],
+    opts: &JobOptions,
+) -> Result<(), BackendError> {
+    let canvas = print_render::decode_png(data)
+        .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
+    print_win::print_canvas_gdi_configured(
+        target_name,
+        title,
+        &canvas,
+        opts.copies.max(1),
+        opts.tray.as_deref(),
+        opts.media_roll_width_mm.or(opts.source_width_mm),
+    )
+    .map_err(|e| {
+        if e.ambiguous {
+            BackendError::ambiguous("GDI_PRINT_ERROR", &e.message)
+        } else {
+            BackendError::retryable("GDI_SETUP_ERROR", &e.message)
+        }
+    })?;
+    Ok(())
+}
+
 impl PrintBackend for NativePrintBackend {
     fn print(&mut self, job: &Job) -> Result<(), BackendError> {
         let q = Queue::open(&self.db_path)
@@ -2468,6 +2580,12 @@ impl PrintBackend for NativePrintBackend {
 
         // 2. Direct IPP transport (ipp://host:port/path or mode == "ipp")
         if job.printer.starts_with("ipp://") || opts.mode == "ipp" {
+            if !job.printer.starts_with("ipp://") && !job.printer.starts_with("http://") {
+                return Err(BackendError::fatal(
+                    "BAD_PRINTER_ADDRESS",
+                    "IPP mode requires an ipp:// or http:// printer URI",
+                ));
+            }
             // IPP submissions are PDF documents (the only format the
             // client negotiates). Anything else - a POS receipt image,
             // raw printer language - must never be sent labeled as
@@ -2531,21 +2649,30 @@ impl PrintBackend for NativePrintBackend {
                 ipp_options.sides = Some(sides.to_string());
             }
             if let Some(paper_name) = opts.paper.as_deref() {
-                let media = match paper_name.trim().to_ascii_lowercase().as_str() {
+                let lower = paper_name.trim().to_ascii_lowercase();
+                let mapped = match lower.as_str() {
                     "a4" => Some("iso_a4_210x297mm"),
                     "a5" => Some("iso_a5_148x210mm"),
                     "letter" => Some("na_letter_8.5x11in"),
                     "legal" => Some("na_legal_8.5x14in"),
                     _ => None,
                 };
-                match media {
-                    Some(m)
-                        if caps.media_supported.is_empty()
-                            || caps.media_supported.iter().any(|x| x == m) =>
-                    {
-                        ipp_options.media = Some(m.to_string());
-                    }
-                    _ => {
+                let matched_media = if caps.media_supported.is_empty() {
+                    mapped.map(|s| s.to_string())
+                } else if let Some(m) = mapped {
+                    caps.media_supported
+                        .iter()
+                        .find(|x| x.eq_ignore_ascii_case(m) || x.to_ascii_lowercase().contains(&format!("_{lower}_")))
+                        .cloned()
+                } else {
+                    caps.media_supported
+                        .iter()
+                        .find(|x| x.eq_ignore_ascii_case(paper_name.trim()))
+                        .cloned()
+                };
+                match matched_media {
+                    Some(m) => ipp_options.media = Some(m),
+                    None => {
                         return Err(BackendError::fatal(
                             "IPP_OPTION_UNSUPPORTED",
                             &format!(
@@ -2555,14 +2682,14 @@ impl PrintBackend for NativePrintBackend {
                     }
                 }
             }
-            if opts.color && !caps.color_supported {
-                return Err(BackendError::fatal(
-                    "IPP_OPTION_UNSUPPORTED",
-                    "the IPP printer does not report colour support",
-                ));
-            }
-            ipp_options.color_mode =
-                Some(if opts.color { "color" } else { "monochrome" }.to_string());
+            ipp_options.color_mode = Some(
+                if opts.color && caps.color_supported {
+                    "color"
+                } else {
+                    "monochrome"
+                }
+                .to_string(),
+            );
             client
                 .print_job_with_options(&data, fmt, title, opts.copies.max(1), &ipp_options)
                 .map_err(|e| BackendError::ambiguous("IPP_PRINT_ERROR", &e.to_string()))?;
@@ -2775,26 +2902,7 @@ impl PrintBackend for NativePrintBackend {
                 "UNKNOWN_MODE",
                 &format!("unsupported print mode {:?} for this document", opts.mode),
             )),
-            ("image-png", "gdi") => {
-                let canvas = print_render::decode_png(&data)
-                    .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
-                print_win::print_canvas_gdi_configured(
-                    &target_name,
-                    title,
-                    &canvas,
-                    opts.copies.max(1),
-                    opts.tray.as_deref(),
-                    opts.media_roll_width_mm.or(opts.source_width_mm),
-                )
-                .map_err(|e| {
-                    if e.ambiguous {
-                        BackendError::ambiguous("GDI_PRINT_ERROR", &e.message)
-                    } else {
-                        BackendError::retryable("GDI_SETUP_ERROR", &e.message)
-                    }
-                })?;
-                Ok(())
-            }
+            ("image-png", "gdi") => print_png_via_gdi(&target_name, title, &data, &opts),
             ("image-png", "escpos" | "zpl" | "tspl" | "epl") => {
                 let raw_bytes = Self::png_to_raw_stream(
                     &data,
@@ -2824,25 +2932,7 @@ impl PrintBackend for NativePrintBackend {
                             "Yaseir Print: raw send to {target_name:?} refused pre-write ({}); printing the image through GDI instead",
                             e.message
                         );
-                        let canvas = print_render::decode_png(&data).map_err(|err| {
-                            BackendError::fatal("IMAGE_DECODE_ERROR", &err.to_string())
-                        })?;
-                        print_win::print_canvas_gdi_configured(
-                            &target_name,
-                            title,
-                            &canvas,
-                            opts.copies.max(1),
-                            opts.tray.as_deref(),
-                            opts.media_roll_width_mm.or(opts.source_width_mm),
-                        )
-                        .map_err(|err| {
-                            if err.ambiguous {
-                                BackendError::ambiguous("GDI_PRINT_ERROR", &err.message)
-                            } else {
-                                BackendError::retryable("GDI_SETUP_ERROR", &err.message)
-                            }
-                        })?;
-                        Ok(())
+                        print_png_via_gdi(&target_name, title, &data, &opts)
                     }
                     Err(e) => Err(BackendError::ambiguous("SPOOLER_RAW_ERROR", &e.message)),
                 }
@@ -3107,12 +3197,23 @@ mod tests {
         assert!(snap[1].is_pos && snap[1].active);
         assert!(tabs.is_pos_tab("tab-2"));
         assert!(!tabs.is_pos_tab("tab-1"));
+        tabs.set_url("tab-closed", "http://h/pos/ui");
+        assert!(tabs.url_of("tab-closed").is_none());
+        // POS tab keeps is_pos=true across login redirects.
+        tabs.set_url("tab-2", "http://h/web/login?redirect=/pos/ui");
+        let after_redirect = tabs.snapshot();
+        assert!(after_redirect[1].is_pos);
+        assert_eq!(after_redirect[1].title, "Sign in");
     }
 
     #[test]
     fn base64_and_host_port_parsing() {
         let decoded = decode_base64("JVBERi0xLjQ=").unwrap();
         assert_eq!(decoded, b"%PDF-1.4");
+        assert!(decode_base64("A").is_err());
+        assert!(decode_base64("A===").is_err());
+        assert!(decode_base64("JV==AAAA").is_err());
+        assert!(decode_base64("AB=C").is_err());
         let (h, p, path) =
             NativePrintBackend::parse_host_port("tcp://192.168.1.200:9100", 9100).unwrap();
         assert_eq!(h, "192.168.1.200");
@@ -3151,6 +3252,9 @@ mod tests {
         assert_eq!(NativePrintBackend::label_gap_mm(None), 3.0);
         assert_eq!(NativePrintBackend::label_gap_mm(Some(2.0)), 2.0);
         assert_eq!(NativePrintBackend::label_gap_mm(Some(-1.0)), 0.0);
+        assert_eq!(NativePrintBackend::label_gap_mm(Some(f64::NAN)), 3.0);
+        assert_eq!(NativePrintBackend::label_gap_mm(Some(f64::INFINITY)), 3.0);
+        assert_eq!(NativePrintBackend::label_gap_mm(Some(500.0)), 100.0);
         // 3 mm at 203 dpi is the EPL default of 24 dots.
         assert_eq!(NativePrintBackend::label_gap_dots(None, 203), 24);
         assert_eq!(NativePrintBackend::label_gap_dots(Some(3.0), 300), 35);

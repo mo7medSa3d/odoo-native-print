@@ -98,14 +98,13 @@ ok("lab: office printer -> pdf only", JSON.stringify(kindValues()) === JSON.stri
 {
   const c = cardOf("HP LaserJet");
   ok("hp: tray chips shown from driver bins", c.textContent.includes("Tray 1") && c.textContent.includes("Tray 2"));
-  const idx = printers.findIndex((p) => p.name === "HP LaserJet");
   const paperSel = c.querySelector(".ps-paper");
   const traySel = c.querySelector(".ps-tray");
   const duplexSel = c.querySelector(".ps-duplex");
   ok("hp: settings offer driver forms + trays + duplex",
     !!paperSel && [...paperSel.options].some((o) => o.value === "Letter") &&
     !!traySel && [...traySel.options].some((o) => o.value === "Tray 2") && !!duplexSel);
-  ok("hp: no color setting (driver reports no color)", !c.querySelector(`#ps-color-${idx}`));
+  ok("hp: no color setting (driver reports no color)", !c.querySelector(".ps-color"));
   paperSel.value = "Letter";
   traySel.value = "Tray 2";
   duplexSel.value = "on";
@@ -116,7 +115,6 @@ ok("lab: office printer -> pdf only", JSON.stringify(kindValues()) === JSON.stri
 }
 {
   const c = cardOf("OneNote (Desktop)");
-  const idx = printers.findIndex((p) => p.name === "OneNote (Desktop)");
   ok("onenote: settings have paper+color but no tray/duplex the driver lacks",
     !!c.querySelector(".ps-paper") && !!c.querySelector(".ps-color") &&
     !c.querySelector(".ps-tray") && !c.querySelector(".ps-duplex"));

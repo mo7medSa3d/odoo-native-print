@@ -8,11 +8,11 @@
 /// is required; credentials, paths, queries and fragments are rejected.
 ///
 /// Scheme policy (ADR-0002, owner decision 2026-11-03): HTTPS is
-/// accepted for any host. HTTP is accepted for any IP literal — LAN
-/// installs are reached by IP (e.g. http://192.168.1.20:8069) and the
-/// owner also accepts external IPs over HTTP. Hostnames over HTTP are
-/// rejected. HTTP is unencrypted: the Control Center shows a standing
-/// warning whenever an HTTP origin is configured.
+/// accepted for any host. HTTP is accepted for `localhost` (exact
+/// loopback hostname only, never subdomains) and for any IP literal —
+/// LAN installs are reached by IP (e.g. http://192.168.1.20:8069) and
+/// the owner also accepts external IPs over HTTP. Other hostnames over
+/// HTTP are rejected.
 pub fn origin_is_allowed(configured: &str, actual: &str) -> bool {
     let (Some(c), Some(a)) = (parse_origin(configured), parse_origin(actual)) else {
         return false;
@@ -35,7 +35,8 @@ pub fn origin_host_port(origin: &str) -> Option<(String, u16)> {
 }
 
 fn scheme_allowed(origin: &(String, String, u16)) -> bool {
-    origin.0 == "https" || (origin.0 == "http" && host_is_ip_literal(&origin.1))
+    origin.0 == "https"
+        || (origin.0 == "http" && (origin.1 == "localhost" || host_is_ip_literal(&origin.1)))
 }
 
 /// True when `host` is a syntactically valid IPv4 or IPv6 literal
@@ -53,7 +54,10 @@ fn host_is_ip_literal(host: &str) -> bool {
 /// Returns (scheme, host_lowercase, effective_port).
 fn parse_origin(s: &str) -> Option<(String, String, u16)> {
     let (scheme, rest) = s.split_once("://")?;
-    if rest.is_empty() || rest.contains(['/', '?', '#', '@', '\\']) {
+    if rest.is_empty()
+        || rest.contains(['/', '?', '#', '@', '\\'])
+        || rest.chars().any(char::is_control)
+    {
         return None;
     }
     if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
@@ -66,7 +70,7 @@ fn parse_origin(s: &str) -> Option<(String, String, u16)> {
     };
     let (host, port) = if let Some(after_open) = rest.strip_prefix('[') {
         let (ipv6, after_close) = after_open.split_once(']')?;
-        if ipv6.is_empty() {
+        if ipv6.parse::<std::net::Ipv6Addr>().is_err() {
             return None;
         }
         let port = if after_close.is_empty() {
@@ -82,7 +86,11 @@ fn parse_origin(s: &str) -> Option<(String, String, u16)> {
     } else {
         match rest.rsplit_once(':') {
             Some((h, p)) => {
-                if h.is_empty() || p.is_empty() || !p.chars().all(|c| c.is_ascii_digit()) {
+                if h.is_empty()
+                    || h.contains(':')
+                    || p.is_empty()
+                    || !p.chars().all(|c| c.is_ascii_digit())
+                {
                     return None;
                 }
                 (h.to_string(), p.parse::<u16>().ok()?)
@@ -90,14 +98,29 @@ fn parse_origin(s: &str) -> Option<(String, String, u16)> {
             None => (rest.to_string(), default_port),
         }
     };
-    if host.is_empty() || host.contains(char::is_whitespace) || port == 0 {
+    if host.contains(char::is_whitespace) || port == 0 {
         return None;
     }
-    Some((
-        scheme.to_ascii_lowercase(),
-        canonical_host(&host.to_ascii_lowercase()),
-        port,
-    ))
+    let host = canonical_host(&host.to_ascii_lowercase());
+    if host.is_empty() || (!host_is_ip_literal(&host) && !is_valid_hostname(&host)) {
+        return None;
+    }
+    Some((scheme.to_ascii_lowercase(), host, port))
+}
+
+fn is_valid_hostname(host: &str) -> bool {
+    if host.len() > 253 {
+        return false;
+    }
+    host.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    })
 }
 
 /// Canonicalize a parsed host the way the webview's URL serializer
@@ -124,10 +147,12 @@ fn canonical_host(host: &str) -> String {
 }
 
 /// Hard limits for job input (spec sections 5 and 7).
+/// `MAX_DIMENSION_MM` accommodates continuous 80mm/58mm thermal POS rolls
+/// (up to 3,276 mm+ Windows spooler forms and long Z-reports).
 pub const MAX_JOB_BYTES: usize = 50 * 1024 * 1024; // S4 tested size is also the cap
 pub const MAX_PAGES: u32 = 2_000;
-pub const MAX_COPIES: u16 = 99;
-pub const MAX_DIMENSION_MM: f64 = 1_500.0;
+pub const MAX_COPIES: u16 = 999;
+pub const MAX_DIMENSION_MM: f64 = 5_000.0;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum LimitError {
@@ -162,17 +187,9 @@ pub fn validate_job_input(
     copies: u16,
     page: crate::PageSize,
 ) -> Result<(), LimitError> {
-    if bytes_len == 0 {
-        return Err(LimitError::Empty);
-    }
-    if bytes_len > MAX_JOB_BYTES {
-        return Err(LimitError::TooLarge);
-    }
+    validate_payload_limits(bytes_len, copies)?;
     if pages == 0 || pages > MAX_PAGES {
         return Err(LimitError::TooManyPages);
-    }
-    if copies == 0 || copies > MAX_COPIES {
-        return Err(LimitError::TooManyCopies);
     }
     if !page.width_mm.is_finite()
         || !page.height_mm.is_finite()
@@ -237,7 +254,15 @@ mod tests {
             "https://8.8.8.8:8069",
             "https://8.8.8.8:8069"
         ));
-        // HTTP: any IP literal, private or public.
+        // HTTP: exact localhost and any IP literal, private or public.
+        assert!(origin_is_allowed(
+            "http://localhost:8069",
+            "http://localhost:8069"
+        ));
+        assert!(!origin_is_allowed(
+            "http://evil.localhost:8069",
+            "http://evil.localhost:8069"
+        ));
         assert!(origin_is_allowed(
             "http://192.168.1.20:8069",
             "http://192.168.1.20:8069"
@@ -334,11 +359,22 @@ mod tests {
         );
         assert_eq!(origin_host_port("http://host/path"), None);
         assert_eq!(origin_host_port("not a url"), None);
+        assert_eq!(origin_host_port("https://[evil.com]:8069"), None);
+        assert_eq!(origin_host_port("https://::1"), None);
+        assert_eq!(origin_host_port("https://."), None);
+        assert_eq!(origin_host_port("https://.."), None);
+        assert_eq!(origin_host_port("https://a..b"), None);
+        assert_eq!(origin_host_port("https://-bad.local"), None);
+        assert_eq!(origin_host_port("https://evil%2ecom:8069"), None);
+        assert_eq!(origin_host_port("https://\u{0435}xample.com:8069"), None);
+        assert_eq!(origin_host_port("https://odoo.local\n:8069"), None);
     }
     #[test]
     fn limits() {
         let a4 = crate::PageSize::a4();
         assert!(validate_job_input(1024, 1, 1, a4).is_ok());
+        // Long thermal receipts (e.g. 3276 mm roll) must not be rejected.
+        assert!(validate_job_input(1024, 1, 1, crate::PageSize::roll_80(3276.0)).is_ok());
         assert_eq!(
             validate_job_input(MAX_JOB_BYTES + 1, 1, 1, a4),
             Err(LimitError::TooLarge)

@@ -39,7 +39,9 @@ pub fn slice_canvas_rows(canvas: &Canvas, start_row: u32, rows: u32) -> Canvas {
     let px = if width == 0 || end <= start {
         Vec::new()
     } else {
-        canvas.px[start * width..end * width].to_vec()
+        let max_end = end.saturating_mul(width).min(canvas.px.len());
+        let min_start = start.saturating_mul(width).min(max_end);
+        canvas.px[min_start..max_end].to_vec()
     };
     Canvas {
         width: canvas.width,
@@ -66,22 +68,21 @@ pub fn fit_mono_to_box(bm: &MonoBitmap, max_w: u32, max_h: u32) -> MonoBitmap {
         .min(1.0);
     let target_w = (((bm.width_dots as f64 * scale).floor() as u32) / 8 * 8).max(8);
     let target_h = ((bm.height_dots as f64 * scale).floor() as u32).max(1);
-    let row_bytes = bm.bytes_per_row();
-    let mut gray = vec![255u8; (bm.width_dots * bm.height_dots) as usize];
-    for y in 0..bm.height_dots {
-        for x in 0..bm.width_dots {
-            let byte = bm.data[y as usize * row_bytes + (x as usize / 8)];
-            if (byte >> (7 - (x % 8))) & 1 == 1 {
-                gray[(y * bm.width_dots + x) as usize] = 0;
+    let src_w = bm.width_dots as usize;
+    let src_h = bm.height_dots as usize;
+    let dst_w = target_w as usize;
+    let dst_h = target_h as usize;
+    let Some(out_len) = dst_w.checked_mul(dst_h) else {
+        return bm.clone();
+    };
+    let mut out = vec![255u8; out_len];
+    for y in 0..dst_h {
+        let sy = ((y as f64 / scale).floor() as usize).min(src_h - 1) as u32;
+        for x in 0..dst_w {
+            let sx = ((x as f64 / scale).floor() as usize).min(src_w - 1) as u32;
+            if bm.pixel_is_black(sx, sy) {
+                out[y * dst_w + x] = 0;
             }
-        }
-    }
-    let mut out = vec![255u8; (target_w * target_h) as usize];
-    for y in 0..target_h {
-        let sy = ((y as f64 / scale).floor() as u32).min(bm.height_dots - 1);
-        for x in 0..target_w {
-            let sx = ((x as f64 / scale).floor() as u32).min(bm.width_dots - 1);
-            out[(y * target_w + x) as usize] = gray[(sy * bm.width_dots + sx) as usize];
         }
     }
     MonoBitmap::from_grayscale(&out, target_w, target_h, 128)
@@ -93,43 +94,61 @@ impl Canvas {
         Self {
             width,
             height,
-            px: vec![255u8; (width as usize) * (height as usize)],
+            px: vec![255u8; (width as usize).saturating_mul(height as usize)],
         }
-    }
-    fn idx(&self, x: u32, y: u32) -> usize {
-        (y as usize) * (self.width as usize) + (x as usize)
     }
     pub fn set(&mut self, x: u32, y: u32) {
         if x < self.width && y < self.height {
-            let i = self.idx(x, y);
-            self.px[i] = 0;
+            if let Some(i) = (y as usize)
+                .checked_mul(self.width as usize)
+                .and_then(|row| row.checked_add(x as usize))
+            {
+                if let Some(px) = self.px.get_mut(i) {
+                    *px = 0;
+                }
+            }
         }
     }
     pub fn hline(&mut self, x0: u32, x1: u32, y: u32, thickness: u32) {
+        if self.width == 0 || self.height == 0 {
+            return;
+        }
+        let x_end = x1.min(self.width - 1);
         for t in 0..thickness {
-            for x in x0..=x1.min(self.width.saturating_sub(1)) {
-                self.set(x, y + t);
+            let yy = y.saturating_add(t);
+            if yy >= self.height {
+                break;
+            }
+            for x in x0..=x_end {
+                self.set(x, yy);
             }
         }
     }
     pub fn vline(&mut self, x: u32, y0: u32, y1: u32, thickness: u32) {
+        if self.width == 0 || self.height == 0 {
+            return;
+        }
+        let y_end = y1.min(self.height - 1);
         for t in 0..thickness {
-            for y in y0..=y1.min(self.height.saturating_sub(1)) {
-                self.set(x + t, y);
+            let xx = x.saturating_add(t);
+            if xx >= self.width {
+                break;
+            }
+            for y in y0..=y_end {
+                self.set(xx, y);
             }
         }
     }
     pub fn rect_outline(&mut self, x: u32, y: u32, w: u32, h: u32, thickness: u32) {
-        // Zero width/height would underflow the `w - 1` / `h - 1`
-        // arithmetic below (debug panic, release wrap) — a degenerate
-        // outline is simply nothing to draw (audit L9).
         if w == 0 || h == 0 {
             return;
         }
-        self.hline(x, x + w - 1, y, thickness);
-        self.hline(x, x + w - 1, y + h - 1, thickness);
-        self.vline(x, y, y + h - 1, thickness);
-        self.vline(x + w - 1, y, y + h - 1, thickness);
+        let x_max = x.saturating_add(w - 1);
+        let y_max = y.saturating_add(h - 1);
+        self.hline(x, x_max, y, thickness);
+        self.hline(x, x_max, y_max, thickness);
+        self.vline(x, y, y_max, thickness);
+        self.vline(x_max, y, y_max, thickness);
     }
     pub fn to_mono(&self, threshold: u8) -> MonoBitmap {
         MonoBitmap::from_grayscale(&self.px, self.width, self.height, threshold)

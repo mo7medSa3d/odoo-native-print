@@ -11,8 +11,8 @@ pub enum PdfParseError {
     NoPages,
     #[error("PDF declares {0} pages, above the supported maximum")]
     TooManyPages(usize),
-    #[error("page {0} has no determinable size (no MediaBox on page or inherited)")]
-    PageSizeUnknown(usize),
+    #[error("PDF exceeds the maximum supported size")]
+    TooLarge,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,23 +44,21 @@ fn has_pdf_token(text: &str, token: &str) -> bool {
     find_pdf_token(text, token).is_some()
 }
 
+fn is_pdf_delim(ch: Option<char>) -> bool {
+    ch.is_none_or(|c| {
+        c.is_ascii_whitespace() || matches!(c, '/' | '[' | ']' | '<' | '>' | '(' | ')' | '%')
+    })
+}
+
 fn find_pdf_token(text: &str, token: &str) -> Option<usize> {
     let mut search_from = 0usize;
     while let Some(rel) = text[search_from..].find(token) {
         let pos = search_from + rel;
         let after_idx = pos + token.len();
-        let next_ch = text[after_idx..].chars().next();
-        let is_delim = match next_ch {
-            None => true,
-            Some(c) => {
-                c.is_ascii_whitespace()
-                    || matches!(c, '/' | '[' | ']' | '<' | '>' | '(' | ')' | '%')
-            }
-        };
-        if is_delim {
+        if is_pdf_delim(text[after_idx..].chars().next()) {
             return Some(pos);
         }
-        search_from = pos + 1;
+        search_from = pos + token.len().max(1);
     }
     None
 }
@@ -69,25 +67,38 @@ fn has_type_token(dict: &str, type_name: &str) -> bool {
     let mut search_from = 0usize;
     while let Some(rel) = dict[search_from..].find("/Type") {
         let pos = search_from + rel;
-        let after_type = &dict[pos + 5..];
-        let trimmed = after_type.trim_start();
+        let trimmed = dict[pos + 5..].trim_start();
         // Either `/Type/Page` (zero whitespace) or `/Type /Page` (with whitespace).
         if let Some(rest) = trimmed.strip_prefix(type_name) {
-            let next_ch = rest.chars().next();
-            let is_delim = match next_ch {
-                None => true,
-                Some(c) => {
-                    c.is_ascii_whitespace()
-                        || matches!(c, '/' | '[' | ']' | '<' | '>' | '(' | ')' | '%')
-                }
-            };
-            if is_delim {
+            if is_pdf_delim(rest.chars().next()) {
                 return true;
             }
         }
         search_from = pos + 5;
     }
     false
+}
+
+/// Locate the `<id> <gen> obj` header within an `endobj`-delimited chunk,
+/// scanning forward so binary/text content inside `stream...endstream`
+/// containing `" obj"` never shadows the real object header.
+fn find_obj_header(chunk: &str) -> Option<(u32, u32, usize)> {
+    let mut search_from = 0usize;
+    while let Some(rel) = chunk[search_from..].find(" obj") {
+        let pos = search_from + rel;
+        let after = chunk[pos + 4..].chars().next();
+        let valid_after = after.is_none_or(|c| c.is_ascii_whitespace() || matches!(c, '<' | '[' | '/'));
+        if valid_after {
+            let mut nums = chunk[..pos].split_whitespace().rev();
+            if let (Some(gen_str), Some(id_str)) = (nums.next(), nums.next()) {
+                if let (Ok(gen_id), Ok(obj_id)) = (gen_str.parse::<u32>(), id_str.parse::<u32>()) {
+                    return Some((obj_id, gen_id, pos + 4));
+                }
+            }
+        }
+        search_from = pos + 4;
+    }
+    None
 }
 
 fn parse_box_array(array_content: &str) -> Option<(f64, f64)> {
@@ -144,41 +155,34 @@ fn points_to_mm(pt: f64) -> f64 {
 /// produced by wkhtmltopdf and most report pipelines, and by our own
 /// calibration writer), including indirect `/MediaBox` array objects. PDFs
 /// that hide dictionaries inside compressed object streams are reported with
-/// Estimated confidence from `/Count` and any visible MediaBox; the
-/// authoritative per-page render on Windows is PDFium, which replaces these
+/// Estimated confidence from `/Count` and any visible MediaBox (or A4 fallback);
+/// the authoritative per-page render on Windows is PDFium, which replaces these
 /// values before anything is printed. The paper ladder always runs on the
 /// values actually used for printing.
 pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
-    if !bytes.starts_with(b"%PDF-") {
+    if bytes.len() > print_core::security::MAX_JOB_BYTES {
+        return Err(PdfParseError::TooLarge);
+    }
+    // Per ISO 32000-1, %PDF- may appear within the first 1024 bytes (e.g. after BOM).
+    let header_window = &bytes[..bytes.len().min(1024)];
+    let Some(header_offset) = header_window.windows(5).position(|w| w == b"%PDF-") else {
         return Err(PdfParseError::NotPdf);
-    }
-    let text = String::from_utf8_lossy(bytes);
-    if has_pdf_token(&text, "/Encrypt") {
-        return Err(PdfParseError::Encrypted);
-    }
+    };
+    let text = String::from_utf8_lossy(&bytes[header_offset..]);
 
     // First pass: collect standalone array objects (`N G obj [x0 y0 x1 y1] endobj`)
     // so indirect `/MediaBox N G R` references resolve cleanly.
     let mut indirect_boxes: std::collections::HashMap<(u32, u32), (f64, f64)> =
         std::collections::HashMap::new();
     for chunk in text.split("endobj") {
-        let Some(obj_pos) = chunk.rfind(" obj") else {
+        let Some((obj_id, gen_id, body_start)) = find_obj_header(chunk) else {
             continue;
         };
-        let header_part = &chunk[..obj_pos];
-        let body = chunk[obj_pos + 4..].trim();
+        let body = chunk[body_start..].trim();
         if let Some(after_lb) = body.strip_prefix('[') {
             if let Some(rb) = after_lb.find(']') {
                 if let Some(b) = parse_box_array(&after_lb[..rb]) {
-                    let nums: Vec<u32> = header_part
-                        .split_whitespace()
-                        .rev()
-                        .take(2)
-                        .filter_map(|t| t.parse::<u32>().ok())
-                        .collect();
-                    if nums.len() == 2 {
-                        indirect_boxes.insert((nums[1], nums[0]), b);
-                    }
+                    indirect_boxes.insert((obj_id, gen_id), b);
                 }
             }
         }
@@ -186,21 +190,34 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
 
     // Second pass: split into indirect objects so page dictionaries can be
     // told apart from the Pages tree (`/Type /Pages`) and catalog entries
-    // like `/PageLabels` or `/PageMode`.
-    let mut page_dicts: Vec<String> = Vec::new();
+    // like `/PageLabels` or `/PageMode`. Also check `/Encrypt` only in
+    // dictionary headers (never inside stream payloads) and the trailer.
+    let mut page_dicts: Vec<&str> = Vec::new();
     let mut pages_tree_boxes: Vec<(f64, f64)> = Vec::new();
     let mut declared_count: Option<usize> = None;
+    let mut has_obj_stm = false;
+    if let Some(trailer_part) = text.rsplit("endobj").next() {
+        if has_pdf_token(trailer_part, "/Encrypt") {
+            return Err(PdfParseError::Encrypted);
+        }
+    }
     for chunk in text.split("endobj") {
-        let Some(obj_start) = chunk.rfind(" obj") else {
+        let Some((_, _, body_start)) = find_obj_header(chunk) else {
             continue;
         };
-        let dict = &chunk[obj_start..];
+        let dict = &chunk[body_start..];
         // Ignore stream payloads after `stream` keyword so content streams
         // never false-match dictionary keys.
         let dict_header = match dict.find("stream") {
             Some(s_idx) => &dict[..s_idx],
             None => dict,
         };
+        if has_pdf_token(dict_header, "/Encrypt") {
+            return Err(PdfParseError::Encrypted);
+        }
+        if has_type_token(dict_header, "/ObjStm") {
+            has_obj_stm = true;
+        }
         let is_pages_tree = has_type_token(dict_header, "/Pages");
         let is_page = !is_pages_tree && has_type_token(dict_header, "/Page");
         if is_pages_tree {
@@ -220,36 +237,31 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
                 }
             }
         } else if is_page {
-            // Cap collection on the primary path too: the fallback
-            // /Count path below was hardened against a crafted page
-            // count, but a small file full of tiny /Page dictionaries
-            // reached this vector uncapped and amplified memory ~3x
-            // (lossy copy + cloned headers + page entries) before any
-            // caller-side limit could run (audit M2).
             if page_dicts.len() >= print_core::security::MAX_PAGES as usize {
                 return Err(PdfParseError::TooManyPages(page_dicts.len() + 1));
             }
-            page_dicts.push(dict_header.to_string());
+            page_dicts.push(dict_header);
         }
     }
 
     let mut confidence = Confidence::Exact;
     let mut pages: Vec<PdfPageInfo> = Vec::new();
-    for (i, dict) in page_dicts.iter().enumerate() {
+    for dict in &page_dicts {
         let box_pt = find_pdf_token(dict, "/CropBox")
             .and_then(|p| parse_box_after(dict, p, &indirect_boxes))
             .or_else(|| {
                 find_pdf_token(dict, "/MediaBox")
                     .and_then(|p| parse_box_after(dict, p, &indirect_boxes))
             });
-        let (w_pt, h_pt) = match box_pt {
-            Some(b) => b,
+        let raw = match box_pt {
+            Some((w_pt, h_pt)) => PageSize::new(points_to_mm(w_pt), points_to_mm(h_pt)),
             None => {
                 confidence = Confidence::Estimated;
                 pages_tree_boxes
                     .first()
                     .copied()
-                    .ok_or(PdfParseError::PageSizeUnknown(i))?
+                    .map(|(w_pt, h_pt)| PageSize::new(points_to_mm(w_pt), points_to_mm(h_pt)))
+                    .unwrap_or_else(PageSize::a4)
             }
         };
         let rotation = find_pdf_token(dict, "/Rotate")
@@ -264,7 +276,6 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
             })
             .map(Rotation::from_pdf_degrees)
             .unwrap_or(Rotation::R0);
-        let raw = PageSize::new(points_to_mm(w_pt), points_to_mm(h_pt));
         pages.push(PdfPageInfo {
             size: rotation.apply(raw),
             rotation,
@@ -272,21 +283,22 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
     }
 
     if pages.is_empty() {
-        // No visible page dictionaries: fall back to /Count + tree MediaBox.
-        let count = declared_count.ok_or(PdfParseError::NoPages)?;
-        // The count comes straight from the file: cap it before
-        // allocating one entry per page, or a small crafted PDF can
-        // exhaust memory by declaring billions of pages (the caller's
-        // page-limit check runs on the vector built here, too late).
+        // No visible page dictionaries: fall back to /Count + tree MediaBox,
+        // or a single estimated A4 page if dictionaries are inside compressed /ObjStm.
+        let count = match declared_count {
+            Some(c) => c,
+            None if has_obj_stm => 1,
+            None => return Err(PdfParseError::NoPages),
+        };
         if count > print_core::security::MAX_PAGES as usize {
             return Err(PdfParseError::TooManyPages(count));
         }
-        let (w_pt, h_pt) = pages_tree_boxes
+        confidence = Confidence::Estimated;
+        let size = pages_tree_boxes
             .first()
             .copied()
-            .ok_or(PdfParseError::PageSizeUnknown(0))?;
-        confidence = Confidence::Estimated;
-        let size = PageSize::new(points_to_mm(w_pt), points_to_mm(h_pt));
+            .map(|(w_pt, h_pt)| PageSize::new(points_to_mm(w_pt), points_to_mm(h_pt)))
+            .unwrap_or_else(PageSize::a4);
         for _ in 0..count {
             pages.push(PdfPageInfo {
                 size,
@@ -315,9 +327,6 @@ mod tests {
 
     #[test]
     fn many_page_dictionaries_are_capped_on_the_primary_path() {
-        // The primary path (visible /Page dictionaries) must hit the
-        // same cap as the /Count fallback: a small file packed with
-        // tiny page dicts is refused, not collected (audit M2).
         let mut pdf = String::from("%PDF-1.4\n");
         for i in 0..(print_core::security::MAX_PAGES + 5) {
             pdf.push_str(&format!(
@@ -365,6 +374,36 @@ trailer << /Root 1 0 R >>
         assert_eq!(info.pages.len(), 1);
         assert_eq!(info.confidence, Confidence::Exact);
         assert!((info.pages[0].size.width_mm - 210.0).abs() < 0.2);
+    }
+
+    #[test]
+    fn tolerates_bom_and_stream_keywords() {
+        let s = "\u{FEFF}%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] >>
+stream
+99 0 obj /Encrypt (literal text in receipt)
+endstream
+endobj
+%%EOF";
+        let info = parse_pdf_info(s.as_bytes()).unwrap();
+        assert_eq!(info.pages.len(), 1);
+        assert_eq!(info.confidence, Confidence::Exact);
+    }
+
+    #[test]
+    fn compressed_objstm_falls_back_to_estimated_a4() {
+        let s = "%PDF-1.5
+1 0 obj << /Type /ObjStm /N 3 /First 10 >> stream
+compressed
+endstream
+endobj
+%%EOF";
+        let info = parse_pdf_info(s.as_bytes()).unwrap();
+        assert_eq!(info.pages.len(), 1);
+        assert_eq!(info.confidence, Confidence::Estimated);
+        assert_eq!(info.pages[0].size, PageSize::a4());
     }
 
     #[test]

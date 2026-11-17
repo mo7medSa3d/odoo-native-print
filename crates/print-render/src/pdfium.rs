@@ -20,7 +20,7 @@
 //! serialized behind a process-wide mutex, and library init/destroy is
 //! reference-counted across [`Pdfium`] instances.
 
-use std::ffi::{c_int, c_ulong, c_void};
+use std::ffi::{c_char, c_int, c_ulong, c_void};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -72,7 +72,7 @@ type FpdfBitmap = *mut c_void;
 
 type FnInitLibrary = unsafe extern "C" fn();
 type FnDestroyLibrary = unsafe extern "C" fn();
-type FnLoadMemDocument = unsafe extern "C" fn(*const u8, c_int, *const i8) -> FpdfDocument;
+type FnLoadMemDocument = unsafe extern "C" fn(*const u8, c_int, *const c_char) -> FpdfDocument;
 type FnGetLastError = unsafe extern "C" fn() -> c_ulong;
 type FnGetPageCount = unsafe extern "C" fn(FpdfDocument) -> c_int;
 type FnCloseDocument = unsafe extern "C" fn(FpdfDocument);
@@ -82,7 +82,7 @@ type FnGetPageWidthF = unsafe extern "C" fn(FpdfPage) -> f32;
 type FnGetPageHeightF = unsafe extern "C" fn(FpdfPage) -> f32;
 type FnBitmapCreateEx = unsafe extern "C" fn(c_int, c_int, c_int, *mut c_void, c_int) -> FpdfBitmap;
 type FnBitmapFillRect =
-    unsafe extern "C" fn(FpdfBitmap, c_int, c_int, c_int, c_int, c_ulong) -> c_int;
+    unsafe extern "C" fn(FpdfBitmap, c_int, c_int, c_int, c_int, c_ulong);
 type FnRenderPageBitmap =
     unsafe extern "C" fn(FpdfBitmap, FpdfPage, c_int, c_int, c_int, c_int, c_int, c_int);
 type FnBitmapGetBuffer = unsafe extern "C" fn(FpdfBitmap) -> *mut c_void;
@@ -136,6 +136,20 @@ fn call_lock() -> &'static Mutex<()> {
 fn init_refcount() -> &'static Mutex<usize> {
     static COUNT: OnceLock<Mutex<usize>> = OnceLock::new();
     COUNT.get_or_init(|| Mutex::new(0))
+}
+
+fn safe_page_size_mm(w_pt: f64, h_pt: f64) -> PageSize {
+    let w_mm = if w_pt.is_finite() && w_pt > 0.0 {
+        w_pt * 25.4 / 72.0
+    } else {
+        1.0
+    };
+    let h_mm = if h_pt.is_finite() && h_pt > 0.0 {
+        h_pt * 25.4 / 72.0
+    } else {
+        1.0
+    };
+    PageSize::new(w_mm, h_mm)
 }
 
 /// A loaded PDFium library. Cheap to clone (Arc inside documents);
@@ -215,10 +229,14 @@ impl Pdfium {
     /// must remain valid while the document is open, so this wrapper
     /// retains an owned copy inside [`PdfDocument`].
     pub fn load_document(self: &Arc<Self>, bytes: &[u8]) -> Result<PdfDocument, PdfiumError> {
+        let len = c_int::try_from(bytes.len()).map_err(|_| PdfiumError::InvalidDocument {
+            code: 3,
+            detail: "document exceeds 2 GiB FFI limit".into(),
+        })?;
         let owned = bytes.to_vec();
         let _guard = call_lock().lock().unwrap_or_else(|e| e.into_inner());
         let doc = unsafe {
-            (self.api.load_mem_document)(owned.as_ptr(), owned.len() as c_int, std::ptr::null())
+            (self.api.load_mem_document)(owned.as_ptr(), len, std::ptr::null())
         };
         if doc.is_null() {
             #[allow(clippy::unnecessary_cast)]
@@ -266,7 +284,12 @@ fn last_error_detail(code: u32) -> String {
 pub fn candidate_paths(explicit: Option<&Path>) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     let mut push = |base: &Path| {
-        if base.is_file() {
+        let looks_like_lib = base.extension().is_some_and(|e| {
+            e.eq_ignore_ascii_case("dll")
+                || e.eq_ignore_ascii_case("so")
+                || e.eq_ignore_ascii_case("dylib")
+        });
+        if base.is_file() || looks_like_lib {
             out.push(base.to_path_buf());
         } else {
             for name in LIB_NAMES {
@@ -359,15 +382,16 @@ impl PdfDocument {
         let w_pt = unsafe { (self.pdfium.api.get_page_width_f)(page) } as f64;
         let h_pt = unsafe { (self.pdfium.api.get_page_height_f)(page) } as f64;
         unsafe { (self.pdfium.api.close_page)(page) };
-        Ok(PageSize::new(w_pt * 25.4 / 72.0, h_pt * 25.4 / 72.0))
+        Ok(safe_page_size_mm(w_pt, h_pt))
     }
 
     fn load_page_locked(&self, index: usize) -> Result<FpdfPage, PdfiumError> {
+        let idx = c_int::try_from(index).map_err(|_| PdfiumError::PageOutOfRange(index))?;
         let count = unsafe { (self.pdfium.api.get_page_count)(self.doc) };
-        if index as c_int >= count {
+        if idx >= count {
             return Err(PdfiumError::PageOutOfRange(index));
         }
-        let page = unsafe { (self.pdfium.api.load_page)(self.doc, index as c_int) };
+        let page = unsafe { (self.pdfium.api.load_page)(self.doc, idx) };
         if page.is_null() {
             return Err(PdfiumError::PageOutOfRange(index));
         }
@@ -407,7 +431,7 @@ impl PdfDocument {
     ) -> Result<RenderedPage, PdfiumError> {
         let w_pt = unsafe { (api.get_page_width_f)(page) } as f64;
         let h_pt = unsafe { (api.get_page_height_f)(page) } as f64;
-        let size = PageSize::new(w_pt * 25.4 / 72.0, h_pt * 25.4 / 72.0);
+        let size = safe_page_size_mm(w_pt, h_pt);
         let plan = plan_render(size, requested_dpi, mode).map_err(|e| match e {
             crate::plan::PlanError::ExceedsCeiling { bytes } => PdfiumError::CeilingExceeded {
                 needed: bytes,
@@ -415,15 +439,21 @@ impl PdfDocument {
             },
         })?;
         let (w, h) = (plan.width_px, plan.height_px);
+        let (w_c, h_c) = (
+            c_int::try_from(w).map_err(|_| PdfiumError::BitmapFailed(w, h))?,
+            c_int::try_from(h).map_err(|_| PdfiumError::BitmapFailed(w, h))?,
+        );
         // Bytes the render itself will allocate: color/gray are the
         // final buffers; a threshold render stages through grayscale.
         let staging_bpp: u64 = match mode {
             RenderMode::Color => 4,
             RenderMode::Grayscale | RenderMode::Threshold => 1,
         };
-        let staging = (w as u64) * (h as u64) * staging_bpp;
-        let needed = staging.max(plan.bytes_estimate);
-        if needed > PER_PAGE_CEILING_BYTES || plan.bytes_estimate > PER_PAGE_CEILING_BYTES {
+        let staging = (w as u64).saturating_mul(h as u64).saturating_mul(staging_bpp);
+        // PDFium's backing bitmap and the row-packed Vec coexist while
+        // copying. Budget both before asking PDFium to allocate the bitmap.
+        let needed = staging.saturating_mul(2).max(plan.bytes_estimate);
+        if needed > PER_PAGE_CEILING_BYTES {
             return Err(PdfiumError::CeilingExceeded {
                 needed,
                 ceiling: PER_PAGE_CEILING_BYTES,
@@ -443,26 +473,47 @@ impl PdfDocument {
             }
             _ => FPDF_ANNOT | FPDF_PRINTING,
         };
-        let bitmap = unsafe {
-            (api.bitmap_create_ex)(w as c_int, h as c_int, format, std::ptr::null_mut(), 0)
-        };
+        let bitmap =
+            unsafe { (api.bitmap_create_ex)(w_c, h_c, format, std::ptr::null_mut(), 0) };
         if bitmap.is_null() {
             return Err(PdfiumError::BitmapFailed(w, h));
         }
         let rendered = unsafe {
             // White background (BGRA 0xFFFFFFFF) so transparent page
             // areas print as paper, not black.
-            (api.bitmap_fill_rect)(bitmap, 0, 0, w as c_int, h as c_int, 0xFFFF_FFFF);
-            (api.render_page_bitmap)(bitmap, page, 0, 0, w as c_int, h as c_int, 0, render_flags);
-            let bw = (api.bitmap_get_width)(bitmap) as u32;
-            let bh = (api.bitmap_get_height)(bitmap) as u32;
-            let stride = (api.bitmap_get_stride)(bitmap) as usize;
+            (api.bitmap_fill_rect)(bitmap, 0, 0, w_c, h_c, 0xFFFF_FFFF);
+            (api.render_page_bitmap)(bitmap, page, 0, 0, w_c, h_c, 0, render_flags);
+            let raw_w = (api.bitmap_get_width)(bitmap);
+            let raw_h = (api.bitmap_get_height)(bitmap);
+            let raw_stride = (api.bitmap_get_stride)(bitmap);
             let buf = (api.bitmap_get_buffer)(bitmap) as *const u8;
-            if buf.is_null() || bw != w || bh != h {
+            if buf.is_null() || raw_w <= 0 || raw_h <= 0 || raw_stride <= 0 {
                 (api.bitmap_destroy)(bitmap);
                 return Err(PdfiumError::BitmapFailed(w, h));
             }
+            let (bw, bh) = (raw_w as u32, raw_h as u32);
+            if bw != w || bh != h {
+                (api.bitmap_destroy)(bitmap);
+                return Err(PdfiumError::BitmapFailed(w, h));
+            }
+            let stride = raw_stride as usize;
             let row_bytes = (bw as usize) * (staging_bpp as usize);
+            if stride < row_bytes {
+                (api.bitmap_destroy)(bitmap);
+                return Err(PdfiumError::BitmapFailed(w, h));
+            }
+            // Account for PDFium's actual aligned row stride plus the
+            // tightly packed destination before allocating the copy.
+            let bitmap_bytes = (stride as u64).saturating_mul(bh as u64);
+            let copy_bytes = (row_bytes as u64).saturating_mul(bh as u64);
+            let peak_bytes = bitmap_bytes.saturating_add(copy_bytes);
+            if peak_bytes > PER_PAGE_CEILING_BYTES {
+                (api.bitmap_destroy)(bitmap);
+                return Err(PdfiumError::CeilingExceeded {
+                    needed: peak_bytes,
+                    ceiling: PER_PAGE_CEILING_BYTES,
+                });
+            }
             let mut pixels = vec![0u8; row_bytes * bh as usize];
             for row in 0..bh as usize {
                 let src = buf.add(row * stride);
@@ -522,7 +573,7 @@ impl RenderedPage {
         }
         match self.mode {
             RenderMode::Color => {
-                let total = (self.width_px as usize) * (self.height_px as usize);
+                let total = (self.width_px as u64) * (self.height_px as u64);
                 let dark = self
                     .pixels
                     .chunks_exact(4)

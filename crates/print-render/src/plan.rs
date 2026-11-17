@@ -18,25 +18,45 @@ pub struct RenderPlan {
     pub mode: RenderMode,
 }
 
-/// Per-page bitmap memory ceiling: 128 MiB. A 500-page document is rendered
-/// page by page, so total memory stays near one page's bitmap plus the
-/// (memory-mapped or spooled) source, far under the 400 MB target.
+/// Per-page render working-set ceiling: 128 MiB. PDFium owns one bitmap
+/// while the renderer copies its pixels into an owned Vec, so planning
+/// budgets both full-size buffers concurrently rather than counting only
+/// one bitmap. Pages are rendered serially, so a 500-page document does not
+/// multiply this budget by its page count.
 pub const PER_PAGE_CEILING_BYTES: u64 = 128 * 1024 * 1024;
 const DPI_STEPS: [u32; 6] = [600, 400, 300, 200, 150, 100];
 
-fn bytes_for(size: PageSize, dpi: u32, mode: RenderMode) -> (u32, u32, u64) {
-    let (w, h) = size.pixels_at(dpi);
+fn sanitize_page_size(size: PageSize) -> PageSize {
+    let w = if size.width_mm.is_finite() && size.width_mm > 0.0 {
+        size.width_mm
+    } else {
+        1.0
+    };
+    let h = if size.height_mm.is_finite() && size.height_mm > 0.0 {
+        size.height_mm
+    } else {
+        1.0
+    };
+    PageSize::new(w, h)
+}
+
+fn bytes_for(size: PageSize, dpi: u32, mode: RenderMode) -> (u32, u32, u64, u64) {
+    let safe = sanitize_page_size(size);
+    let (w, h) = safe.pixels_at(dpi);
+    // Threshold renders stage through an 8-bit grayscale bitmap in PDFium
+    // before packing to 1-bit monochrome, so budget 1 byte/px here to match.
     let bpp: u64 = match mode {
         RenderMode::Color => 4,
-        RenderMode::Grayscale => 1,
-        RenderMode::Threshold => 0, // packed bits, computed below
+        RenderMode::Grayscale | RenderMode::Threshold => 1,
     };
-    let bytes = if mode == RenderMode::Threshold {
-        (w as u64).div_ceil(8) * h as u64
-    } else {
-        w as u64 * h as u64 * bpp
-    };
-    (w, h, bytes)
+    let row_bytes = (w as u64).saturating_mul(bpp);
+    let packed_bytes = row_bytes.saturating_mul(h as u64);
+    // PDFium allocates 4-byte-aligned scanlines; include stride padding in
+    // the peak working-set check so a planned render never surprises pdfium.rs.
+    let aligned_stride = row_bytes.div_ceil(4).saturating_mul(4);
+    let pdfium_bytes = aligned_stride.saturating_mul(h as u64);
+    let peak_bytes = pdfium_bytes.saturating_add(packed_bytes);
+    (w, h, packed_bytes, peak_bytes)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,7 +71,7 @@ impl std::fmt::Display for PlanError {
         match self {
             PlanError::ExceedsCeiling { bytes } => write!(
                 f,
-                "page bitmap needs {bytes} bytes even at the lowest DPI, over the {PER_PAGE_CEILING_BYTES}-byte ceiling"
+                "page render working set needs {bytes} bytes even at the lowest DPI, over the {PER_PAGE_CEILING_BYTES}-byte ceiling"
             ),
         }
     }
@@ -59,24 +79,36 @@ impl std::fmt::Display for PlanError {
 
 impl std::error::Error for PlanError {}
 
-/// Choose the highest DPI at or below the request whose bitmap fits the
-/// per-page ceiling. Never returns a plan over the ceiling: when even
-/// the lowest step (100 DPI) does not fit — a 1500x1500 mm color page
-/// needs ~139.5 MB — the caller gets `PlanError::ExceedsCeiling`
-/// instead of a plan that violates the invariant (audit M4; the old
-/// code returned the over-ceiling plan while its docs claimed the
-/// opposite).
+/// Choose the highest DPI at or below the request whose peak two-buffer
+/// working set fits the per-page ceiling. The PDFium bitmap and its owned
+/// pixel copy coexist during row copying, so the planner budgets both
+/// together. Never returns a plan whose estimated peak exceeds the
+/// ceiling; when even the lowest DPI does not fit, return an error.
 pub fn plan_render(
     size: PageSize,
     requested_dpi: u32,
     mode: RenderMode,
 ) -> Result<RenderPlan, PlanError> {
+    if requested_dpi > 0 && requested_dpi < 100 {
+        let (w, h, bytes, peak_bytes) = bytes_for(size, requested_dpi, mode);
+        if peak_bytes <= PER_PAGE_CEILING_BYTES {
+            return Ok(RenderPlan {
+                dpi: requested_dpi,
+                width_px: w,
+                height_px: h,
+                bytes_estimate: bytes,
+                mode,
+            });
+        }
+        return Err(PlanError::ExceedsCeiling { bytes: peak_bytes });
+    }
+
     for dpi in DPI_STEPS {
         if dpi > requested_dpi && requested_dpi != 0 {
             continue;
         }
-        let (w, h, bytes) = bytes_for(size, dpi, mode);
-        if bytes <= PER_PAGE_CEILING_BYTES {
+        let (w, h, bytes, peak_bytes) = bytes_for(size, dpi, mode);
+        if peak_bytes <= PER_PAGE_CEILING_BYTES {
             return Ok(RenderPlan {
                 dpi,
                 width_px: w,
@@ -86,9 +118,8 @@ pub fn plan_render(
             });
         }
     }
-    let dpi = 100;
-    let (_, _, bytes) = bytes_for(size, dpi, mode);
-    Err(PlanError::ExceedsCeiling { bytes })
+    let (_, _, _, peak_bytes) = bytes_for(size, 100, mode);
+    Err(PlanError::ExceedsCeiling { bytes: peak_bytes })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -143,12 +174,31 @@ mod tests {
         assert!(p.dpi < 600);
     }
     #[test]
+    fn planner_budgets_pdfium_bitmap_and_owned_copy_together() {
+        // At 300 dpi this page's single grayscale buffer is under 128 MiB,
+        // but its PDFium bitmap plus the simultaneous owned copy are not.
+        let p = plan_render(PageSize::new(900.0, 900.0), 300, RenderMode::Grayscale).unwrap();
+        assert!(p.bytes_estimate.saturating_mul(2) <= PER_PAGE_CEILING_BYTES);
+        assert!(p.dpi < 300);
+    }
+    #[test]
     fn over_ceiling_at_lowest_dpi_is_an_error_not_a_plan() {
         // 1500x1500 mm color at 100 DPI is ~139.5 MB > the 128 MiB
         // ceiling: no DPI step fits, so the planner must say so
         // instead of returning an over-ceiling plan (audit M4).
         let r = plan_render(PageSize::new(1500.0, 1500.0), 300, RenderMode::Color);
         assert!(matches!(r, Err(PlanError::ExceedsCeiling { .. })));
+    }
+    #[test]
+    fn low_dpi_request_succeeds_without_false_ceiling_error() {
+        let p = plan_render(PageSize::a4(), 72, RenderMode::Color).unwrap();
+        assert_eq!(p.dpi, 72);
+        assert!(p.bytes_estimate < PER_PAGE_CEILING_BYTES);
+    }
+    #[test]
+    fn non_finite_page_size_is_sanitized_safely() {
+        let p = plan_render(PageSize::new(f64::NAN, -5.0), 150, RenderMode::Grayscale).unwrap();
+        assert!(p.width_px >= 1 && p.height_px >= 1);
     }
     #[test]
     fn threshold_is_cheap() {

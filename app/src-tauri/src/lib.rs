@@ -331,7 +331,7 @@ const BRIDGE_JS: &str = r#"
       }
       var origin = "";
       try { origin = window.location.origin; } catch (e) {}
-      var esc = function (x) { return String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;"); };
+      var esc = function (x) { return String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); };
       var html = '<div style="font-size:0.85rem;color:#5b6472;margin-bottom:0.8rem;">الخادم المستهدف: <span dir="ltr" style="font-weight:600;">' + esc(origin) + '</span></div>';
       if (isTranslations) {
         html += '<div style="background:#fdf3e3;border:1px solid #f0d9a8;border-radius:12px;padding:0.7rem 0.9rem;font-size:0.85rem;color:#6b5410;margin-bottom:0.8rem;">السبب المرجّح: سيرفر Odoo رجّع خطأ في ملف الترجمة — المشكلة في السيرفر مش في الجهاز ده. الحل: حدّث إضافة الطباعة (native_print) على السيرفر لآخر إصدار وأعد تشغيل Odoo.</div>';
@@ -342,7 +342,7 @@ const BRIDGE_JS: &str = r#"
       var errs = [];
       try { errs = window.__NP_ERRORS__ || []; } catch (e) {}
       if (!errs.length) return "";
-      var esc = function (x) { return String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;"); };
+      var esc = function (x) { return String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); };
       var html = '<div style="margin-top:0.8rem;"><div style="font-size:0.85rem;font-weight:700;color:#b3261e;margin-bottom:0.3rem;">أخطاء الصفحة:</div>';
       for (var i = 0; i < Math.min(errs.length, 3); i++) {
         html += '<div style="font-size:0.78rem;color:#5b6472;word-break:break-word;padding:0.15rem 0;">' + esc(errs[i]) + '</div>';
@@ -439,6 +439,12 @@ const BRIDGE_JS: &str = r#"
     }, delays.tickMs);
   }
   if (__npIsTop && !npIsLocalPage()) {
+    try {
+      // Every Odoo report is intercepted by Native Print. Never expose
+      // the browser's print dialog from an embedded remote page: it
+      // bypasses printer selection, job logging and the native queue.
+      window.print = function () {};
+    } catch (e) { /* ignore */ }
     // Arm IMMEDIATELY at init-script evaluation: a page whose
     // DOMContentLoaded stalls (a hung render-blocking asset) still
     // gets its watchdog and environment report. Only the HTTP strip
@@ -500,6 +506,9 @@ pub fn layout_webviews(app: &tauri::AppHandle) {
     let Ok(size) = window.inner_size() else {
         return;
     };
+    if size.width == 0 || size.height == 0 {
+        return;
+    }
     let scale = window.scale_factor().unwrap_or(1.0);
     let width = size.width as f64 / scale;
     let height = size.height as f64 / scale;
@@ -509,7 +518,7 @@ pub fn layout_webviews(app: &tauri::AppHandle) {
     }
     let active = {
         let state = app.state::<AppState>();
-        let Ok(tabs) = state.tabs.read() else { return };
+        let tabs = commands::read_lock(&state.tabs);
         tabs.active.clone()
     };
     if let Some(label) = active {
@@ -528,9 +537,7 @@ pub fn layout_webviews(app: &tauri::AppHandle) {
 pub fn activate_tab(app: &tauri::AppHandle, label: &str) {
     let labels = {
         let state = app.state::<AppState>();
-        let Ok(mut tabs) = state.tabs.write() else {
-            return;
-        };
+        let mut tabs = commands::write_lock(&state.tabs);
         if !tabs.order.iter().any(|l| l == label) {
             return;
         }
@@ -644,8 +651,9 @@ pub fn create_tab_webview(
             tauri::webview::NewWindowResponse::Deny
         })
         .on_page_load(move |_webview, payload| {
-            if payload.event() == tauri::webview::PageLoadEvent::Finished {
-                if let Ok(mut tabs) = load_handle.state::<AppState>().tabs.write() {
+            match payload.event() {
+                tauri::webview::PageLoadEvent::Started | tauri::webview::PageLoadEvent::Finished => {
+                    let mut tabs = commands::write_lock(&load_handle.state::<AppState>().tabs);
                     tabs.set_url(&load_label, payload.url().as_str());
                 }
             }
@@ -711,10 +719,6 @@ pub fn run() {
                 worker_wake,
             });
 
-            // If a valid HTTP IP Odoo origin is configured, open it directly;
-            // otherwise open the built-in local Control Center (`index.html`)
-            // so the administrator can configure the origin or run printer
-            // diagnostics without the app crashing on startup.
             // With an origin configured, start on the local boot page:
             // it probes the origin (probe_origin) and only then
             // navigates the webview to Odoo, so a down or unreachable

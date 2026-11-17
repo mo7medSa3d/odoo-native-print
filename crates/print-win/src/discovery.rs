@@ -9,34 +9,56 @@
 //! compiler, not a hand-computed offset, does the layout on Windows.
 
 use print_core::paper::Form;
-use print_core::printer::PrinterInfo;
-#[cfg(test)]
-use print_core::printer::PrinterKind;
+use print_core::printer::{PrinterInfo, PrinterKind};
 use print_core::PageSize;
 
 /// A raw level-2 record as read from Windows, before conversion.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawPrinterInfo2 {
-    pub server_name: String,
     pub printer_name: String,
-    pub share_name: String,
     pub port_name: String,
     pub driver_name: String,
     pub attributes: u32,
     pub status: u32,
-    pub job_count: u32,
 }
 
 pub const PRINTER_ATTRIBUTE_DEFAULT: u32 = 0x0000_0004;
-pub const PRINTER_ATTRIBUTE_SHARED: u32 = 0x0000_0008;
+pub const PRINTER_ATTRIBUTE_NETWORK: u32 = 0x0000_0010;
 pub const PRINTER_ATTRIBUTE_WORK_OFFLINE: u32 = 0x0000_0400;
 
+const PRINTER_STATUS_USER_INTERVENTION: u32 = 0x0010_0000;
+
+/// Normalize spooler status flags so transient/informational flags and
+/// driver quirks do not falsely block job submission. Virtual writers and
+/// USB printers frequently raise `PRINTER_STATUS_USER_INTERVENTION` even
+/// when the Windows Spooler accepts and prints jobs normally; real physical
+/// faults (paper out/jam, door open, offline, paused, error) are preserved.
+pub fn tolerant_spooler_flags(
+    status: u32,
+    kind: PrinterKind,
+    port_name: &str,
+) -> u32 {
+    if matches!(
+        kind,
+        PrinterKind::Virtual | PrinterKind::Shared | PrinterKind::Network
+    ) || port_name.trim_start().to_ascii_uppercase().starts_with("USB")
+    {
+        status & !PRINTER_STATUS_USER_INTERVENTION
+    } else {
+        status
+    }
+}
+
 pub fn convert(raw: &RawPrinterInfo2) -> PrinterInfo {
-    let kind = PrinterInfo::classify(&raw.printer_name, &raw.port_name);
+    let mut kind = PrinterInfo::classify(&raw.printer_name, &raw.port_name);
+    if kind != PrinterKind::Virtual && (raw.attributes & PRINTER_ATTRIBUTE_NETWORK) != 0 {
+        kind = PrinterKind::Shared;
+    }
     let (protocol, printer_class) =
         print_core::printer::detect_protocol(&raw.printer_name, &raw.driver_name, kind);
+    let effective_status = tolerant_spooler_flags(raw.status, kind, &raw.port_name);
     let health = print_core::PrinterHealth::from_spooler_flags(
-        raw.status,
+        effective_status,
         raw.attributes & PRINTER_ATTRIBUTE_WORK_OFFLINE != 0,
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -63,12 +85,6 @@ pub fn convert(raw: &RawPrinterInfo2) -> PrinterInfo {
     }
 }
 
-impl From<&RawPrinterInfo2> for PrinterInfo {
-    fn from(raw: &RawPrinterInfo2) -> Self {
-        convert(raw)
-    }
-}
-
 /// Is this a printer a user would expect to see (filters out the
 /// pseudo-printers some drivers register with no port)?
 pub fn is_usable(raw: &RawPrinterInfo2) -> bool {
@@ -81,7 +97,10 @@ pub fn is_usable(raw: &RawPrinterInfo2) -> bool {
     // pipeline works for it; it is classified Shared and labelled
     // as such everywhere it is shown. Only nameless/portless
     // pseudo-printers are filtered out.
-    !raw.printer_name.is_empty() && !raw.port_name.is_empty()
+    !raw.printer_name.is_empty()
+        && (!raw.port_name.is_empty()
+            || raw.printer_name.starts_with(r"\\")
+            || (raw.attributes & PRINTER_ATTRIBUTE_NETWORK) != 0)
 }
 
 /// Convert a driver-reported paper name and size (mm) into a `Form`,
@@ -167,14 +186,11 @@ mod tests {
 
     fn raw(status: u32, attrs: u32) -> RawPrinterInfo2 {
         RawPrinterInfo2 {
-            server_name: String::new(),
             printer_name: "HP LaserJet Pro".into(),
-            share_name: String::new(),
             port_name: "USB001".into(),
             driver_name: "HP Universal".into(),
             attributes: attrs,
             status,
-            job_count: 0,
         }
     }
     #[test]
@@ -288,5 +304,43 @@ mod tests {
         let fallback = classify_form("", 100.0, 150.0);
         assert_eq!(fallback.name, "100x150mm");
         assert!(!fallback.roll);
+    }
+
+    #[test]
+    fn tolerant_status_ignores_nonfatal_and_virtual_usb_intervention() {
+        // Virtual printer with USER_INTERVENTION + POWER_SAVE + NOT_AVAILABLE (0x1000)
+        let mut virt = raw(0x0010_0000 | 0x0100_0000 | 0x0000_1000, 0);
+        virt.printer_name = "Microsoft Print to PDF".into();
+        virt.port_name = "PORTPROMPT:".into();
+        let v_info = convert(&virt);
+        assert_eq!(v_info.status, PrinterStatus::Ready);
+        assert!(!v_info.health.as_ref().unwrap().blocks_printing());
+
+        // USB printer with USER_INTERVENTION + TONER_LOW + PRINTING
+        let usb = raw(0x0010_0000 | 0x0002_0000 | 0x0000_0400, 0);
+        let u_info = convert(&usb);
+        assert_eq!(u_info.status, PrinterStatus::Printing);
+        assert!(!u_info.health.as_ref().unwrap().blocks_printing());
+
+        // Real physical fault on USB still blocks
+        let fault = raw(0x0010_0000 | 0x0000_0010, 0);
+        let f_info = convert(&fault);
+        assert_eq!(f_info.status, PrinterStatus::PaperOut);
+        assert!(f_info.health.as_ref().unwrap().blocks_printing());
+    }
+
+    #[test]
+    fn shared_network_printers_survive_empty_port_and_transient_flags() {
+        let mut unc = raw(
+            0x0010_0000 | 0x0000_1000 | 0x0080_0000,
+            PRINTER_ATTRIBUTE_NETWORK,
+        );
+        unc.printer_name = r"\\cashier-pc\EPSON TM-T88V".into();
+        unc.port_name = String::new();
+        assert!(is_usable(&unc));
+        let info = convert(&unc);
+        assert_eq!(info.kind, PrinterKind::Shared);
+        assert_eq!(info.status, PrinterStatus::Ready);
+        assert!(!info.health.as_ref().unwrap().blocks_printing());
     }
 }

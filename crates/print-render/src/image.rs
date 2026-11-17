@@ -40,6 +40,9 @@ pub enum ImageError {
 /// Printable width in dots at the standard 203 dpi receipt density:
 /// - `58mm` (or `57mm`/`58 mm` roll) -> 48 mm printable = 384 dots
 /// - `80mm` (or `72mm`/`80 mm` roll) -> 72 mm printable = 576 dots
+/// - `112mm` -> 104 mm printable = 832 dots
+/// - Any other explicit `<N>mm` paper name within 40..=220 mm resolves
+///   via [`receipt_dots_for_width_mm`].
 pub fn receipt_dots_for_paper(paper: &str) -> Option<u32> {
     let lower = paper.trim().to_ascii_lowercase();
     if lower.starts_with("58")
@@ -56,8 +59,22 @@ pub fn receipt_dots_for_paper(paper: &str) -> Option<u32> {
         || lower.starts_with("72")
     {
         Some(576)
+    } else if let Some(mm_pos) = lower.find("mm") {
+        let prefix = lower[..mm_pos].trim_end();
+        let num_str: String = prefix
+            .chars()
+            .rev()
+            .take_while(|c| c.is_ascii_digit() || *c == '.')
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        num_str
+            .parse::<f64>()
+            .ok()
+            .and_then(receipt_dots_for_width_mm)
     } else {
-        // Unknown paper names are refused, never silently treated as
+        // Unknown non-mm paper names are refused, never silently treated as
         // 80 mm (a wrong-width receipt is clipped or scaled).
         None
     }
@@ -144,7 +161,9 @@ pub fn decode_png(bytes: &[u8]) -> Result<Canvas, ImageError> {
         .next_frame(&mut buf)
         .map_err(|e| ImageError::Decode(e.to_string()))?;
     let data = &buf[..frame.buffer_size()];
-    let px_count = (width * height) as usize;
+    let px_count = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or(ImageError::DimensionsTooLarge(width, height))?;
     let mut px = vec![255u8; px_count];
     match frame.color_type {
         png::ColorType::Grayscale => {
@@ -194,7 +213,7 @@ pub fn decode_png(bytes: &[u8]) -> Result<Canvas, ImageError> {
 /// Averaging (not nearest neighbour) is what keeps small receipt text
 /// legible when a 2x browser capture is scaled to 576 dots.
 pub fn scale_to_width(img: &Canvas, target_width: u32) -> Canvas {
-    if target_width == 0 || img.width <= target_width {
+    if target_width == 0 || img.width == 0 || img.height == 0 || img.width <= target_width {
         return Canvas {
             width: img.width,
             height: img.height,
@@ -203,26 +222,44 @@ pub fn scale_to_width(img: &Canvas, target_width: u32) -> Canvas {
     }
     let ratio = img.width as f64 / target_width as f64;
     let out_height = ((img.height as f64 / ratio).round() as u32).max(1);
-    let mut px = vec![255u8; (target_width * out_height) as usize];
+    let Some(out_len) = (target_width as usize).checked_mul(out_height as usize) else {
+        return Canvas {
+            width: img.width,
+            height: img.height,
+            px: img.px.clone(),
+        };
+    };
+    let mut px = vec![255u8; out_len];
+    let src_w = img.width as usize;
     for oy in 0..out_height {
-        let y0 = (oy as f64 * ratio) as u32;
+        let y0 = ((oy as f64 * ratio) as u32).min(img.height - 1);
         let y1 = (((oy + 1) as f64 * ratio).ceil() as u32)
-            .min(img.height)
-            .max(y0 + 1);
+            .max(y0 + 1)
+            .min(img.height);
         for ox in 0..target_width {
-            let x0 = (ox as f64 * ratio) as u32;
+            let x0 = ((ox as f64 * ratio) as u32).min(img.width - 1);
             let x1 = (((ox + 1) as f64 * ratio).ceil() as u32)
-                .min(img.width)
-                .max(x0 + 1);
+                .max(x0 + 1)
+                .min(img.width);
             let mut sum: u64 = 0;
             let mut count: u64 = 0;
             for y in y0..y1 {
-                for x in x0..x1 {
-                    sum += img.px[(y * img.width + x) as usize] as u64;
-                    count += 1;
+                if let Some(row_off) = (y as usize).checked_mul(src_w) {
+                    for x in x0..x1 {
+                        if let Some(val) = row_off.checked_add(x as usize).and_then(|i| img.px.get(i)) {
+                            sum += *val as u64;
+                            count += 1;
+                        }
+                    }
                 }
             }
-            px[(oy * target_width + ox) as usize] = (sum / count.max(1)) as u8;
+            if let Some(dst) = (oy as usize)
+                .checked_mul(target_width as usize)
+                .and_then(|r| r.checked_add(ox as usize))
+                .and_then(|i| px.get_mut(i))
+            {
+                *dst = (sum / count.max(1)) as u8;
+            }
         }
     }
     Canvas {
@@ -235,13 +272,9 @@ pub fn scale_to_width(img: &Canvas, target_width: u32) -> Canvas {
 /// The full receipt pipeline: PNG bytes -> ready-to-send ESC/POS stream
 /// (raster + feed + partial cut), sized for the profile's paper.
 pub fn receipt_png_to_escpos(png_bytes: &[u8], paper: &str) -> Result<Vec<u8>, ImageError> {
-    let img = decode_png(png_bytes)?;
     let dots = receipt_dots_for_paper(paper)
         .ok_or_else(|| ImageError::Decode(format!("unknown receipt paper {paper:?}")))?;
-    let scaled = scale_to_width(&img, dots);
-    let mono = scaled.to_mono(RECEIPT_THRESHOLD);
-    let stream = EscPos::new().raster(&mono).feed_lines(3).cut_partial();
-    Ok(stream.bytes().to_vec())
+    receipt_png_to_escpos_width(png_bytes, dots)
 }
 
 #[cfg(test)]
@@ -336,6 +369,12 @@ mod tests {
         assert_eq!(same.width, 8);
     }
     #[test]
+    fn scale_extreme_aspect_ratio_does_not_panic() {
+        let img = Canvas::new(2000, 1);
+        let out = scale_to_width(&img, 384);
+        assert_eq!((out.width, out.height), (384, 1));
+    }
+    #[test]
     fn receipt_stream_shape_80mm_and_58mm() {
         let bytes = half_black_rgba_png(1152, 20);
         let stream = receipt_png_to_escpos(&bytes, "80mm").unwrap();
@@ -421,6 +460,8 @@ mod tests {
         assert_eq!(receipt_dots_for_paper("58mm"), Some(384));
         assert_eq!(receipt_dots_for_paper("58 mm Roll"), Some(384));
         assert_eq!(receipt_dots_for_paper("58x3276mm"), Some(384));
+        assert_eq!(receipt_dots_for_paper("76mm"), Some(576));
+        assert_eq!(receipt_dots_for_paper("100mm"), Some(728));
         assert_eq!(receipt_dots_for_paper(""), None);
         assert_eq!(receipt_dots_for_paper("112mm"), Some(832));
     }

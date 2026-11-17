@@ -36,6 +36,7 @@ test("localized controls have Arabic and English translations", () => {
   const match = script.match(/const I18N = (\{[\s\S]*?\n  \});/);
   assert.ok(match);
   const i18n = new vm.Script("(" + match[1] + ")").runInNewContext({});
+  assert.deepEqual(Object.keys(i18n.ar).sort(), Object.keys(i18n.en).sort(), "I18N AR/EN key mismatch");
   for (const key of html.matchAll(/data-i18n=["']([^"']+)["']/g)) {
     assert.ok(i18n.ar[key[1]], "missing Arabic translation: " + key[1]);
     assert.ok(i18n.en[key[1]], "missing English translation: " + key[1]);
@@ -99,4 +100,51 @@ test("demo fallback and local Windows paths are removed", () => {
   assert.match(script, /async function saveAndOpenOdoo\(\)/);
   assert.match(script, /document\.execCommand\("copy"\)/);
   assert.match(script, /window\.setTimeout\(\(\) =>/);
+});
+
+test("printer card CSS classes match rendered DOM and diagnostics output is preserved on language switch", () => {
+  for (const cls of [".printer-card-top", ".printer-identity", ".printer-type-icon", ".printer-meta-list", ".printer-meta-item", ".badge .dot"]) {
+    assert.ok(html.includes(cls), "missing CSS rule for " + cls);
+  }
+  assert.match(script, /el\.id === "diagnosticsOutput" && diagnosticsGenerated/);
+});
+
+test("secondary desktop pages parse, resolve IDs, translate all keys, and match Rust IPC commands", () => {
+  const libRs = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  const handlerBlock = libRs.match(/tauri::generate_handler!\[([\s\S]*?)\]/)?.[1] || "";
+  const registered = new Set([...handlerBlock.matchAll(/commands::(\w+)/g)].map(m => m[1]));
+  assert.ok(registered.size >= 25, "expected registered Tauri commands in lib.rs");
+
+  for (const file of ["boot.html", "tabbar.html", "settings.html"]) {
+    const pageHtml = readFileSync(new URL("../dist/" + file, import.meta.url), "utf8");
+    const pageScripts = [...pageHtml.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)];
+    assert.equal(pageScripts.length, 1, file + " must have one embedded script");
+    const pageScript = pageScripts[0][1];
+    assert.doesNotThrow(() => new vm.Script(pageScript), file + " JS syntax");
+
+    const ids = [...pageHtml.matchAll(/(?<![-\w])id=["']([^"']+)["']/g)].map(m => m[1]);
+    const idSet = new Set(ids);
+    assert.equal(idSet.size, ids.length, file + " duplicate IDs");
+    const refs = [...pageScript.matchAll(/getElementById\(["']([^"'$]+)["']\)/g)].map(m => m[1]);
+    assert.deepEqual([...new Set(refs.filter(id => !idSet.has(id)))], [], file + " missing DOM IDs");
+
+    const strMatch = pageScript.match(/var STR = (\{[\s\S]*?\n  \});/);
+    if (strMatch) {
+      const str = new vm.Script("(" + strMatch[1] + ")").runInNewContext({});
+      assert.deepEqual(Object.keys(str.ar).sort(), Object.keys(str.en).sort(), file + " AR/EN key mismatch");
+      for (const key of pageHtml.matchAll(/data-i18n=["']([^"']+)["']/g)) {
+        assert.ok(str.ar[key[1]], file + " missing AR translation: " + key[1]);
+        assert.ok(str.en[key[1]], file + " missing EN translation: " + key[1]);
+      }
+    }
+
+    for (const inv of pageScript.matchAll(/\binvoke\(\s*["']([^"']+)["']/g)) {
+      assert.ok(registered.has(inv[1]), file + " invokes unregistered Tauri command: " + inv[1]);
+    }
+  }
+  const bootHtml = readFileSync(new URL("../dist/boot.html", import.meta.url), "utf8");
+  assert.match(bootHtml, /function isHttpOrigin\(/, "boot.html must validate http/https origin before redirect");
+  const admx = readFileSync(new URL("../deploy/admx/OdooNativePrint.admx", import.meta.url), "utf8");
+  const odooOriginPolicy = admx.match(/<policy name="OdooOrigin"[^>]*>/)?.[0] || "";
+  assert.equal(odooOriginPolicy.includes("valueName="), false, "ADMX OdooOrigin <policy> must not duplicate valueName of <text>");
 });
