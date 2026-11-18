@@ -140,7 +140,7 @@ pub fn receipt_png_to_escpos_width(
     png_bytes: &[u8],
     target_width_dots: u32,
 ) -> Result<Vec<u8>, ImageError> {
-    if !(256..=2048).contains(&target_width_dots) || target_width_dots % 8 != 0 {
+    if !(256..=2048).contains(&target_width_dots) || !target_width_dots.is_multiple_of(8) {
         return Err(ImageError::DimensionsTooLarge(target_width_dots, 1));
     }
     let img = decode_png(png_bytes)?;
@@ -184,10 +184,7 @@ pub fn decode_png(bytes: &[u8]) -> Result<Canvas, ImageError> {
     let frame = reader
         .next_frame(&mut buf)
         .map_err(|e| ImageError::Decode(e.to_string()))?;
-    if frame.width != width
-        || frame.height != height
-        || frame.bit_depth != png::BitDepth::Eight
-    {
+    if frame.width != width || frame.height != height || frame.bit_depth != png::BitDepth::Eight {
         return Err(ImageError::BadFrame);
     }
     let data = &buf[..frame.buffer_size()];

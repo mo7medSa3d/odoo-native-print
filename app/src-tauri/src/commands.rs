@@ -1208,7 +1208,7 @@ pub async fn run_test_print(
         attempts: 0,
         error_code: None,
     };
-        enqueue_idempotent(&queue_arc, &job, payload_kind, &payload_bytes, &opts)?
+        enqueue_idempotent(&queue_arc, &job, payload_kind, &payload_bytes, &opts)
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -2672,7 +2672,10 @@ impl PrintBackend for NativePrintBackend {
                 } else if let Some(m) = mapped {
                     caps.media_supported
                         .iter()
-                        .find(|x| x.eq_ignore_ascii_case(m) || x.to_ascii_lowercase().contains(&format!("_{lower}_")))
+                        .find(|x| {
+                            x.eq_ignore_ascii_case(m)
+                                || x.to_ascii_lowercase().contains(&format!("_{lower}_"))
+                        })
                         .cloned()
                 } else {
                     caps.media_supported
@@ -3041,10 +3044,9 @@ pub fn spawn_worker_loop(
                     // Panic isolation: one bad job or backend panic
                     // must never kill the only worker thread and
                     // silently stop all printing for the session.
-                    let outcome =
-                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            worker.run_once(&printer)
-                        }));
+                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        worker.run_once(&printer)
+                    }));
                     match outcome {
                         Ok(Ok(o)) => {
                             if o != Outcome::Idle {
@@ -3059,7 +3061,9 @@ pub fn spawn_worker_loop(
                             }
                         }
                         Err(_) => {
-                            eprintln!("Yaseir Print: worker panicked on {printer}; resetting queue");
+                            eprintln!(
+                                "Yaseir Print: worker panicked on {printer}; resetting queue"
+                            );
                             reset_queue = true;
                             break;
                         }

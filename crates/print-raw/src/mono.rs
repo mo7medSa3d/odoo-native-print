@@ -71,7 +71,7 @@ impl MonoBitmap {
         height_dots: u32,
         data: Vec<u8>,
     ) -> Result<Self, MonoError> {
-        if width_dots % 8 != 0 {
+        if !width_dots.is_multiple_of(8) {
             return Err(MonoError::WidthNotMultipleOf8(width_dots));
         }
         let expected = (width_dots as usize / 8)

@@ -268,8 +268,7 @@ pub fn pick_sheet_form(forms: &[Form], page_width_mm: f64) -> Option<Form> {
         let office = forms
             .iter()
             .filter(|f| {
-                valid_sheet(f)
-                    && (200.0..=225.0).contains(&f.size.width_mm.min(f.size.height_mm))
+                valid_sheet(f) && (200.0..=225.0).contains(&f.size.width_mm.min(f.size.height_mm))
             })
             .min_by(|a, b| {
                 let a_portrait = a.size.width_mm <= a.size.height_mm;

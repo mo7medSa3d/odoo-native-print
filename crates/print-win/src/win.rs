@@ -378,7 +378,10 @@ fn build_printer_devmode(
                             (unrotated_w * 10.0).round().clamp(100.0, 32000.0) as i16;
                         dm.dm_paper_length =
                             (unrotated_h * 10.0).round().clamp(100.0, 32000.0) as i16;
-                        dm.dm_fields = (dm.dm_fields & !DM_FORMNAME) | DM_PAPERSIZE | DM_PAPERWIDTH | DM_PAPERLENGTH;
+                        dm.dm_fields = (dm.dm_fields & !DM_FORMNAME)
+                            | DM_PAPERSIZE
+                            | DM_PAPERWIDTH
+                            | DM_PAPERLENGTH;
                     }
                 }
 
@@ -717,7 +720,10 @@ fn print_canvas_gdi_default_media(
     match print_canvas_pages(dc.0, canvas, copies.max(1), roll_width_mm) {
         Ok(pages) => {
             if unsafe { EndDoc(dc.0) } <= 0 {
-                return Err(GdiPrintError::mid_print(format!("EndDoc: {}", last_error())));
+                return Err(GdiPrintError::mid_print(format!(
+                    "EndDoc: {}",
+                    last_error()
+                )));
             }
             Ok(pages)
         }
@@ -738,7 +744,6 @@ fn print_canvas_gdi_with_caps(
     tray: Option<&str>,
     roll_width_mm: Option<f64>,
 ) -> Result<usize, GdiPrintError> {
-
     // POS/kitchen PNG jobs that use GDI must obey the same media contract as
     // PDF jobs: derive the physical page geometry from the 203-DPI raster,
     // then select an exact/roll/custom/larger media form from the driver.

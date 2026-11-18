@@ -36,7 +36,9 @@ pub struct ResolvedConfig {
 /// Write-temp-then-rename with unique temp filenames and a brief retry
 /// on Windows sharing violations (e.g. antivirus or concurrent reader).
 fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
-    let parent = path.parent().ok_or_else(|| "invalid config path".to_string())?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "invalid config path".to_string())?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let name = path
         .file_name()

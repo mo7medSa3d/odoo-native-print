@@ -575,7 +575,7 @@ impl Queue {
         tx.execute(
             "INSERT INTO jobs(id,idempotency_key,printer,report,pages,bytes,priority,state,attempts,error_code,updated_at)
              VALUES(?1,?2,?3,?4,?5,?6,?7,'queued',0,NULL,?8)",
-            params![job.id, job.idempotency_key, job.printer, job.report, job.pages, job.bytes, job.priority, now],
+            params![job.id, job.idempotency_key, job.printer, job.report, job.pages, job.bytes as i64, job.priority, now],
         )?;
         tx.execute(
             "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'enqueued',?3)",
@@ -688,7 +688,7 @@ impl Queue {
         tx.execute(
             "INSERT INTO jobs(id,idempotency_key,printer,report,pages,bytes,priority,state,attempts,error_code,updated_at)
              VALUES(?1,?2,?3,?4,?5,?6,?7,'queued',0,NULL,?8)",
-            params![job.id, job.idempotency_key, job.printer, job.report, job.pages, job.bytes, job.priority, now],
+            params![job.id, job.idempotency_key, job.printer, job.report, job.pages, job.bytes as i64, job.priority, now],
         )?;
         tx.execute(
             "INSERT INTO payloads(job_id, kind, data, payload_hash) VALUES(?1,?2,?3,?4)",

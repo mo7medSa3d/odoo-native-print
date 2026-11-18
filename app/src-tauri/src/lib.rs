@@ -659,12 +659,11 @@ pub fn create_tab_webview(
             }
             tauri::webview::NewWindowResponse::Deny
         })
-        .on_page_load(move |_webview, payload| {
-            match payload.event() {
-                tauri::webview::PageLoadEvent::Started | tauri::webview::PageLoadEvent::Finished => {
-                    let mut tabs = commands::write_lock(&load_handle.state::<AppState>().tabs);
-                    tabs.set_url(&load_label, payload.url().as_str());
-                }
+        .on_page_load(move |_webview, payload| match payload.event() {
+            tauri::webview::PageLoadEvent::Started | tauri::webview::PageLoadEvent::Finished => {
+                let st = load_handle.state::<AppState>();
+                let mut tabs = commands::write_lock(&st.tabs);
+                tabs.set_url(&load_label, payload.url().as_str());
             }
         });
     let (width, height) = {

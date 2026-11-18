@@ -567,7 +567,9 @@ impl RenderedPage {
                 let total = (self.width_px as u64) * (self.height_px as u64);
                 let dark = self
                     .pixels
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .filter(|px| px[0] < 250 || px[1] < 250 || px[2] < 250)
                     .count();
                 dark as f64 / total.max(1) as f64

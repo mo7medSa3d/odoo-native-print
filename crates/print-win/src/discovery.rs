@@ -34,11 +34,7 @@ const PRINTER_STATUS_USER_INTERVENTION: u32 = 0x0010_0000;
 /// `PRINTER_STATUS_USER_INTERVENTION` even when the Windows Spooler accepts
 /// and prints jobs normally; real physical faults (paper out/jam, door open,
 /// offline, paused, error) are preserved.
-pub fn tolerant_spooler_flags(
-    status: u32,
-    kind: PrinterKind,
-    port_name: &str,
-) -> u32 {
+pub fn tolerant_spooler_flags(status: u32, kind: PrinterKind, port_name: &str) -> u32 {
     let p = port_name.trim_start().to_ascii_uppercase();
     let tolerant_port = p.starts_with("USB")
         || p.starts_with("TMUSB")
@@ -361,7 +357,10 @@ mod tests {
             p.port_name = port.into();
             let info = convert(&p);
             assert_eq!(info.status, PrinterStatus::Ready, "port {port}");
-            assert!(!info.health.as_ref().unwrap().blocks_printing(), "port {port}");
+            assert!(
+                !info.health.as_ref().unwrap().blocks_printing(),
+                "port {port}"
+            );
         }
     }
 }

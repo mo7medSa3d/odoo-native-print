@@ -440,7 +440,9 @@ enum HttpFraming {
     Close,
 }
 
-fn split_http_response(mut raw: &[u8]) -> Result<Option<(u16, HttpFraming, &[u8])>, IppError> {
+type ParsedHttpResponse<'a> = (u16, HttpFraming, &'a [u8]);
+
+fn split_http_response(mut raw: &[u8]) -> Result<Option<ParsedHttpResponse<'_>>, IppError> {
     loop {
         let Some(split) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
             return Ok(None);
