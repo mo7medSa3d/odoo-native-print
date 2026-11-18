@@ -31,36 +31,37 @@ class NativePrintDevice(models.Model):
     def _register_hook(self):
         super()._register_hook()
         try:
-            self.env.cr.execute(
-                "SELECT 1 FROM information_schema.tables "
-                "WHERE table_schema = 'public' AND table_name = %s",
-                [self._table],
-            )
-            if not self.env.cr.fetchone():
-                return
-            self.env.cr.execute(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = 'public' AND table_name = %s",
-                [self._table],
-            )
-            existing = {row[0] for row in self.env.cr.fetchall()}
-            expected = {
-                "protocol": "varchar",
-                "printer_class": "varchar",
-                "forms_summary": "text",
-                "trays_summary": "text",
-                "caps_synced_at": "timestamp without time zone",
-            }
-            for col, col_type in expected.items():
-                if col not in existing:
-                    self.env.cr.execute(
-                        f'ALTER TABLE "{self._table}" ADD COLUMN IF NOT EXISTS "{col}" {col_type}'
-                    )
-                    _logger.warning(
-                        "native_print: added missing column %s.%s automatically",
-                        self._table,
-                        col,
-                    )
+            with self.env.cr.savepoint():
+                self.env.cr.execute(
+                    "SELECT 1 FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = %s",
+                    [self._table],
+                )
+                if not self.env.cr.fetchone():
+                    return
+                self.env.cr.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = %s",
+                    [self._table],
+                )
+                existing = {row[0] for row in self.env.cr.fetchall()}
+                expected = {
+                    "protocol": "varchar",
+                    "printer_class": "varchar",
+                    "forms_summary": "text",
+                    "trays_summary": "text",
+                    "caps_synced_at": "timestamp without time zone",
+                }
+                for col, col_type in expected.items():
+                    if col not in existing:
+                        self.env.cr.execute(
+                            f'ALTER TABLE "{self._table}" ADD COLUMN IF NOT EXISTS "{col}" {col_type}'
+                        )
+                        _logger.warning(
+                            "native_print: added missing column %s.%s automatically",
+                            self._table,
+                            col,
+                        )
         except Exception as exc:
             _logger.debug("native_print: device schema check skipped (%s)", exc)
 

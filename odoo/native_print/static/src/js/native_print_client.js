@@ -134,12 +134,6 @@ export function detectPrinterType(printer) {
     if (thermalTokens.some((t) => signature.includes(t))) {
         return { mode: "escpos", printerClass: "thermal" };
     }
-    if (
-        kind === "network" &&
-        (signature.includes("ipp") || signature.includes("airprint"))
-    ) {
-        return { mode: "gdi", printerClass: "office" };
-    }
     return { mode: "gdi", printerClass: "office" };
 }
 
@@ -173,8 +167,9 @@ function isIpLiteral(value) {
 export function formatFormsSummary(forms, rollLabel) {
     return (forms || []).map((f) => {
         const size = (f && (f.size || f)) || {};
-        const w = Number.isFinite(Number(size.width_mm)) ? Math.round(Number(size.width_mm)) : "?";
-        const h = Number.isFinite(Number(size.height_mm)) ? Math.round(Number(size.height_mm)) : "?";
+        const dim = (v) => (v != null && v !== "" && Number.isFinite(Number(v)) ? Math.round(Number(v)) : "?");
+        const w = dim(size.width_mm);
+        const h = dim(size.height_mm);
         return (
             `${(f && f.name) || "Form"} — ${w}×${h}mm` +
             (f && f.roll ? " (" + rollLabel + ")" : "")
@@ -184,7 +179,7 @@ export function formatFormsSummary(forms, rollLabel) {
 
 export function printerPatternFor(printer, mode) {
     const rawModes = ["escpos", "zpl", "tspl", "epl"];
-    const port = (printer && printer.port) || "";
+    const port = String((printer && printer.port) || "").trim();
     if (rawModes.includes(mode) && isIpLiteral(port)) {
         // IPv6 literals need brackets in a URI authority, or the
         // port suffix is ambiguous (audit L9).

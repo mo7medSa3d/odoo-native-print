@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<odoo>
+<odoo noupdate="1">
     <!-- Job-log retention (audit M2): the log otherwise grows
          forever. Ships INACTIVE on purpose: the log is an audit
          trail, so deleting history must be an explicit admin choice.

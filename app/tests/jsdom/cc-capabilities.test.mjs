@@ -53,7 +53,7 @@ const kindsOf = (card) => [...card.querySelectorAll("[data-action='test-print']"
 {
   const c = cardOf("OneNote (Desktop)");
   ok("onenote: only the PDF quick test is offered", JSON.stringify(kindsOf(c)) === JSON.stringify(["pdf-a4"]));
-  ok("onenote: class badge says Virtual GDI (not NETWORK)", c.textContent.includes("GDI") && !c.textContent.includes("NETWORK"));
+  ok("onenote: class badge says Virtual (not NETWORK)", (c.textContent.includes("افتراضية") || c.textContent.includes("Virtual")) && !c.textContent.includes("NETWORK"));
   ok("onenote: no duplex chip (driver does not report it)", !c.textContent.includes("Duplex") && !c.textContent.includes("وجهان"));
 }
 // EPSON thermal: ESC/POS only.

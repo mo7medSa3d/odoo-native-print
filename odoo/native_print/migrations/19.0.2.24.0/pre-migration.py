@@ -15,7 +15,7 @@ def migrate(cr, version):
         ("mode", "varchar"),
     ):
         cr.execute(
-            f'ALTER TABLE "native_print_job" ADD COLUMN IF NOT EXISTS "{col}" {col_type}'
+            f'ALTER TABLE IF EXISTS "native_print_job" ADD COLUMN IF NOT EXISTS "{col}" {col_type}'
         )
     for col, col_type in (
         ("protocol", "varchar"),
@@ -25,5 +25,5 @@ def migrate(cr, version):
         ("caps_synced_at", "timestamp without time zone"),
     ):
         cr.execute(
-            f'ALTER TABLE "native_print_device" ADD COLUMN IF NOT EXISTS "{col}" {col_type}'
+            f'ALTER TABLE IF EXISTS "native_print_device" ADD COLUMN IF NOT EXISTS "{col}" {col_type}'
         )

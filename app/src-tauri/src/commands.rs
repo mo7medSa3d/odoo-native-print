@@ -389,6 +389,9 @@ fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
 /// or `http(s)://tauri.localhost`). Uses full host equality so CVE-2026-42184
 /// first-label tricks (`http://tauri.evil.com`) never match.
 pub fn is_local_app_url(url: &tauri::Url) -> bool {
+    if url.port().is_some() {
+        return false;
+    }
     match url.scheme() {
         "tauri" => url.host_str() == Some("localhost"),
         "http" | "https" => url.host_str() == Some("tauri.localhost"),
@@ -1321,7 +1324,7 @@ pub fn app_identity(
     webview: tauri::Webview,
     state: State<'_, AppState>,
 ) -> Result<AppIdentity, String> {
-    check_origin(&webview, &state)?;
+    check_local_only(&webview)?;
     let origin = state
         .configured_origin
         .read()
@@ -1337,6 +1340,8 @@ pub fn app_identity(
 /// tab_open command, the POS navigation rule and window.open
 /// handling. Async: creating a webview from a synchronous command
 /// can deadlock on Windows.
+const MAX_TABS: usize = 24;
+
 pub async fn open_tab_internal(
     app: &tauri::AppHandle,
     state: &AppState,
@@ -1344,6 +1349,9 @@ pub async fn open_tab_internal(
 ) -> Result<String, String> {
     let (label, prev_active) = {
         let mut tabs = write_lock(&state.tabs);
+        if tabs.order.len() >= MAX_TABS {
+            return Err("too_many_tabs".to_string());
+        }
         let prev_active = tabs.active.clone();
         tabs.next_id += 1;
         let label = format!("tab-{}", tabs.next_id);
@@ -1406,7 +1414,9 @@ pub async fn tab_open(
     } else {
         tauri::Url::parse(&url).map_err(|_| "bad_tab_url".to_string())?
     };
-    if !is_local_app_url(&parsed) {
+    if is_local_app_url(&parsed) {
+        check_local_only(&webview)?;
+    } else {
         let configured = state
             .configured_origin
             .read()
@@ -1814,7 +1824,7 @@ pub async fn open_odoo_origin(
     webview: tauri::Webview,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    check_origin(&webview, &state)?;
+    check_local_only(&webview)?;
     let origin = state
         .configured_origin
         .read()
@@ -3199,6 +3209,21 @@ mod tests {
             "Control Center"
         );
         assert_eq!(tab_title_for("tauri://localhost/boot.html"), "Yaseir Print");
+        assert!(is_local_app_url(
+            &tauri::Url::parse("tauri://localhost/index.html").unwrap()
+        ));
+        assert!(is_local_app_url(
+            &tauri::Url::parse("http://tauri.localhost/index.html").unwrap()
+        ));
+        assert!(is_local_app_url(
+            &tauri::Url::parse("https://tauri.localhost/index.html").unwrap()
+        ));
+        assert!(!is_local_app_url(
+            &tauri::Url::parse("http://tauri.localhost:8080/index.html").unwrap()
+        ));
+        assert!(!is_local_app_url(
+            &tauri::Url::parse("tauri://localhost:1234/index.html").unwrap()
+        ));
         // POS detection: /pos and /pos/* only — a backend route that
         // merely contains "pos" must not divert into a POS tab.
         assert!(is_pos_url("http://h/pos/ui"));

@@ -65,6 +65,8 @@ impl ProfileDb {
     pub fn merge_overrides(&mut self, overrides: ProfileDb) {
         for (k, v) in overrides.by_driver {
             if !k.trim().is_empty() {
+                self.by_driver
+                    .retain(|existing, _| !existing.eq_ignore_ascii_case(&k));
                 self.by_driver.insert(k, v.sanitized());
             }
         }
@@ -112,9 +114,21 @@ mod tests {
         );
         db.merge_overrides(ov);
         assert_eq!(db.lookup("epson tm-t88").offset_x_mm, -2.0);
+        // Case-insensitive override replaces the base key instead of
+        // losing to ASCII sort order in lookup().
+        let mut ov_case = ProfileDb::new();
+        ov_case.by_driver.insert(
+            "epson tm-t88".into(),
+            PrinterQuirks {
+                offset_x_mm: -3.0,
+                ..Default::default()
+            },
+        );
+        db.merge_overrides(ov_case);
+        assert_eq!(db.lookup("EPSON TM-T88").offset_x_mm, -3.0);
         // Round-trip through JSON (the on-disk format).
         let db2 = ProfileDb::from_json(&db.to_json()).unwrap();
-        assert_eq!(db2.lookup("EPSON TM-T88").offset_x_mm, -2.0);
+        assert_eq!(db2.lookup("EPSON TM-T88").offset_x_mm, -3.0);
     }
 
     #[test]

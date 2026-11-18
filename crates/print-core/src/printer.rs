@@ -210,7 +210,12 @@ pub fn preferred_raw_render_dpi(resolutions_dpi: &[u32]) -> u32 {
     {
         return dpi;
     }
-    resolutions_dpi.iter().copied().min().unwrap_or(203)
+    resolutions_dpi
+        .iter()
+        .copied()
+        .filter(|&d| d > 0)
+        .min()
+        .unwrap_or(203)
 }
 
 /// Stable identity for a spooler queue backed by a physical
@@ -1063,6 +1068,8 @@ mod tests {
         assert_eq!(preferred_raw_render_dpi(&[600]), 600);
         assert_eq!(preferred_raw_render_dpi(&[]), 203);
         assert_eq!(preferred_raw_render_dpi(&[150, 300]), 300);
+        assert_eq!(preferred_raw_render_dpi(&[0, 600]), 600);
+        assert_eq!(preferred_raw_render_dpi(&[0]), 203);
     }
 
     #[test]

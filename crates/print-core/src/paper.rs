@@ -81,6 +81,14 @@ pub const ROLL_WIDTH_TOLERANCE_MM: f64 = 2.0;
 /// (e.g. A4 210x297 vs US Letter 215.9x279.4, ~6% difference).
 const CLOSE_SHEET_REL_TOLERANCE: f64 = 0.10;
 
+fn valid_sheet(f: &Form) -> bool {
+    !f.roll
+        && f.size.width_mm.is_finite()
+        && f.size.height_mm.is_finite()
+        && f.size.width_mm > 0.0
+        && f.size.height_mm > 0.0
+}
+
 fn close(a: f64, b: f64) -> bool {
     (a - b).abs() <= EXACT_TOLERANCE_MM
 }
@@ -174,7 +182,7 @@ pub fn match_paper(
     ) {
         let mut larger: Vec<&Form> = forms
             .iter()
-            .filter(|f| !f.roll)
+            .filter(|f| valid_sheet(f))
             .filter(|f| {
                 (f.size.width_mm + EXACT_TOLERANCE_MM >= page.width_mm
                     && f.size.height_mm + EXACT_TOLERANCE_MM >= page.height_mm)
@@ -260,8 +268,8 @@ pub fn pick_sheet_form(forms: &[Form], page_width_mm: f64) -> Option<Form> {
         let office = forms
             .iter()
             .filter(|f| {
-                let short_side = f.size.width_mm.min(f.size.height_mm);
-                !f.roll && (200.0..=225.0).contains(&short_side)
+                valid_sheet(f)
+                    && (200.0..=225.0).contains(&f.size.width_mm.min(f.size.height_mm))
             })
             .min_by(|a, b| {
                 let a_portrait = a.size.width_mm <= a.size.height_mm;
@@ -280,7 +288,7 @@ pub fn pick_sheet_form(forms: &[Form], page_width_mm: f64) -> Option<Form> {
     }
     let mut best_fit: Option<&Form> = None;
     let mut widest: Option<&Form> = None;
-    for form in forms.iter().filter(|f| !f.roll) {
+    for form in forms.iter().filter(|f| valid_sheet(f)) {
         if widest.is_none_or(|w| form.size.width_mm > w.size.width_mm) {
             widest = Some(form);
         }
@@ -402,7 +410,7 @@ pub fn match_paper_auto(
             if let Some(form) = capabilities
                 .forms
                 .iter()
-                .filter(|f| !f.roll)
+                .filter(|f| valid_sheet(f))
                 .filter_map(|f| orient_delta(f).map(|d| (d, f)))
                 .min_by(|(da, _), (db, _)| da.partial_cmp(db).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(_, f)| f.clone())

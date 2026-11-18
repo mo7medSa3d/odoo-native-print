@@ -179,7 +179,7 @@ impl Pdfium {
     /// Like [`Pdfium::load`], with an explicit first candidate.
     pub fn load_from(explicit: Option<&Path>) -> Result<Arc<Self>, PdfiumError> {
         let candidates = candidate_paths(explicit);
-        let mut last_load_error: Option<PdfiumError> = None;
+        let mut file_load_error: Option<PdfiumError> = None;
         for cand in &candidates {
             match unsafe { libloading::Library::new(cand) } {
                 Ok(lib) => {
@@ -199,20 +199,19 @@ impl Pdfium {
                     }));
                 }
                 Err(e) => {
-                    last_load_error = Some(PdfiumError::LoadFailed {
-                        path: cand.display().to_string(),
-                        source: e,
-                    });
+                    if file_load_error.is_none() && cand.is_file() {
+                        file_load_error = Some(PdfiumError::LoadFailed {
+                            path: cand.display().to_string(),
+                            source: e,
+                        });
+                    }
                 }
             }
         }
         // If at least one candidate existed as a file but failed to
-        // load, that is the more useful error; otherwise: not found.
-        let any_file = candidates.iter().any(|c| c.is_file());
-        if any_file {
-            if let Some(e) = last_load_error {
-                return Err(e);
-            }
+        // load, report that candidate's actual error; otherwise: not found.
+        if let Some(e) = file_load_error {
+            return Err(e);
         }
         Err(PdfiumError::LibraryNotFound {
             searched: candidates.iter().map(|c| c.display().to_string()).collect(),
@@ -308,12 +307,6 @@ pub fn candidate_paths(explicit: Option<&Path>) -> Vec<PathBuf> {
                 out.push(dir.join(name));
                 out.push(dir.join("resources").join(name));
             }
-        }
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        for name in LIB_NAMES {
-            out.push(cwd.join(name));
-            out.push(cwd.join("resources").join(name));
         }
     }
     for name in LIB_NAMES {

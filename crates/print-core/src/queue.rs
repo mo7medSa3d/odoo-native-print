@@ -372,7 +372,10 @@ impl Queue {
         })();
         match res {
             Ok(()) => {
-                self.conn.execute_batch("COMMIT")?;
+                if let Err(e) = self.conn.execute_batch("COMMIT") {
+                    let _ = self.conn.execute_batch("ROLLBACK");
+                    return Err(e.into());
+                }
                 Ok(())
             }
             Err(e) => {
@@ -405,7 +408,10 @@ impl Queue {
         })();
         match res {
             Ok(()) => {
-                self.conn.execute_batch("COMMIT")?;
+                if let Err(e) = self.conn.execute_batch("COMMIT") {
+                    let _ = self.conn.execute_batch("ROLLBACK");
+                    return Err(e.into());
+                }
                 Ok(())
             }
             Err(e) => {
@@ -907,8 +913,9 @@ impl Queue {
             )?
         };
         if changed == 0 {
+            let current = self.get(id)?.state;
             return Err(QueueError::Transition(crate::state::TransitionError {
-                from: job.state,
+                from: current,
                 to: next,
             }));
         }

@@ -27,6 +27,7 @@ double-quoted invoke() calls.
 import json
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -44,9 +45,10 @@ def main():
     manifest = set(re.findall(rf'"({NAME})"', span))
     perms = {}
     for toml in sorted((SRC / "permissions").glob("*.toml")):
-        text = toml.read_text(encoding="utf-8")
-        for m in re.finditer(r'identifier = "([^"]+)".*?commands\.allow = \[(.*?)\]', text, re.S):
-            perms[m.group(1)] = set(re.findall(rf'"({NAME})"', m.group(2)))
+        parsed = tomllib.loads(toml.read_text(encoding="utf-8"))
+        for entry in parsed.get("permission", []):
+            allow = (entry.get("commands") or {}).get("allow") or []
+            perms[entry["identifier"]] = set(allow)
     granted = set().union(*perms.values()) if perms else set()
     caps = {}
     cap_data = {}
@@ -131,14 +133,14 @@ def main():
     js_surfaces = [SRC / "src" / "lib.rs"] + sorted((SRC.parent / "dist").glob("*.html"))
     called = set()
     for surface in js_surfaces:
-        called |= set(re.findall(rf"invoke\(\s*[\"']({NAME})[\"']", surface.read_text(encoding="utf-8")))
+        called |= set(re.findall(r"invoke\(\s*[\"']([a-zA-Z0-9_|:|-]+)[\"']", surface.read_text(encoding="utf-8")))
     unknown_calls = called - handler
     if unknown_calls:
         problems.append(f"JS invokes commands missing from the handler: {sorted(unknown_calls)}")
     # Every exported Tauri command must perform an explicit origin or
     # local-app guard. A registered command without either guard is a
     # security regression even if capabilities currently hide it.
-    commands_rs = (SRC / "src" / "commands.rs").read_text(encoding="utf-8")
+    commands_rs = (SRC / "src" / "commands.rs").read_text(encoding="utf-8").split("#[cfg(test)]", 1)[0]
     command_decls = list(re.finditer(
         r"#\[tauri::command(?:\([^]]*\))?\]\s*pub\s+(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)",
         commands_rs,

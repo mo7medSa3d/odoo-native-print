@@ -36,7 +36,7 @@ def main():
         "Cargo.toml": m.group(1) if m else None,
     }
     manifest = (ROOT / "odoo/native_print/__manifest__.py").read_text(encoding="utf-8")
-    am = re.search(r'"version":\s*"([^"]+)"', manifest)
+    am = re.search(r'''["']version["']\s*:\s*["']([^"']+)["']''', manifest)
     if not am:
         print("ADDON MANIFEST UNPARSEABLE: no version string found")
         return 1
@@ -46,8 +46,11 @@ def main():
         print(f"VERSION MISMATCH: {versions}")
         return 1
     app_version = uniq.pop()
+    ref_type = os.environ.get("GITHUB_REF_TYPE", "")
+    ref = os.environ.get("GITHUB_REF", "")
     tag = os.environ.get("GITHUB_REF_NAME", "")
-    if tag.startswith("v") and tag.lstrip("v").split("-")[0] != app_version:
+    is_tag = (ref_type == "tag") or ref.startswith("refs/tags/") or (not ref_type and not ref and tag.startswith("v"))
+    if is_tag and tag.startswith("v") and tag.removeprefix("v").split("-")[0] != app_version:
         print(f"TAG MISMATCH: tag {tag} vs app version {app_version}")
         return 1
     print(f"app version consistent everywhere: {app_version}")

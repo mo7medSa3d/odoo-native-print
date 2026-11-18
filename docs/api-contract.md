@@ -64,7 +64,7 @@ through the bridge, infers the print mode from the driver identity,
 and hands the job to the desktop. A printer that is not connected
 right now can never be routed to. The server keeps only the job
 log.
-capabilities. Protocol inference is conservative: only recognized driver
+Protocol inference is conservative: only recognized driver
 signatures select ESC/POS, ZPL, TSPL or EPL; unknown devices stay on the
 Windows driver-managed GDI path. Company managers can inspect the full
 company printer inventory across workstations, including human-readable forms,

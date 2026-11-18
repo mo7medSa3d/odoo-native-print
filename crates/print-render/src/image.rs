@@ -37,6 +37,27 @@ pub enum ImageError {
     BadFrame,
 }
 
+fn starts_with_num(s: &str, prefix: &str) -> bool {
+    s.strip_prefix(prefix)
+        .is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_digit()))
+}
+
+fn contains_num(s: &str, needle: &str) -> bool {
+    let mut from = 0;
+    while let Some(rel) = s[from..].find(needle) {
+        let pos = from + rel;
+        let prev_is_digit = s[..pos]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_digit());
+        if !prev_is_digit {
+            return true;
+        }
+        from = pos + needle.len();
+    }
+    false
+}
+
 /// Printable width in dots at the standard 203 dpi receipt density:
 /// - `58mm` (or `57mm`/`58 mm` roll) -> 48 mm printable = 384 dots
 /// - `80mm` (or `72mm`/`80 mm` roll) -> 72 mm printable = 576 dots
@@ -45,18 +66,21 @@ pub enum ImageError {
 ///   via [`receipt_dots_for_width_mm`].
 pub fn receipt_dots_for_paper(paper: &str) -> Option<u32> {
     let lower = paper.trim().to_ascii_lowercase();
-    if lower.starts_with("58")
-        || lower.contains("58mm")
-        || lower.contains("58 mm")
-        || lower.starts_with("57")
+    if starts_with_num(&lower, "58")
+        || contains_num(&lower, "58mm")
+        || contains_num(&lower, "58 mm")
+        || starts_with_num(&lower, "57")
     {
         Some(384)
-    } else if lower.starts_with("112") || lower.contains("112mm") || lower.contains("112 mm") {
+    } else if starts_with_num(&lower, "112")
+        || contains_num(&lower, "112mm")
+        || contains_num(&lower, "112 mm")
+    {
         Some(832)
-    } else if lower.starts_with("80")
-        || lower.contains("80mm")
-        || lower.contains("80 mm")
-        || lower.starts_with("72")
+    } else if starts_with_num(&lower, "80")
+        || contains_num(&lower, "80mm")
+        || contains_num(&lower, "80 mm")
+        || starts_with_num(&lower, "72")
     {
         Some(576)
     } else if let Some(mm_pos) = lower.find("mm") {
@@ -160,6 +184,12 @@ pub fn decode_png(bytes: &[u8]) -> Result<Canvas, ImageError> {
     let frame = reader
         .next_frame(&mut buf)
         .map_err(|e| ImageError::Decode(e.to_string()))?;
+    if frame.width != width
+        || frame.height != height
+        || frame.bit_depth != png::BitDepth::Eight
+    {
+        return Err(ImageError::BadFrame);
+    }
     let data = &buf[..frame.buffer_size()];
     let px_count = (width as usize)
         .checked_mul(height as usize)
@@ -464,6 +494,9 @@ mod tests {
         assert_eq!(receipt_dots_for_paper("58x3276mm"), Some(384));
         assert_eq!(receipt_dots_for_paper("76mm"), Some(576));
         assert_eq!(receipt_dots_for_paper("100mm"), Some(728));
+        assert_eq!(receipt_dots_for_paper("158mm"), Some(1192));
+        assert_eq!(receipt_dots_for_paper("280mm"), None);
+        assert_eq!(receipt_dots_for_paper("580mm"), None);
         assert_eq!(receipt_dots_for_paper(""), None);
         assert_eq!(receipt_dots_for_paper("112mm"), Some(832));
     }

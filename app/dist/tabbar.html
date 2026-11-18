@@ -417,6 +417,7 @@
         invoke("tab_switch", { label: t.label }).then(refresh).catch(function () {});
       });
       el.addEventListener("keydown", function (ev) {
+        if (ev.target !== el) return;
         if (ev.key === "Enter" || ev.key === " ") {
           ev.preventDefault();
           invoke("tab_switch", { label: t.label }).then(refresh).catch(function () {});

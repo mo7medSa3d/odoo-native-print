@@ -1921,7 +1921,7 @@
       printerSettings = map || {};
       printerSettingsVersion++;
       renderPrintersGrid(lastGridPrinters);
-    }).catch(() => {});
+    }).catch(() => { printerSettingsRequested = false; });
   }
   function printerSettingsHtml(p) {
     const caps = capsCache.get(p.name);
@@ -2471,12 +2471,12 @@
       if (!Number.isInteger(port) || port < 1 || port > 65535) return false;
     }
     if (url.protocol === "https:") return url.hostname.length > 0;
-    return isIpLiteral(url.hostname);
+    return url.hostname === "localhost" || isIpLiteral(url.hostname);
   }
 
   function isAllowedPrinterUri(value) {
     const normalized = String(value || "").trim();
-    const match = normalized.match(/^(tcp|raw|ipp):\/\/(\[[0-9a-f:.]+\]|(?:0|[1-9][0-9]{0,2}\.){3}(?:0|[1-9][0-9]{0,2}))(?::([0-9]{1,5}))?(\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*)?$/i);
+    const match = normalized.match(/^(tcp|raw|ipp):\/\/(\[[0-9a-f:.]+\]|(?:(?:0|[1-9][0-9]{0,2})\.){3}(?:0|[1-9][0-9]{0,2}))(?::([0-9]{1,5}))?(\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*)?$/i);
     if (!match) return false;
     const scheme = match[1].toLowerCase(), host = match[2], port = match[3], path = match[4];
     if (scheme !== "ipp" && path) return false;
@@ -2503,8 +2503,8 @@
     const locked = !!(overviewState && overviewState.lockedByPolicy);
     const save = document.getElementById("btnSaveOrigin");
     const saveOpen = document.getElementById("btnSaveAndOpen");
-    if (save) save.disabled = locked || !valid;
-    if (saveOpen) saveOpen.disabled = locked || !valid;
+    if (save && !uiLocks.has("btnSaveOrigin")) save.disabled = locked || !valid;
+    if (saveOpen && !uiLocks.has("btnSaveAndOpen")) saveOpen.disabled = locked || !valid;
     return valid;
   }
 
@@ -2641,7 +2641,7 @@
     fallback.focus();
     fallback.select();
     let copied = false;
-    try { copied = document.execCommand("copy"); } finally { fallback.remove(); }
+    try { copied = document.execCommand("copy"); } catch (_e) { copied = false; } finally { fallback.remove(); }
     if (copied) showToast(I18N[currentLang].diagnostics_copied);
     else showToast(currentLang === "ar" ? "تعذر النسخ تلقائياً. حدّد JSON وانسخه يدوياً." : "Automatic copy failed. Select the JSON and copy it manually.", true);
   }

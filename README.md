@@ -1,6 +1,6 @@
 # Odoo Native Print Client (v1.5.7)
 
-A production-grade native client (**Tauri 2**, **Rust** core, embedded **PDFium**) and **Odoo 19** addon (**19.0.2.23.0**) that renders and prints Odoo reports, shipping labels, kitchen tickets, and Point of Sale (POS) receipts directly on local and LAN printers. No gateway, no local background agent, no localhost HTTP daemon, and no cloud relay in the print path.
+A production-grade native client (**Tauri 2**, **Rust** core, embedded **PDFium**) and **Odoo 19** addon (**19.0.2.24.0**) that renders and prints Odoo reports, shipping labels, kitchen tickets, and Point of Sale (POS) receipts directly on local and LAN printers. No gateway, no local background agent, no localhost HTTP daemon, and no cloud relay in the print path.
 
 ## Architecture & Repository Layout
 

@@ -69,12 +69,11 @@ def _safe_model_name(val):
 
 
 def _safe_int(val, default=None):
-    if val is None or val is False or val == "":
+    if val is None or isinstance(val, bool) or val == "":
         return default
     try:
-        # Clamp to a sane range: the job columns are int4, and an
-        # absurd client value must not turn into a database error.
-        return max(0, min(int(val), 10_000_000))
+        # Clamp to PostgreSQL int4 max (desktop queue allows up to 50 MB).
+        return max(0, min(int(val), 2_147_483_647))
     except (ValueError, TypeError):
         return default
 
@@ -128,6 +127,8 @@ def _get_or_create_device(device_name, company_id, vals=None):
                 ("name", "=", device_name),
                 ("company_id", "=", company_id),
             ], limit=1)
+            if printer and vals:
+                printer.write(vals)
     elif vals:
         printer.write(vals)
     return printer
@@ -172,7 +173,7 @@ class NativePrintController(http.Controller):
             ("company_id", "=", company),
         ], limit=1)
         job = _lock_status_job(job)
-        if job and job.user_id and job.user_id.id != request.env.user.id:
+        if job and job.user_id.id != request.env.user.id:
             return {"ok": False, "error": "forbidden"}
         if job and job.state in TERMINAL_STATES:
             # Terminal states are final: a late or retried status post
@@ -185,12 +186,13 @@ class NativePrintController(http.Controller):
             # canceling a job that is already printing).
             return {"ok": True, "job_id": job.id, "state": job.state,
                     "ignored": "illegal_transition"}
-        device_name = (str(device).strip()[:256] or None) if device else None
+        device_name = (device.strip()[:256] or None) if isinstance(device, str) else None
         vals = {
             "state": state,
-            "error_code": str(error_code)[:128] if error_code else False,
-            "device": device_name or (job.device if job else False),
+            "error_code": error_code.strip()[:128] if isinstance(error_code, str) and error_code.strip() else False,
         }
+        if device_name:
+            vals["device"] = device_name
         # `duplex=None` means leave the driver default in force. Only a
         # JSON boolean is an explicit choice (including False/simplex).
         if isinstance(duplex, bool) and (not job or not job.duplex_configured):
@@ -274,7 +276,7 @@ class NativePrintController(http.Controller):
                 # the loser of the create race could overwrite a
                 # just-finished job's terminal state, another user's
                 # job, or its monotonic attempt count (audit M3).
-                if job.user_id and job.user_id.id != request.env.user.id:
+                if job.user_id.id != request.env.user.id:
                     return {"ok": False, "error": "forbidden"}
                 if job.state in TERMINAL_STATES:
                     return {"ok": True, "job_id": job.id, "state": job.state,
@@ -285,6 +287,11 @@ class NativePrintController(http.Controller):
                             "ignored": "illegal_transition"}
                 if "attempts" in vals and vals["attempts"] < (job.attempts or 0):
                     del vals["attempts"]
+                if job.duplex_configured:
+                    vals.pop("duplex", None)
+                    vals.pop("duplex_configured", None)
+                if job.device_id:
+                    vals.pop("device_id", None)
         if job and not created:
             # A later post may carry the source reference the creating
             # post missed (or vice versa): fill blanks, never overwrite.
@@ -333,8 +340,8 @@ class NativePrintController(http.Controller):
         forms_list = _clean_list(forms)
         trays_list = _clean_list(trays)
         vals = {
-            "protocol": str(protocol)[:32] if protocol else False,
-            "printer_class": str(printer_class)[:32] if printer_class else False,
+            "protocol": protocol.strip()[:32] if isinstance(protocol, str) and protocol.strip() else False,
+            "printer_class": printer_class.strip()[:32] if isinstance(printer_class, str) and printer_class.strip() else False,
             "forms_summary": "\n".join(forms_list) or False,
             "trays_summary": "\n".join(trays_list) or False,
             "caps_synced_at": fields.Datetime.now(),

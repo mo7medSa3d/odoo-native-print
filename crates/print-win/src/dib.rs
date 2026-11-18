@@ -50,7 +50,7 @@ fn header(width: u32, height: u32, bit_count: u16, image_bytes: usize) -> [u8; 4
     h[0..4].copy_from_slice(&40u32.to_le_bytes()); // biSize
     h[4..8].copy_from_slice(&(width as i32).to_le_bytes()); // biWidth
                                                             // Negative height: top-down DIB, rows in display order.
-    h[8..12].copy_from_slice(&(-(height as i32)).to_le_bytes()); // biHeight
+    h[8..12].copy_from_slice(&(height as i32).wrapping_neg().to_le_bytes()); // biHeight
     h[12..14].copy_from_slice(&1u16.to_le_bytes()); // biPlanes
     h[14..16].copy_from_slice(&bit_count.to_le_bytes()); // biBitCount
                                                          // biCompression = 0 (BI_RGB) at offset 16: already zero.

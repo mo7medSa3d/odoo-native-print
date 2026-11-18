@@ -32,6 +32,14 @@ import { JOB_TERMINAL_STATES as TERMINAL_STATES, notifyUser, resolveBridgeTarget
 // 50 MB). Payloads above it can never be accepted, so the handler
 // checks before enqueueing and keeps Odoo's standard download.
 const MAX_NATIVE_PAYLOAD_BYTES = 50 * 1024 * 1024;
+// Matches print_text's 1 MiB ceiling in app/src-tauri/src/commands.rs.
+const MAX_NATIVE_TEXT_BYTES = 1024 * 1024;
+
+function buildReportIdempotencyKey(prefix, action) {
+    const raw = (action && (action.id || action.report_name)) || "report";
+    const safeTag = String(raw).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 64) || "report";
+    return `${prefix}-${safeTag}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 // Report submissions currently between click and desktop enqueue,
 // keyed by report + target records. A second invocation for the same
@@ -176,6 +184,21 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
             if (!state) {
                 continue;
             }
+            // Quiet retry check: if the desktop worker hit a transient
+            // error (busy/offline) and auto-requeued or recovered within
+            // one brief tick, resolve the recheck BEFORE posting `failed`
+            // or flashing a sticky error toast so temporary retries stay
+            // silent and the server log always receives the final state.
+            if (state === "failed" && typeof bridge.jobDetail === "function") {
+                await new Promise((resolve) => setTimeout(resolve, 900));
+                const recheck = await bridge.jobDetail(jobId).catch(() => null);
+                if (recheck && recheck.state) {
+                    state = recheck.state;
+                    errorCode = recheck.errorCode || null;
+                    pages = recheck.pages || pages;
+                    attempts = recheck.attempts || attempts;
+                }
+            }
             if (state !== lastState || pages !== lastPages || attempts !== lastAttempts) {
                 lastState = state;
                 lastPages = pages;
@@ -219,29 +242,6 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
                         );
                     }
                     return state;
-                }
-                // Quiet retry check: if the desktop worker hit a transient
-                // error (busy/offline) and auto-requeued into `queued` or
-                // `printing` immediately, wait one brief tick before firing
-                // a sticky error toast so temporary retries remain silent.
-                if (state === "failed" && typeof bridge.jobDetail === "function") {
-                    await new Promise((resolve) => setTimeout(resolve, 900));
-                    const recheck = await bridge.jobDetail(jobId).catch(() => null);
-                    if (recheck && recheck.state && !TERMINAL_STATES.has(recheck.state)) {
-                        lastState = recheck.state;
-                        lastPages = recheck.pages || lastPages;
-                        lastAttempts = recheck.attempts || lastAttempts;
-                        lastProgressAt = Date.now();
-                        continue;
-                    }
-                    if (recheck && recheck.state === "done") {
-                        notifyUser(
-                            env,
-                            _t('Sent "%s" to %s', meta.reportName, printerLabel),
-                            "success",
-                        );
-                        return "done";
-                    }
                 }
                 const failureKey = state + ":" + attempts;
                 if (notifiedFailure !== failureKey) {
@@ -349,15 +349,6 @@ async function handleReportSubmission(action, options, env, bridge) {
         // bridge), not UTF-16 code units: text.length undercounts
         // Arabic/CJK content for the job log and the size guard.
         const textBytes = new TextEncoder().encode(text).length;
-        if (textBytes > MAX_NATIVE_PAYLOAD_BYTES) {
-            // Oversized for the desktop queue: keep Odoo's standard
-            // download rather than a doomed enqueue (audit L5).
-            return undefined;
-        }
-        const textKey =
-            `odoo-txt-${action.id || action.report_name}-${Date.now()}-` +
-            Math.random().toString(36).slice(2, 10);
-        const textSource = reportSource(action);
         // ESC/POS is a thermal printer's language (external
         // review, 2026-11-07): only a thermal target may receive
         // the text as ESC/POS. An office, label or virtual target
@@ -367,6 +358,14 @@ async function handleReportSubmission(action, options, env, bridge) {
         // raw payloads to office/virtual targets as a second line
         // of defence.)
         const textAsEscpos = rule.mode === "escpos";
+        const maxTextBytes = textAsEscpos ? MAX_NATIVE_TEXT_BYTES : MAX_NATIVE_PAYLOAD_BYTES;
+        if ((textAsEscpos && textBytes === 0) || textBytes > maxTextBytes) {
+            // Empty or oversized for the desktop queue: keep Odoo's standard
+            // download rather than a doomed enqueue (audit L5).
+            return undefined;
+        }
+        const textKey = buildReportIdempotencyKey("odoo-txt", action);
+        const textSource = reportSource(action);
         await rpc("/native_print/job_status", {
             idempotency_key: textKey,
             state: "queued",
@@ -446,25 +445,31 @@ async function handleReportSubmission(action, options, env, bridge) {
     }
 
     const url = buildReportUrl(action, "pdf", env);
-    let bytes;
+    let rawBytes;
     try {
         const response = await fetch(url, { credentials: "same-origin" });
         if (!response.ok) {
             // Let Odoo's default flow handle (and report) it.
             return undefined;
         }
-        bytes = Array.from(new Uint8Array(await response.arrayBuffer()));
+        rawBytes = new Uint8Array(await response.arrayBuffer());
     } catch (_fetchError) {
         // Same fallback contract as the text branch. (Audit F1.)
+        return undefined;
+    }
+    if (rawBytes.length > MAX_NATIVE_PAYLOAD_BYTES) {
+        // Bigger than the desktop queue accepts: downloading keeps
+        // the document usable instead of failing at the bridge
+        // (audit L5). Check before converting to a JS Array.
         return undefined;
     }
     // A 200 response is not necessarily a PDF: an expired session
     // answers with the login page's HTML. Never queue HTML as a
     // document; fall back to the standard download instead.
     const hasPdfMagic = (() => {
-        const limit = Math.min(bytes.length - 3, 16);
+        const limit = Math.min(rawBytes.length - 3, 16);
         for (let i = 0; i < limit; i++) {
-            if (bytes[i] === 0x25 && bytes[i + 1] === 0x50 && bytes[i + 2] === 0x44 && bytes[i + 3] === 0x46) {
+            if (rawBytes[i] === 0x25 && rawBytes[i + 1] === 0x50 && rawBytes[i + 2] === 0x44 && rawBytes[i + 3] === 0x46) {
                 return true;
             }
         }
@@ -473,15 +478,8 @@ async function handleReportSubmission(action, options, env, bridge) {
     if (!hasPdfMagic) {
         return undefined;
     }
-    if (bytes.length > MAX_NATIVE_PAYLOAD_BYTES) {
-        // Bigger than the desktop queue accepts: downloading keeps
-        // the document usable instead of failing at the bridge
-        // (audit L5).
-        return undefined;
-    }
-    const idempotencyKey =
-        `odoo-${action.id || action.report_name}-${Date.now()}-` +
-        Math.random().toString(36).slice(2, 10);
+    const bytes = Array.from(rawBytes);
+    const idempotencyKey = buildReportIdempotencyKey("odoo", action);
     const pdfSource = reportSource(action);
     await rpc("/native_print/job_status", {
         idempotency_key: idempotencyKey,

@@ -270,6 +270,7 @@ impl IppClient {
         // broken or hostile endpoint cannot stream forever and grow
         // memory without bound on the worker thread.
         const MAX_IPP_RESPONSE_BYTES: usize = 1 << 20;
+        let read_deadline = std::time::Instant::now().checked_add(timeout);
         let mut raw = Vec::new();
         let mut buf = [0u8; 8192];
         loop {
@@ -282,6 +283,17 @@ impl IppClient {
             }
             if http_response_complete(&raw) {
                 break;
+            }
+            if let Some(deadline) = read_deadline {
+                let remaining_time = deadline.saturating_duration_since(std::time::Instant::now());
+                if remaining_time.is_zero() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "IPP response timed out",
+                    )
+                    .into());
+                }
+                stream.set_read_timeout(Some(remaining_time.max(MIN_IPP_TIMEOUT)))?;
             }
             let remaining = (MAX_IPP_RESPONSE_BYTES + 1) - raw.len();
             let to_read = buf.len().min(remaining);
@@ -422,58 +434,22 @@ fn base_format(f: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn http_response_complete(mut raw: &[u8]) -> bool {
-    loop {
-        let Some(split) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
-            return false;
-        };
-        let headers = String::from_utf8_lossy(&raw[..split]);
-        let Some(status) = headers
-            .split_whitespace()
-            .nth(1)
-            .and_then(|s| s.parse::<u16>().ok())
-        else {
-            return true;
-        };
-        if (100..200).contains(&status) {
-            raw = &raw[split + 4..];
-            continue;
-        }
-        if status != 200 {
-            return true;
-        }
-        let body = &raw[split + 4..];
-        let lower = headers.to_ascii_lowercase();
-        let is_chunked = lower.lines().any(|l| {
-            l.split_once(':')
-                .is_some_and(|(k, v)| k.trim() == "transfer-encoding" && v.contains("chunked"))
-        });
-        if is_chunked {
-            return body.ends_with(b"\r\n\r\n") && dechunk(body).is_ok();
-        }
-        let content_length = lower.lines().find_map(|l| {
-            l.split_once(':').and_then(|(k, v)| {
-                if k.trim() == "content-length" {
-                    v.trim().parse::<usize>().ok()
-                } else {
-                    None
-                }
-            })
-        });
-        return content_length.is_some_and(|len| body.len() >= len);
-    }
+enum HttpFraming {
+    Chunked,
+    ContentLength(usize),
+    Close,
 }
 
-fn parse_http_response(mut raw: &[u8]) -> Result<Vec<u8>, IppError> {
+fn split_http_response(mut raw: &[u8]) -> Result<Option<(u16, HttpFraming, &[u8])>, IppError> {
     loop {
-        let split = raw
-            .windows(4)
-            .position(|w| w == b"\r\n\r\n")
-            .ok_or_else(|| IppError::Parse("no HTTP header terminator".into()))?;
-        let headers = String::from_utf8_lossy(&raw[..split]).to_string();
+        let Some(split) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
+            return Ok(None);
+        };
+        let headers = String::from_utf8_lossy(&raw[..split]);
         let status: u16 = headers
-            .split_whitespace()
-            .nth(1)
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
             .and_then(|s| s.parse().ok())
             .ok_or_else(|| IppError::Parse("no HTTP status".into()))?;
         // Skip interim 1xx responses (e.g. `HTTP/1.1 100 Continue`) that CUPS
@@ -482,19 +458,15 @@ fn parse_http_response(mut raw: &[u8]) -> Result<Vec<u8>, IppError> {
             raw = &raw[split + 4..];
             continue;
         }
-        if status != 200 {
-            return Err(IppError::Http(status));
-        }
         let body = &raw[split + 4..];
-        let lower = headers.to_lowercase();
+        let lower = headers.to_ascii_lowercase();
         let is_chunked = lower.lines().any(|l| {
             l.split_once(':')
                 .is_some_and(|(k, v)| k.trim() == "transfer-encoding" && v.contains("chunked"))
         });
-        if is_chunked {
-            return dechunk(body).map_err(IppError::Parse);
-        }
-        let content_length = lower.lines().find_map(|l| {
+        let framing = if is_chunked {
+            HttpFraming::Chunked
+        } else if let Some(len) = lower.lines().find_map(|l| {
             l.split_once(':').and_then(|(k, v)| {
                 if k.trim() == "content-length" {
                     v.trim().parse::<usize>().ok()
@@ -502,15 +474,41 @@ fn parse_http_response(mut raw: &[u8]) -> Result<Vec<u8>, IppError> {
                     None
                 }
             })
-        });
-        return if let Some(len) = content_length {
+        }) {
+            HttpFraming::ContentLength(len)
+        } else {
+            HttpFraming::Close
+        };
+        return Ok(Some((status, framing, body)));
+    }
+}
+
+fn http_response_complete(raw: &[u8]) -> bool {
+    match split_http_response(raw) {
+        Ok(None) => false,
+        Err(_) => true,
+        Ok(Some((status, _, _))) if status != 200 => true,
+        Ok(Some((_, HttpFraming::Chunked, body))) => dechunk(body).is_ok(),
+        Ok(Some((_, HttpFraming::ContentLength(len), body))) => body.len() >= len,
+        Ok(Some((_, HttpFraming::Close, _))) => false,
+    }
+}
+
+fn parse_http_response(raw: &[u8]) -> Result<Vec<u8>, IppError> {
+    let (status, framing, body) = split_http_response(raw)?
+        .ok_or_else(|| IppError::Parse("no HTTP header terminator".into()))?;
+    if status != 200 {
+        return Err(IppError::Http(status));
+    }
+    match framing {
+        HttpFraming::Chunked => dechunk(body).map_err(IppError::Parse),
+        HttpFraming::ContentLength(len) => {
             if body.len() < len {
                 return Err(IppError::Parse("short HTTP body".into()));
             }
             Ok(body[..len].to_vec())
-        } else {
-            Ok(body.to_vec())
-        };
+        }
+        HttpFraming::Close => Ok(body.to_vec()),
     }
 }
 
@@ -523,11 +521,18 @@ fn dechunk(body: &[u8]) -> Result<Vec<u8>, String> {
             .position(|w| w == b"\r\n")
             .ok_or("bad chunk header")?
             + pos;
-        let size_str = String::from_utf8_lossy(&body[pos..line_end]).to_string();
-        let size = usize::from_str_radix(size_str.trim().split(';').next().unwrap_or(""), 16)
-            .map_err(|_| "bad chunk size")?;
+        let size_str = String::from_utf8_lossy(&body[pos..line_end]);
+        let size_hex = size_str.split(';').next().unwrap_or("").trim();
+        if size_hex.is_empty() || !size_hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("bad chunk size".into());
+        }
+        let size = usize::from_str_radix(size_hex, 16).map_err(|_| "bad chunk size")?;
         if size == 0 {
-            break;
+            let tail = &body[line_end + 2..];
+            if tail.starts_with(b"\r\n") || tail.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+            return Err("unterminated chunked body".into());
         }
         let start = line_end + 2;
         let end = start.checked_add(size).ok_or("chunk size overflow")?;
@@ -869,6 +874,9 @@ mod tests {
         assert!(parse_message(b"\x01\x01\x00").is_err());
         assert!(parse_message(&[0xFF; 64]).is_err());
         assert!(dechunk(b"5\r\nhelloXX0\r\n\r\n").is_err());
+        assert!(dechunk(b"5\r\nhello\r\n0\r\n").is_err());
+        assert!(dechunk(b"+5\r\nhello\r\n0\r\n\r\n").is_err());
+        assert!(parse_http_response(b"HTTP/1.1\r\n200 OK\r\n\r\n").is_err());
     }
 
     #[test]

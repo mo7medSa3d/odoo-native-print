@@ -34,6 +34,7 @@
                        decoration-muted="state == 'canceled'"/>
                 <field name="error_code" class="font-monospace text-danger" optional="show"/>
                 <field name="user_id" widget="many2one_avatar_user"/>
+                <field name="source_ids" column_invisible="1"/>
                 <button name="action_reprint" type="object" string="Reprint"
                         icon="fa-print" class="btn-link"
                         invisible="not report_id or not source_ids"
@@ -46,7 +47,7 @@
         <field name="name">native.print.job.kanban</field>
         <field name="model">native.print.job</field>
         <field name="arch" type="xml">
-            <kanban default_group_by="state" create="0">
+            <kanban default_group_by="state" create="0" edit="0" delete="0" records_draggable="0">
                 <field name="name"/>
                 <field name="state"/>
                 <field name="error_code"/>
@@ -125,6 +126,7 @@
                     </div>
                     <group>
                         <group string="Print Source &amp; Routing">
+                            <field name="source_ids" invisible="1"/>
                             <field name="report_id"/>
                             <field name="report_name" string="Source Name"/>
                             <field name="source_type" widget="badge"

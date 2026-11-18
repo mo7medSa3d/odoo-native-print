@@ -45,9 +45,10 @@ impl TsplLabel {
         // the TEXT command into arbitrary TSPL commands (the ESC/POS
         // builder strips them for the same reason). Quotes are folded
         // so the string literal cannot terminate early.
+        // Also strip backslashes so a trailing `\` cannot escape the closing quote.
         let safe: String = content
             .chars()
-            .filter(|c| !c.is_control())
+            .filter(|c| !c.is_control() && *c != '\\')
             .map(|c| if c == '"' { '\'' } else { c })
             .collect();
         self.buf
@@ -161,7 +162,7 @@ mod tests {
     #[test]
     fn text_strips_control_injection() {
         let out = TsplLabel::new(50, 30, 3)
-            .text(1, 1, "evil\"\r\nPRINT 99\u{7}")
+            .text(1, 1, "evil\"\\\r\nPRINT 99\u{7}")
             .print(1, 1);
         let text = String::from_utf8_lossy(&out);
         // The words stay as inert quoted TEXT data; the CR/LF that
@@ -170,6 +171,7 @@ mod tests {
             !text.contains("\r\nPRINT 99"),
             "CR/LF injection must be stripped: {text}"
         );
+        assert!(!text.contains('\\'), "backslashes must be stripped: {text}");
         assert_eq!(
             text.matches("\r\nPRINT ").count(),
             1,

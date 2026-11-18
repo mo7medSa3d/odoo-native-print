@@ -172,6 +172,10 @@ async function inlineMedia(source, clone) {
             img.setAttribute("src", sourceCanvases[i].toDataURL("image/png"));
             img.setAttribute("width", sourceCanvases[i].width);
             img.setAttribute("height", sourceCanvases[i].height);
+            const canvasStyle = cloneCanvases[i].getAttribute("style");
+            if (canvasStyle) {
+                img.setAttribute("style", canvasStyle);
+            }
             cloneCanvases[i].replaceWith(img);
         } catch (_err) {
             // Leave cross-origin canvas as-is.
@@ -291,6 +295,23 @@ async function elementToPngBytes(element, scale = 2) {
             offscreenHost.remove();
         }
     }
+}
+
+function extractCashierUserId(cashierObj, posStore, order) {
+    const idOf = (v) => {
+        if (v == null) return null;
+        if (typeof v === "number" || typeof v === "string") return v;
+        if (Array.isArray(v)) return v[0] ?? null;
+        if (typeof v === "object") return v.id ?? null;
+        return null;
+    };
+    const raw =
+        idOf(cashierObj) ||
+        idOf(posStore && posStore.user) ||
+        idOf(posStore && posStore.session && posStore.session.user_id) ||
+        idOf(order && order.user_id) ||
+        0;
+    return String(raw).replace(/[^0-9]/g, "") || "0";
 }
 
 function posReceiptKey(safeRef, userId) {
@@ -552,13 +573,7 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
         (posStore && typeof posStore.get_cashier === "function" && posStore.get_cashier()) ||
         (posStore && posStore.cashier) ||
         null;
-    const cashierRaw =
-        (cashierObj && (cashierObj.id || (Array.isArray(cashierObj) && cashierObj[0]) || cashierObj)) ||
-        (posStore && posStore.user && (posStore.user.id || (Array.isArray(posStore.user) && posStore.user[0]) || posStore.user)) ||
-        (posStore && posStore.session && (posStore.session.user_id?.id || (Array.isArray(posStore.session.user_id) && posStore.session.user_id[0]) || posStore.session.user_id)) ||
-        (order && order.user_id && (order.user_id.id || (Array.isArray(order.user_id) && order.user_id[0]) || order.user_id)) ||
-        0;
-    const userId = String(cashierRaw).replace(/[^0-9]/g, "") || "0";
+    const userId = extractCashierUserId(cashierObj, posStore, order);
     const idempotencyKey = posReceiptKey(safeRef, userId);
     if (!bridge || typeof bridge.printImage !== "function") {
         return { reason: POS_FAIL_NO_PRINTER, code: "POS_NO_PRINTER", key: idempotencyKey, safeRef, userId };

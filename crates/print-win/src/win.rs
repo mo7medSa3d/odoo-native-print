@@ -201,11 +201,24 @@ fn resolve_printer_bin_id(printer_wide: &[u16], tray_spec: &str) -> Option<i16> 
             std::ptr::null(),
         )
     };
-    if count <= 0 {
+    if !(1..=4096).contains(&count) {
         return None;
     }
-    let n = (count as usize).min(4096);
-    let mut bin_ids = vec![0u16; n];
+    let name_count = unsafe {
+        DeviceCapabilitiesW(
+            printer_wide.as_ptr(),
+            std::ptr::null(),
+            DC_BINNAMES,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        )
+    };
+    if !(1..=4096).contains(&name_count) {
+        return None;
+    }
+    let n_ids = count as usize;
+    let n_names = name_count as usize;
+    let mut bin_ids = vec![0u16; n_ids];
     let got_ids = unsafe {
         DeviceCapabilitiesW(
             printer_wide.as_ptr(),
@@ -216,7 +229,7 @@ fn resolve_printer_bin_id(printer_wide: &[u16], tray_spec: &str) -> Option<i16> 
         )
     };
     // DC_BINNAMES: each entry is a 24-WCHAR block (Microsoft Learn).
-    let mut bin_names = vec![0u16; n * 24];
+    let mut bin_names = vec![0u16; n_names * 24];
     let got_names = unsafe {
         DeviceCapabilitiesW(
             printer_wide.as_ptr(),
@@ -229,7 +242,10 @@ fn resolve_printer_bin_id(printer_wide: &[u16], tray_spec: &str) -> Option<i16> 
     if got_ids <= 0 || got_names <= 0 {
         return None;
     }
-    let count_ok = (got_ids as usize).min(got_names as usize).min(n);
+    let count_ok = (got_ids as usize)
+        .min(got_names as usize)
+        .min(n_ids)
+        .min(n_names);
     let target = trimmed.to_ascii_lowercase();
     let names: Vec<String> = (0..count_ok)
         .map(|i| {
@@ -1111,6 +1127,7 @@ extern "system" {
 
 const PRINTER_ENUM_LOCAL: u32 = 0x0000_0002;
 const PRINTER_ENUM_CONNECTIONS: u32 = 0x0000_0004;
+const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
 
 unsafe fn read_wide(ptr: *const u16) -> String {
     const MAX_WIDE_LEN: usize = 32_768;
@@ -1174,22 +1191,31 @@ fn discover_printers_uncached() -> Result<Vec<print_core::PrinterInfo>, String> 
         }
         return Ok(Vec::new());
     }
-    let mut buf = aligned_byte_buf(needed as usize);
-    let buf_bytes = buf.len() * std::mem::size_of::<u64>();
-    let ok = unsafe {
-        EnumPrintersW(
-            PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS,
-            std::ptr::null(),
-            2,
-            buf.as_mut_ptr() as *mut u8,
-            needed,
-            &mut needed,
-            &mut returned,
-        )
-    };
-    if ok == 0 {
-        return Err(last_error());
+    let mut buf = Vec::new();
+    for attempt in 0..3 {
+        let cap = needed;
+        buf = aligned_byte_buf(cap as usize);
+        let ok = unsafe {
+            EnumPrintersW(
+                PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS,
+                std::ptr::null(),
+                2,
+                buf.as_mut_ptr() as *mut u8,
+                cap,
+                &mut needed,
+                &mut returned,
+            )
+        };
+        if ok != 0 {
+            break;
+        }
+        let code = last_error_code();
+        if code == ERROR_INSUFFICIENT_BUFFER && needed > cap && attempt < 2 {
+            continue;
+        }
+        return Err(format!("win32 error {code}"));
     }
+    let buf_bytes = buf.len() * std::mem::size_of::<u64>();
     let stride = std::mem::size_of::<PrinterInfo2W>();
     let max_entries = buf_bytes / stride;
     let count = (returned as usize).min(max_entries);
@@ -1232,20 +1258,29 @@ pub fn printer_health(printer: &str) -> Result<print_core::PrinterHealth, String
         let mut needed: u32 = 0;
         GetPrinterW(handle.0, 2, std::ptr::null_mut(), 0, &mut needed);
         if needed == 0 {
-            Err(last_error())
+            return Err(last_error());
+        }
+        let mut buf = Vec::new();
+        for attempt in 0..3 {
+            let cap = needed;
+            buf = aligned_byte_buf(cap as usize);
+            let ok2 = GetPrinterW(handle.0, 2, buf.as_mut_ptr() as *mut u8, cap, &mut needed);
+            if ok2 != 0 {
+                break;
+            }
+            let code = last_error_code();
+            if code == ERROR_INSUFFICIENT_BUFFER && needed > cap && attempt < 2 {
+                continue;
+            }
+            return Err(format!("win32 error {code}"));
+        }
+        if (needed as usize) < std::mem::size_of::<PrinterInfo2W>() {
+            Err("GetPrinterW returned truncated PRINTER_INFO_2W".to_string())
         } else {
-            let mut buf = aligned_byte_buf(needed as usize);
-            let ok2 = GetPrinterW(handle.0, 2, buf.as_mut_ptr() as *mut u8, needed, &mut needed);
-            if ok2 == 0 {
-                Err(last_error())
-            } else if (needed as usize) < std::mem::size_of::<PrinterInfo2W>() {
-                Err("GetPrinterW returned truncated PRINTER_INFO_2W".to_string())
-            } else {
-                let info = (buf.as_ptr() as *const PrinterInfo2W).read_unaligned();
-                match crate::discovery::convert(&convert_info2(&info)).health {
-                    Some(health) => Ok(health),
-                    None => Err("spooler status produced no health observation".to_string()),
-                }
+            let info = (buf.as_ptr() as *const PrinterInfo2W).read_unaligned();
+            match crate::discovery::convert(&convert_info2(&info)).health {
+                Some(health) => Ok(health),
+                None => Err("spooler status produced no health observation".to_string()),
             }
         }
     }
@@ -1258,8 +1293,8 @@ fn wide(s: &str) -> Vec<u16> {
         .collect()
 }
 
-fn last_error() -> String {
-    format!("win32 error {}", unsafe {
+fn last_error_code() -> u32 {
+    unsafe {
         // GetLastError via kernel32, declared locally to keep the FFI
         // surface in one auditable place.
         #[link(name = "kernel32")]
@@ -1267,7 +1302,11 @@ fn last_error() -> String {
             fn GetLastError() -> u32;
         }
         GetLastError()
-    })
+    }
+}
+
+fn last_error() -> String {
+    format!("win32 error {}", last_error_code())
 }
 
 /// The system's default printer name.
@@ -1277,10 +1316,19 @@ pub fn default_printer_name() -> Result<String, String> {
     if size == 0 {
         return Err(last_error());
     }
-    let mut buf = vec![0u16; size as usize];
-    let ok = unsafe { GetDefaultPrinterW(buf.as_mut_ptr(), &mut size) };
-    if ok == 0 {
-        return Err(last_error());
+    let mut buf = Vec::new();
+    for attempt in 0..3 {
+        let cap = size;
+        buf = vec![0u16; cap as usize];
+        let ok = unsafe { GetDefaultPrinterW(buf.as_mut_ptr(), &mut size) };
+        if ok != 0 {
+            break;
+        }
+        let code = last_error_code();
+        if code == ERROR_INSUFFICIENT_BUFFER && size > cap && attempt < 2 {
+            continue;
+        }
+        return Err(format!("win32 error {code}"));
     }
     let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
     Ok(String::from_utf16_lossy(&buf[..end]))
@@ -1306,8 +1354,13 @@ pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
     if count == 0 {
         return Ok(Vec::new());
     }
-    let n = (count as usize).min(4096);
-    let mut paper_ids = vec![0u16; n];
+    if count > 4096 {
+        return Err(format!(
+            "DeviceCapabilitiesW(DC_PAPERS) returned excessive count {count}"
+        ));
+    }
+    let n_ids = count as usize;
+    let mut paper_ids = vec![0u16; n_ids];
     let got_ids = unsafe {
         DeviceCapabilitiesW(
             name.as_ptr(),
@@ -1317,7 +1370,25 @@ pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
             std::ptr::null(),
         )
     };
-    let mut sizes = vec![0i32; n * 2]; // POINT is two LONGs (i32)
+    let size_count = unsafe {
+        DeviceCapabilitiesW(
+            name.as_ptr(),
+            std::ptr::null(),
+            DC_PAPERSIZE,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        )
+    };
+    if size_count <= 0 {
+        return Err(last_error());
+    }
+    if size_count > 4096 {
+        return Err(format!(
+            "DeviceCapabilitiesW(DC_PAPERSIZE) returned excessive count {size_count}"
+        ));
+    }
+    let n_sizes = size_count as usize;
+    let mut sizes = vec![0i32; n_sizes * 2]; // POINT is two LONGs (i32)
     let got = unsafe {
         DeviceCapabilitiesW(
             name.as_ptr(),
@@ -1330,23 +1401,43 @@ pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
     if got <= 0 {
         return Err(last_error());
     }
-    let valid_count = (got as usize).min(n);
+    let valid_count = (got as usize).min(n_sizes);
     // Query DC_PAPERNAMES (16): each entry is a 64-WCHAR block.
-    let mut name_blocks = vec![0u16; n * 64];
-    let got_names = unsafe {
+    let raw_name_count = unsafe {
         DeviceCapabilitiesW(
             name.as_ptr(),
             std::ptr::null(),
             DC_PAPERNAMES,
-            name_blocks.as_mut_ptr() as *mut c_void,
+            std::ptr::null_mut(),
             std::ptr::null(),
         )
     };
+    let n_names = if (1..=4096).contains(&raw_name_count) {
+        raw_name_count as usize
+    } else {
+        0
+    };
+    let mut name_blocks = vec![0u16; n_names * 64];
+    let got_names = if n_names == 0 {
+        0
+    } else {
+        unsafe {
+            DeviceCapabilitiesW(
+                name.as_ptr(),
+                std::ptr::null(),
+                DC_PAPERNAMES,
+                name_blocks.as_mut_ptr() as *mut c_void,
+                std::ptr::null(),
+            )
+        }
+    };
+    let valid_names = (got_names.max(0) as usize).min(n_names);
+    let valid_ids = (got_ids.max(0) as usize).min(n_ids);
     let mut forms = Vec::with_capacity(valid_count);
     for i in 0..valid_count {
         let w_mm = sizes[i * 2] as f64 / 10.0;
         let h_mm = sizes[i * 2 + 1] as f64 / 10.0;
-        let raw_name = if got_names > 0 && i < (got_names as usize) {
+        let raw_name = if i < valid_names {
             let block = &name_blocks[i * 64..(i + 1) * 64];
             let end = block.iter().position(|&c| c == 0).unwrap_or(64);
             String::from_utf16_lossy(&block[..end])
@@ -1359,7 +1450,7 @@ pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
             || lower_name.contains("continuous");
         if w_mm > 0.0 && (h_mm > 0.0 || named_roll) {
             let mut form = crate::discovery::classify_form(&raw_name, w_mm, h_mm);
-            if got_ids > 0 && i < (got_ids as usize) && paper_ids[i] > 0 {
+            if i < valid_ids && paper_ids[i] > 0 {
                 form.paper_id = Some(paper_ids[i]);
             }
             forms.push(form);

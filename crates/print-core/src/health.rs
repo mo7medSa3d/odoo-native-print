@@ -76,6 +76,7 @@ impl HealthCondition {
                 | HealthCondition::Paused
                 | HealthCondition::Offline
                 | HealthCondition::Stopped
+                | HealthCondition::Overheating
                 | HealthCondition::HardwareError
                 | HealthCondition::UserIntervention
                 | HealthCondition::OtherError
@@ -193,6 +194,7 @@ impl PrinterHealth {
         } else if has(HealthCondition::TonerEmpty)
             || has(HealthCondition::InkEmpty)
             || has(HealthCondition::MarkerSupplyEmpty)
+            || has(HealthCondition::RibbonOut)
         {
             PrinterStatus::NoToner
         } else if has(HealthCondition::Offline) || has(HealthCondition::Stopped) {
@@ -201,7 +203,10 @@ impl PrinterHealth {
             PrinterStatus::UserIntervention
         } else if has(HealthCondition::Paused) {
             PrinterStatus::Paused
-        } else if has(HealthCondition::HardwareError) || has(HealthCondition::OtherError) {
+        } else if has(HealthCondition::HardwareError)
+            || has(HealthCondition::Overheating)
+            || has(HealthCondition::OtherError)
+        {
             PrinterStatus::Error
         } else if has(HealthCondition::Printing)
             || has(HealthCondition::Busy)
@@ -296,7 +301,10 @@ impl PrinterHealth {
                 "marker-supply-empty" => {
                     set.insert(HealthCondition::MarkerSupplyEmpty);
                 }
-                "marker-supply-low" | "toner-low" | "marker-low" => {
+                "marker-supply-low" | "marker-low" => {
+                    set.insert(HealthCondition::MarkerSupplyLow);
+                }
+                "toner-low" => {
                     set.insert(HealthCondition::TonerLow);
                 }
                 "toner-empty" => {
@@ -535,6 +543,9 @@ mod tests {
         let h = PrinterHealth::from_tspl_status(0x20, 0);
         assert!(h.has(HealthCondition::Printing));
         assert!(!h.blocks_printing());
+        let ribbon = PrinterHealth::from_tspl_status(0x08, 0);
+        assert!(ribbon.blocks_printing());
+        assert_eq!(ribbon.primary_status(), PrinterStatus::NoToner);
     }
 
     #[test]
@@ -549,6 +560,8 @@ mod tests {
         assert!(err.has(HealthCondition::HardwareError));
         let hot = PrinterHealth::from_escpos(None, None, Some(0x12 | 0x40), None, 0);
         assert!(hot.has(HealthCondition::Overheating));
+        assert!(hot.blocks_printing());
+        assert_eq!(hot.primary_status(), PrinterStatus::Error);
     }
 
     #[test]

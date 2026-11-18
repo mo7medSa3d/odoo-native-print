@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Fetch the pinned PDFium binary for local / CI test runs (Linux x64).
 #
 # The Windows build does NOT use this script: pdfium.dll is vendored in
@@ -12,7 +12,7 @@
 #   tools/pdfium/libpdfium.so
 #   tools/pdfium/VERSION
 # tools/pdfium/ is gitignored (a downloaded binary, not a source).
-set -eu
+set -euo pipefail
 
 TAG="chromium/8125"
 TAG_ENC="chromium%2F8125"
@@ -24,13 +24,13 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="${ROOT}/tools/pdfium"
 mkdir -p "${DEST}"
 
-if [ -f "${DEST}/libpdfium.so" ] && [ -f "${DEST}/VERSION" ] && grep -q "${TAG}" "${DEST}/VERSION"; then
+if [ -f "${DEST}/libpdfium.so" ] && [ -f "${DEST}/VERSION" ] && grep -Fq "${TAG}" "${DEST}/VERSION"; then
     echo "pdfium ${TAG} already present at ${DEST}/libpdfium.so"
     exit 0
 fi
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "${TMP}"' EXIT
+trap 'rm -rf "${TMP}"' EXIT INT TERM
 echo "downloading ${URL}"
 curl -fsSL -o "${TMP}/${TGZ}" "${URL}"
 echo "${SHA256}  ${TMP}/${TGZ}" | sha256sum -c -

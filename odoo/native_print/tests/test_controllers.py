@@ -293,6 +293,18 @@ class TestNativePrintControllers(HttpCase):
         self.assertFalse(res["ok"])
         self.assertEqual(res["error"], "bad_request")
 
+    def test_job_status_preserves_large_byte_size_and_ignores_non_string_device(self):
+        res = self._rpc("/native_print/job_status", {
+            "idempotency_key": JOB_KEY, "state": "queued",
+            "byte_size": 25 * 1024 * 1024,
+            "device": {"bad": True},
+        })
+        self.assertTrue(res["ok"], res)
+        job = self.env["native.print.job"].search([("name", "=", JOB_KEY)])
+        self.assertEqual(job.byte_size, 25 * 1024 * 1024)
+        self.assertFalse(job.device)
+        self.assertFalse(job.device_id)
+
 
 @tagged("post_install", "-at_install")
 class TestNativePrintMultiUser(HttpCase):

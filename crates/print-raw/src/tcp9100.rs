@@ -132,23 +132,7 @@ fn query_dle_eot(host: &str, port: u16, n: u8, timeout: Duration) -> std::io::Re
     let timeout = timeout.max(MIN_IO_TIMEOUT);
     stream.set_write_timeout(Some(timeout))?;
     stream.set_read_timeout(Some(timeout))?;
-    stream.write_all(&[0x10, 0x04, n])?;
-    stream.flush()?;
-    // A status byte has fixed bits (bit 1 and bit 4 set; bits 0 and 7
-    // clear). Unsolicited ASB frames or line noise can precede the real
-    // response, so skip up to 4 bytes looking for a valid frame instead
-    // of decoding whatever arrives first.
-    let mut buf = [0u8; 1];
-    for _ in 0..4 {
-        stream.read_exact(&mut buf)?;
-        if dle_eot_frame_valid(buf[0]) {
-            return Ok(buf[0]);
-        }
-    }
-    Err(std::io::Error::new(
-        ErrorKind::InvalidData,
-        "no valid DLE EOT status frame in response",
-    ))
+    query_dle_eot_on_stream(&mut stream, n)
 }
 
 /// DLE EOT response frames always have bit 1 and bit 4 set and bits 0
@@ -313,36 +297,29 @@ pub fn query_blocking_condition(
     stream.set_read_timeout(Some(timeout))?;
 
     let paper_byte = query_dle_eot_on_stream(&mut stream, 4)?;
-    let error_byte = match query_dle_eot_on_stream(&mut stream, 3) {
-        Ok(b) => b,
-        Err(e)
-            if matches!(
-                e.kind(),
-                ErrorKind::UnexpectedEof
-                    | ErrorKind::ConnectionReset
-                    | ErrorKind::ConnectionAborted
-                    | ErrorKind::BrokenPipe
-            ) =>
-        {
-            query_error_status(host, port, timeout)?
+    let mut stream = Some(stream);
+    let mut query_next = |n: u8| -> std::io::Result<u8> {
+        if let Some(mut s) = stream.take() {
+            match query_dle_eot_on_stream(&mut s, n) {
+                Ok(b) => {
+                    stream = Some(s);
+                    return Ok(b);
+                }
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        ErrorKind::UnexpectedEof
+                            | ErrorKind::ConnectionReset
+                            | ErrorKind::ConnectionAborted
+                            | ErrorKind::BrokenPipe
+                    ) => {}
+                Err(e) => return Err(e),
+            }
         }
-        Err(e) => return Err(e),
+        query_dle_eot(host, port, n, timeout)
     };
-    let printer_byte = match query_dle_eot_on_stream(&mut stream, 1) {
-        Ok(b) => b,
-        Err(e)
-            if matches!(
-                e.kind(),
-                ErrorKind::UnexpectedEof
-                    | ErrorKind::ConnectionReset
-                    | ErrorKind::ConnectionAborted
-                    | ErrorKind::BrokenPipe
-            ) =>
-        {
-            query_printer_status(host, port, timeout)?
-        }
-        Err(e) => return Err(e),
-    };
+    let error_byte = query_next(3)?;
+    let printer_byte = query_next(1)?;
 
     let paper = decode_dle_eot_paper(paper_byte);
     let error = decode_dle_eot_error(error_byte);

@@ -24,8 +24,8 @@ globalThis.sessionStorage = {
     setItem: (k, v) => store.set(k, String(v)),
     removeItem: (k) => store.delete(k),
 };
-eval(extract("posReceiptKey") + "\n" + extract("finishPosReceiptAttempt") +
-    "\nglobalThis.__k = posReceiptKey; globalThis.__c = finishPosReceiptAttempt;");
+eval(extract("extractCashierUserId") + "\n" + extract("posReceiptKey") + "\n" + extract("finishPosReceiptAttempt") +
+    "\nglobalThis.__u = extractCashierUserId; globalThis.__k = posReceiptKey; globalThis.__c = finishPosReceiptAttempt;");
 
 const k1 = globalThis.__k("Order_1", "7");
 const k2 = globalThis.__k("Order_1", "7");
@@ -45,4 +45,25 @@ assert.match(other, /^pos-Order_1-\d{8}-u9-a1$/);
 assert.notStrictEqual(other, k3);
 assert.strictEqual(globalThis.__k("Order_1", "9"), other, "second cashier keeps own in-flight key");
 assert.strictEqual(globalThis.__k("Order_1", "7"), k3, "first cashier record untouched");
+// Stale record (>15s without terminal state) advances to a fresh attempt.
+store.set("np.pos.key.Order_3.u7", JSON.stringify({ key: "pos-Order_3-20261119-u7-a1", ts: Date.now() - 20000, attempt: 1 }));
+const staleNext = globalThis.__k("Order_3", "7");
+assert.match(staleNext, /-a2$/, "stale >15s record advances to next attempt");
+
+// Cashier ID extraction: an object without .id falls through instead of returning "0".
+assert.strictEqual(
+    globalThis.__u({ name: "Anon" }, { user: { id: 12 } }, null),
+    "12",
+    "cashier object without id falls through to posStore.user.id",
+);
+assert.strictEqual(
+    globalThis.__u({}, { user: {}, session: { user_id: [19, "Cashier"] } }, null),
+    "19",
+    "empty cashier/user objects fall through to session.user_id tuple",
+);
+assert.strictEqual(
+    globalThis.__u(null, null, { user_id: { id: 42 } }),
+    "42",
+    "falls through to order.user_id.id",
+);
 console.log("pos key tests: ALL PASS");

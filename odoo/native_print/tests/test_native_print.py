@@ -296,6 +296,11 @@ class TestTranslationFiles(TransactionCase):
                 any(l.startswith("#:") for l in block.splitlines()),
                 f"catalog entry without occurrences (importer drops it): {msgid!r}",
             )
+            if any("/static/src/js/" in l for l in block.splitlines() if l.startswith("#:")):
+                self.assertIn(
+                    "#. odoo-javascript", block,
+                    f"JS catalog entry without odoo-javascript marker: {msgid!r}",
+                )
             msgids.add(msgid)
         self.assertGreaterEqual(len(msgids), 100)
 

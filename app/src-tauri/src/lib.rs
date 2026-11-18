@@ -31,6 +31,12 @@ const BRIDGE_JS: &str = r#"
   // here instead of leaving a silent white page. Captured errors are
   // surfaced in the boot card, the environment report and the
   // diagnostics bundle.
+  // Subframes get no facade, no watchdog, and no environment IPC:
+  // a third-party frame embedded in the Odoo page must not inherit
+  // the top page's print rights or UI overlays (audit B2). Fail
+  // closed if the top-frame check throws.
+  var __npIsTop = false;
+  try { __npIsTop = window === window.top; } catch (e) { __npIsTop = false; }
   window.__NP_ERRORS__ = [];
   function npPushError(kind, message) {
     try {
@@ -39,7 +45,7 @@ const BRIDGE_JS: &str = r#"
       var text = String(kind || "error") + ": " + String(message == null ? "" : message).slice(0, 300);
       if (list.indexOf(text) !== -1) return;
       list.push(text);
-      if (window.__NP_ERROR_TIMER__) return;
+      if (!__npIsTop || window.__NP_ERROR_TIMER__) return;
       window.__NP_ERROR_TIMER__ = window.setTimeout(function () {
         window.__NP_ERROR_TIMER__ = null;
         npReportEnvironment();
@@ -65,12 +71,6 @@ const BRIDGE_JS: &str = r#"
     var r = ev && ev.reason;
     npPushError("promise", (r && (r.message || r)) || "unhandled rejection");
   });
-  // Subframes get no facade and no watchdog: a third-party frame
-  // embedded in the Odoo page must not inherit the top page's print
-  // rights or UI overlays (audit B2). The error tap above stays in
-  // every frame; it is read-only diagnostics.
-  var __npIsTop = false;
-  try { __npIsTop = window === window.top; } catch (e) { __npIsTop = true; }
   const __npFacade = {
     version: "__APP_VERSION__",
     printPdf: function (args) {
@@ -201,7 +201,7 @@ const BRIDGE_JS: &str = r#"
   // panel with working recovery actions.
   // ------------------------------------------------------------------
   function npIsLocalPage() {
-    return window.location.hostname === "tauri.localhost" || window.location.protocol === "tauri:";
+    return (window.location.hostname === "tauri.localhost" && window.location.port === "") || window.location.protocol === "tauri:";
   }
   // Unencrypted-origin warning: HTTP to an IP address is allowed by
   // the owner's policy (ADR-0002), but credentials and documents cross
@@ -471,7 +471,7 @@ const BRIDGE_JS: &str = r#"
     } catch (e) { /* history patching is best-effort */ }
   }
   window.addEventListener("keydown", function (ev) {
-    if (window !== window.top) return;
+    if (!__npIsTop) return;
     if (ev.altKey && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) {
       var t = ev.target;
       var editable = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
@@ -483,7 +483,7 @@ const BRIDGE_JS: &str = r#"
     }
     if (ev.ctrlKey && ev.shiftKey && (ev.key === "Y" || ev.key === "y")) {
       ev.preventDefault();
-      if (window.location.hostname === "tauri.localhost" || window.location.protocol === "tauri:") {
+      if (npIsLocalPage()) {
         window.__NATIVE_PRINT__.openOdooOrigin().catch(function () {});
       } else {
         window.__NATIVE_PRINT__.openControlCenter().catch(function () {});
@@ -576,6 +576,7 @@ pub fn create_tab_webview(
     let nav_handle = app.clone();
     let nav_label = label.to_string();
     let open_handle = app.clone();
+    let open_label = label.to_string();
     let load_handle = app.clone();
     let load_label = label.to_string();
     let builder = tauri::webview::WebviewBuilder::new(label, url)
@@ -637,7 +638,15 @@ pub fn create_tab_webview(
             // (the origin policy leaves the app no other browser).
             let state = open_handle.state::<AppState>();
             let allowed = state.configured_origin.read().ok().and_then(|g| g.clone());
-            let on_origin = is_local_app_url(&u)
+            let opener_is_local = state
+                .tabs
+                .read()
+                .ok()
+                .and_then(|t| t.url_of(&open_label).map(|s| s.to_string()))
+                .and_then(|s| tauri::Url::parse(&s).ok())
+                .map(|cu| is_local_app_url(&cu))
+                .unwrap_or(false);
+            let on_origin = (opener_is_local && is_local_app_url(&u))
                 || allowed
                     .map(|cfg| origin_is_allowed(&cfg, &u.origin().ascii_serialization()))
                     .unwrap_or(false);
@@ -747,7 +756,9 @@ pub fn run() {
                 tauri::webview::WebviewBuilder::new(
                     "tabbar",
                     WebviewUrl::App("tabbar.html".into()),
-                ),
+                )
+                .on_navigation(|u| is_local_app_url(u))
+                .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny),
                 tauri::LogicalPosition::new(0.0, 0.0),
                 tauri::LogicalSize::new(1280.0, TABBAR_HEIGHT),
             )?;

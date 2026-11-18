@@ -253,7 +253,11 @@ export class NativePrintSystray extends Component {
         this.closeMenu();
         const bridge = window.__NATIVE_PRINT__ || null;
         if (bridge && typeof bridge.openControlCenter === "function") {
-            await bridge.openControlCenter();
+            try {
+                await bridge.openControlCenter();
+            } catch (err) {
+                console.error(err);
+            }
         } else {
             this.notification.add(
                 _t("The Control Center is available when running inside the Yaseir Print desktop app (Ctrl+Shift+Y)."),

@@ -19,41 +19,42 @@ class NativePrintJob(models.Model):
         # updated and Odoo restarted without `-u native_print`, ensure
         # newly added columns exist before any ORM read/prefetch runs.
         try:
-            self.env.cr.execute(
-                "SELECT 1 FROM information_schema.tables "
-                "WHERE table_schema = 'public' AND table_name = %s",
-                [self._table],
-            )
-            if not self.env.cr.fetchone():
-                return
-            self.env.cr.execute(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = 'public' AND table_name = %s",
-                [self._table],
-            )
-            existing = {row[0] for row in self.env.cr.fetchall()}
-            expected = {
-                "device_id": "integer",
-                "source_type": "varchar DEFAULT 'report'",
-                "source_model": "varchar",
-                "source_ids": "varchar",
-                "copies": "integer DEFAULT 1",
-                "paper": "varchar",
-                "duplex": "boolean DEFAULT false",
-                "duplex_configured": "boolean DEFAULT false",
-                "color": "boolean DEFAULT true",
-                "mode": "varchar",
-            }
-            for col, col_type in expected.items():
-                if col not in existing:
-                    self.env.cr.execute(
-                        f'ALTER TABLE "{self._table}" ADD COLUMN IF NOT EXISTS "{col}" {col_type}'
-                    )
-                    _logger.warning(
-                        "native_print: added missing column %s.%s automatically (run -u native_print to complete module upgrade)",
-                        self._table,
-                        col,
-                    )
+            with self.env.cr.savepoint():
+                self.env.cr.execute(
+                    "SELECT 1 FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = %s",
+                    [self._table],
+                )
+                if not self.env.cr.fetchone():
+                    return
+                self.env.cr.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = %s",
+                    [self._table],
+                )
+                existing = {row[0] for row in self.env.cr.fetchall()}
+                expected = {
+                    "device_id": "integer",
+                    "source_type": "varchar DEFAULT 'report'",
+                    "source_model": "varchar",
+                    "source_ids": "varchar",
+                    "copies": "integer DEFAULT 1",
+                    "paper": "varchar",
+                    "duplex": "boolean DEFAULT false",
+                    "duplex_configured": "boolean DEFAULT false",
+                    "color": "boolean DEFAULT true",
+                    "mode": "varchar",
+                }
+                for col, col_type in expected.items():
+                    if col not in existing:
+                        self.env.cr.execute(
+                            f'ALTER TABLE "{self._table}" ADD COLUMN IF NOT EXISTS "{col}" {col_type}'
+                        )
+                        _logger.warning(
+                            "native_print: added missing column %s.%s automatically (run -u native_print to complete module upgrade)",
+                            self._table,
+                            col,
+                        )
         except Exception as exc:
             _logger.debug("native_print: schema check skipped (%s)", exc)
 
@@ -117,6 +118,7 @@ class NativePrintJob(models.Model):
     mode = fields.Char(string="Print Mode")
     user_id = fields.Many2one(
         "res.users",
+        index=True,
         default=lambda s: s.env.user,
         string="User",
     )
@@ -134,6 +136,7 @@ class NativePrintJob(models.Model):
     company_id = fields.Many2one(
         "res.company",
         required=True,
+        index=True,
         default=lambda s: s.env.company,
         string="Company",
     )
@@ -158,8 +161,10 @@ class NativePrintJob(models.Model):
                    if x.strip().isdigit()]
         report = self.report_id
         if not report and self.report_name:
-            report = self.env["ir.actions.report"].sudo().search(
+            found = self.env["ir.actions.report"].sudo().search(
                 [("report_name", "=", self.report_name)], limit=1)
+            # Drop sudo so check_access("read") below runs as the caller.
+            report = self.env["ir.actions.report"].browse(found.id)
         if not report or not ids:
             raise UserError(_(
                 "This job cannot be reprinted: the original report "
@@ -249,7 +254,7 @@ class NativePrintJob(models.Model):
         "A print job with this idempotency key already exists for this company.",
     )
 
-    def _cron_prune_job_log(self, days=180):
+    def _cron_prune_job_log(self, days=180, batch_size=1000, max_batches=10):
         """Retention hook for the scheduled action (shipped
         INACTIVE — see data/native_print_cron.xml): delete
         terminal-state jobs older than `days`. The log is an audit
@@ -257,14 +262,25 @@ class NativePrintJob(models.Model):
         silent default (audit M2). Active jobs are never pruned:
         their outcome is still owed to someone."""
         days = max(1, int(days))
-        cutoff = fields.Datetime.now() - timedelta(days=days)
-        old = self.sudo().search([
+        batch_size = max(1, int(batch_size))
+        max_batches = max(1, int(max_batches))
+        cutoff = fields.Datetime.to_string(
+            fields.Datetime.now() - timedelta(days=days)
+        )
+        domain = [
             ("state", "in", ["done", "failed", "canceled", "dead_letter"]),
-            ("create_date", "<", fields.Datetime.to_string(cutoff)),
-        ])
-        count = len(old)
-        if old:
-            old.unlink()
+            ("create_date", "<", cutoff),
+        ]
+        Job = self.sudo()
+        count = 0
+        for _ in range(max_batches):
+            batch = Job.search(domain, limit=batch_size)
+            if not batch:
+                break
+            count += len(batch)
+            batch.unlink()
+            if len(batch) < batch_size:
+                break
         return count
 
     def write(self, vals):

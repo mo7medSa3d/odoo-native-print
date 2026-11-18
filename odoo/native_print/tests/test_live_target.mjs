@@ -127,6 +127,16 @@ eq(summary[0], "A4 — 210×297mm", "nested size summary");
 eq(summary[1], "Roll 80 — 80×297mm (Roll)", "roll suffix");
 eq(summary[2], "Letter — 216×279mm", "flat size tolerated");
 eq(m.formatFormsSummary(undefined, "Roll").length, 0, "no forms -> empty");
+eq(
+    m.formatFormsSummary([{ name: "Custom", size: { width_mm: null, height_mm: "" }, roll: false }], "Roll")[0],
+    "Custom — ?×?mm",
+    "null/empty dimensions stay unknown instead of 0",
+);
+eq(
+    m.printerPatternFor({ name: "EPSON TM-T88VII", port: " 192.168.1.50 " }, "escpos"),
+    "tcp://192.168.1.50:9100",
+    "whitespace-padded IP port is trimmed",
+);
 
 // Protocol-detection parity (2026-11-07): the thermal token
 // table and the label rules exist in TWO languages — this page
@@ -218,4 +228,126 @@ t = await m.resolveBridgeTarget(bridge);
 eq(t.printer.name, "HP LaserJet", "report printer stays HP LaserJet");
 m.setSelectedPosPrinter(null);
 m.setSelectedPrinter(null);
+// End-to-end handler regression tests: quiet-retry status sync,
+// qweb-text 1 MiB/empty guard, and ASCII-safe <=128-char idempotency keys.
+const rpcCalls = [];
+const notices = [];
+let registeredHandler = null;
+const handlerSrc = readFileSync(
+    new URL("../static/src/js/native_print_handler.js", import.meta.url),
+    "utf8",
+)
+    .replace('import { registry } from "@web/core/registry";',
+        'const registry = { category: () => ({ add: (_k, fn) => { globalThis.__npHandler = fn; } }) };')
+    .replace('import { rpc } from "@web/core/network/rpc";',
+        'const rpc = async (url, params) => { globalThis.__npRpcCalls.push({ url, params }); return { ok: true }; };')
+    .replace('import { _t } from "@web/core/l10n/translation";',
+        'const _t = (s, ...args) => args.reduce((acc, v) => acc.replace("%s", String(v)), s);')
+    .replace('from "./native_print_client";',
+        `from "${tmp}";`);
+globalThis.__npRpcCalls = rpcCalls;
+const tmpHandler = join(tmpdir(), "np_handler_test.mjs");
+writeFileSync(tmpHandler, handlerSrc);
+const h = await import(tmpHandler);
+registeredHandler = globalThis.__npHandler;
+const testEnv = {
+    services: {
+        notification: { add: (msg, opts) => notices.push({ msg, type: opts && opts.type }) },
+    },
+};
+
+const origSetTimeout = globalThis.setTimeout;
+globalThis.setTimeout = (fn) => { fn(); return 0; };
+try {
+    // 1. Quiet retry failed -> done must post `done` (not leave server `failed`).
+    rpcCalls.length = 0;
+    notices.length = 0;
+    let pollIdx = 0;
+    const retryDoneBridge = {
+        jobDetail: async () => {
+            pollIdx++;
+            if (pollIdx === 1) return { state: "failed", errorCode: "BUSY", pages: 1, attempts: 1 };
+            return { state: "done", errorCode: null, pages: 2, attempts: 2 };
+        },
+    };
+    const resDone = await h.watchJobToCompletion(
+        retryDoneBridge,
+        "job-retry-done",
+        { reportName: "account.report_invoice", printerName: "HP", printerPattern: "HP", byteSize: 100 },
+        testEnv,
+    );
+    eq(resDone, "done", "quiet-retry recovery returns done");
+    eq(rpcCalls.length, 1, "quiet-retry recovery posts one final status");
+    eq(rpcCalls[0].params.state, "done", "quiet-retry recovery syncs done to server");
+    eq(rpcCalls[0].params.pages, 2, "quiet-retry recovery syncs updated pages");
+    eq(notices.length, 1, "quiet-retry recovery emits one toast");
+    eq(notices[0].type, "success", "quiet-retry recovery toast is success");
+
+    // 2. Quiet retry failed -> canceled must post `canceled` and emit no danger toast.
+    rpcCalls.length = 0;
+    notices.length = 0;
+    let cancelIdx = 0;
+    const retryCancelBridge = {
+        jobDetail: async () => {
+            cancelIdx++;
+            if (cancelIdx === 1) return { state: "failed", errorCode: "BUSY", pages: 1, attempts: 1 };
+            return { state: "canceled", errorCode: null, pages: 1, attempts: 1 };
+        },
+    };
+    const resCancel = await h.watchJobToCompletion(
+        retryCancelBridge,
+        "job-retry-cancel",
+        { reportName: "account.report_invoice", printerName: "HP", printerPattern: "HP", byteSize: 100 },
+        testEnv,
+    );
+    eq(resCancel, "canceled", "quiet-retry canceled returns canceled");
+    eq(rpcCalls.length, 1, "quiet-retry canceled posts one status");
+    eq(rpcCalls[0].params.state, "canceled", "quiet-retry canceled syncs canceled");
+    eq(notices.length, 0, "quiet-retry canceled emits no danger toast");
+} finally {
+    globalThis.setTimeout = origSetTimeout;
+}
+
+// 3. qweb-text on escpos: empty and >1 MiB fall back without calling bridge.printText.
+const origFetch = globalThis.fetch;
+try {
+    let textPrintCalls = 0;
+    globalThis.window.__NATIVE_PRINT__ = {
+        listPrinters: async () => [{ name: "EPSON TM-T88VII", driver: "EPSON", kind: "local", is_default: true }],
+        printerCapabilities: async () => ({ forms: [], color: false }),
+        printText: async () => { textPrintCalls++; return "ok"; },
+    };
+    rpcCalls.length = 0;
+    globalThis.fetch = async () => ({ ok: true, text: async () => "" });
+    const emptyRes = await registeredHandler({ report_type: "qweb-text", report_name: "r.empty" }, {}, testEnv);
+    eq(emptyRes, undefined, "empty qweb-text falls back");
+    eq(textPrintCalls, 0, "empty qweb-text never calls printText");
+    eq(rpcCalls.length, 0, "empty qweb-text never posts queued status");
+
+    globalThis.fetch = async () => ({ ok: true, text: async () => "x".repeat(1024 * 1024 + 1) });
+    const bigRes = await registeredHandler({ report_type: "qweb-text", report_name: "r.big" }, {}, testEnv);
+    eq(bigRes, undefined, "oversized >1MiB qweb-text falls back");
+    eq(textPrintCalls, 0, "oversized qweb-text never calls printText");
+
+    // 4. Dynamic report with long non-ASCII report_name produces a valid <=128-char ASCII key.
+    let capturedKey = null;
+    globalThis.window.__NATIVE_PRINT__ = {
+        listPrinters: async () => [{ name: "HP LaserJet", driver: "HP PCL", kind: "local", is_default: true }],
+        printerCapabilities: async () => ({ forms: [], color: true }),
+        printPdf: async (req) => { capturedKey = req.idempotencyKey; return req.idempotencyKey; },
+        jobDetail: async () => ({ state: "done", pages: 1, attempts: 1 }),
+    };
+    globalThis.fetch = async () => ({
+        ok: true,
+        arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]).buffer,
+    });
+    const longName = "فاتورة " + "a".repeat(150);
+    const pdfRes = await registeredHandler({ report_type: "qweb-pdf", report_name: longName }, {}, testEnv);
+    eq(pdfRes, true, "dynamic long non-ASCII report prints");
+    eq(capturedKey.length <= 128, true, "idempotencyKey length <= 128");
+    eq(/^[!-~]+$/.test(capturedKey), true, "idempotencyKey is printable ASCII");
+} finally {
+    globalThis.fetch = origFetch;
+    delete globalThis.window.__NATIVE_PRINT__;
+}
 console.log("JS LIVE TARGET TESTS: ALL PASS");

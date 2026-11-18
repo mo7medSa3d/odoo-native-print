@@ -63,13 +63,15 @@ test("Odoo origin accepts HTTPS anywhere and HTTP on any IP", () => {
     "http://172.16.4.9:8069", "http://127.0.0.1:8069",
     "http://8.8.8.8:8069", "http://68.221.27.248:8070",
     "http://[::1]:8069", "http://[fd00::25]:8069", "http://[fe80::1]:8069",
-    "http://[2001:4860:4860::8888]:8069"
+    "http://[2001:4860:4860::8888]:8069",
+    "http://localhost:8069"
   ]) assert.equal(validOdoo(value), true, value);
 });
 
 test("Odoo origin rejects HTTP hostnames, bad IPs and URL tricks", () => {
   for (const value of [
     "http://odoo.company.local:8069",
+    "http://evil.localhost:8069",
     "http://999.999.999.999:8069",
     "http://192.168.1.20:0", "http://192.168.1.20:65536",
     "http://user@192.168.1.20:8069", "https://user@odoo.example.com:8069",
@@ -82,6 +84,8 @@ test("Odoo origin rejects HTTP hostnames, bad IPs and URL tricks", () => {
 test("printer URI accepts IP-only TCP, RAW and IPP", () => {
   for (const value of [
     "tcp://192.168.1.200:9100", "raw://192.168.1.200:9100",
+    "tcp://192.168.0.10:9100", "tcp://10.0.0.5:9100", "tcp://172.16.0.1:9100",
+    "ipp://192.168.0.50:631/ipp/print",
     "ipp://192.168.1.200:631/ipp/print", "ipp://[::1]:631/ipp/print"
   ]) assert.equal(validPrinter(value), true, value);
 });
@@ -91,6 +95,7 @@ test("printer URI rejects domains, other schemes and bad ports", () => {
     "tcp://printer.local:9100", "https://192.168.1.200:9100",
     "ftp://192.168.1.200:21", "tcp://999.999.999.999:9100",
     "tcp://192.168.1.200:0", "tcp://192.168.1.200:65536",
+    "tcp://192.168.00.1:9100", "tcp://0001:9100",
     "tcp://192.168.1.200:9100/print"
   ]) assert.equal(validPrinter(value), false, value);
 });
@@ -150,4 +155,29 @@ test("secondary desktop pages parse, resolve IDs, translate all keys, and match 
   const admx = readFileSync(new URL("../deploy/admx/OdooNativePrint.admx", import.meta.url), "utf8");
   const odooOriginPolicy = admx.match(/<policy name="OdooOrigin"[^>]*>/)?.[0] || "";
   assert.equal(odooOriginPolicy.includes("valueName="), false, "ADMX OdooOrigin <policy> must not duplicate valueName of <text>");
+});
+
+const escapeHtml = new vm.Script("(" + extract("escapeHtml", "  function formatBytes(") + ")").runInNewContext({});
+
+test("escapeHtml neutralizes HTML special characters", () => {
+  assert.equal(escapeHtml(`<script>alert("x" & 'y')</script>`), "&lt;script&gt;alert(&quot;x&quot; &amp; &#39;y&#39;)&lt;/script&gt;");
+  assert.equal(escapeHtml(null), "");
+  assert.equal(escapeHtml(undefined), "");
+});
+
+test("Control Center bridge calls align with lib.rs BRIDGE_JS and registered commands", async () => {
+  const { extractBridge } = await import("./jsdom/extract-bridge.mjs");
+  const bridgeJs = extractBridge();
+  assert.doesNotThrow(() => new vm.Script(bridgeJs), "extracted BRIDGE_JS must parse");
+  const libRs = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  const handlerBlock = libRs.match(/tauri::generate_handler!\[([\s\S]*?)\]/)?.[1] || "";
+  const registered = new Set([...handlerBlock.matchAll(/commands::(\w+)/g)].map(m => m[1]));
+  for (const inv of bridgeJs.matchAll(/\binvoke\(\s*["']([^"']+)["']/g)) {
+    assert.ok(registered.has(inv[1]), "BRIDGE_JS invokes unregistered command: " + inv[1]);
+  }
+  const facadeMethods = new Set([...bridgeJs.matchAll(/\b(\w+):\s*function\s*\(/g)].map(m => m[1]));
+  for (const call of script.matchAll(/\b(?:api|b)\.(\w+)\s*\(/g)) {
+    if (["has", "get", "set", "delete", "add", "remove", "toggle", "includes", "forEach", "map", "filter", "find", "slice", "join", "push", "trim", "replace", "toLowerCase", "toUpperCase", "startsWith", "endsWith", "test", "match", "split", "setAttribute", "getAttribute", "closest", "querySelector", "querySelectorAll", "addEventListener", "focus", "click"].includes(call[1])) continue;
+    assert.ok(facadeMethods.has(call[1]), "index.html calls missing bridge method: " + call[1]);
+  }
 });
