@@ -161,19 +161,20 @@ class NativePrintJob(models.Model):
         if self.source_ids:
             ids = [int(x) for x in self.source_ids.split(",")
                    if x.strip().isdigit()]
-        report = self.report_id
+        # Report metadata is read with sudo: print users have no ACL on
+        # ir.actions.report. Authorization is decided explicitly by the
+        # group check below, not by that ACL.
+        report = self.report_id.sudo()
         if not report and self.report_name:
             found = self.env["ir.actions.report"].sudo().search(
                 [("report_name", "=", self.report_name)], limit=1)
-            # Drop sudo so check_access("read") below runs as the caller.
-            report = self.env["ir.actions.report"].browse(found.id)
+            report = found
         if not report or not ids:
             raise UserError(_(
                 "This job cannot be reprinted: the original report "
                 "or its records were not recorded for it (for "
                 "example, POS receipts are reprinted from the POS)."
             ))
-        report.check_access("read")
         # The log row is client-reported, so nothing on it is trusted
         # on its own (audit L4): the report's OWN model decides which
         # records are rendered — never the posted source_model — the
