@@ -37,12 +37,17 @@ function nativeBridge() {
 }
 
 function notificationEnv(contextObj) {
-    // OWL components expose env directly, and the PosStore keeps it
-    // on .env as well. Anything else simply means no toast is
-    // possible here; notifyUser then no-ops.
+    // OWL components expose env directly, PosStore keeps it on .env,
+    // and some Odoo POS services attach .notification directly.
     return (
         (contextObj && contextObj.env) ||
         (contextObj && contextObj.pos && contextObj.pos.env) ||
+        (contextObj && contextObj.notification
+            ? { services: { notification: contextObj.notification } }
+            : null) ||
+        (contextObj && contextObj.pos && contextObj.pos.notification
+            ? { services: { notification: contextObj.pos.notification } }
+            : null) ||
         null
     );
 }
@@ -94,7 +99,7 @@ function findReceiptElement(orderRef) {
     );
 }
 
-async function waitForReceiptElement(orderRef, timeoutMs = 1500) {
+async function waitForReceiptElement(orderRef, timeoutMs = 2000) {
     let el = findReceiptElement(orderRef);
     if (el) return el;
     const deadline = Date.now() + timeoutMs;
@@ -194,10 +199,29 @@ async function inlineMedia(source, clone) {
     }
 }
 
+function extractReceiptText(element) {
+    if (!element) {
+        return "";
+    }
+    const raw =
+        (typeof element.innerText === "string" && element.innerText) ||
+        element.textContent ||
+        "";
+    return raw
+        .replace(/\r\n?/g, "\n")
+        .split("\n")
+        .map((line) => line.replace(/[ \t]+/g, " ").trimEnd())
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+}
+
 async function elementToPngBytes(element, scale = 2) {
     let offscreenHost = null;
+    let svgObjectUrl = null;
     if (!element.isConnected && document.body) {
         offscreenHost = document.createElement("div");
+        offscreenHost.className = "pos-receipt-container";
         offscreenHost.setAttribute(
             "style",
             "position:fixed;left:-99999px;top:0;width:300px;background:#fff;color:#000;pointer-events:none;z-index:-1;",
@@ -206,43 +230,63 @@ async function elementToPngBytes(element, scale = 2) {
         document.body.appendChild(offscreenHost);
     }
     try {
-    const width = element.offsetWidth || 320;
-    const height = element.offsetHeight || element.scrollHeight || 480;
-    if (!width || !height) {
-        throw new Error("receipt element has no size");
-    }
-    const clone = element.cloneNode(true);
-    inlineStyles(element, clone);
-    await inlineMedia(element, clone);
-    clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
-    const svg =
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
-        `<foreignObject width="100%" height="100%">` +
-        new XMLSerializer().serializeToString(clone) +
-        `</foreignObject></svg>`;
-    const img = new Image();
-    const loaded = new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = () => reject(new Error("receipt SVG failed to load"));
-    });
-    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
-    await loaded;
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.ceil(width * scale);
-    canvas.height = Math.ceil(height * scale);
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.scale(scale, scale);
-    ctx.drawImage(img, 0, 0, width, height);
-    const blob = await new Promise((resolve) =>
-        canvas.toBlob(resolve, "image/png"),
-    );
-    if (!blob) {
-        throw new Error("receipt canvas produced no image");
-    }
-    return Array.from(new Uint8Array(await blob.arrayBuffer()));
+        const width = element.offsetWidth || 320;
+        const height = element.offsetHeight || element.scrollHeight || 480;
+        if (!width || !height) {
+            throw new Error("receipt element has no size");
+        }
+        // Clamp scale so extra-tall receipts stay within browser canvas backing limits.
+        const effectiveScale = Math.max(
+            0.5,
+            Math.min(scale, 14000 / height, 4096 / width),
+        );
+        const clone = element.cloneNode(true);
+        inlineStyles(element, clone);
+        await inlineMedia(element, clone);
+        clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+        // Strip control characters that are illegal in XML 1.0 foreignObject trees.
+        const serializedClone = new XMLSerializer()
+            .serializeToString(clone)
+            .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+        const svg =
+            `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
+            `<foreignObject width="100%" height="100%">` +
+            serializedClone +
+            `</foreignObject></svg>`;
+        const img = new Image();
+        const loaded = new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = () => reject(new Error("receipt SVG failed to load"));
+        });
+        if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+            const svgBlob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+            svgObjectUrl = URL.createObjectURL(svgBlob);
+            img.src = svgObjectUrl;
+        } else {
+            img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+        }
+        await loaded;
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.ceil(width * effectiveScale));
+        canvas.height = Math.max(1, Math.ceil(height * effectiveScale));
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.scale(effectiveScale, effectiveScale);
+        ctx.drawImage(img, 0, 0, width, height);
+        const blob = await new Promise((resolve) =>
+            canvas.toBlob(resolve, "image/png"),
+        );
+        if (!blob) {
+            throw new Error("receipt canvas produced no image");
+        }
+        return Array.from(new Uint8Array(await blob.arrayBuffer()));
     } finally {
+        if (svgObjectUrl && typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
+            try {
+                URL.revokeObjectURL(svgObjectUrl);
+            } catch (_err) { /* ignore */ }
+        }
         if (offscreenHost) {
             offscreenHost.remove();
         }
@@ -307,7 +351,8 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
     // queue legitimately takes longer), 30-minute absolute cap.
     const absoluteDeadline = Date.now() + 30 * 60 * 1000;
     let lastProgressAt = Date.now();
-    let lastSeenState = null;
+    let lastSeenState = "queued";
+    let lastSeenAttempts = 1;
     let reachedTerminal = false;
     let consecutiveErrors = 0;
     // The watch continues past retryable outcomes (failed /
@@ -316,102 +361,115 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
     // the same failure would re-post and re-notify on every poll.
     let lastOutcomeKey = null;
     let orderReleased = false;
+    const syncJobStatus = async (state, errorCode, attempts) => {
+        await rpc(
+            "/native_print/job_status",
+            {
+                idempotency_key: jobId,
+                state,
+                error_code: errorCode || null,
+                device: printerName || rule.printer_pattern,
+                report_name: POS_RECEIPT_SOURCE,
+                source_type: "pos_receipt",
+                copies: rule.copies || 1,
+                mode: rule.mode || "gdi",
+                pages: 1,
+                byte_size: byteSize,
+                attempts,
+            },
+            { silent: true },
+        ).catch(() => {});
+    };
+
     for (let i = 0; Date.now() < absoluteDeadline && Date.now() - lastProgressAt < 5 * 60 * 1000; i++) {
         await new Promise((resolve) =>
             setTimeout(resolve, i < 10 ? 600 : 2000));
         try {
             let state = null;
             let errorCode = null;
-            let attempts = 1;
+            let attempts = lastSeenAttempts;
             if (typeof bridge.jobDetail === "function") {
                 const detail = await bridge.jobDetail(jobId);
                 if (detail) {
                     state = detail.state;
-                    errorCode = detail.errorCode || null;
+                    errorCode = detail.errorCode || detail.error_code || null;
                     attempts = detail.attempts || attempts;
                 }
             } else if (typeof bridge.printStatus === "function") {
                 state = await bridge.printStatus(jobId);
             }
             consecutiveErrors = 0;
-            if (state && state !== lastSeenState) {
-                lastSeenState = state;
+            if (!state) {
+                continue;
+            }
+            const progressed = state !== lastSeenState || attempts !== lastSeenAttempts;
+            if (progressed) {
                 lastProgressAt = Date.now();
             }
-            if (state && TERMINAL_STATES.has(state)) {
-                const outcomeKey = state + ":" + attempts;
-                if (outcomeKey === lastOutcomeKey) {
-                    // Same outcome as last poll: still waiting on
-                    // a possible retry. Do not re-post or re-notify.
-                    continue;
+            if (!TERMINAL_STATES.has(state)) {
+                if (progressed) {
+                    lastSeenState = state;
+                    lastSeenAttempts = attempts;
+                    await syncJobStatus(state, errorCode, attempts);
                 }
-                lastOutcomeKey = outcomeKey;
-                reachedTerminal = true;
-                // Every outcome observation is posted to the server
-                // log, including a retryable failure: the controller
-                // accepts failed/dead_letter -> queued re-entry, so
-                // the log converges on the retry's outcome instead
-                // of freezing on the first failure.
-                if (!orderReleased) {
-                    // The order is handed back on the FIRST outcome
-                    // (success or failure) so the cashier's flow and
-                    // reprint path stay available immediately; later
-                    // retry outcomes only update the server log.
-                    orderReleased = true;
-                    // Terminal: the next print of this order is a new,
-                    // deliberate attempt with a fresh idempotency key.
-                    if (safeRef) {
-                        finishPosReceiptAttempt(safeRef, userId);
-                    }
-                }
-                // Keep the POS order aligned with the latest confirmed
-                // outcome. A retryable failure may later reach `done`;
-                // the first outcome releases the cashier, but a later
-                // successful retry must still restore `_printed`.
-                if (order) {
-                    if (state === "done") {
-                        order._printed = true;
-                    } else if (state === "failed" || state === "dead_letter" || state === "canceled") {
-                        order._printed = false;
-                    }
-                }
-                await rpc(
-                    "/native_print/job_status",
-                    {
-                        idempotency_key: jobId,
-                        state,
-                        error_code: errorCode,
-                        device: printerName || rule.printer_pattern,
-                        report_name: POS_RECEIPT_SOURCE,
-                        source_type: "pos_receipt",
-                        copies: rule.copies || 1,
-                        mode: rule.mode || "gdi",
-                        pages: 1,
-                        byte_size: byteSize,
-                        attempts,
-                    },
-                    { silent: true },
-                ).catch(() => {});
-                if (state === "failed" || state === "dead_letter") {
-                    // The cashier must know this receipt failed;
-                    // success stays silent (the receipt itself, plus
-                    // the receipt screen, is the feedback). Wording
-                    // stays honest: a failed submission can still
-                    // have produced partial output on some paths, so
-                    // the cashier is told to check before reprinting.
-                    notifyUser(
-                        env,
-                        _t('Receipt printing failed on "%s" (%s). Check the printer before reprinting.', printerName || rule.printer_pattern, errorCode || state),
-                        "danger",
-                    );
-                    // Retryable outcome: keep polling within the
-                    // existing ladder so a re-queued job's later
-                    // outcome still reaches the server log. The
-                    // order was already handed back above.
-                    continue;
-                }
-                break;
+                continue;
             }
+            // Quiet retry check: if the desktop worker hit a transient error
+            // and already re-queued the receipt (`queued` / `printing`) or
+            // succeeded on retry, avoid flashing a false red toast.
+            if (state === "failed" && typeof bridge.jobDetail === "function") {
+                await new Promise((resolve) => setTimeout(resolve, 900));
+                const recheck = await bridge.jobDetail(jobId).catch(() => null);
+                if (recheck && recheck.state && !TERMINAL_STATES.has(recheck.state)) {
+                    lastSeenState = recheck.state;
+                    lastSeenAttempts = recheck.attempts || attempts;
+                    lastProgressAt = Date.now();
+                    await syncJobStatus(
+                        recheck.state,
+                        recheck.errorCode || recheck.error_code || null,
+                        lastSeenAttempts,
+                    );
+                    continue;
+                }
+                if (recheck && recheck.state) {
+                    state = recheck.state;
+                    errorCode = recheck.errorCode || recheck.error_code || errorCode;
+                    attempts = recheck.attempts || attempts;
+                }
+            }
+            lastSeenState = state;
+            lastSeenAttempts = attempts;
+            const outcomeKey = state + ":" + attempts;
+            if (outcomeKey === lastOutcomeKey) {
+                // Same outcome as last poll: still waiting on
+                // a possible retry. Do not re-post or re-notify.
+                continue;
+            }
+            lastOutcomeKey = outcomeKey;
+            reachedTerminal = true;
+            if (!orderReleased) {
+                orderReleased = true;
+                if (safeRef) {
+                    finishPosReceiptAttempt(safeRef, userId);
+                }
+            }
+            if (order) {
+                if (state === "done") {
+                    order._printed = true;
+                } else if (state === "failed" || state === "dead_letter" || state === "canceled") {
+                    order._printed = false;
+                }
+            }
+            await syncJobStatus(state, errorCode, attempts);
+            if (state === "failed" || state === "dead_letter") {
+                notifyUser(
+                    env,
+                    _t('Receipt printing failed on "%s" (%s). Check the printer before reprinting.', printerName || rule.printer_pattern, errorCode || state),
+                    "danger",
+                );
+                continue;
+            }
+            break;
         } catch (_err) {
             // Same rule as report jobs: one flaky poll must not
             // orphan the job and hide its outcome from the cashier.
@@ -427,7 +485,6 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
             "warning",
         );
     }
-
 }
 
 // A declined POS attempt (no printer, capture failure, enqueue
@@ -491,10 +548,15 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
     // and of the in-flight record, because the server log scopes jobs
     // per user and one browser profile can serve several cashiers.
     const posStore = (contextObj && contextObj.pos) || contextObj || null;
+    const cashierObj =
+        (posStore && typeof posStore.get_cashier === "function" && posStore.get_cashier()) ||
+        (posStore && posStore.cashier) ||
+        null;
     const cashierRaw =
-        (posStore && posStore.user && (posStore.user.id || posStore.user)) ||
-        (posStore && posStore.session && posStore.session.user_id) ||
-        (order && order.user_id && (order.user_id.id || order.user_id)) ||
+        (cashierObj && (cashierObj.id || (Array.isArray(cashierObj) && cashierObj[0]) || cashierObj)) ||
+        (posStore && posStore.user && (posStore.user.id || (Array.isArray(posStore.user) && posStore.user[0]) || posStore.user)) ||
+        (posStore && posStore.session && (posStore.session.user_id?.id || (Array.isArray(posStore.session.user_id) && posStore.session.user_id[0]) || posStore.session.user_id)) ||
+        (order && order.user_id && (order.user_id.id || (Array.isArray(order.user_id) && order.user_id[0]) || order.user_id)) ||
         0;
     const userId = String(cashierRaw).replace(/[^0-9]/g, "") || "0";
     const idempotencyKey = posReceiptKey(safeRef, userId);
@@ -506,107 +568,113 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
     }
     inFlightPosKeys.add(idempotencyKey);
     try {
-    let target = await resolveBridgeTarget(
-        bridge, { isPos: true, preferClasses: ["thermal", "label"] },
-    ).catch(() => null);
-    if (!target) {
-        await new Promise((resolve) => setTimeout(resolve, 700));
-        target = await resolveBridgeTarget(
+        let target = await resolveBridgeTarget(
             bridge, { isPos: true, preferClasses: ["thermal", "label"] },
         ).catch(() => null);
-    }
-    if (!target) {
-        // No printer on this PC right now.
-        return { reason: POS_FAIL_NO_PRINTER, code: "POS_NO_PRINTER", key: idempotencyKey, safeRef, userId };
-    }
-    const element = explicitElement || (await waitForReceiptElement(order ? displayRef : null));
-    if (!element) {
-        return { reason: POS_FAIL_NO_RECEIPT, code: "POS_RECEIPT_NOT_ON_SCREEN", key: idempotencyKey, safeRef, userId, device: target.printer.name, mode: target.rule.mode };
-    }
-    // The receipt's own physical width (CSS px render at 96 dpi):
-    // the last width evidence for the native renderer when
-    // neither the job nor the target's driver reports media — a
-    // receipt is sized by the best evidence available, and this
-    // one is always available (owner directive, 2026-11-05).
-    const sourceWidthMm = element.offsetWidth
-        ? Math.round((element.offsetWidth * 25.4) / 96 * 10) / 10
-        : undefined;
-    let bytes;
-    try {
-        bytes = await elementToPngBytes(element, 2);
-    } catch (_firstCaptureError) {
-        // A capture can fail on canvas size alone (a very long
-        // receipt at scale 2); retry once at scale 1 before
-        // reporting a capture failure.
-        try {
-            bytes = await elementToPngBytes(element, 1);
-        } catch (_secondCaptureError) {
-            return { reason: POS_FAIL_CAPTURE, code: "POS_CAPTURE_FAILED", key: idempotencyKey, safeRef, userId, device: target.printer.name, mode: target.rule.mode };
+        if (!target) {
+            await new Promise((resolve) => setTimeout(resolve, 700));
+            target = await resolveBridgeTarget(
+                bridge, { isPos: true, preferClasses: ["thermal", "label"] },
+            ).catch(() => null);
         }
-    }
-    const rule = target.rule;
-    // The mode comes from the TARGET printer's detection (thermal
-    // -> escpos, label languages, office/virtual -> gdi). The
-    // fallback for a missing mode is gdi — never a raw language: a
-    // document must not turn into raw bytes for a printer nobody
-    // identified as a raw printer (that default is what killed
-    // receipts sent to virtual printers before the owner caught
-    // it). One variable so the job log records the mode that
-    // actually ran.
-    const effectiveMode = rule.mode || "gdi";
-    try {
-        await bridge.printImage({
-            idempotencyKey,
-            reportName: POS_RECEIPT_SOURCE,
-            printerPattern: rule.printer_pattern,
-            mode: effectiveMode,
-            // The driver-reported roll width is resolved by the native worker.
-            // Never guess 58mm or 80mm for a kitchen/POS receipt.
-            mediaRollWidthMm:
-                (rule.media && rule.media.roll_width_mm) || undefined,
-            sourceWidthMm,
-            copies: rule.copies || 1,
-            bytes,
-        });
-    } catch (err) {
-        // The enqueue itself failed: rotate the idempotency record so
-        // an immediate deliberate reprint is a fresh attempt instead
-        // of deduping into the dead job inside the 15 s window. The
-        // key rides on the error so the wrapper can still log the
-        // declined attempt under it.
-        if (safeRef) { finishPosReceiptAttempt(safeRef, userId); }
+        if (!target) {
+            // No printer on this PC right now.
+            return { reason: POS_FAIL_NO_PRINTER, code: "POS_NO_PRINTER", key: idempotencyKey, safeRef, userId };
+        }
+        const element = explicitElement || (await waitForReceiptElement(order ? displayRef : null));
+        if (!element) {
+            return { reason: POS_FAIL_NO_RECEIPT, code: "POS_RECEIPT_NOT_ON_SCREEN", key: idempotencyKey, safeRef, userId, device: target.printer.name, mode: target.rule.mode };
+        }
+        const rule = target.rule;
+        // The mode comes from the TARGET printer's detection (thermal
+        // -> escpos, label languages, office/virtual -> gdi).
+        const effectiveMode = rule.mode || "gdi";
+        const sourceWidthMm = element.offsetWidth
+            ? Math.round((element.offsetWidth * 25.4) / 96 * 10) / 10
+            : undefined;
+        let bytes = null;
+        let fallbackText = null;
         try {
-            err.npKey = idempotencyKey;
-            err.npRef = safeRef;
-            err.npUserId = userId;
-            err.npDevice = target.printer.name;
-            err.npMode = effectiveMode;
-        } catch (_ignored) { /* non-object error: nothing to attach */ }
-        throw err;
-    }
-    rpc(
-        "/native_print/job_status",
-        {
-            idempotency_key: idempotencyKey,
-            state: "queued",
-            device: target.printer.name,
-            report_name: POS_RECEIPT_SOURCE,
-            source_type: "pos_receipt",
-            copies: rule.copies || 1,
-            mode: effectiveMode,
-            pages: 1,
-            byte_size: bytes.length,
-        },
-        { silent: true },
-    ).catch(() => {});
-    watchPosJob(
-        bridge, idempotencyKey, rule, bytes.length, safeRef,
-        target.printer.name, notificationEnv(contextObj), userId, order,
-    ).catch(() => {});
-    if (order) {
-        order._printed = true;
-    }
-    return null;
+            bytes = await elementToPngBytes(element, 2);
+        } catch (_firstCaptureError) {
+            // A capture can fail on canvas size alone (a very long
+            // receipt at scale 2); retry once at scale 1, and if raster
+            // capture still fails on a thermal ESC/POS printer, fall back
+            // to plain-text thermal output instead of aborting the receipt.
+            try {
+                bytes = await elementToPngBytes(element, 1);
+            } catch (_secondCaptureError) {
+                if (effectiveMode === "escpos" && typeof bridge.printText === "function") {
+                    const extracted = extractReceiptText(element);
+                    if (extracted) {
+                        fallbackText = extracted;
+                    }
+                }
+                if (!fallbackText) {
+                    return { reason: POS_FAIL_CAPTURE, code: "POS_CAPTURE_FAILED", key: idempotencyKey, safeRef, userId, device: target.printer.name, mode: effectiveMode };
+                }
+            }
+        }
+        const payloadByteSize = fallbackText
+            ? new TextEncoder().encode(fallbackText).length
+            : bytes.length;
+        try {
+            if (fallbackText) {
+                await bridge.printText({
+                    idempotencyKey,
+                    reportName: POS_RECEIPT_SOURCE,
+                    printerPattern: rule.printer_pattern,
+                    text: fallbackText,
+                    cut: true,
+                    copies: rule.copies || 1,
+                });
+            } else {
+                await bridge.printImage({
+                    idempotencyKey,
+                    reportName: POS_RECEIPT_SOURCE,
+                    printerPattern: rule.printer_pattern,
+                    mode: effectiveMode,
+                    mediaRollWidthMm:
+                        (rule.media && rule.media.roll_width_mm) || undefined,
+                    sourceWidthMm,
+                    copies: rule.copies || 1,
+                    bytes,
+                });
+            }
+        } catch (err) {
+            if (safeRef) { finishPosReceiptAttempt(safeRef, userId); }
+            try {
+                err.npKey = idempotencyKey;
+                err.npRef = safeRef;
+                err.npUserId = userId;
+                err.npDevice = target.printer.name;
+                err.npMode = effectiveMode;
+            } catch (_ignored) { /* non-object error: nothing to attach */ }
+            throw err;
+        }
+        rpc(
+            "/native_print/job_status",
+            {
+                idempotency_key: idempotencyKey,
+                state: "queued",
+                device: target.printer.name,
+                report_name: POS_RECEIPT_SOURCE,
+                source_type: "pos_receipt",
+                copies: rule.copies || 1,
+                mode: effectiveMode,
+                pages: 1,
+                byte_size: payloadByteSize,
+            },
+            { silent: true },
+        ).catch(() => {});
+        watchPosJob(
+            bridge, idempotencyKey, rule, payloadByteSize, safeRef,
+            target.printer.name, notificationEnv(contextObj), userId, order,
+        ).catch(() => {});
+        if (order) {
+            order._printed = true;
+        }
+        return null;
     } finally {
         inFlightPosKeys.delete(idempotencyKey);
     }

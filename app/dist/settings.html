@@ -10,44 +10,46 @@
   body { display: flex; flex-direction: column; }
   header {
     display: flex; align-items: center; gap: 14px;
-    padding: 18px 28px;
+    padding: 16px 28px;
     background: var(--bg-surface);
     border-bottom: 1px solid var(--border);
   }
-  header img { width: 38px; height: 38px; border-radius: 10px; }
-  header h1 { font-size: 18px; font-weight: 700; margin: 0; }
-  header .sub { color: var(--text-muted); font-size: 12.5px; margin-top: 2px; }
+  header img { width: 34px; height: 34px; border-radius: var(--radius-md); border: 1px solid var(--border); }
+  header h1 { font-size: 16px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+  header .sub { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
   .layout {
-    flex: 1; display: flex; flex-direction: column; gap: 18px; padding: 18px 20px 28px;
-    max-width: 1000px; width: 100%; margin: 0 auto; align-items: stretch;
+    flex: 1; display: flex; flex-direction: column; gap: 18px; padding: 20px 20px 32px;
+    max-width: 980px; width: 100%; margin: 0 auto; align-items: stretch;
   }
   nav {
-    display: flex; flex-direction: row; gap: 6px; overflow-x: auto; scrollbar-width: none;
+    display: flex; flex-direction: row; gap: 4px; overflow-x: auto; scrollbar-width: none;
   }
   nav::-webkit-scrollbar { display: none; }
   nav button {
     display: flex; align-items: center; gap: 10px; white-space: nowrap;
-    padding: 9px 12px; border: 1px solid transparent; border-radius: var(--radius-md); cursor: pointer;
-    background: transparent; color: var(--text-secondary); font: inherit; font-size: 13.5px; font-weight: 500;
-    text-align: start; transition: background-color .14s ease, color .14s ease;
+    padding: 8px 12px; border: 1px solid transparent; border-radius: var(--radius-md); cursor: pointer;
+    background: transparent; color: var(--text-secondary); font: inherit; font-size: 13px; font-weight: 500;
+    text-align: start; position: relative;
+    transition: background-color .12s ease, color .12s ease, border-color .12s ease;
   }
   @media (min-width: 720px) {
-    .layout { flex-direction: row; gap: 24px; padding: 24px 28px 32px; align-items: flex-start; }
-    nav { flex: 0 0 216px; flex-direction: column; gap: 4px; position: sticky; top: 20px; overflow-x: visible; }
+    .layout { flex-direction: row; gap: 24px; padding: 24px 28px 36px; align-items: flex-start; }
+    nav { flex: 0 0 220px; flex-direction: column; gap: 3px; position: sticky; top: 20px; overflow-x: visible; }
     nav button { white-space: normal; }
   }
-  nav button svg { width: 16px; height: 16px; flex: 0 0 auto; }
+  nav button svg { width: 15px; height: 15px; flex: 0 0 auto; }
   nav button:hover { background: var(--bg-subtle); color: var(--text-primary); }
   nav button.active {
-    background: var(--brand-soft); color: var(--brand); border-color: var(--border); font-weight: 600;
+    background: var(--bg-surface); color: var(--brand); border-color: var(--border); font-weight: 600;
+    box-shadow: var(--shadow-sm);
   }
-  main { flex: 1 1 auto; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  main { flex: 1 1 auto; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
   .card {
     background: var(--bg-elevated); border: 1px solid var(--border);
     border-radius: var(--radius-lg); padding: 20px 22px; box-shadow: var(--shadow-sm);
   }
-  .card h2 { font-size: 15px; font-weight: 700; margin: 0 0 6px; }
-  .card p { color: var(--text-secondary); font-size: 13.5px; line-height: 1.65; margin: 0; }
+  .card h2 { font-size: 14.5px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .card p { color: var(--text-secondary); font-size: 13px; line-height: 1.65; margin: 0; }
   .rows { margin-top: 14px; display: flex; flex-direction: column; }
   .row {
     display: flex; justify-content: space-between; align-items: center; gap: 16px;
@@ -61,23 +63,23 @@
   .kbd {
     display: inline-block; font-family: var(--font-mono); font-size: 11.5px; font-weight: 600;
     background: var(--bg-subtle); border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm); padding: 2px 7px; color: var(--text-primary);
+    border-radius: var(--radius-xs); padding: 2px 7px; color: var(--text-primary);
     direction: ltr;
   }
   .about-head { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
-  .about-head img { width: 48px; height: 48px; border-radius: 12px; border: 1px solid var(--border); }
-  .about-head .name { font-size: 16px; font-weight: 700; }
-  .about-head .tag { color: var(--text-muted); font-size: 12.5px; margin-top: 2px; }
+  .about-head img { width: 44px; height: 44px; border-radius: var(--radius-lg); border: 1px solid var(--border); }
+  .about-head .name { font-size: 15.5px; font-weight: 700; }
+  .about-head .tag { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
   .credit { margin-top: 14px; color: var(--text-muted); font-size: 12px; text-align: center; }
   .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
   .btn {
     border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer;
-    font: inherit; font-size: 13px; font-weight: 500;
-    padding: 8px 14px; background: var(--bg-subtle); color: var(--text-primary);
+    font: inherit; font-size: 12.5px; font-weight: 500;
+    padding: 7px 14px; background: var(--bg-surface); color: var(--text-primary);
     display: inline-flex; align-items: center; gap: 8px;
-    transition: background-color .14s ease, border-color .14s ease, opacity .14s ease;
+    transition: background-color .12s ease, border-color .12s ease, opacity .12s ease;
   }
-  .btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-strong); }
+  .btn:hover:not(:disabled) { background: var(--bg-subtle); border-color: var(--border-strong); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn.brand { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); font-weight: 600; }
   .btn.brand:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
@@ -87,18 +89,18 @@
   }
   .seg-btn {
     border: 0; background: transparent; color: var(--text-secondary); cursor: pointer;
-    font: inherit; font-size: 12.5px; font-weight: 500; padding: 5px 12px; border-radius: 6px;
-    transition: background-color .14s ease, color .14s ease;
+    font: inherit; font-size: 12px; font-weight: 500; padding: 5px 12px; border-radius: var(--radius-sm);
+    transition: background-color .12s ease, color .12s ease;
   }
   .seg-btn.active { background: var(--bg-surface); color: var(--text-primary); font-weight: 600; box-shadow: var(--shadow-sm); }
   .note { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
   .inline-hint {
-    margin-top: 10px; font-size: 12.5px; color: var(--warn-fg);
+    margin-top: 10px; font-size: 12px; color: var(--warn-fg);
     background: var(--warn-bg); border: 1px solid var(--warn-border);
-    border-radius: var(--radius-sm); padding: 7px 10px; display: none;
+    border-radius: var(--radius-sm); padding: 8px 10px; display: none;
   }
   .inline-hint.show { display: block; }
-  section.page { display: none; flex-direction: column; gap: 16px; }
+  section.page { display: none; flex-direction: column; gap: 14px; }
   section.page.active { display: flex; }
 </style>
 </head>
@@ -107,7 +109,7 @@
     <img src="app-icon.png" alt=""/>
     <div>
       <h1 data-i18n="title">الإعدادات</h1>
-      <div class="sub" data-i18n="subtitle">تطبيق الطباعة من Yaseir — طباعة محلية لتقارير وإيصالات Odoo</div>
+      <div class="sub" data-i18n="subtitle">طباعة سريعة من Odoo إلى طابعاتك المحلية</div>
     </div>
   </header>
 
@@ -123,7 +125,7 @@
       </button>
       <button type="button" id="tab-contact" data-page="contact" role="tab" aria-selected="false" aria-controls="page-contact">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-        <span data-i18n="nav_contact">التواصل والدعم</span>
+        <span data-i18n="nav_contact">الدعم والتواصل</span>
       </button>
     </nav>
 
@@ -134,15 +136,15 @@
             <img src="app-icon.png" alt=""/>
             <div>
               <div class="name">Yaseir Print</div>
-              <div class="tag" data-i18n="about_tag">الطباعة من Yaseir</div>
+              <div class="tag" data-i18n="about_tag">محرك الطباعة المحلي لـ Odoo</div>
             </div>
           </div>
-          <p data-i18n="about_text">يطبع هذا التطبيق تقارير Odoo وإيصالات نقاط البيع مباشرة على الطابعات المحلية — بهدوء، وبالمقاسات التي تدعمها كل طابعة فعليًا — دون أي خادم وسيط في مسار الطباعة.</p>
+          <p data-i18n="about_text">طباعة فورية لتقارير Odoo وإيصالات نقاط البيع مباشرة إلى الطابعات المحلية، بأحجام الورق الفعلية وبدون خادم وسيط.</p>
           <div class="rows">
-            <div class="row"><span class="k" data-i18n="version">الإصدار</span><span class="v tabular-nums" dir="ltr" id="appVersion">—</span></div>
+            <div class="row"><span class="k" data-i18n="version">الإصدار</span><span class="v tabular-nums mono" dir="ltr" id="appVersion">—</span></div>
             <div class="row"><span class="k" data-i18n="platform">النظام</span><span class="v">Windows</span></div>
           </div>
-          <p class="credit" data-i18n="credit">تطوير وتشغيل Yaseir.com — جميع الحقوق محفوظة © يسير</p>
+          <p class="credit" data-i18n="credit">Yaseir Print © يسير</p>
         </div>
       </section>
 
@@ -168,18 +170,18 @@
         </div>
         <div class="card">
           <h2 data-i18n="prefs_title">التفضيلات</h2>
-          <p data-i18n="prefs_text">إعدادات الطابعات والاتصال وخادم Odoo تُدار من مركز التحكم: المقاسات والأدراج الافتراضية لكل طابعة، وعنوان الخادم، وسجلّ المهام والتشخيص.</p>
+          <p data-i18n="prefs_text">تُدار إعدادات الطابعات، والأدراج الافتراضية، ورابط Odoo، وسجلّ الطباعة من مركز التحكم.</p>
           <div class="actions">
             <button type="button" class="btn brand" id="btnOpenCc" data-i18n="open_cc">فتح مركز التحكم</button>
             <button type="button" class="btn" id="btnOpenOdoo" data-i18n="open_odoo">فتح Odoo</button>
           </div>
-          <div class="inline-hint" id="odooHint" role="status" data-i18n="no_origin_hint">لم يتم ضبط رابط Odoo بعد. افتح مركز التحكم لإدخال عنوان الخادم أولاً.</div>
+          <div class="inline-hint" id="odooHint" role="status" data-i18n="no_origin_hint">لم يُضبط رابط Odoo بعد. أضف عنوان الخادم من مركز التحكم أولاً.</div>
         </div>
         <div class="card">
-          <h2 data-i18n="shortcuts_title">اختصارات مفيدة</h2>
+          <h2 data-i18n="shortcuts_title">اختصارات لوحة المفاتيح</h2>
           <div class="rows">
-            <div class="row"><span class="kbd">Ctrl+Shift+Y</span><span class="v" data-i18n="shortcut_cc">إظهار / إخفاء مركز التحكم</span></div>
-            <div class="row"><span class="kbd">Alt+← / Alt+→</span><span class="v" data-i18n="shortcut_nav">الرجوع / التقدّم في التصفح</span></div>
+            <div class="row"><span class="kbd">Ctrl+Shift+Y</span><span class="v" data-i18n="shortcut_cc">فتح مركز التحكم</span></div>
+            <div class="row"><span class="kbd">Alt+← / Alt+→</span><span class="v" data-i18n="shortcut_nav">التنقل للخلف / للأمام</span></div>
           </div>
         </div>
       </section>
@@ -187,7 +189,7 @@
       <section class="page" id="page-contact" role="tabpanel" aria-labelledby="tab-contact">
         <div class="card">
           <h2 data-i18n="contact_title">تواصل معنا</h2>
-          <p data-i18n="contact_text">لأي استفسار أو دعم فني، تواصل معنا عبر القنوات التالية:</p>
+          <p data-i18n="contact_text">تواصل مع فريق الدعم الفني:</p>
           <div class="rows">
             <div class="row"><span class="k" data-i18n="company">الشركة</span><span class="v">Yaseir</span></div>
             <div class="row"><span class="k" data-i18n="email">البريد الإلكتروني</span><span class="v" dir="ltr"><a href="mailto:support@yaseir.example">support@yaseir.example</a></span></div>
@@ -195,7 +197,7 @@
             <div class="row"><span class="k" data-i18n="website">الموقع</span><span class="v" dir="ltr"><a href="https://yaseir.example" target="_blank" rel="noopener noreferrer">yaseir.example</a></span></div>
           </div>
         </div>
-        <p class="note" data-i18n="contact_note">بيانات التواصل أعلاه بيانات مؤقتة للعرض — تُستبدل ببيانات الشركة الحقيقية عند الإطلاق.</p>
+        <p class="note" data-i18n="contact_note">بيانات تواصل تجريبية — تُحدَّث عند الإطلاق.</p>
       </section>
     </main>
   </div>
@@ -211,39 +213,39 @@
   var STR = {
     ar: {
       title: "الإعدادات",
-      subtitle: "تطبيق الطباعة من Yaseir — طباعة محلية لتقارير وإيصالات Odoo",
-      nav_about: "حول التطبيق", nav_contact: "التواصل والدعم", nav_prefs: "التفضيلات",
-      about_tag: "الطباعة من Yaseir",
-      about_text: "يطبع هذا التطبيق تقارير Odoo وإيصالات نقاط البيع مباشرة على الطابعات المحلية — بهدوء، وبالمقاسات التي تدعمها كل طابعة فعليًا — دون أي خادم وسيط في مسار الطباعة.",
-      version: "الإصدار", credit: "تطوير وتشغيل Yaseir.com — جميع الحقوق محفوظة © يسير", platform: "النظام",
+      subtitle: "طباعة سريعة من Odoo إلى طابعاتك المحلية",
+      nav_about: "حول التطبيق", nav_contact: "الدعم والتواصل", nav_prefs: "التفضيلات",
+      about_tag: "محرك الطباعة المحلي لـ Odoo",
+      about_text: "طباعة فورية لتقارير Odoo وإيصالات نقاط البيع مباشرة إلى الطابعات المحلية، بأحجام الورق الفعلية وبدون خادم وسيط.",
+      version: "الإصدار", credit: "Yaseir Print © يسير", platform: "النظام",
       appearance_title: "المظهر واللغة", theme_label: "المظهر", theme_light: "فاتح", theme_dark: "داكن", lang_label: "اللغة",
       contact_title: "تواصل معنا",
-      contact_text: "لأي استفسار أو دعم فني، تواصل معنا عبر القنوات التالية:",
+      contact_text: "تواصل مع فريق الدعم الفني:",
       company: "الشركة", email: "البريد الإلكتروني", phone: "الهاتف", website: "الموقع",
-      contact_note: "بيانات التواصل أعلاه بيانات مؤقتة للعرض — تُستبدل ببيانات الشركة الحقيقية عند الإطلاق.",
+      contact_note: "بيانات تواصل تجريبية — تُحدَّث عند الإطلاق.",
       prefs_title: "التفضيلات",
-      prefs_text: "إعدادات الطابعات والاتصال وخادم Odoo تُدار من مركز التحكم: المقاسات والأدراج الافتراضية لكل طابعة، وعنوان الخادم، وسجلّ المهام والتشخيص.",
+      prefs_text: "تُدار إعدادات الطابعات، والأدراج الافتراضية، ورابط Odoo، وسجلّ الطباعة من مركز التحكم.",
       open_cc: "فتح مركز التحكم", open_odoo: "فتح Odoo",
-      no_origin_hint: "لم يتم ضبط رابط Odoo بعد. افتح مركز التحكم لإدخال عنوان الخادم أولاً.",
-      shortcuts_title: "اختصارات مفيدة", shortcut_cc: "إظهار / إخفاء مركز التحكم", shortcut_nav: "الرجوع / التقدّم في التصفح"
+      no_origin_hint: "لم يُضبط رابط Odoo بعد. أضف عنوان الخادم من مركز التحكم أولاً.",
+      shortcuts_title: "اختصارات لوحة المفاتيح", shortcut_cc: "فتح مركز التحكم", shortcut_nav: "التنقل للخلف / للأمام"
     },
     en: {
       title: "Settings",
-      subtitle: "Yaseir Print — local printing for Odoo reports and POS receipts",
-      nav_about: "About", nav_contact: "Contact & support", nav_prefs: "Preferences",
-      about_tag: "Printing by Yaseir",
-      about_text: "This app prints Odoo reports and point-of-sale receipts directly to local printers — silently, at the sizes each printer actually supports — with no intermediary server in the print path.",
-      version: "Version", credit: "Developed & operated by Yaseir.com — All rights reserved © Yaseir", platform: "Platform",
+      subtitle: "Direct Odoo printing to local printers",
+      nav_about: "About", nav_contact: "Support", nav_prefs: "Preferences",
+      about_tag: "Local Print Engine for Odoo",
+      about_text: "Silent, zero-middleware printing for Odoo reports and POS receipts directly to your local printers.",
+      version: "Version", credit: "Yaseir Print © Yaseir", platform: "Platform",
       appearance_title: "Appearance & language", theme_label: "Theme", theme_light: "Light", theme_dark: "Dark", lang_label: "Language",
       contact_title: "Contact us",
-      contact_text: "For questions or technical support, reach us through:",
+      contact_text: "Reach our support team:",
       company: "Company", email: "Email", phone: "Phone", website: "Website",
-      contact_note: "The contact details above are placeholders — they are replaced with the company's real information at launch.",
+      contact_note: "Placeholder contact details — updated at launch.",
       prefs_title: "Preferences",
-      prefs_text: "Printer, connection and Odoo server settings live in the Control Center: per-printer default sizes and trays, the server address, the job history and diagnostics.",
+      prefs_text: "Manage printers, default trays, Odoo server origin, and print logs from Control Center.",
       open_cc: "Open Control Center", open_odoo: "Open Odoo",
-      no_origin_hint: "The Odoo server address is not configured yet. Open Control Center to set it first.",
-      shortcuts_title: "Useful shortcuts", shortcut_cc: "Show / hide the Control Center", shortcut_nav: "Navigate back / forward"
+      no_origin_hint: "Odoo server URL not set. Configure it in Control Center first.",
+      shortcuts_title: "Keyboard shortcuts", shortcut_cc: "Open Control Center", shortcut_nav: "Navigate back / forward"
     }
   };
   function setSeg(id, active) {
@@ -261,6 +263,7 @@
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
     document.documentElement.setAttribute("data-theme", theme);
+    document.title = "Yaseir Print — " + STR[lang].title;
     document.querySelectorAll("[data-i18n]").forEach(function (el) {
       var v = STR[lang][el.getAttribute("data-i18n")];
       if (v) el.textContent = v;

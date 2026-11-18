@@ -6,7 +6,6 @@
 <title>Yaseir Print — Control Center</title>
 <link rel="stylesheet" href="theme.css" />
 <style>
-
   body {
     font-family: var(--font-sans);
     background: var(--bg-canvas);
@@ -14,16 +13,17 @@
     min-height: 100vh;
     display: flex;
     flex-direction: column;
-    line-height: 1.55;
+    line-height: 1.5;
   }
 
   .hidden { display: none !important; }
 
-  /* Top Navigation Bar */
+  /* ── Top Application Bar (Desktop Workbench Chrome) ── */
   .topbar {
     background: var(--bg-surface);
     color: var(--text-primary);
-    padding: 0.7rem 1.5rem;
+    padding: 0 1.5rem;
+    height: 56px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -34,30 +34,36 @@
     z-index: 50;
     width: 100%;
   }
-  .brand { display: flex; align-items: center; gap: 0.85rem; }
+  .brand { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
   .brand-logo {
-    width: 40px; height: 40px; border-radius: 10px;
+    width: 34px; height: 34px; border-radius: var(--radius-md);
     background: var(--bg-subtle); border: 1px solid var(--border);
     display: flex; align-items: center; justify-content: center; flex-shrink: 0;
     overflow: hidden;
   }
-  .brand-title { font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; }
-  .version-pill {
-    font-size: 0.72rem; font-weight: 600; font-family: var(--font-mono);
-    background: var(--bg-subtle); color: var(--text-secondary);
-    border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px;
-    direction: ltr;
+  .brand-logo img { width: 100%; height: 100%; display: block; object-fit: cover; }
+  .brand-text { min-width: 0; }
+  .brand-title {
+    font-size: 0.95rem; font-weight: 700; letter-spacing: -0.01em;
+    display: flex; align-items: baseline; gap: 0.5rem; white-space: nowrap;
   }
-  .brand-subtitle { font-size: 0.8rem; color: var(--text-muted); }
-  .topbar-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .version-tag {
+    font-size: 0.72rem; font-weight: 600; font-family: var(--font-mono);
+    color: var(--text-muted); direction: ltr; font-variant-numeric: tabular-nums;
+  }
+  .brand-subtitle {
+    font-size: 0.74rem; color: var(--text-muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .topbar-actions { display: flex; align-items: center; gap: 0.45rem; flex-shrink: 0; }
 
-  /* Workspace Shell: Sidebar + Main Canvas on Desktop */
+  /* ── Desktop Two-Pane Workbench Shell ── */
   .workspace-shell {
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     width: 100%;
-    max-width: 1440px;
+    max-width: 1480px;
     margin: 0 auto;
   }
   .tabsbar {
@@ -65,53 +71,112 @@
     border-bottom: 1px solid var(--border);
     padding: 0.5rem 1rem;
   }
+  .sidebar-section-label {
+    display: none;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 0 0.65rem 0.5rem;
+  }
   .nav-tabs {
     display: flex;
     flex-direction: row;
-    gap: 0.35rem;
+    gap: 0.3rem;
     overflow-x: auto;
     scrollbar-width: none;
   }
   .nav-tabs::-webkit-scrollbar { display: none; }
   .nav-tab {
     display: flex; align-items: center; gap: 0.6rem;
-    padding: 0.55rem 0.9rem;
+    padding: 0.5rem 0.8rem;
     border: 1px solid transparent; border-radius: var(--radius-md);
     background: transparent; color: var(--text-secondary);
-    font: inherit; font-size: 0.86rem; font-weight: 500;
+    font: inherit; font-size: 0.83rem; font-weight: 500;
     cursor: pointer; white-space: nowrap; text-align: start;
-    transition: background-color .14s ease, color .14s ease, border-color .14s ease;
+    position: relative;
+    transition: background-color .12s ease, color .12s ease, border-color .12s ease;
   }
   .nav-tab:hover { background: var(--bg-subtle); color: var(--text-primary); }
   .nav-tab.active {
-    background: var(--brand-soft);
+    background: var(--bg-elevated);
     color: var(--brand);
     border-color: var(--border);
     font-weight: 600;
+    box-shadow: var(--shadow-sm);
   }
-  .nav-tab svg { flex-shrink: 0; }
+  .nav-tab svg { flex-shrink: 0; opacity: 0.85; }
+  .nav-tab.active svg { opacity: 1; }
+
+  .sidebar-status {
+    display: none;
+    margin-top: 1.1rem;
+    padding: 0.85rem 0.9rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    font-size: 0.76rem;
+  }
+  .sidebar-status-title {
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+    font-size: 0.78rem;
+  }
+  .sidebar-status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+  .sidebar-status-row:first-of-type { border-top: 0; }
+  .sidebar-status-val {
+    color: var(--text-primary);
+    font-weight: 600;
+    text-align: end;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 140px;
+  }
 
   @media (min-width: 960px) {
     .workspace-shell {
       flex-direction: row;
       align-items: flex-start;
-      padding: 1.25rem 1.5rem 2rem;
+      padding: 1.25rem 1.5rem 2.25rem;
       gap: 1.5rem;
     }
     .tabsbar {
-      flex: 0 0 236px;
+      flex: 0 0 248px;
       background: transparent;
       border-bottom: 0;
       padding: 0;
       position: sticky;
       top: 76px;
     }
+    .sidebar-section-label { display: block; }
     .nav-tabs {
       flex-direction: column;
-      gap: 0.25rem;
+      gap: 0.2rem;
       overflow-x: visible;
     }
-    .nav-tab { width: 100%; white-space: normal; }
+    .nav-tab { width: 100%; white-space: normal; padding: 0.56rem 0.75rem; }
+    .nav-tab.active::before {
+      content: "";
+      position: absolute;
+      inset-inline-start: 0;
+      top: 7px;
+      bottom: 7px;
+      width: 3px;
+      border-radius: 2px;
+      background: var(--brand);
+    }
+    .sidebar-status { display: block; }
   }
 
   .main-container {
@@ -124,67 +189,102 @@
     .main-container { padding: 0; }
   }
 
-  .tab-pane { display: flex; flex-direction: column; gap: 1.15rem; }
+  .tab-pane { display: flex; flex-direction: column; gap: 1rem; }
 
-  /* Buttons */
-  .btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem;
-    border: 1px solid var(--border); border-radius: var(--radius-md);
-    padding: 0.5rem 0.9rem; font: inherit; font-size: 0.84rem; font-weight: 500;
-    cursor: pointer; background: var(--bg-subtle); color: var(--text-primary);
-    transition: background-color .14s ease, border-color .14s ease, opacity .14s ease;
+  .pane-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    padding-bottom: 0.25rem;
   }
-  .btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-strong); }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-sm { padding: 0.35rem 0.7rem; font-size: 0.78rem; border-radius: var(--radius-sm); }
+  .pane-title {
+    margin: 0;
+    font-size: 1.18rem;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    color: var(--text-primary);
+  }
+  .pane-subtitle {
+    margin: 0.15rem 0 0;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+
+  /* ── Buttons ── */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 0.45rem 0.85rem; font: inherit; font-size: 0.81rem; font-weight: 500;
+    cursor: pointer; background: var(--bg-surface); color: var(--text-primary);
+    transition: background-color .12s ease, border-color .12s ease, opacity .12s ease;
+    white-space: nowrap;
+  }
+  .btn:hover:not(:disabled) { background: var(--bg-subtle); border-color: var(--border-strong); }
+  .btn:disabled { opacity: 0.48; cursor: not-allowed; }
+  .btn-sm { padding: 0.32rem 0.65rem; font-size: 0.76rem; border-radius: var(--radius-sm); }
   .btn-primary { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); font-weight: 600; }
   .btn-primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
   .btn-secondary { background: var(--bg-surface); border-color: var(--border-strong); color: var(--text-primary); }
   .btn-secondary:hover:not(:disabled) { background: var(--bg-subtle); }
   .btn-glass { background: var(--bg-subtle); border-color: var(--border); color: var(--text-primary); }
+  .btn-glass:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-strong); }
   .btn-danger { background: var(--err-fg); border-color: var(--err-fg); color: #fff; font-weight: 600; }
   .btn-danger:hover:not(:disabled) { opacity: 0.9; }
   .btn.is-refreshing svg { animation: npSpin 0.8s linear infinite; }
   @keyframes npSpin { to { transform: rotate(360deg); } }
 
-  /* Alert Banner */
+  /* ── Alert Banner ── */
   .alert-banner {
     display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
-    padding: 0.8rem 1rem; border-radius: var(--radius-lg);
+    padding: 0.75rem 1rem; border-radius: var(--radius-lg);
     border: 1px solid var(--warn-border); background: var(--warn-bg); color: var(--warn-fg);
-    font-size: 0.86rem; font-weight: 500; margin-bottom: 1rem;
+    font-size: 0.83rem; font-weight: 500; margin-bottom: 1rem;
   }
 
-  /* KPI Grid */
+  /* ── KPI Strip (4-Column Desktop Precision) ── */
   .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-    gap: 0.9rem;
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+    gap: 0.85rem;
+  }
+  @media (min-width: 600px) {
+    .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (min-width: 1120px) {
+    .kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   }
   .kpi-card {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 1rem 1.1rem;
+    padding: 0.95rem 1.05rem;
     box-shadow: var(--shadow-sm);
     display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;
   }
-  .kpi-label { font-size: 0.78rem; color: var(--text-muted); font-weight: 600; }
+  .kpi-body { min-width: 0; flex: 1 1 auto; }
+  .kpi-label { font-size: 0.75rem; color: var(--text-muted); font-weight: 600; }
   .kpi-value {
-    font-size: 1.65rem; font-weight: 700; color: var(--text-primary);
-    font-variant-numeric: tabular-nums; line-height: 1.25; margin: 0.25rem 0 0.2rem;
+    font-size: 1.7rem; font-weight: 700; color: var(--text-primary);
+    font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+    line-height: 1.2; margin: 0.28rem 0 0.25rem;
   }
-  .kpi-meta { font-size: 0.76rem; color: var(--text-secondary); word-break: break-word; }
+  .kpi-meta {
+    font-size: 0.74rem; color: var(--text-secondary);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .kpi-icon {
-    width: 38px; height: 38px; border-radius: var(--radius-md);
+    width: 34px; height: 34px; border-radius: var(--radius-md);
+    border: 1px solid transparent;
     display: flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
-  .kpi-icon.info { background: var(--info-bg); color: var(--info-fg); }
-  .kpi-icon.warn { background: var(--warn-bg); color: var(--warn-fg); }
-  .kpi-icon.ok { background: var(--ok-bg); color: var(--ok-fg); }
-  .kpi-icon.err { background: var(--err-bg); color: var(--err-fg); }
+  .kpi-icon.info { background: var(--info-bg); color: var(--info-fg); border-color: var(--info-border); }
+  .kpi-icon.warn { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-border); }
+  .kpi-icon.ok { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-border); }
+  .kpi-icon.err { background: var(--err-bg); color: var(--err-fg); border-color: var(--err-border); }
 
-  /* Cards */
+  /* ── Cards ── */
   .card {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
@@ -193,26 +293,64 @@
     overflow: hidden;
   }
   .card-header {
-    padding: 0.9rem 1.15rem;
+    padding: 0.82rem 1.1rem;
     border-bottom: 1px solid var(--border);
     display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
     background: var(--bg-surface);
   }
   .card-title {
-    display: flex; align-items: center; gap: 0.55rem;
-    font-size: 0.95rem; font-weight: 700; color: var(--text-primary);
+    display: flex; align-items: center; gap: 0.5rem;
+    font-size: 0.9rem; font-weight: 700; color: var(--text-primary);
   }
-  .card-body { padding: 1.15rem; }
+  .card-body { padding: 1.1rem; }
 
-  /* Filter Pills */
+  /* ── Segmented Filter & Search Toolbar ── */
+  .queue-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+  }
+  .search-input-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .search-input-wrap svg {
+    position: absolute;
+    inset-inline-start: 0.6rem;
+    width: 14px;
+    height: 14px;
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+  .queue-search {
+    height: 31px;
+    width: 185px;
+    padding-inline: 1.85rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-canvas);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 0.78rem;
+    transition: border-color .12s ease, width .15s ease;
+  }
+  .queue-search:focus {
+    outline: none;
+    border-color: var(--brand);
+    width: 220px;
+    background: var(--bg-surface);
+  }
+
   .filter-pills {
     display: inline-flex; background: var(--bg-subtle); border: 1px solid var(--border);
     border-radius: var(--radius-md); padding: 2px; gap: 2px; flex-wrap: wrap;
   }
   .filter-pill {
     border: 0; background: transparent; color: var(--text-secondary); cursor: pointer;
-    font: inherit; font-size: 0.78rem; font-weight: 500;
-    padding: 0.3rem 0.65rem; border-radius: var(--radius-sm);
+    font: inherit; font-size: 0.76rem; font-weight: 500;
+    padding: 0.25rem 0.62rem; border-radius: var(--radius-sm);
     transition: background-color .12s ease, color .12s ease;
   }
   .filter-pill:hover { color: var(--text-primary); }
@@ -221,111 +359,189 @@
     box-shadow: var(--shadow-sm);
   }
 
-  /* Table */
+  /* ── High-Density Print Queue Table ── */
   .table-wrap { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.81rem; }
   thead th {
-    text-align: start; font-weight: 600; font-size: 0.76rem; color: var(--text-muted);
-    padding: 0.65rem 1rem; border-bottom: 1px solid var(--border);
+    text-align: start; font-weight: 700; font-size: 0.71rem; color: var(--text-muted);
+    letter-spacing: 0.03em; text-transform: uppercase;
+    padding: 0.62rem 1rem; border-bottom: 1px solid var(--border);
     background: var(--bg-subtle); white-space: nowrap;
   }
   tbody td {
-    padding: 0.7rem 1rem; border-bottom: 1px solid var(--border);
+    padding: 0.62rem 1rem; border-bottom: 1px solid var(--border);
     color: var(--text-primary); vertical-align: middle;
   }
   tbody tr:last-child td { border-bottom: 0; }
   tbody tr:hover { background: var(--bg-subtle); }
-  td.mono, .mono { font-family: var(--font-mono); font-size: 0.78rem; }
+  td.mono, .mono { font-family: var(--font-mono); font-size: 0.76rem; }
 
-  /* Badges */
+  /* ── Unboxed Semantic Status Indicators (Zero-Pill Discipline) ── */
   .main-container.is-stale { opacity: 0.72; transition: opacity .2s ease; }
   .badge {
-    display: inline-flex; align-items: center; gap: 0.3rem;
-    font-size: 0.72rem; font-weight: 600; padding: 0.18rem 0.55rem;
-    border-radius: 999px; border: 1px solid transparent; white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 0.36rem;
+    font-size: 0.75rem; font-weight: 600;
+    padding: 0; border-radius: var(--radius-xs);
+    background: transparent; border: 0; white-space: nowrap;
   }
   .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
-  .badge-ok { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-border); }
-  .badge-warn { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-border); }
-  .badge-err { background: var(--err-bg); color: var(--err-fg); border-color: var(--err-border); }
-  .badge-info { background: var(--info-bg); color: var(--info-fg); border-color: var(--info-border); }
-  .badge-neutral { background: var(--bg-subtle); color: var(--text-secondary); border-color: var(--border); }
+  .badge-ok { color: var(--ok-fg); }
+  .badge-warn { color: var(--warn-fg); }
+  .badge-err { color: var(--err-fg); }
+  .badge-info { color: var(--info-fg); }
+  .badge-neutral { color: var(--text-secondary); }
 
-  /* Forms */
+  /* ── Forms & Calibration Matrix ── */
   .form-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
     gap: 0.9rem;
   }
-  .form-group { display: flex; flex-direction: column; gap: 0.35rem; }
-  .form-label { font-size: 0.82rem; font-weight: 600; color: var(--text-primary); }
+  .form-group { display: flex; flex-direction: column; gap: 0.32rem; }
+  .form-label { font-size: 0.79rem; font-weight: 600; color: var(--text-primary); }
   .input, .select {
-    width: 100%; height: 36px; padding: 0 0.7rem;
+    width: 100%; height: 35px; padding: 0 0.7rem;
     border: 1px solid var(--border-strong); border-radius: var(--radius-md);
     background: var(--bg-surface); color: var(--text-primary);
-    font: inherit; font-size: 0.84rem;
-    transition: border-color .14s ease, box-shadow .14s ease;
+    font: inherit; font-size: 0.82rem;
+    transition: border-color .12s ease, box-shadow .12s ease;
   }
   .input:focus, .select:focus { border-color: var(--brand); outline: none; box-shadow: 0 0 0 3px var(--brand-soft); }
   .input.invalid, .select.invalid { border-color: var(--err-fg); }
-  .form-help { font-size: 0.76rem; color: var(--text-muted); line-height: 1.5; }
+  .form-help { font-size: 0.75rem; color: var(--text-muted); line-height: 1.5; }
   .form-error {
-    font-size: 0.78rem; color: var(--err-fg); background: var(--err-bg);
+    font-size: 0.76rem; color: var(--err-fg); background: var(--err-bg);
     border: 1px solid var(--err-border); border-radius: var(--radius-sm);
-    padding: 0.4rem 0.65rem; font-weight: 500;
+    padding: 0.42rem 0.65rem; font-weight: 500;
   }
 
-  /* Printer Cards */
+  /* ── Hardware Printer Cards ── */
   .printer-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
-    gap: 1rem;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 0.95rem;
   }
   .printer-card {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 1.05rem 1.15rem;
+    padding: 1.05rem 1.1rem;
     box-shadow: var(--shadow-sm);
-    display: flex; flex-direction: column; gap: 0.75rem;
-    transition: border-color .14s ease;
+    display: flex; flex-direction: column; gap: 0.7rem;
+    transition: border-color .12s ease;
   }
   .printer-card:hover { border-color: var(--border-strong); }
   .printer-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
   .printer-identity { display: flex; align-items: flex-start; gap: 0.65rem; min-width: 0; }
   .printer-type-icon {
-    width: 36px; height: 36px; border-radius: var(--radius-md);
+    width: 34px; height: 34px; border-radius: var(--radius-md);
     background: var(--bg-subtle); border: 1px solid var(--border);
     color: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
-  .printer-type-icon svg { width: 18px; height: 18px; }
-  .printer-name { font-size: 0.94rem; font-weight: 700; color: var(--text-primary); word-break: break-word; }
-  .printer-meta-list { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.78rem; }
+  .printer-type-icon svg { width: 17px; height: 17px; }
+  .printer-name { font-size: 0.92rem; font-weight: 700; color: var(--text-primary); word-break: break-word; }
+  .printer-subline {
+    display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
+    margin-top: 0.15rem; font-size: 0.74rem; color: var(--text-muted);
+  }
+  .printer-default-tag {
+    font-weight: 700;
+    color: var(--brand);
+  }
+  .printer-meta-list {
+    display: flex; flex-direction: column; gap: 0.28rem; font-size: 0.77rem;
+    padding: 0.5rem 0.65rem;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+  }
   .printer-meta-item { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
   .printer-meta-item span { color: var(--text-muted); flex-shrink: 0; }
-  .printer-meta-item strong { color: var(--text-secondary); font-weight: 600; text-align: end; word-break: break-word; }
-  .printer-actions { display: flex; gap: 0.45rem; flex-wrap: wrap; margin-top: auto; padding-top: 0.25rem; }
+  .printer-meta-item strong { color: var(--text-primary); font-weight: 600; text-align: end; word-break: break-word; }
 
-  /* Code Box */
+  .printer-specs {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem 0.55rem;
+    font-size: 0.74rem; color: var(--text-secondary); line-height: 1.5;
+  }
+  .printer-specs .spec-sep { color: var(--border-strong); }
+  .printer-health-line {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem 0.65rem;
+    font-size: 0.73rem; color: var(--text-muted);
+    padding-top: 0.15rem;
+  }
+  .printer-actions {
+    display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: auto;
+    padding-top: 0.55rem; border-top: 1px solid var(--border);
+  }
+
+  .forms-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+    gap: 0.35rem 0.65rem;
+    font-size: 0.74rem;
+  }
+  .forms-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.4rem;
+    padding: 0.22rem 0;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-primary);
+  }
+  .forms-item:last-child { border-bottom: 0; }
+  .forms-item span { color: var(--text-muted); font-family: var(--font-mono); font-size: 0.71rem; }
+
+  /* ── Checklist & Setup Steps ── */
+  .guide-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.85rem;
+  }
+  .guide-step {
+    padding: 0.85rem 0.95rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-subtle);
+  }
+  .guide-step-num {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--brand);
+    margin-bottom: 0.25rem;
+  }
+  .guide-step-title { font-size: 0.83rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.2rem; }
+  .guide-step-desc { font-size: 0.76rem; color: var(--text-secondary); line-height: 1.55; }
+
+  /* ── Diagnostics Code Inspector ── */
+  .diag-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+  }
+  @media (min-width: 1120px) {
+    .diag-grid { grid-template-columns: 360px minmax(0, 1fr); align-items: start; }
+  }
   .code-box {
     background: var(--bg-canvas); border: 1px solid var(--border);
     border-radius: var(--radius-md); padding: 0.9rem 1rem;
-    font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.55;
-    color: var(--text-primary); max-height: 420px; overflow: auto;
+    font-family: var(--font-mono); font-size: 0.76rem; line-height: 1.55;
+    color: var(--text-primary); max-height: 460px; overflow: auto;
     direction: ltr; text-align: left; white-space: pre-wrap; word-break: break-word;
+    margin: 0;
   }
 
-  /* Toasts */
+  /* ── Toasts ── */
   .toast-container {
     position: fixed; bottom: 16px; inset-inline-end: 16px; z-index: 100;
     display: flex; flex-direction: column; gap: 0.5rem; max-width: 380px; width: calc(100vw - 32px);
   }
   .toast {
     display: flex; align-items: center; gap: 0.6rem;
-    padding: 0.7rem 0.9rem; border-radius: var(--radius-md);
+    padding: 0.68rem 0.9rem; border-radius: var(--radius-md);
     background: var(--bg-elevated); color: var(--text-primary);
     border: 1px solid var(--border-strong); box-shadow: var(--shadow-md);
-    font-size: 0.83rem; font-weight: 500;
+    font-size: 0.81rem; font-weight: 500;
   }
   .toast.toast-error { background: var(--err-bg); color: var(--err-fg); border-color: var(--err-border); }
   .toast.toast-success { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-border); }
@@ -337,9 +553,9 @@
   }
   .toast-close:hover { opacity: 1; }
 
-  /* Modal */
+  /* ── Modal ── */
   .modal-overlay {
-    position: fixed; inset: 0; background: rgba(10, 14, 22, 0.55);
+    position: fixed; inset: 0; background: rgba(9, 12, 18, 0.58);
     backdrop-filter: blur(2px); z-index: 200;
     display: flex; align-items: center; justify-content: center; padding: 1rem;
   }
@@ -350,9 +566,26 @@
     display: flex; flex-direction: column; gap: 0.9rem;
   }
   .modal-head { display: flex; align-items: center; gap: 0.75rem; }
-  .modal-title { font-size: 1rem; font-weight: 700; color: var(--text-primary); }
-  .modal-message { font-size: 0.86rem; color: var(--text-secondary); line-height: 1.6; }
+  .modal-title { font-size: 0.98rem; font-weight: 700; color: var(--text-primary); }
+  .modal-message { font-size: 0.84rem; color: var(--text-secondary); line-height: 1.6; margin: 0; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.25rem; }
+
+  @media (max-width: 640px) {
+    .topbar { padding: 0 0.75rem; gap: 0.5rem; }
+    .brand { flex: 1 1 auto; min-width: 0; gap: 0.5rem; }
+    .brand-logo { width: 30px; height: 30px; }
+    .brand-text { min-width: 0; flex: 1 1 auto; }
+    .brand-title { font-size: 0.84rem; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .version-tag { display: none; }
+    .brand-subtitle { display: none; }
+    .topbar-actions { gap: 0.32rem; }
+    .topbar .btn { padding: 0.4rem 0.52rem; font-size: 0.75rem; }
+    .btn span { display: none; }
+    #btnOpenOdoo span, #btnLang span, #btnSaveOrigin span, #btnSaveAndOpen span, #btnCustomTestPrint span { display: inline; }
+    .nav-tab { padding: 0.44rem 0.68rem; font-size: 0.78rem; gap: 0.42rem; }
+    .queue-search { width: 100%; }
+    .queue-search:focus { width: 100%; }
+  }
 </style>
 </head>
 <body>
@@ -361,31 +594,31 @@
   <header class="topbar">
     <div class="brand">
       <div class="brand-logo" aria-hidden="true">
-        <img src="app-icon.png" alt="" width="42" height="42" style="border-radius: 12px; display: block;"/>
+        <img src="app-icon.png" alt="" width="34" height="34"/>
       </div>
-      <div>
+      <div class="brand-text">
         <div class="brand-title">
-          <span data-i18n="app_title">الطباعة من Yaseir</span>
-          <span class="version-pill" id="appVersionBadge">—</span>
+          <span data-i18n="app_title">Yaseir Print</span>
+          <span class="version-tag" id="appVersionBadge">—</span>
         </div>
         <div class="brand-subtitle" data-i18n="app_subtitle">
-          طباعة محلية من Odoo — بدون خادم وسيط
+          طباعة فورية من Odoo
         </div>
       </div>
     </div>
 
     <div class="topbar-actions">
       <button class="btn btn-primary" id="btnOpenOdoo" data-action="open-odoo">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
           <polyline points="15 3 21 3 21 9"></polyline>
           <line x1="10" y1="14" x2="21" y2="3"></line>
         </svg>
-        <span data-i18n="btn_open_odoo">فتح نظام Odoo</span>
+        <span data-i18n="btn_open_odoo">فتح Odoo</span>
       </button>
 
       <button class="btn btn-glass" id="btnRefresh" data-action="manual-refresh" title="Refresh">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="23 4 23 10 17 10"></polyline>
           <polyline points="1 20 1 14 7 14"></polyline>
           <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
@@ -394,7 +627,7 @@
       </button>
 
       <button class="btn btn-glass" data-action="toggle-theme" id="btnTheme">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
         </svg>
         <span data-i18n="btn_theme">المظهر</span>
@@ -407,27 +640,44 @@
   </header>
 
   <div class="workspace-shell">
-  <!-- Navigation Tabs (sidebar on desktop, strip on narrow screens) -->
-  <div class="tabsbar">
-  <nav class="nav-tabs" role="tablist">
-    <button class="nav-tab active" role="tab" aria-selected="true" aria-controls="tab-dashboard" data-tab="dashboard" data-action="switch-tab">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-      <span data-i18n="tab_dashboard">لوحة المراقبة وطابور الطباعة</span>
-    </button>
-    <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-printers" data-tab="printers" data-action="switch-tab">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-      <span data-i18n="tab_printers">الطابعات ومعمل المعايرة</span>
-    </button>
-    <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-settings" data-tab="settings" data-action="switch-tab">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-      <span data-i18n="tab_settings">إعدادات اتصال Odoo والأمان</span>
-    </button>
-    <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-diagnostics" data-tab="diagnostics" data-action="switch-tab">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
-      <span data-i18n="tab_diagnostics">حزمة التشخيص والدعم الفني</span>
-    </button>
-  </nav>
-  </div>
+  <!-- Navigation Sidebar -->
+  <aside class="tabsbar">
+    <div class="sidebar-section-label" data-i18n="nav_section">مساحة العمل</div>
+    <nav class="nav-tabs" role="tablist">
+      <button class="nav-tab active" role="tab" aria-selected="true" aria-controls="tab-dashboard" data-tab="dashboard" data-action="switch-tab">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect></svg>
+        <span data-i18n="tab_dashboard">لوحة المراقبة</span>
+      </button>
+      <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-printers" data-tab="printers" data-action="switch-tab">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+        <span data-i18n="tab_printers">الطابعات والمعايرة</span>
+      </button>
+      <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-settings" data-tab="settings" data-action="switch-tab">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        <span data-i18n="tab_settings">اتصال Odoo</span>
+      </button>
+      <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-diagnostics" data-tab="diagnostics" data-action="switch-tab">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+        <span data-i18n="tab_diagnostics">التشخيص</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-status">
+      <div class="sidebar-status-title" data-i18n="sidebar_engine_title">حالة النظام</div>
+      <div class="sidebar-status-row">
+        <span data-i18n="sidebar_server_lbl">الخادم</span>
+        <span class="sidebar-status-val mono" dir="ltr" id="sidebarOriginVal">—</span>
+      </div>
+      <div class="sidebar-status-row">
+        <span data-i18n="sidebar_default_lbl">الافتراضية</span>
+        <span class="sidebar-status-val" id="sidebarPrinterVal">—</span>
+      </div>
+      <div class="sidebar-status-row">
+        <span data-i18n="sidebar_shortcut_lbl">اختصار</span>
+        <span class="sidebar-status-val mono" dir="ltr">Ctrl+Shift+Y</span>
+      </div>
+    </div>
+  </aside>
 
   <!-- Main Content Area -->
   <main class="main-container">
@@ -435,56 +685,63 @@
     <!-- Status Alert Banner -->
     <div id="originAlertBanner" class="alert-banner hidden">
       <div style="display:flex;align-items:center;gap:0.65rem;">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-        <span id="originAlertText" data-i18n="origin_not_configured">لم يتم ضبط رابط Odoo بعد. أدخل عنوان IP والمنفذ من الإعدادات.</span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+        <span id="originAlertText" data-i18n="origin_not_configured">أدخل رابط خادم Odoo للبدء.</span>
       </div>
-      <button class="btn btn-sm btn-primary" data-action="switch-tab" data-tab="settings" data-i18n="btn_configure_now">ضبط الرابط الآن</button>
+      <button class="btn btn-sm btn-primary" data-action="switch-tab" data-tab="settings" data-i18n="btn_configure_now">إعداد الرابط</button>
     </div>
 
     <!-- TAB 1: DASHBOARD & QUEUE -->
     <section id="tab-dashboard" class="tab-pane" role="tabpanel">
+      <div class="pane-header">
+        <div>
+          <h1 class="pane-title" data-i18n="pane_dash_title">لوحة المراقبة</h1>
+          <p class="pane-subtitle" data-i18n="pane_dash_sub">متابعة الطابعات المتصلة ومهام الطباعة الفورية.</p>
+        </div>
+      </div>
+
       <div class="kpi-grid">
         <div class="kpi-card">
-          <div>
-            <div class="kpi-label" data-i18n="kpi_printers">الطابعات المكتشفة</div>
+          <div class="kpi-body">
+            <div class="kpi-label" data-i18n="kpi_printers">الطابعات</div>
             <div class="kpi-value" id="kpiPrintersCount">0</div>
             <div class="kpi-meta" id="kpiDefaultPrinter">—</div>
           </div>
           <div class="kpi-icon info">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
           </div>
         </div>
 
         <div class="kpi-card">
-          <div>
-            <div class="kpi-label" data-i18n="kpi_active_jobs">المهام النشطة / بالانتظار</div>
+          <div class="kpi-body">
+            <div class="kpi-label" data-i18n="kpi_active_jobs">قيد التنفيذ</div>
             <div class="kpi-value" id="kpiActiveCount">0</div>
-            <div class="kpi-meta" data-i18n="kpi_active_sub">يُحفظ تلقائيًا</div>
+            <div class="kpi-meta" data-i18n="kpi_active_sub">حفظ تلقائي للطابور</div>
           </div>
           <div class="kpi-icon warn">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
           </div>
         </div>
 
         <div class="kpi-card">
-          <div>
-            <div class="kpi-label" data-i18n="kpi_done_jobs">مهام مكتملة بنجاح</div>
+          <div class="kpi-body">
+            <div class="kpi-label" data-i18n="kpi_done_jobs">مكتملة</div>
             <div class="kpi-value" id="kpiDoneCount">0</div>
             <div class="kpi-meta" id="kpiPdfiumStatus">PDFium: —</div>
           </div>
           <div class="kpi-icon ok">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
           </div>
         </div>
 
         <div class="kpi-card">
-          <div>
-            <div class="kpi-label" data-i18n="kpi_failed_jobs">تحتاج لتدخل (Failed / Dead Letter)</div>
+          <div class="kpi-body">
+            <div class="kpi-label" data-i18n="kpi_failed_jobs">متعثرة</div>
             <div class="kpi-value" id="kpiFailedCount">0</div>
             <div class="kpi-meta" id="kpiOriginMeta">—</div>
           </div>
           <div class="kpi-icon err">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
           </div>
         </div>
       </div>
@@ -493,18 +750,22 @@
       <div class="card">
         <div class="card-header">
           <div class="card-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
-            <span data-i18n="queue_title">طابور الطباعة</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+            <span data-i18n="queue_title">سجل المهام</span>
           </div>
-          <div style="display:flex;align-items:center;gap:0.65rem;flex-wrap:wrap;">
+          <div class="queue-controls">
+            <div class="search-input-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <input type="search" id="queueSearchInput" class="queue-search" placeholder="بحث…" aria-label="Search queue"/>
+            </div>
             <div class="filter-pills">
               <button class="filter-pill active" data-filter="all" aria-pressed="true" data-action="set-job-filter" data-i18n="filter_all">الكل</button>
               <button class="filter-pill" data-filter="active" aria-pressed="false" data-action="set-job-filter" data-i18n="filter_active">نشطة</button>
-              <button class="filter-pill" data-filter="attention" aria-pressed="false" data-action="set-job-filter" data-i18n="filter_attention">فاشلة / Dead Letter</button>
+              <button class="filter-pill" data-filter="attention" aria-pressed="false" data-action="set-job-filter" data-i18n="filter_attention">متعثرة</button>
               <button class="filter-pill" data-filter="done" aria-pressed="false" data-action="set-job-filter" data-i18n="filter_done">مكتملة</button>
             </div>
             <button class="btn btn-sm btn-secondary" id="btnClearFinished" data-action="clear-finished">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
               <span data-i18n="btn_clear_done">مسح المكتملة</span>
             </button>
           </div>
@@ -513,18 +774,18 @@
           <table>
             <thead>
               <tr>
-                <th data-i18n="col_id">معرّف المهمة (Idempotency Key)</th>
-                <th data-i18n="col_report">التقرير / المصدر</th>
-                <th data-i18n="col_printer">الطابعة المستهدفة</th>
-                <th data-i18n="col_pages">الصفحات / الحجم</th>
+                <th data-i18n="col_id">المعرّف</th>
+                <th data-i18n="col_report">المستند</th>
+                <th data-i18n="col_printer">الطابعة</th>
+                <th data-i18n="col_pages">الحجم</th>
                 <th data-i18n="col_state">الحالة</th>
                 <th data-i18n="col_attempts">المحاولات</th>
-                <th data-i18n="col_error">رمز الخطأ</th>
-                <th data-i18n="col_actions">إجراءات</th>
+                <th data-i18n="col_error">الخطأ</th>
+                <th data-i18n="col_actions">إجراء</th>
               </tr>
             </thead>
             <tbody id="jobsTableBody">
-              <tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-muted);" data-i18n="no_jobs">لا توجد مهام في الطابور حالياً.</td></tr>
+              <tr><td colspan="8" style="text-align:center;padding:2.2rem;color:var(--text-muted);" data-i18n="no_jobs">لا توجد مهام حالياً.</td></tr>
             </tbody>
           </table>
         </div>
@@ -533,53 +794,60 @@
 
     <!-- TAB 2: PRINTERS & CALIBRATION LAB -->
     <section id="tab-printers" class="tab-pane hidden" role="tabpanel">
+      <div class="pane-header">
+        <div>
+          <h1 class="pane-title" data-i18n="pane_printers_title">الطابعات والمعايرة</h1>
+          <p class="pane-subtitle" data-i18n="pane_printers_sub">اختبار جودة الطباعة وضبط المقاسات والأدراج الافتراضية.</p>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-header">
           <div class="card-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-            <span data-i18n="direct_test_title">اختبار ومعايرة الطابعة</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            <span data-i18n="direct_test_title">اختبار سريع</span>
           </div>
         </div>
         <div class="card-body">
           <div class="form-grid" style="align-items:end;">
             <div class="form-group">
-              <label class="form-label" for="customPrinterSelect" data-i18n="lbl_target_printer">اختر الطابعة</label>
+              <label class="form-label" for="customPrinterSelect" data-i18n="lbl_target_printer">الطابعة</label>
               <select id="customPrinterSelect" class="select" data-action="test-printer-change"></select>
               <input type="text" id="customPrinterUri" class="input mono hidden" dir="ltr" placeholder="tcp://192.168.1.200:9100" autocomplete="off" spellcheck="false" aria-describedby="customPrinterUriHelp customPrinterUriError" style="margin-top:0.5rem;" />
-              <div class="form-help hidden" id="customPrinterUriHelp" data-i18n="custom_printer_uri_help">TCP/RAW: tcp://IP:9100 أو IPP: ipp://IP:631/ipp/print</div>
+              <div class="form-help hidden" id="customPrinterUriHelp" data-i18n="custom_printer_uri_help">tcp://IP:9100 أو ipp://IP:631/ipp/print</div>
               <div class="form-error hidden" id="customPrinterUriError" role="alert"></div>
             </div>
             <div class="form-group">
-              <label class="form-label" for="customTestKind" data-i18n="lbl_test_type">نوع صفحة المعايرة والاختبار</label>
+              <label class="form-label" for="customTestKind" data-i18n="lbl_test_type">نموذج الاختبار</label>
               <select id="customTestKind" class="select" data-action="update-cal-warning">
-                <option value="pdf-a4" data-i18n="opt_calibration_pdf">PDF test page (GDI + PDFium • rulers + sizing square + barcode)</option>
-                <option value="thermal-80mm" data-i18n="opt_cal_thermal80">Thermal 80mm Receipt Calibration (ESC/POS • 576 dots)</option>
-                <option value="thermal-58mm" data-i18n="opt_cal_thermal58">Thermal 58mm Receipt Calibration (ESC/POS • 384 dots)</option>
-                <option value="zpl-label" data-i18n="opt_cal_zpl">Label 100×150mm Calibration (ZPL II)</option>
-                <option value="tspl-label" data-i18n="opt_cal_tspl">Label 100×150mm Calibration (TSPL)</option>
-                <option value="epl-label" data-i18n="opt_cal_epl">Label 100×150mm Calibration (EPL)</option>
+                <option value="pdf-a4" data-i18n="opt_calibration_pdf">صفحة معايرة PDF (مساطر وباركود)</option>
+                <option value="thermal-80mm" data-i18n="opt_cal_thermal80">إيصال حراري 80مم (ESC/POS)</option>
+                <option value="thermal-58mm" data-i18n="opt_cal_thermal58">إيصال حراري 58مم (ESC/POS)</option>
+                <option value="zpl-label" data-i18n="opt_cal_zpl">ملصق 100×150مم (ZPL II)</option>
+                <option value="tspl-label" data-i18n="opt_cal_tspl">ملصق 100×150مم (TSPL)</option>
+                <option value="epl-label" data-i18n="opt_cal_epl">ملصق 100×150مم (EPL)</option>
               </select>
             </div>
             <div>
               <button class="btn btn-primary" id="btnCustomTestPrint" data-action="custom-test-print" style="width:100%;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-                <span data-i18n="btn_send_test">إرسال صفحة المعايرة للطابعة</span>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                <span data-i18n="btn_send_test">إرسال اختبار</span>
               </button>
             </div>
           </div>
-          <div class="form-grid" style="align-items:end;margin-top:0.75rem;">
+          <div class="form-grid" style="align-items:end;margin-top:0.85rem;">
             <div class="form-group">
-              <label class="form-label" for="labPaperSelect" data-i18n="lbl_lab_paper">مقاس ورق الاختبار</label>
+              <label class="form-label" for="labPaperSelect" data-i18n="lbl_lab_paper">مقاس الورق</label>
               <select id="labPaperSelect" class="select"></select>
             </div>
             <div class="form-group">
-              <label class="form-label" for="labTraySelect" data-i18n="lbl_lab_tray">درج الورق</label>
+              <label class="form-label" for="labTraySelect" data-i18n="lbl_lab_tray">الدرج</label>
               <select id="labTraySelect" class="select"></select>
             </div>
             <div class="form-group">
-              <label class="form-label" for="labDuplexSelect" data-i18n="lbl_lab_duplex">الطباعة على الوجهين</label>
+              <label class="form-label" for="labDuplexSelect" data-i18n="lbl_lab_duplex">وجهان</label>
               <select id="labDuplexSelect" class="select">
-                <option value="" data-i18n="lab_auto">تلقائي (من الطابعة)</option>
+                <option value="" data-i18n="lab_auto">تلقائي</option>
                 <option value="on" data-i18n="ps_on">تشغيل</option>
                 <option value="off" data-i18n="ps_off">إيقاف</option>
               </select>
@@ -587,13 +855,13 @@
             <div class="form-group">
               <label class="form-label" for="labColorSelect" data-i18n="lbl_lab_color">الألوان</label>
               <select id="labColorSelect" class="select">
-                <option value="" data-i18n="lab_auto">تلقائي (من الطابعة)</option>
+                <option value="" data-i18n="lab_auto">تلقائي</option>
                 <option value="on" data-i18n="ps_on">تشغيل</option>
                 <option value="off" data-i18n="ps_off">إيقاف</option>
               </select>
             </div>
           </div>
-          <div class="form-help" data-i18n="lab_options_hint" style="margin-top:0.4rem;">تُستخدم هذه الخيارات مع صفحة اختبار PDF: المقاس يُبنى من مقاسات الطابعة المحددة فعليًا، و«تلقائي» يعني المقاس الافتراضي الذي تحدده الطابعة نفسها.</div>
+          <div class="form-help" data-i18n="lab_options_hint" style="margin-top:0.5rem;">تُطبَّق الخيارات على اختبار PDF وفق المقاسات الفعلية للطابعة.</div>
           <div id="calVirtualWarning" class="form-error hidden" role="alert" style="margin-top:0.75rem;"></div>
         </div>
       </div>
@@ -603,86 +871,128 @@
 
     <!-- TAB 3: SETTINGS & SECURITY -->
     <section id="tab-settings" class="tab-pane hidden" role="tabpanel">
+      <div class="pane-header">
+        <div>
+          <h1 class="pane-title" data-i18n="pane_settings_title">اتصال Odoo</h1>
+          <p class="pane-subtitle" data-i18n="pane_settings_sub">ربط التطبيق بخادم Odoo وضبط استئناف المهام.</p>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-header">
           <div class="card-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-            <span data-i18n="settings_title">الاتصال بـ Odoo</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            <span data-i18n="settings_title">إعدادات الخادم</span>
           </div>
-          <span class="badge badge-info" id="policyStatusBadge">Local Config</span>
+          <span class="badge badge-info" id="policyStatusBadge"><span class="dot"></span>Local Config</span>
         </div>
         <div class="card-body">
           <div class="form-grid">
             <div class="form-group">
               <label class="form-label" for="inputOdooOrigin" data-i18n="lbl_odoo_origin">رابط Odoo</label>
               <input type="url" id="inputOdooOrigin" class="input mono" dir="ltr" placeholder="http://192.168.1.20:8069" autocomplete="url" spellcheck="false" aria-describedby="helpOdooOrigin originHttpWarning originError" />
-              <div class="form-help" id="helpOdooOrigin" data-i18n="help_odoo_origin">الرابط كما يظهر في المتصفح. HTTPS لأي عنوان، أو HTTP لأي عنوان IP — مثل http://192.168.1.20:8069</div>
-              <div class="form-help hidden" id="originHttpWarning" data-i18n="origin_http_warning" style="color:var(--warn-fg);font-weight:600;" role="note">تنبيه: HTTP غير مشفّر. استخدمه للاختبار أو داخل شبكة موثوقة فقط.</div>
+              <div class="form-help" id="helpOdooOrigin" data-i18n="help_odoo_origin">أدخل الرابط كما يظهر في المتصفح (HTTPS أو HTTP مع عنوان IP).</div>
+              <div class="form-help hidden" id="originHttpWarning" data-i18n="origin_http_warning" style="color:var(--warn-fg);font-weight:600;" role="note">اتصال HTTP غير مشفّر — يُفضَّل استخدامه داخل الشبكة المحلية فقط.</div>
               <div class="form-error hidden" id="originError" role="alert"></div>
             </div>
 
             <div class="form-group">
-              <label class="form-label" for="inputAutoReprint" data-i18n="lbl_recovery_mode">عند توقف مفاجئ</label>
+              <label class="form-label" for="inputAutoReprint" data-i18n="lbl_recovery_mode">استعادة المهام عند التشغيل</label>
               <select id="inputAutoReprint" class="select">
-                <option value="false" data-i18n="opt_recovery_safe">آمن (افتراضي): عدم إعادة طباعة المهام الغامضة تلقائيًا</option>
-                <option value="true" data-i18n="opt_recovery_auto">إعادة الطباعة التلقائية للمهام قيد التنفيذ عند بدء التشغيل</option>
+                <option value="false" data-i18n="opt_recovery_safe">آمن — عدم تكرار المهام قيد الطباعة</option>
+                <option value="true" data-i18n="opt_recovery_auto">تلقائي — إعادة المهام قيد الطباعة</option>
               </select>
               <div class="form-help" data-i18n="help_recovery_mode">
-                المهام التي لم تُرسل للطابعة تُستأنف دائمًا. المهام المُرسلة يحددها هذا الخيار.
+                تُستأنف المهام المعلّقة دائماً، بينما تخضع المهام المُرسلة لهذا الخيار.
               </div>
             </div>
           </div>
 
-          <div style="margin-top:1.25rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+          <div style="margin-top:1.25rem;display:flex;align-items:center;gap:0.65rem;flex-wrap:wrap;">
             <button class="btn btn-primary" id="btnSaveOrigin" data-action="save-origin">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
-              <span data-i18n="btn_save_origin">حفظ الإعدادات</span>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+              <span data-i18n="btn_save_origin">حفظ</span>
             </button>
-            <button class="btn btn-primary" id="btnSaveAndOpen" data-action="save-and-open">
+            <button class="btn btn-secondary" id="btnSaveAndOpen" data-action="save-and-open">
               <span data-i18n="btn_save_and_launch">حفظ وفتح Odoo</span>
             </button>
           </div>
+        </div>
+      </div>
 
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            <span data-i18n="guide_title">دليل البدء السريع</span>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="guide-grid">
+            <div class="guide-step">
+              <div class="guide-step-num">01</div>
+              <div class="guide-step-title" data-i18n="guide_s1_t">تحديث وحدة Odoo</div>
+              <div class="guide-step-desc" data-i18n="guide_s1_d">احرص على ترقية تطبيق Yaseir Print من قائمة تطبيقات Odoo بعد تحديث ملفات الخادم.</div>
+            </div>
+            <div class="guide-step">
+              <div class="guide-step-num">02</div>
+              <div class="guide-step-title" data-i18n="guide_s2_t">تبويبات العمل</div>
+              <div class="guide-step-desc" data-i18n="guide_s2_d">عند فتح Odoo يظهر شريط التبويبات العلوي للتنقل السلس بين الجلسات ونقاط البيع.</div>
+            </div>
+            <div class="guide-step">
+              <div class="guide-step-num">03</div>
+              <div class="guide-step-title" data-i18n="guide_s3_t">الرجوع السريع</div>
+              <div class="guide-step-desc" data-i18n="guide_s3_d">اضغط Ctrl+Shift+Y في أي لحظة للعودة إلى مركز التحكم.</div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
 
     <!-- TAB 4: DIAGNOSTICS & SUPPORT -->
     <section id="tab-diagnostics" class="tab-pane hidden" role="tabpanel">
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
-            <span data-i18n="env_title">بيئة العرض المدمجة</span>
-          </div>
-          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:flex-end;">
-            <button class="btn btn-sm btn-secondary" id="btnClearWebData" data-action="clear-web-data" data-i18n="btn_clear_web">مسح بيانات التصفح</button>
-          </div>
-        </div>
-        <div class="card-body">
-          <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.85rem;" data-i18n="env_desc">
-            فحص حي لبيئة عرض صفحات Odoo على هذا الجهاز. إذا ظهرت شاشة بيضاء بعد تسجيل الدخول، فالمسح يعيد البيئة نظيفة (كاش وملفات ارتباط وتخزين) ويحل المشكلة غالبًا.
-          </p>
-          <div id="envSummary"></div>
+      <div class="pane-header">
+        <div>
+          <h1 class="pane-title" data-i18n="pane_diag_title">التشخيص</h1>
+          <p class="pane-subtitle" data-i18n="pane_diag_sub">فحص بيئة التشغيل وتصدير تقرير دعم فني منقّح.</p>
         </div>
       </div>
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-            <span data-i18n="diag_title">حزمة التشخيص الآمنة (Redacted Diagnostics Bundle)</span>
+
+      <div class="diag-grid">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+              <span data-i18n="env_title">بيئة التشغيل</span>
+            </div>
+            <button class="btn btn-sm btn-secondary" id="btnClearWebData" data-action="clear-web-data" data-i18n="btn_clear_web">مسح البيانات</button>
           </div>
-          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:flex-end;">
-            <button class="btn btn-sm btn-secondary" id="btnGenerateDiagnostics" data-action="generate-diagnostics" data-i18n="btn_generate_diag">توليد الحزمة</button>
-            <button class="btn btn-sm btn-secondary" id="btnCopyDiagnostics" data-action="copy-diagnostics" data-i18n="btn_copy_diag">نسخ JSON</button>
-            <button class="btn btn-sm btn-primary" id="btnDownloadDiagnostics" data-action="download-diagnostics" data-i18n="btn_download_diag">تنزيل ملف JSON</button>
+          <div class="card-body">
+            <p style="font-size:0.8rem;color:var(--text-secondary);margin:0 0 0.85rem;" data-i18n="env_desc">
+              فحص حي لبيئة المتصفح. امسح البيانات المؤقتة عند مواجهة مشكلة في تسجيل الدخول.
+            </p>
+            <div id="envSummary"></div>
           </div>
         </div>
-        <div class="card-body">
-          <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.85rem;" data-i18n="diag_desc">
-            تحتوي هذه الحزمة على إصدار التطبيق وإحصائيات الحالات وآخر 200 مهمة طباعة بدون أي بيانات سرية أو محتوى مستندات أو رموز جلسات (آمنة تماماً لإرفاقها في تذاكر الدعم الفني).
-          </p>
-          <pre class="code-box" id="diagnosticsOutput" aria-live="polite" data-i18n="diag_placeholder">لسه ما اتولّدتش حزمة تشخيص. اضغط «توليد الحزمة».</pre>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              <span data-i18n="diag_title">حزمة التشخيص</span>
+            </div>
+            <div style="display:flex;gap:0.45rem;flex-wrap:wrap;justify-content:flex-end;">
+              <button class="btn btn-sm btn-secondary" id="btnGenerateDiagnostics" data-action="generate-diagnostics" data-i18n="btn_generate_diag">توليد</button>
+              <button class="btn btn-sm btn-secondary" id="btnCopyDiagnostics" data-action="copy-diagnostics" data-i18n="btn_copy_diag">نسخ JSON</button>
+              <button class="btn btn-sm btn-primary" id="btnDownloadDiagnostics" data-action="download-diagnostics" data-i18n="btn_download_diag">تنزيل JSON</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <p style="font-size:0.8rem;color:var(--text-secondary);margin:0 0 0.85rem;" data-i18n="diag_desc">
+              ملخص الحالة وآخر 200 مهمة — خالٍ تماماً من البيانات الحساسة.
+            </p>
+            <pre class="code-box" id="diagnosticsOutput" aria-live="polite" data-i18n="diag_placeholder">اضغط «توليد» لإنشاء تقرير التشخيص.</pre>
+          </div>
         </div>
       </div>
     </section>
@@ -696,7 +1006,7 @@
   <div id="confirmOverlay" class="modal-overlay hidden">
     <div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
       <div class="modal-head">
-        <img src="app-icon.png" alt="" width="34" height="34" style="border-radius: 9px; display: block;"/>
+        <img src="app-icon.png" alt="" width="32" height="32" style="border-radius: 8px; display: block;"/>
         <div id="confirmTitle" class="modal-title">تأكيد الإجراء</div>
       </div>
       <p id="confirmMessage" class="modal-message"></p>
@@ -710,153 +1020,195 @@
 <script>
   const I18N = {
     ar: {
-      app_title: "الطباعة من Yaseir",
-      app_subtitle: "طباعة مباشرة من Odoo إلى الطابعة المحلية",
-      btn_open_odoo: "فتح نظام Odoo",
+      app_title: "Yaseir Print",
+      app_subtitle: "طباعة فورية من Odoo",
+      nav_section: "مساحة العمل",
+      sidebar_engine_title: "حالة النظام",
+      sidebar_server_lbl: "الخادم",
+      sidebar_default_lbl: "الافتراضية",
+      sidebar_shortcut_lbl: "اختصار",
+      pane_dash_title: "لوحة المراقبة",
+      pane_dash_sub: "متابعة الطابعات المتصلة ومهام الطباعة الفورية.",
+      pane_printers_title: "الطابعات والمعايرة",
+      pane_printers_sub: "اختبار جودة الطباعة وضبط المقاسات والأدراج الافتراضية.",
+      pane_settings_title: "اتصال Odoo",
+      pane_settings_sub: "ربط التطبيق بخادم Odoo وضبط استئناف المهام.",
+      pane_diag_title: "التشخيص",
+      pane_diag_sub: "فحص بيئة التشغيل وتصدير تقرير دعم فني منقّح.",
+      guide_title: "دليل البدء السريع",
+      guide_s1_t: "تحديث وحدة Odoo",
+      guide_s1_d: "احرص على ترقية تطبيق Yaseir Print من قائمة تطبيقات Odoo بعد تحديث ملفات الخادم.",
+      guide_s2_t: "تبويبات العمل",
+      guide_s2_d: "عند فتح Odoo يظهر شريط التبويبات العلوي للتنقل السلس بين الجلسات ونقاط البيع.",
+      guide_s3_t: "الرجوع السريع",
+      guide_s3_d: "اضغط Ctrl+Shift+Y في أي لحظة للعودة إلى مركز التحكم.",
+      search_queue_ph: "بحث…",
+      btn_open_odoo: "فتح Odoo",
       btn_refresh: "تحديث",
       refreshed: "تم التحديث",
       dialog_title: "تأكيد الإجراء",
-      env_ok: "OK",
+      env_ok: "متاح",
       env_unavailable: "غير متاح",
-      toast_failed: "ما تمّش تنفيذ الإجراء. حاول مرة أخرى.",
-      env_err_translations_t: "خطأ ترجمة من السيرفر",
-      env_err_translations_b: "سيرفر Odoo رجّع خطأ في ملف الترجمة، فالواجهة مش هتكمل فتح. الحل على السيرفر: حدّث إضافة الطباعة (native_print) لآخر إصدار وأعد تشغيل Odoo.",
-      env_err_generic: "خطأ غير متوقع في الصفحة",
-      state_queued: "في الانتظار",
-      state_rendering: "جارٍ التجهيز",
-      state_spooling: "جارٍ الإرسال للطابعة",
-      state_printing: "جارٍ الطباعة",
+      toast_failed: "تعذّر إتمام الإجراء. حاول مجدداً.",
+      env_err_translations_t: "خطأ ترجمة من الخادم",
+      env_err_translations_b: "تعذّر تحميل ملف الترجمة من Odoo. حدّث وحدة native_print على الخادم وأعد التشغيل.",
+      env_err_generic: "خطأ غير متوقع",
+      state_queued: "بالانتظار",
+      state_rendering: "تجهيز",
+      state_spooling: "إرسال",
+      state_printing: "جاري الطباعة",
       state_done: "مكتملة",
       state_failed: "فاشلة",
-      state_dead_letter: "فاشلة نهائيًا",
+      state_dead_letter: "متوقفة",
       state_canceled: "ملغاة",
       ps_ready: "جاهزة",
-      ps_printing: "تطبع الآن",
+      ps_printing: "تطبع",
       ps_offline: "غير متصلة",
-      ps_paper_out: "الورق نفد",
-      ps_paper_jam: "ورق محشور",
-      ps_door_open: "الباب مفتوح",
-      ps_no_toner: "الحبر نفد",
+      ps_paper_out: "نفد الورق",
+      ps_paper_jam: "انحشار ورق",
+      ps_door_open: "الغطاء مفتوح",
+      ps_no_toner: "نفد الحبر",
       ps_error: "خطأ",
-      ps_paused: "إيقاف مؤقت",
+      ps_paused: "متوقفة مؤقتاً",
       ps_unknown: "غير معروفة",
-      qt_pdf: "PDF مكتبية",
-      qt_escpos: "حراري ESC/POS 80مم",
+      qt_pdf: "PDF مكتبي",
+      qt_escpos: "حراري 80مم",
       qt_zpl: "ملصق ZPL",
       qt_tspl: "ملصق TSPL",
       qt_epl: "ملصق EPL",
       cls_thermal: "حرارية · ESC/POS",
       cls_label: "ملصقات",
       cls_office: "مكتبية · GDI",
-      cls_virtual: "افتراضية · GDI",
-      cap_duplex: "وجهان (Duplex)",
+      cls_virtual: "افتراضية · PDF",
+      cap_duplex: "وجهان",
       cap_color: "ألوان",
       cap_trays: "الأدراج",
       ps_title: "إعدادات الطابعة",
       ps_paper: "الورق الافتراضي",
       ps_tray: "الدرج الافتراضي",
-      ps_duplex: "الطباعة على الوجهين",
+      ps_duplex: "الوجهين",
       ps_color: "الألوان",
-      ps_driver_default: "افتراضي التعريف",
+      ps_driver_default: "افتراضي الطابعة",
       ps_on: "تشغيل",
       ps_off: "إيقاف",
-      ps_save: "حفظ الإعدادات",
+      ps_save: "حفظ",
       ps_saved: "تم حفظ إعدادات الطابعة",
-      lbl_lab_paper: "مقاس ورق الاختبار",
-      lbl_lab_tray: "درج الورق",
-      lbl_lab_duplex: "الطباعة على الوجهين",
+      lbl_lab_paper: "مقاس الورق",
+      lbl_lab_tray: "الدرج",
+      lbl_lab_duplex: "وجهان",
       lbl_lab_color: "الألوان",
-      lab_auto: "تلقائي (من الطابعة)",
-      lab_options_hint: "تُستخدم هذه الخيارات مع صفحة اختبار PDF: المقاس يُبنى من مقاسات الطابعة المحددة فعليًا، و«تلقائي» يعني المقاس الافتراضي الذي تحدده الطابعة نفسها.",
-      ps_hint: "تُستخدم عندما لا يحدد المستند إعداداته بنفسه.",
+      lab_auto: "تلقائي",
+      lab_options_hint: "تُطبَّق الخيارات على اختبار PDF وفق المقاسات الفعلية للطابعة.",
+      ps_hint: "تُطبَّق عند عدم تحديد المستند لإعداداته.",
       cap_more_forms: "مقاسات إضافية",
-      diag_placeholder: "لسه ما اتولّدتش حزمة تشخيص. اضغط «توليد الحزمة».",
+      diag_placeholder: "اضغط «توليد» لإنشاء تقرير التشخيص.",
       dialog_confirm: "تأكيد",
       dialog_cancel: "إلغاء",
-      confirm_clear_web_data: "سيتم مسح الكاش وملفات الارتباط والتخزين المحلي للتطبيق وتسجيل الخروج. متابعة؟",
+      confirm_clear_web_data: "سيتم مسح البيانات المؤقتة وتسجيل الخروج. هل تريد المتابعة؟",
       btn_theme: "المظهر",
-      tab_dashboard: "لوحة المراقبة وطابور الطباعة",
-      tab_printers: "الطابعات ومعمل المعايرة",
-      tab_settings: "إعدادات اتصال Odoo والأمان",
-      tab_diagnostics: "حزمة التشخيص والدعم الفني",
-      env_title: "بيئة العرض المدمجة",
-      btn_clear_web: "مسح بيانات التصفح",
-      env_desc: "فحص حي لبيئة عرض صفحات Odoo على هذا الجهاز. إذا ظهرت شاشة بيضاء بعد تسجيل الدخول، فالمسح يعيد البيئة نظيفة (كاش وملفات ارتباط وتخزين) ويحل المشكلة غالبًا.",
-      btn_configure_now: "ضبط الرابط الآن",
-      kpi_printers: "الطابعات المكتشفة",
-      kpi_active_jobs: "المهام النشطة / بالانتظار",
-      kpi_active_sub: "يُحفظ تلقائيًا",
-      kpi_done_jobs: "مهام مكتملة بنجاح",
-      kpi_failed_jobs: "تحتاج لتدخل (Failed / Dead Letter)",
-      queue_title: "طابور الطباعة",
+      tab_dashboard: "لوحة المراقبة",
+      tab_printers: "الطابعات والمعايرة",
+      tab_settings: "اتصال Odoo",
+      tab_diagnostics: "التشخيص",
+      env_title: "بيئة التشغيل",
+      btn_clear_web: "مسح البيانات",
+      env_desc: "فحص حي لبيئة المتصفح. امسح البيانات المؤقتة عند مواجهة مشكلة في تسجيل الدخول.",
+      btn_configure_now: "إعداد الرابط",
+      kpi_printers: "الطابعات",
+      kpi_active_jobs: "قيد التنفيذ",
+      kpi_active_sub: "حفظ تلقائي للطابور",
+      kpi_done_jobs: "مكتملة",
+      kpi_failed_jobs: "متعثرة",
+      queue_title: "سجل المهام",
       filter_all: "الكل",
       filter_active: "نشطة",
-      filter_attention: "فاشلة / Dead Letter",
+      filter_attention: "متعثرة",
       filter_done: "مكتملة",
       btn_clear_done: "مسح المكتملة",
-      col_id: "معرّف المهمة (Idempotency Key)",
-      col_report: "التقرير / المصدر",
-      col_printer: "الطابعة المستهدفة",
-      col_pages: "الصفحات / الحجم",
+      col_id: "المعرّف",
+      col_report: "المستند",
+      col_printer: "الطابعة",
+      col_pages: "الحجم",
       col_state: "الحالة",
       col_attempts: "المحاولات",
-      col_error: "رمز الخطأ",
-      col_actions: "إجراءات",
-      no_jobs: "لا توجد مهام مطابقة في الطابور حالياً.",
-      no_printers: "لم يتم العثور على طابعات مثبتة في Windows Spooler على هذا الجهاز حالياً. يمكنك استخدام مربع الاختبار المباشر أعلاه للطباعة عبر TCP 9100 أو IPP.",
-      toast_close: "إغلاق التنبيه",
-      direct_test_title: "اختبار ومعايرة الطابعة",
-      lbl_target_printer: "اختر الطابعة",
-      lbl_test_type: "نوع صفحة المعايرة والاختبار",
-      btn_send_test: "إرسال صفحة المعايرة للطابعة",
-      settings_title: "الاتصال بـ Odoo",
+      col_error: "الخطأ",
+      col_actions: "إجراء",
+      no_jobs: "لا توجد مهام مطابقة.",
+      no_printers: "لم يتم اكتشاف طابعات محلية بعد. استخدم الاختبار المباشر عبر TCP 9100 أو IPP.",
+      toast_close: "إغلاق",
+      direct_test_title: "اختبار سريع",
+      lbl_target_printer: "الطابعة",
+      lbl_test_type: "نموذج الاختبار",
+      btn_send_test: "إرسال اختبار",
+      settings_title: "إعدادات الخادم",
       lbl_odoo_origin: "رابط Odoo",
-      help_odoo_origin: "الرابط كما يظهر في المتصفح. HTTPS لأي عنوان، أو HTTP لأي عنوان IP — مثل http://192.168.1.20:8069",
-      origin_http_warning: "تنبيه: HTTP غير مشفّر. استخدمه داخل شبكتك المحلية فقط، وفضّل HTTPS دائمًا.",
-      origin_invalid: "عنوان غير صالح — HTTPS، أو HTTP مع عنوان IP.",
-      origin_not_configured: "لم يتم ضبط رابط Odoo بعد. أدخل عنوان IP والمنفذ من الإعدادات.",
-      native_bridge_unavailable: "خدمة الطباعة المحلية غير متاحة. افتح تطبيق سطح المكتب ثم أعد المحاولة.",
-      custom_printer_uri_help: "TCP/RAW: tcp://IP:9100 أو IPP: ipp://IP:631/ipp/print",
-      custom_printer_uri_invalid: "عنوان الطابعة غير صالح. استخدم tcp:// أو raw:// أو ipp:// مع IP صحيح.",
+      help_odoo_origin: "أدخل الرابط كما يظهر في المتصفح (HTTPS أو HTTP مع عنوان IP).",
+      origin_http_warning: "اتصال HTTP غير مشفّر — يُفضَّل استخدامه داخل الشبكة المحلية فقط.",
+      origin_invalid: "رابط غير صالح — استخدم HTTPS أو HTTP مع عنوان IP.",
+      origin_not_configured: "أدخل رابط خادم Odoo للبدء.",
+      native_bridge_unavailable: "خدمة الطباعة المحلية غير متاحة حالياً.",
+      custom_printer_uri_help: "tcp://IP:9100 أو ipp://IP:631/ipp/print",
+      custom_printer_uri_invalid: "عنوان غير صالح — استخدم tcp:// أو raw:// أو ipp:// مع IP صحيح.",
       kpi_pdf_ready: "محرك PDF جاهز",
       kpi_pdf_unavailable: "محرك PDF غير متاح",
-      confirm_clear_done: "هل تريد حذف مهام الطباعة المكتملة؟ لا يمكن التراجع.",
-      confirm_cancel_job: "إلغاء مهمة الطباعة هذه؟ لن تُطبع.",
-      diagnostics_copied: "تم نسخ تقرير التشخيص",
-      diagnostics_downloaded: "بدأ تنزيل حزمة التشخيص",
-      diagnostics_failed: "تعذر إنشاء تقرير التشخيص. راجع الخطأ وحاول مجدداً.",
-      lbl_recovery_mode: "عند توقف مفاجئ",
-      opt_recovery_safe: "آمن (افتراضي): عدم إعادة طباعة المهام الغامضة تلقائيًا",
-      opt_recovery_auto: "إعادة الطباعة التلقائية للمهام قيد التنفيذ عند بدء التشغيل",
-      opt_calibration_pdf: "صفحة اختبار PDF (GDI + PDFium • مساطر + مربع معايرة + باركود)",
-      opt_cal_thermal80: "معايرة إيصالات حرارية 80مم (ESC/POS • 576 نقطة)",
-      opt_cal_thermal58: "معايرة إيصالات حرارية 58مم (ESC/POS • 384 نقطة)",
-      opt_cal_zpl: "معايرة ملصق 100×150مم (ZPL II)",
-      opt_cal_tspl: "معايرة ملصق 100×150مم (TSPL)",
-      opt_cal_epl: "معايرة ملصق 100×150مم (EPL)",
-      cal_virtual_warning: "تنبيه: الطابعة المختارة افتراضية (PDF/XPS). صفحات المعايرة الخام (ESC/POS / ZPL / TSPL) لا تصلح لها — ستُنشئ ملفًا تالفًا بدل صفحة مطبوعة. اختر طابعة حقيقية.",
-      help_recovery_mode: "المهام التي لم تُرسل للطابعة تُستأنف دائمًا. المهام المُرسلة يحددها هذا الخيار.",
-      btn_save_origin: "حفظ الإعدادات",
+      confirm_clear_done: "حذف جميع المهام المكتملة من السجل؟",
+      confirm_cancel_job: "إلغاء مهمة الطباعة هذه؟",
+      diagnostics_copied: "تم نسخ التقرير",
+      diagnostics_downloaded: "بدأ تنزيل ملف التشخيص",
+      diagnostics_failed: "تعذّر توليد حزمة التشخيص.",
+      lbl_recovery_mode: "استعادة المهام عند التشغيل",
+      opt_recovery_safe: "آمن — عدم تكرار المهام قيد الطباعة",
+      opt_recovery_auto: "تلقائي — إعادة المهام قيد الطباعة",
+      opt_calibration_pdf: "صفحة معايرة PDF (مساطر وباركود)",
+      opt_cal_thermal80: "إيصال حراري 80مم (ESC/POS)",
+      opt_cal_thermal58: "إيصال حراري 58مم (ESC/POS)",
+      opt_cal_zpl: "ملصق 100×150مم (ZPL II)",
+      opt_cal_tspl: "ملصق 100×150مم (TSPL)",
+      opt_cal_epl: "ملصق 100×150مم (EPL)",
+      cal_virtual_warning: "تنبيه: الطابعة الافتراضية لا تقبل أوامر الطباعة الخام (ESC/POS أو ZPL). اختر طابعة فعلية أو نموذج PDF.",
+      help_recovery_mode: "تُستأنف المهام المعلّقة دائماً، بينما تخضع المهام المُرسلة لهذا الخيار.",
+      btn_save_origin: "حفظ",
       btn_save_and_launch: "حفظ وفتح Odoo",
-      diag_title: "حزمة التشخيص الآمنة (Redacted Diagnostics Bundle)",
-      btn_generate_diag: "توليد الحزمة",
+      diag_title: "حزمة التشخيص",
+      btn_generate_diag: "توليد",
       btn_copy_diag: "نسخ JSON",
-      btn_download_diag: "تنزيل ملف JSON",
-      diag_desc: "إصدار التطبيق وآخر 200 مهمة — بدون بيانات سرية.",
+      btn_download_diag: "تنزيل JSON",
+      diag_desc: "ملخص الحالة وآخر 200 مهمة — خالٍ تماماً من البيانات الحساسة.",
     },
     en: {
       app_title: "Yaseir Print",
-      app_subtitle: "Direct local printing from Odoo to your printers.",
+      app_subtitle: "Direct local printing for Odoo & POS",
+      nav_section: "Workspace",
+      sidebar_engine_title: "System Status",
+      sidebar_server_lbl: "Server",
+      sidebar_default_lbl: "Default",
+      sidebar_shortcut_lbl: "Shortcut",
+      pane_dash_title: "Dashboard",
+      pane_dash_sub: "Live status of connected printers and print jobs.",
+      pane_printers_title: "Printers & Calibration",
+      pane_printers_sub: "Verify print alignment and configure default paper sizes & trays.",
+      pane_settings_title: "Odoo Connection",
+      pane_settings_sub: "Configure your Odoo endpoint and crash recovery policy.",
+      pane_diag_title: "Diagnostics",
+      pane_diag_sub: "Inspect runtime health and export a redacted support bundle.",
+      guide_title: "Quick Start",
+      guide_s1_t: "Sync native_print",
+      guide_s1_d: "Upgrade Yaseir Print in Odoo Apps after updating server add-on files.",
+      guide_s2_t: "Multi-tab Odoo",
+      guide_s2_d: "Opening Odoo reveals the browser tab bar for seamless multi-session and POS workflows.",
+      guide_s3_t: "Quick switch",
+      guide_s3_d: "Press Ctrl+Shift+Y anytime to jump back to Control Center.",
+      search_queue_ph: "Search jobs…",
       btn_open_odoo: "Open Odoo",
       btn_refresh: "Refresh",
       refreshed: "Refreshed",
-      dialog_title: "Please confirm",
+      dialog_title: "Confirm action",
       env_ok: "OK",
       env_unavailable: "Unavailable",
-      toast_failed: "The action could not be completed. Please try again.",
+      toast_failed: "Action failed. Please try again.",
       env_err_translations_t: "Server translation error",
-      env_err_translations_b: "The Odoo server returned a translation-file error, so the web client cannot finish loading. Fix on the server: update the print add-on (native_print) to the latest version and restart Odoo.",
-      env_err_generic: "Unexpected page error",
+      env_err_translations_b: "Odoo failed to serve translations. Upgrade native_print on the server and restart Odoo.",
+      env_err_generic: "Page error",
       state_queued: "Queued",
       state_rendering: "Rendering",
       state_spooling: "Spooling",
@@ -875,15 +1227,15 @@
       ps_error: "Error",
       ps_paused: "Paused",
       ps_unknown: "Unknown",
-      qt_pdf: "Office PDF (GDI)",
-      qt_escpos: "80mm ESC/POS",
+      qt_pdf: "Office PDF",
+      qt_escpos: "80mm Thermal",
       qt_zpl: "ZPL Label",
       qt_tspl: "TSPL Label",
       qt_epl: "EPL Label",
       cls_thermal: "Thermal · ESC/POS",
       cls_label: "Label",
       cls_office: "Office · GDI",
-      cls_virtual: "Virtual · GDI",
+      cls_virtual: "Virtual · PDF",
       cap_duplex: "Duplex",
       cap_color: "Color",
       cap_trays: "Trays",
@@ -895,94 +1247,93 @@
       ps_driver_default: "Printer default",
       ps_on: "On",
       ps_off: "Off",
-      ps_save: "Save settings",
+      ps_save: "Save",
       ps_saved: "Printer settings saved",
-      lbl_lab_paper: "Test paper size",
-      lbl_lab_tray: "Paper tray",
+      lbl_lab_paper: "Paper size",
+      lbl_lab_tray: "Tray",
       lbl_lab_duplex: "Duplex",
       lbl_lab_color: "Color",
-      lab_auto: "Automatic (from the printer)",
-      lab_options_hint: "These options apply to the PDF test page: the size is built from the selected printer's real forms, and Automatic means the printer's own default form.",
+      lab_auto: "Automatic",
+      lab_options_hint: "Applied to PDF calibration using the printer's real supported forms.",
       ps_hint: "Used when a document does not specify its own settings.",
       cap_more_forms: "more sizes",
-      diag_placeholder: "No diagnostics bundle yet. Press Generate.",
+      diag_placeholder: "Click Generate to create a diagnostics report.",
       dialog_confirm: "Confirm",
       dialog_cancel: "Cancel",
-      confirm_clear_web_data: "This clears the app cache, cookies and local storage and signs you out. Continue?",
+      confirm_clear_web_data: "Clear cached web data and sign out of Odoo?",
       btn_theme: "Theme",
-      tab_dashboard: "Dashboard & Print Queue",
-      tab_printers: "Printers & Calibration Lab",
-      tab_settings: "Odoo Connection & Security",
-      tab_diagnostics: "Diagnostics & Support Bundle",
-      env_title: "Embedded Browser Environment",
-      btn_clear_web: "Clear Web Data",
-      env_desc: "Live check of the environment that renders Odoo pages on this PC. If a white page appears after sign-in, clearing returns a clean environment (cache, cookies, storage) and usually fixes it.",
-      btn_configure_now: "Configure Now",
-      kpi_printers: "Discovered Printers",
-      kpi_active_jobs: "Active / Queued Jobs",
-      kpi_active_sub: "Saved automatically",
-      kpi_done_jobs: "Completed Jobs",
-      kpi_failed_jobs: "Needs Attention (Failed / Dead Letter)",
-      queue_title: "Print queue",
+      tab_dashboard: "Dashboard",
+      tab_printers: "Printers & Lab",
+      tab_settings: "Odoo Connection",
+      tab_diagnostics: "Diagnostics",
+      env_title: "Runtime Health",
+      btn_clear_web: "Clear data",
+      env_desc: "Live browser environment checks. Clear cached web data if sign-in stalls.",
+      btn_configure_now: "Configure",
+      kpi_printers: "Printers",
+      kpi_active_jobs: "In Progress",
+      kpi_active_sub: "Auto-persisted queue",
+      kpi_done_jobs: "Completed",
+      kpi_failed_jobs: "Failed",
+      queue_title: "Print Queue",
       filter_all: "All",
       filter_active: "Active",
-      filter_attention: "Failed / Dead Letter",
-      filter_done: "Completed",
-      btn_clear_done: "Clear Completed",
-      col_id: "Job ID (Idempotency Key)",
-      col_report: "Report / Source",
-      col_printer: "Target Printer",
-      col_pages: "Pages / Size",
-      col_state: "State",
-      col_attempts: "Attempts",
-      col_error: "Error Code",
-      col_actions: "Actions",
-      no_jobs: "No matching print jobs in the queue.",
-      no_printers: "No Windows Spooler printers discovered on this host. Use the Direct Calibration box above to test TCP 9100 or IPP printers.",
-      toast_close: "Dismiss notification",
-      direct_test_title: "Printer test & calibration",
-      lbl_target_printer: "Choose a printer",
-      lbl_test_type: "Calibration Test Page Type",
-      btn_send_test: "Send Calibration Page",
-      settings_title: "Odoo connection",
-      lbl_odoo_origin: "Odoo address",
-      help_odoo_origin: "The address exactly as in the browser. HTTPS for any address, or HTTP for any IP address, e.g. http://192.168.1.20:8069.",
-      origin_http_warning: "Notice: HTTP is unencrypted. Use it only on your local network; prefer HTTPS.",
-      origin_invalid: "Invalid address — HTTPS, or HTTP with an IP address.",
-      origin_not_configured: "The Odoo address is not configured. Enter its IP address and port in Settings.",
-      native_bridge_unavailable: "The local print service is unavailable. Open the desktop app and try again.",
-      custom_printer_uri_help: "TCP/RAW: tcp://IP:9100 or IPP: ipp://IP:631/ipp/print",
-      custom_printer_uri_invalid: "Invalid printer address. Use tcp://, raw://, or ipp:// with a valid IP address.",
+      filter_attention: "Failed",
+      filter_done: "Done",
+      btn_clear_done: "Clear done",
+      col_id: "Job ID",
+      col_report: "Document",
+      col_printer: "Printer",
+      col_pages: "Size",
+      col_state: "Status",
+      col_attempts: "Tries",
+      col_error: "Error",
+      col_actions: "Action",
+      no_jobs: "No print jobs yet.",
+      no_printers: "No local spooler printers detected. Test network printers directly via TCP 9100 or IPP above.",
+      toast_close: "Dismiss",
+      direct_test_title: "Calibration Test",
+      lbl_target_printer: "Printer",
+      lbl_test_type: "Test template",
+      btn_send_test: "Print test page",
+      settings_title: "Server Endpoint",
+      lbl_odoo_origin: "Odoo URL",
+      help_odoo_origin: "Enter your Odoo origin URL (HTTPS, or HTTP with an IP address).",
+      origin_http_warning: "Unencrypted HTTP — recommended on trusted local networks only.",
+      origin_invalid: "Invalid URL — use HTTPS, or HTTP with an IP address.",
+      origin_not_configured: "Add your Odoo server URL to get started.",
+      native_bridge_unavailable: "Local print service is unavailable.",
+      custom_printer_uri_help: "tcp://IP:9100 or ipp://IP:631/ipp/print",
+      custom_printer_uri_invalid: "Invalid printer URI — use tcp://, raw://, or ipp:// with a valid IP.",
       kpi_pdf_ready: "PDF engine ready",
       kpi_pdf_unavailable: "PDF engine unavailable",
-      confirm_clear_done: "Delete completed print jobs? This cannot be undone.",
-      confirm_cancel_job: "Cancel this print job? It will not print.",
-      diagnostics_copied: "Diagnostics report copied",
-      diagnostics_downloaded: "Diagnostics download started",
-      diagnostics_failed: "Could not generate diagnostics. Check the error and try again.",
-      lbl_recovery_mode: "After a sudden stop",
-      opt_recovery_safe: "Safe (default): never auto-reprint ambiguous jobs",
-      opt_recovery_auto: "Auto-reprint in-flight jobs at startup",
-      opt_calibration_pdf: "PDF test page (GDI + PDFium • rulers + sizing square + barcode)",
-      opt_cal_thermal80: "Thermal 80mm Receipt Calibration (ESC/POS • 576 dots)",
-      opt_cal_thermal58: "Thermal 58mm Receipt Calibration (ESC/POS • 384 dots)",
-      opt_cal_zpl: "Label 100×150mm Calibration (ZPL II)",
-      opt_cal_tspl: "Label 100×150mm Calibration (TSPL)",
-      opt_cal_epl: "Label 100×150mm Calibration (EPL)",
-      cal_virtual_warning: "Note: the selected printer is virtual (PDF/XPS). Raw calibration pages (ESC/POS / ZPL / TSPL) cannot go to it — they would create a corrupt file instead of a printed page. Choose a physical printer.",
-      help_recovery_mode: "Jobs not yet sent to the printer always resume. Jobs already sent follow this choice.",
-      btn_save_origin: "Save Settings",
-      btn_save_and_launch: "Save & open Odoo",
-      diag_title: "One-Click Redacted Diagnostics Bundle",
-      btn_generate_diag: "Generate Bundle",
+      confirm_clear_done: "Clear all finished jobs from the queue?",
+      confirm_cancel_job: "Cancel this print job?",
+      diagnostics_copied: "Report copied",
+      diagnostics_downloaded: "Download started",
+      diagnostics_failed: "Could not generate diagnostics bundle.",
+      lbl_recovery_mode: "Crash recovery",
+      opt_recovery_safe: "Safe — skip in-flight jobs",
+      opt_recovery_auto: "Auto — reprint in-flight jobs",
+      opt_calibration_pdf: "PDF Calibration (Rulers & Barcode)",
+      opt_cal_thermal80: "Thermal Receipt 80mm (ESC/POS)",
+      opt_cal_thermal58: "Thermal Receipt 58mm (ESC/POS)",
+      opt_cal_zpl: "Label 100×150mm (ZPL II)",
+      opt_cal_tspl: "Label 100×150mm (TSPL)",
+      opt_cal_epl: "Label 100×150mm (EPL)",
+      cal_virtual_warning: "Virtual printers don't support raw protocols (ESC/POS / ZPL). Choose a physical printer or PDF calibration.",
+      help_recovery_mode: "Queued jobs always resume; already-spooled jobs follow this rule.",
+      btn_save_origin: "Save",
+      btn_save_and_launch: "Save & Open Odoo",
+      diag_title: "Diagnostics Bundle",
+      btn_generate_diag: "Generate",
       btn_copy_diag: "Copy JSON",
       btn_download_diag: "Download JSON",
-      diag_desc: "App version and the last 200 jobs. No secrets, no document content.",
+      diag_desc: "App state and last 200 jobs — fully redacted with zero sensitive content.",
     }
   };
 
   let currentLang = "ar";
-  // Persisted UI preferences (language + theme) survive reloads.
   try {
     const savedLang = localStorage.getItem("np_cc_lang");
     if (savedLang === "en" || savedLang === "ar") currentLang = savedLang;
@@ -992,19 +1343,14 @@
     }
   } catch (e) { /* storage unavailable: defaults apply */ }
   let currentFilter = "all";
+  let currentSearch = "";
   let overviewState = null;
 
-  // Transactional form state: once the user edits a form, background
-  // refreshes must never write into its controls again. Settings values
-  // load once on start and re-sync once after a successful save; the
-  // test lab keeps the user's choices until the page is reloaded.
   const formState = {
     settingsDirty: false,
     testDirty: false,
   };
 
-  // Rendered-output signatures: when a poll returns data that would
-  // render identically, the DOM is left completely untouched.
   let lastJobsSignature = null;
   let lastPrintersSignature = null;
   let lastEnvSignature = null;
@@ -1013,26 +1359,16 @@
     return window.__NATIVE_PRINT__ || null;
   }
 
-  // textContent write that is a no-op when the value is unchanged,
-  // so polling does not churn layout for static-looking numbers.
   function setText(id, value) {
     const el = document.getElementById(id);
     if (el && el.textContent !== value) el.textContent = value;
   }
 
-  // True while the user is interacting with any form control (a select
-  // shows its dropdown only while focused, so focus is the open test).
   function anyFormControlFocused() {
     const el = document.activeElement;
     return !!el && (el.tagName === "SELECT" || el.tagName === "INPUT" || el.tagName === "TEXTAREA");
   }
 
-  // In-flight operation locks (audit JS-M3): while a save, a
-  // diagnostics generation or a test print is running, its buttons
-  // are registered here. setNativeControlsEnabled — called by every
-  // 5 s poll — must never re-enable a locked control, or the
-  // double-submit races those operations guard against reopen in
-  // the poll window.
   const uiLocks = new Set();
   function lockControls(ids) {
     for (const id of ids) {
@@ -1057,11 +1393,6 @@
     }
   }
 
-  // Toast stack: at most 3 visible, newest on top. Errors stay 8s,
-  // success/info 4.2s; hovering pauses the countdown, and identical
-  // messages shown within 2s are deduped. Callers keep using
-  // showToast(message, isError); the optional third argument picks an
-  // explicit type ("success" | "error" | "info").
   const toastState = {
     entries: [],
     recent: new Map(),
@@ -1149,7 +1480,6 @@
       .replace(/'/g, "&#39;");
   }
 
-
   function formatBytes(b) {
     const n = Number(b) || 0;
     if (n < 1024) return `${n} B`;
@@ -1167,7 +1497,7 @@
     if (s === "failed" || s === "dead_letter") {
       return `<span class="badge badge-err"><span class="dot"></span>${escapeHtml(label)}</span>`;
     }
-    return `<span class="badge badge-neutral">${escapeHtml(label)}</span>`;
+    return `<span class="badge badge-neutral"><span class="dot"></span>${escapeHtml(label)}</span>`;
   }
 
   function printerStatusBadge(status) {
@@ -1210,14 +1540,14 @@
     document.getElementById("btnLang").innerHTML = `<span>${currentLang === "ar" ? "English" : "العربية"}</span>`;
     const refreshBtn = document.getElementById("btnRefresh");
     if (refreshBtn) refreshBtn.title = I18N[currentLang].btn_refresh;
+    const searchEl = document.getElementById("queueSearchInput");
+    if (searchEl) searchEl.placeholder = I18N[currentLang].search_queue_ph;
     const dict = I18N[currentLang];
     document.querySelectorAll("[data-i18n]").forEach((el) => {
       if (el.id === "diagnosticsOutput" && diagnosticsGenerated) return;
       const k = el.getAttribute("data-i18n");
       if (dict[k]) el.textContent = dict[k];
     });
-    // Dynamic strings outside the sweep must follow the language too:
-    // the custom-URI error line and the calibration warning.
     validateCustomPrinterUriField();
     updateCalWarning();
     rebuildTestKindOptions();
@@ -1241,14 +1571,9 @@
 
   let refreshInFlight = false;
 
-  // Styled in-app confirmation dialog (replaces window.confirm):
-  // a promise that resolves true on confirm, false on cancel,
-  // backdrop click or Escape. One instance, reused for every prompt.
   let confirmResolver = null;
   let confirmReturnFocus = null;
   function confirmDialog(message, options = {}) {
-    // A second prompt settles the first as cancelled instead of
-    // orphaning its promise (the first caller must not hang silently).
     if (confirmResolver) { const r = confirmResolver; confirmResolver = null; r(false); }
     confirmReturnFocus = document.activeElement;
     const overlay = document.getElementById("confirmOverlay");
@@ -1284,8 +1609,6 @@
     confirmReturnFocus = null;
   }
 
-  // Topbar Refresh: visible feedback (spinning icon + disabled state
-  // while the refresh runs, a toast when it lands).
   async function manualRefresh() {
     const btn = document.getElementById("btnRefresh");
     if (btn) { btn.disabled = true; btn.classList.add("is-refreshing"); }
@@ -1298,8 +1621,6 @@
   }
 
   async function refreshAll(options = {}) {
-    // A slow overview (cold printer discovery takes seconds) must not
-    // stack overlapping polls on the 5 s interval.
     if (refreshInFlight) return false;
     refreshInFlight = true;
     try {
@@ -1333,11 +1654,7 @@
       document.getElementById("originAlertText").textContent = currentLang === "ar"
         ? "تعذر الاتصال بخدمة الطباعة المحلية. تحقق من تشغيل التطبيق ثم أعد التحديث."
         : "Could not contact the local print service. Check that the desktop app is running, then refresh.";
-      // The numbers on screen are now stale: say so visually.
       document.querySelector(".main-container").classList.add("is-stale");
-      // Braces matter: the toast is part of the !silent branch.
-      // Without them a silent 5 s poll raised an error toast on
-      // every cycle during any bridge outage (audit JS-M2).
       if (!silent) { console.error(error); showToast(I18N[currentLang].toast_failed, true); }
       return false;
     }
@@ -1366,6 +1683,7 @@
     setText("kpiDefaultPrinter", data.defaultPrinter
       ? (currentLang === "ar" ? `الافتراضية: ${data.defaultPrinter}` : `Default: ${data.defaultPrinter}`)
       : (currentLang === "ar" ? "لا توجد طابعة افتراضية" : "No default printer"));
+    setText("sidebarPrinterVal", data.defaultPrinter || "—");
 
     const counts = Object.fromEntries(data.stateCounts || []);
     const active = (counts.queued || 0) + (counts.rendering || 0) + (counts.spooling || 0) + (counts.printing || 0);
@@ -1386,9 +1704,9 @@
       if (envSignature !== lastEnvSignature) {
         lastEnvSignature = envSignature;
         const fact = (label, ok, value) =>
-          `<div style="display:flex;justify-content:space-between;padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.85rem;"><span style="color:var(--text-secondary);">${escapeHtml(label)}</span><strong style="color:${ok ? "var(--ok-fg)" : "var(--err-fg)"};">${escapeHtml(value)}</strong></div>`;
+          `<div style="display:flex;justify-content:space-between;padding:0.42rem 0;border-bottom:1px solid var(--border);font-size:0.8rem;"><span style="color:var(--text-secondary);">${escapeHtml(label)}</span><strong class="mono" style="font-size:0.75rem;color:${ok ? "var(--ok-fg)" : "var(--err-fg)"};">${escapeHtml(value)}</strong></div>`;
         envEl.innerHTML =
-          fact("Embedded Browser Runtime", !!data.webviewVersion, data.webviewVersion || "—") +
+          fact("Runtime", !!data.webviewVersion, data.webviewVersion || "—") +
           fact("ES2022", !!env.es2022, env.es2022 ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
           fact(currentLang === "ar" ? "التخزين المحلي" : "Local storage", !!env.localStorage, env.localStorage ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
           fact(currentLang === "ar" ? "ملفات الارتباط" : "Cookies", !!env.cookies, env.cookies ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
@@ -1398,12 +1716,12 @@
           const d = I18N[currentLang];
           envEl.innerHTML += env.errors.slice(0, 5).map((e) => {
             if (/fetching translations/i.test(e)) {
-              return `<div style="padding:0.45rem 0;border-bottom:1px solid var(--border);font-size:0.82rem;">` +
+              return `<div style="padding:0.45rem 0;border-bottom:1px solid var(--border);font-size:0.8rem;">` +
                 `<div style="color:var(--err-fg);font-weight:700;">${escapeHtml(d.env_err_translations_t)}</div>` +
-                `<div style="color:var(--text-secondary);line-height:1.6;">${escapeHtml(d.env_err_translations_b)}</div>` +
-                `<div style="color:var(--text-muted);font-size:0.75rem;word-break:break-word;" dir="ltr">${escapeHtml(e)}</div></div>`;
+                `<div style="color:var(--text-secondary);line-height:1.55;">${escapeHtml(d.env_err_translations_b)}</div>` +
+                `<div style="color:var(--text-muted);font-size:0.72rem;word-break:break-word;" dir="ltr">${escapeHtml(e)}</div></div>`;
             }
-            return `<div style="padding:0.3rem 0;border-bottom:1px solid var(--border);font-size:0.8rem;">` +
+            return `<div style="padding:0.35rem 0;border-bottom:1px solid var(--border);font-size:0.78rem;">` +
               `<span style="color:var(--err-fg);font-weight:600;">${escapeHtml(d.env_err_generic)}:</span> ` +
               `<span style="color:var(--text-secondary);word-break:break-word;" dir="auto">${escapeHtml(e)}</span></div>`;
           }).join("");
@@ -1416,17 +1734,15 @@
       alertBanner.classList.remove("hidden");
       setText("originAlertText", I18N[currentLang].origin_not_configured);
       setText("kpiOriginMeta", currentLang === "ar" ? "غير مضبوط" : "Not configured");
+      setText("sidebarOriginVal", currentLang === "ar" ? "غير مضبوط" : "Unset");
       document.getElementById("btnOpenOdoo").disabled = true;
     } else {
       alertBanner.classList.add("hidden");
       setText("kpiOriginMeta", data.odooOrigin);
+      setText("sidebarOriginVal", data.odooOrigin.replace(/^https?:\/\//, ""));
       document.getElementById("btnOpenOdoo").disabled = false;
     }
 
-    // Settings are transactional: saved values are written into the
-    // form only while the user has not edited it and is not interacting
-    // with any control. From the first edit on, only the Save button
-    // applies changes (and a successful save re-syncs the form once).
     const formLocked = !!data.lockedByPolicy;
     const originInput = document.getElementById("inputOdooOrigin");
     const autoReprintInput = document.getElementById("inputAutoReprint");
@@ -1438,9 +1754,13 @@
     }
     if (originInput.disabled !== formLocked) originInput.disabled = formLocked;
     if (autoReprintInput.disabled !== formLocked) autoReprintInput.disabled = formLocked;
-    setText("policyStatusBadge", formLocked
-      ? (currentLang === "ar" ? "مقفل بواسطة مسؤول النظام" : "Managed by administrator")
-      : (currentLang === "ar" ? "قابل للتعديل على هذا الجهاز" : "Editable on this device"));
+    const policyLabel = formLocked
+      ? (currentLang === "ar" ? "مُدار بواسطة النظام" : "Managed by policy")
+      : (currentLang === "ar" ? "إعداد محلي" : "Local config");
+    const policyEl = document.getElementById("policyStatusBadge");
+    if (policyEl && policyEl.textContent !== policyLabel) {
+      policyEl.innerHTML = `<span class="dot"></span>${escapeHtml(policyLabel)}`;
+    }
 
     populatePrinterSelect(printers, data.defaultPrinter);
     validateOriginField();
@@ -1451,25 +1771,27 @@
 
   function renderJobsTable(jobs) {
     const tbody = document.getElementById("jobsTableBody");
+    const q = currentSearch.trim().toLowerCase();
     const filtered = jobs.filter((j) => {
       const s = String(j.state || "").toLowerCase();
-      if (currentFilter === "active") return ["queued", "rendering", "spooling", "printing"].includes(s);
-      if (currentFilter === "attention") return ["failed", "dead_letter"].includes(s);
-      if (currentFilter === "done") return s === "done";
+      if (currentFilter === "active" && !["queued", "rendering", "spooling", "printing"].includes(s)) return false;
+      if (currentFilter === "attention" && !["failed", "dead_letter"].includes(s)) return false;
+      if (currentFilter === "done" && s !== "done") return false;
+      if (q) {
+        const hay = `${j.id || ""} ${j.report || ""} ${j.printer || ""} ${j.error_code || ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
       return true;
     });
 
-    // Skip the rebuild entirely when the rows that would be painted are
-    // identical to the last render; this keeps hover, scroll and any
-    // in-flight click intact across silent polls.
-    const signature = currentFilter + "|" + currentLang + "|" + JSON.stringify(filtered.map((j) =>
+    const signature = currentFilter + "|" + q + "|" + currentLang + "|" + JSON.stringify(filtered.map((j) =>
       [j.id, j.report, j.printer, j.pages, j.bytes, j.state, j.attempts, j.error_code, j.diag_id]));
     if (signature === lastJobsSignature) return;
     lastJobsSignature = signature;
     const scrollY = window.scrollY;
 
     if (!filtered.length) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-muted);">${escapeHtml(I18N[currentLang].no_jobs)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:2.5rem 1rem;color:var(--text-muted);">${escapeHtml(I18N[currentLang].no_jobs)}</td></tr>`;
       if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
       return;
     }
@@ -1483,10 +1805,10 @@
           <td class="mono">${escapeHtml(j.id)}${j.diag_id ? `<div style="font-size:0.68rem;color:var(--text-muted);" title="Diagnostics ID">${escapeHtml(j.diag_id)}</div>` : ""}</td>
           <td><strong>${escapeHtml(j.report || "—")}</strong></td>
           <td>${escapeHtml(j.printer)}</td>
-          <td>${Number(j.pages) || 1}p • <span class="mono">${formatBytes(j.bytes)}</span></td>
+          <td class="tabular-nums">${Number(j.pages) || 1}p · <span class="mono">${formatBytes(j.bytes)}</span></td>
           <td>${stateBadgeHtml(j.state)}</td>
-          <td>${Number(j.attempts) || 0}</td>
-          <td class="mono" style="color:var(--err-fg);">${escapeHtml(j.error_code || "—")}</td>
+          <td class="tabular-nums">${Number(j.attempts) || 0}</td>
+          <td class="mono" style="color:${j.error_code ? "var(--err-fg)" : "var(--text-muted)"};">${escapeHtml(j.error_code || "—")}</td>
           <td>
             <div style="display:flex;gap:0.35rem;">
               ${canRetry ? `<button class="btn btn-sm btn-primary" data-action="retry-job" data-job-id="${escapeHtml(j.id)}">${currentLang === "ar" ? "إعادة محاولة" : "Retry"}</button>` : ""}
@@ -1500,17 +1822,8 @@
     if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
   }
 
-  // ---- Capability truth (owner, 2026-11-04) --------------------
-  // A printer card and the calibration lab offer ONLY what the
-  // printer actually speaks and supports: no RAW test on a card
-  // whose printer cannot accept raw, no calibration kind the
-  // selected printer does not speak. Protocol and class come from
-  // the bridge (Rust detect_protocol over the driver identity);
-  // the fallback mirrors the same table for older payloads.
   function ccProtocol(p) {
     if (!p) return "gdi";
-    // Virtual writers can never be upgraded to a RAW language by a
-    // stale or inconsistent protocol field in a printer payload.
     if (p.kind === "virtual") return "gdi";
     if (p.protocol) return p.protocol;
     const sig = `${p.name || ""} ${p.driver || ""}`.toLowerCase();
@@ -1533,9 +1846,6 @@
     if (proto === "zpl" || proto === "tspl" || proto === "epl") return "label";
     return "office";
   }
-  // Card icon per printer class: a receipt for thermal/POS, a tag
-  // for label printers, a file for virtual writers, the printer
-  // glyph for office/document printers.
   function ccClassIcon(p) {
     const proto = ccProtocol(p);
     const cls = String((p && p.printer_class) || "").toLowerCase();
@@ -1559,9 +1869,7 @@
     if (cls === "virtual") return d.cls_virtual;
     return d.cls_office;
   }
-  // Driver-reported capabilities per printer, fetched once and
-  // cached; the chips on a card show only what the driver reports
-  // (forms, duplex, color) — never a feature the printer lacks.
+
   const capsCache = new Map();
   let capsVersion = 0;
   let lastGridPrinters = [];
@@ -1569,22 +1877,21 @@
     const caps = capsCache.get(p.name);
     if (!caps || caps === "loading") return "";
     const d = I18N[currentLang];
-    const chips = [];
+    const items = [];
     const forms = Array.isArray(caps.forms) ? caps.forms : [];
     const seen = new Set();
     for (const f of forms) {
       if (!f || !f.name || seen.has(f.name)) continue;
       seen.add(f.name);
-      if (seen.size <= 4) chips.push(`<span class="badge badge-neutral">${escapeHtml(f.name)}${f.roll ? " • ROLL" : ""}</span>`);
+      if (seen.size <= 3) items.push(`<span>${escapeHtml(f.name)}${f.roll ? " · ROLL" : ""}</span>`);
     }
-    if (seen.size > 4) chips.push(`<span class="badge badge-neutral">+${seen.size - 4} ${escapeHtml(d.cap_more_forms)}</span>`);
-    if (caps.duplex) chips.push(`<span class="badge badge-info">${escapeHtml(d.cap_duplex)}</span>`);
-    if (caps.color) chips.push(`<span class="badge badge-info">${escapeHtml(d.cap_color)}</span>`);
+    if (seen.size > 3) items.push(`<span>+${seen.size - 3} ${escapeHtml(d.cap_more_forms)}</span>`);
+    if (caps.duplex) items.push(`<span style="color:var(--info-fg);font-weight:600;">${escapeHtml(d.cap_duplex)}</span>`);
+    if (caps.color) items.push(`<span style="color:var(--info-fg);font-weight:600;">${escapeHtml(d.cap_color)}</span>`);
     const bins = Array.isArray(caps.bins) ? caps.bins.filter(Boolean) : [];
-    bins.slice(0, 3).forEach((bin) => chips.push(`<span class="badge badge-neutral">${escapeHtml(d.cap_trays)}: ${escapeHtml(bin)}</span>`));
-    if (bins.length > 3) chips.push(`<span class="badge badge-neutral">${escapeHtml(d.cap_trays)} +${bins.length - 3}</span>`);
-    if (!chips.length) return "";
-    return `<div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-top:0.5rem;">${chips.join("")}</div>`;
+    if (bins.length) items.push(`<span>${escapeHtml(d.cap_trays)}: ${escapeHtml(bins.slice(0, 2).join(", "))}${bins.length > 2 ? ` +${bins.length - 2}` : ""}</span>`);
+    if (!items.length) return "";
+    return `<div class="printer-specs">${items.join('<span class="spec-sep">·</span>')}</div>`;
   }
   function ensureCaps(printers) {
     const b = bridge();
@@ -1601,11 +1908,6 @@
     }
   }
 
-  // Per-printer defaults (paper / tray / duplex / color), stored in
-  // the desktop app and applied by the print worker when a job does
-  // not specify them (owner brief, 2026-11-05). Every choice comes
-  // from the DRIVER's reported capabilities: a printer only offers
-  // the sizes, trays and features it actually has.
   let printerSettings = {};
   let printerSettingsVersion = 0;
   let printerSettingsRequested = false;
@@ -1632,27 +1934,21 @@
     const listOpts = (names, current) => opt("", !current, d.ps_driver_default) + names.map((n) => opt(n, current === n, n)).join("");
     const triOpts = (current) => opt("", current === undefined || current === null, d.ps_driver_default) +
       opt("on", current === true, d.ps_on) + opt("off", current === false, d.ps_off);
-    // Every control is scoped to THIS card's wrapper and read back
-    // through it (classes, never document-wide ids): the grid
-    // re-renders as capabilities and health stream in, and an
-    // index-addressed read could silently pick up ANOTHER card's
-    // values — the field bug where saving one printer's settings
-    // saved them on its neighbour too (2026-11-05).
-    const row = (label, cls, inner) => `<label style="display:flex;flex-direction:column;gap:0.2rem;flex:1 1 45%;min-width:120px;"><span style="color:var(--text-muted);">${escapeHtml(label)}</span><select class="input ${cls}">${inner}</select></label>`;
+    const row = (label, cls, inner) => `<label style="display:flex;flex-direction:column;gap:0.25rem;flex:1 1 45%;min-width:120px;"><span style="color:var(--text-muted);font-weight:600;">${escapeHtml(label)}</span><select class="select ${cls}" style="height:32px;font-size:0.78rem;">${inner}</select></label>`;
     return `
-      <div style="margin-top:0.6rem;" data-settings-wrap data-printer="${escapeHtml(p.name)}">
+      <div data-settings-wrap data-printer="${escapeHtml(p.name)}">
         <button class="btn btn-sm btn-secondary" data-action="toggle-settings" aria-expanded="${openSettingsPrinters.has(p.name) ? "true" : "false"}">
           ${escapeHtml(d.ps_title)}
         </button>
-        <div class="settings-box${openSettingsPrinters.has(p.name) ? "" : " hidden"}" style="margin-top:0.5rem;font-size:0.76rem;background:var(--bg-subtle);padding:0.6rem;border-radius:8px;">
-          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <div class="settings-box${openSettingsPrinters.has(p.name) ? "" : " hidden"}" style="margin-top:0.55rem;font-size:0.75rem;background:var(--bg-subtle);border:1px solid var(--border);padding:0.7rem;border-radius:var(--radius-md);">
+          <div style="display:flex;gap:0.55rem;flex-wrap:wrap;">
             ${row(d.ps_paper, "ps-paper", listOpts(formNames, cur.paper))}
             ${bins.length ? row(d.ps_tray, "ps-tray", listOpts(bins, cur.tray)) : ""}
             ${caps.duplex ? row(d.ps_duplex, "ps-duplex", triOpts(cur.duplex)) : ""}
             ${caps.color ? row(d.ps_color, "ps-color", triOpts(cur.color)) : ""}
           </div>
-          <div style="color:var(--text-muted);margin-top:0.4rem;">${escapeHtml(d.ps_hint)}</div>
-          <button class="btn btn-sm btn-primary" style="margin-top:0.5rem;" data-action="save-settings">
+          <div style="color:var(--text-muted);margin-top:0.45rem;">${escapeHtml(d.ps_hint)}</div>
+          <button class="btn btn-sm btn-primary" style="margin-top:0.55rem;" data-action="save-settings">
             ${escapeHtml(d.ps_save)}
           </button>
         </div>
@@ -1700,12 +1996,6 @@
     }
   }
 
-  // Multi-condition health from the discovery observation
-  // (print-core PrinterHealth): every reported condition is
-  // shown, never collapsed to one badge, and an observation
-  // past its TTL is marked STALE instead of shown as live.
-  // No observation at all means the status badge alone is a
-  // spooler-reported value, not a sensor read.
   const HEALTH_BLOCKING = new Set(["paper_out", "paper_jam", "cover_open", "head_open",
     "ribbon_out", "toner_empty", "ink_empty", "marker_supply_empty", "offline", "paused",
     "stopped", "hardware_error", "communication_error", "overheating", "user_intervention",
@@ -1724,18 +2014,18 @@
     const ttl = typeof h.ttl_secs === "number" ? h.ttl_secs : 0;
     const stale = ttl === 0 || (Date.now() / 1000 - (h.observed_at || 0) > ttl);
     const conds = Array.isArray(h.conditions) ? h.conditions : [];
-    const chips = conds.map((c) => {
+    const items = conds.map((c) => {
       const cls = HEALTH_BLOCKING.has(c) ? "badge-err" : "badge-warn";
-      return `<span class="badge ${cls}">${escapeHtml(String(c).replace(/_/g, " ").toUpperCase())}</span>`;
+      return `<span class="badge ${cls}"><span class="dot"></span>${escapeHtml(String(c).replace(/_/g, " ").toUpperCase())}</span>`;
     });
     if (!conds.length) {
-      chips.push(`<span class="badge badge-ok">${currentLang === "ar" ? "جاهز" : "READY"}</span>`);
+      items.push(`<span class="badge badge-ok"><span class="dot"></span>${currentLang === "ar" ? "متصلة وجاهزة" : "ONLINE"}</span>`);
     }
     if (stale) {
-      chips.push(`<span class="badge badge-neutral">${currentLang === "ar" ? "بيانات قديمة" : "STALE"}</span>`);
+      items.push(`<span class="badge badge-warn">${currentLang === "ar" ? "بيانات قديمة" : "STALE"}</span>`);
     }
-    chips.push(`<span class="badge badge-neutral">${escapeHtml(String(h.source || "?").toUpperCase())}</span>`);
-    return `<div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-top:0.5rem;">${chips.join("")}</div>`;
+    items.push(`<span class="mono" style="font-size:0.7rem;">${escapeHtml(String(h.source || "?").toUpperCase())}</span>`);
+    return `<div class="printer-health-line">${items.join('<span>·</span>')}</div>`;
   }
 
   function renderPrintersGrid(printers) {
@@ -1743,11 +2033,6 @@
     lastGridPrinters = printers;
     const ae = document.activeElement;
     if (ae && grid && grid.contains(ae) && (ae.tagName === "SELECT" || ae.tagName === "INPUT")) return;
-    // Same skip-if-identical guard as the jobs table: an unchanged
-    // printer set leaves the cards (and any open paper-forms box) alone.
-    // Health conditions, staleness and the stable id are part of the
-    // signature (the raw observation timestamp is not: it changes on
-    // every poll and would defeat the guard and flicker the grid).
     const signature = currentLang + "|" + capsVersion + "|" + printerSettingsVersion + "|" + JSON.stringify(printers.map((p) =>
       [p.name, p.kind, p.is_default, p.status, p.port, p.driver, p.protocol, p.printer_class, p.stable_id || "", healthFingerprint(p)]));
     if (signature === lastPrintersSignature) return;
@@ -1756,7 +2041,7 @@
 
     if (!printers.length) {
       grid.innerHTML = `
-        <div class="card" style="grid-column:1/-1;padding:2rem;text-align:center;color:var(--text-muted);">
+        <div class="card" style="grid-column:1/-1;padding:2.2rem;text-align:center;color:var(--text-muted);">
           ${escapeHtml(I18N[currentLang].no_printers)}
         </div>`;
       if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
@@ -1768,11 +2053,11 @@
         <div class="printer-card-top">
           <div class="printer-identity">
             <div class="printer-type-icon">${ccClassIcon(p)}</div>
-            <div>
+            <div style="min-width:0;">
               <div class="printer-name">${escapeHtml(p.name)}</div>
-              <div style="display:flex;gap:0.35rem;margin-top:0.25rem;flex-wrap:wrap;">
-                <span class="badge badge-info">${escapeHtml(ccClassLabel(p))}</span>
-                ${p.is_default ? `<span class="badge badge-neutral">${currentLang === "ar" ? "الأساسية" : "DEFAULT"}</span>` : ""}
+              <div class="printer-subline">
+                <span>${escapeHtml(ccClassLabel(p))}</span>
+                ${p.is_default ? `<span>·</span><span class="printer-default-tag">${currentLang === "ar" ? "الافتراضية" : "DEFAULT"}</span>` : ""}
               </div>
             </div>
           </div>
@@ -1781,11 +2066,11 @@
 
         <div class="printer-meta-list">
           <div class="printer-meta-item">
-            <span>${currentLang === "ar" ? "المنفذ (Port)" : "Port"}</span>
+            <span>${currentLang === "ar" ? "المنفذ" : "Port"}</span>
             <strong class="mono" dir="ltr">${escapeHtml(p.port || "—")}</strong>
           </div>
           <div class="printer-meta-item">
-            <span>${currentLang === "ar" ? "التعريف (Driver)" : "Driver"}</span>
+            <span>${currentLang === "ar" ? "التعريف" : "Driver"}</span>
             <strong dir="ltr">${escapeHtml(p.driver || "—")}</strong>
           </div>
         </div>
@@ -1796,7 +2081,7 @@
 
         ${printerSettingsHtml(p)}
 
-        <div id="forms-box-${idx}" class="hidden" style="font-size:0.76rem;background:var(--bg-subtle);padding:0.6rem;border-radius:8px;max-height:110px;overflow:auto;"></div>
+        <div id="forms-box-${idx}" class="hidden" style="background:var(--bg-subtle);border:1px solid var(--border);padding:0.6rem 0.7rem;border-radius:var(--radius-md);max-height:130px;overflow:auto;"></div>
 
         <div class="printer-actions">
           <button class="btn btn-sm btn-primary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="pdf-a4">
@@ -1815,7 +2100,7 @@
             ${I18N[currentLang].qt_epl}
           </button>` : ""}
           <button class="btn btn-sm btn-secondary" data-action="inspect-forms" data-printer="${escapeHtml(p.name)}" data-idx="${idx}" aria-expanded="false">
-            ${currentLang === "ar" ? "مقاسات الورق" : "Paper Forms"}
+            ${currentLang === "ar" ? "المقاسات" : "Paper sizes"}
           </button>
         </div>
       </div>
@@ -1825,12 +2110,6 @@
     if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
   }
 
-  // Delegated handler for every dynamically rendered action button.
-  // Job ids and printer names reach the page from the remote origin /
-  // the OS and are attacker-influenceable, so they are carried in
-  // data-* attributes and read back as strings — never interpolated
-  // into inline handler code (audit B-1: the old onclick + escaping
-  // combination was a stored script injection into this admin page).
   document.addEventListener("click", (ev) => {
     const btn = ev.target && ev.target.closest ? ev.target.closest("[data-action]") : null;
     if (!btn) return;
@@ -1866,6 +2145,10 @@
     else if (action === "update-cal-warning") updateCalWarning();
   });
   document.getElementById("confirmOverlay").addEventListener("click", confirmOverlayClicked);
+  document.getElementById("queueSearchInput").addEventListener("input", (ev) => {
+    currentSearch = ev.target.value || "";
+    if (overviewState) renderJobsTable(overviewState.recentJobs || []);
+  });
 
   function isRawTestKind(kind) {
     return kind !== "pdf-a4" && kind !== "pdf" && kind !== "gdi";
@@ -1919,10 +2202,6 @@
   function populatePrinterSelect(printers, defaultPrinter) {
     const sel = document.getElementById("customPrinterSelect");
     if (!sel) return;
-    // The test lab is transactional too: once the user has picked a
-    // printer (or is interacting with any control), a background
-    // refresh must not touch the select. Rebuilding its options would
-    // close an open dropdown and discard the user's choice.
     if (formState.testDirty || anyFormControlFocused()) return;
     const previous = sel.value;
     const options = [];
@@ -1938,8 +2217,6 @@
     }
     options.push({ value: "__uri__", label: currentLang === "ar" ? "عنوان مخصص (URI)…" : "Custom address (URI)…" });
     const wanted = [previous, defaultPrinter].find((v) => v && options.some((o) => o.value === v));
-    // Skip the rebuild when the option set and the resulting selection
-    // are unchanged; an innerHTML swap is what closed open dropdowns.
     const signature = JSON.stringify(options) + "|" + (wanted || "");
     if (sel.dataset.optionsSignature === signature) return;
     sel.dataset.optionsSignature = signature;
@@ -1950,11 +2227,6 @@
     onTestPrinterChange();
   }
 
-  // The calibration lab offers only the kinds the SELECTED printer
-  // actually speaks (owner, 2026-11-04): a document calibration for
-  // everyone, raw calibrations strictly for the matching protocol.
-  // Direct network/URI targets keep the full list — a raw endpoint
-  // is the operator's explicit choice and cannot be probed here.
   const TEST_KIND_I18N = {
     "pdf-a4": "opt_calibration_pdf",
     "thermal-80mm": "opt_cal_thermal80",
@@ -2021,9 +2293,6 @@
       document.getElementById("customPrinterUri").focus();
       return;
     }
-    // The lab's document options (paper / tray / duplex / colour)
-    // ride the PDF test: the page is generated at the chosen size
-    // and printed with exactly those settings (2026-11-05).
     const options = {};
     if (!isRawTestKind(kind)) {
       const tri = (id) => {
@@ -2041,10 +2310,6 @@
     await runPrinterTest(printer, kind, options);
   }
 
-  // Lab document options, populated from the SELECTED printer's
-  // driver capabilities: paper sizes and trays are the printer's
-  // own, "Automatic" defers to the printer — nothing is hardcoded
-  // to a fixed size (2026-11-05).
   function rebuildLabOptions() {
     const name = selectedTestPrinter();
     const caps = name && !name.includes("://") ? capsCache.get(name) : null;
@@ -2054,7 +2319,7 @@
       const el = document.getElementById(id);
       if (!el) return;
       const prev = el.value;
-      const sig = (ready ? "r" : "-") + "|" + names.join(",");
+      const sig = currentLang + "|" + (ready ? "r" : "-") + "|" + names.join(",");
       if (el.dataset.labSig === sig) return;
       el.dataset.labSig = sig;
       el.innerHTML = "";
@@ -2105,9 +2370,6 @@
     document.querySelectorAll('[data-action="inspect-forms"]').forEach((b) => b.setAttribute("aria-expanded", "false"));
     box.classList.remove("hidden");
     if (btn) btn.setAttribute("aria-expanded", "true");
-    // Tag the box with its printer: the grid can re-render while the
-    // driver call is in flight, and the result must never land on a
-    // card that now belongs to a different printer (audit JS-L10).
     box.dataset.printer = printerName;
     const b = bridge();
     if (!b || typeof b.printerForms !== "function") {
@@ -2122,9 +2384,9 @@
         current.textContent = currentLang === "ar" ? "لا توجد نماذج ورق مسجلة من التعريف." : "No forms reported by driver.";
         return;
       }
-      current.innerHTML = forms.map((f) =>
-        `<span class="badge ${f.roll ? "badge-info" : "badge-neutral"}" style="margin:2px;">${escapeHtml(f.name)} (${Math.round(f.size.width_mm)}×${Math.round(f.size.height_mm)}mm${f.roll ? " • ROLL" : ""})</span>`
-      ).join(" ");
+      current.innerHTML = `<div class="forms-list">` + forms.map((f) =>
+        `<div class="forms-item"><strong>${escapeHtml(f.name)}</strong><span>${Math.round(f.size.width_mm)}×${Math.round(f.size.height_mm)}mm${f.roll ? " · ROLL" : ""}</span></div>`
+      ).join("") + `</div>`;
     } catch (e) {
       console.error(e);
       const current = document.getElementById(`forms-box-${idx}`);
@@ -2182,15 +2444,10 @@
   }
 
   function isAllowedOrigin(value) {
-    // Mirrors print-core::security::origin_is_allowed (ADR-0002):
-    // HTTPS for any host; HTTP for any IP literal (private or public).
-    // Exact origin: no credentials, path, query or fragment; ports
-    // 1-65535. HTTP is unencrypted; the form warns about it.
     function isIpLiteral(host) {
       const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
       if (v4) return [+v4[1], +v4[2], +v4[3], +v4[4]].every((o) => o <= 255);
       const h = host.toLowerCase().replace(/^\[|\]$/g, "");
-      // One "::" compression at most, no stray single ':' at the edges.
       const shapeOk = /^[0-9a-f:]+$/.test(h)
         && (h.match(/::/g) || []).length <= 1
         && (!h.startsWith(":") || h.startsWith("::"))
@@ -2231,8 +2488,7 @@
     return host.split(".").length === 4 && host.split(".").every((part) => Number(part) <= 255);
   }
 
-  // Live field validation: the error appears while typing and clears
-  // the moment the address becomes valid (no stale messages).
+  // Live field validation:
   function validateOriginField() {
     const input = document.getElementById("inputOdooOrigin");
     const error = document.getElementById("originError");
@@ -2293,9 +2549,6 @@
     lockControls(["btnSaveOrigin", "btnSaveAndOpen"]);
     try {
       const saved = await api.saveOrigin(origin, autoReprint);
-      // The save is the one moment the form re-syncs from the server:
-      // clearing the dirty flag lets the refresh below write the saved
-      // (normalized) values back into the fields exactly once.
       formState.settingsDirty = false;
       showToast(currentLang === "ar" ? `تم حفظ العنوان: ${saved}` : `Saved address: ${saved}`);
       await refreshAll({ silent: true });
@@ -2424,18 +2677,11 @@
     }
   });
   document.getElementById("customPrinterUri").addEventListener("input", validateCustomPrinterUriField);
-  // From the first user edit on, a form belongs to the user: these
-  // listeners arm the transactional guards used by renderOverview and
-  // populatePrinterSelect. Genuine DOM change/input events only fire
-  // for user interaction, never for programmatic value writes.
   document.getElementById("inputOdooOrigin").addEventListener("input", () => { formState.settingsDirty = true; });
   document.getElementById("inputAutoReprint").addEventListener("change", () => { formState.settingsDirty = true; });
   document.getElementById("customPrinterSelect").addEventListener("change", () => { formState.testDirty = true; });
   document.getElementById("customPrinterUri").addEventListener("input", () => { formState.testDirty = true; });
   if (currentLang !== "ar") applyLanguage();
-  // The refresh tooltip is localized inside applyLanguage, which a
-  // plain Arabic session never calls — set it unconditionally so it
-  // does not stay in English (audit JS-L6).
   document.getElementById("btnRefresh").title = I18N[currentLang].btn_refresh;
   window.addEventListener("storage", (ev) => {
     if (ev.key === "np_cc_theme") {

@@ -275,20 +275,78 @@ pub fn blocking_condition(
     None
 }
 
+fn read_dle_eot_frame(stream: &mut TcpStream) -> std::io::Result<u8> {
+    let mut buf = [0u8; 1];
+    for _ in 0..4 {
+        stream.read_exact(&mut buf)?;
+        if dle_eot_frame_valid(buf[0]) {
+            return Ok(buf[0]);
+        }
+    }
+    Err(std::io::Error::new(
+        ErrorKind::InvalidData,
+        "no valid DLE EOT status frame in response",
+    ))
+}
+
+fn query_dle_eot_on_stream(stream: &mut TcpStream, n: u8) -> std::io::Result<u8> {
+    stream.write_all(&[0x10, 0x04, n])?;
+    stream.flush()?;
+    read_dle_eot_frame(stream)
+}
+
 /// Query a TCP thermal printer's live sensor state (DLE EOT
-/// frames 4, 3, 1) and return its blocking condition, if any.
-/// An Err means the printer did not answer the status protocol
-/// at all (many clones never do): callers must treat that as
-/// "unknown" and print anyway — a status probe may veto a job
-/// only on positive sensor evidence, never on silence.
+/// frames 4, 3, 1) over a single connection (with a per-frame fallback
+/// if the printer closes the socket after replying to one command) and
+/// return its blocking condition, if any. An Err means the printer did
+/// not answer the status protocol at all (many clones never do):
+/// callers must treat that as "unknown" and print anyway — a status
+/// probe may veto a job only on positive sensor evidence, never on silence.
 pub fn query_blocking_condition(
     host: &str,
     port: u16,
     timeout: Duration,
 ) -> std::io::Result<Option<(&'static str, &'static str)>> {
-    let paper = decode_dle_eot_paper(query_paper_status(host, port, timeout)?);
-    let error = decode_dle_eot_error(query_error_status(host, port, timeout)?);
-    let printer = decode_dle_eot_printer(query_printer_status(host, port, timeout)?);
+    let mut stream = connect_any(host, port, timeout)?;
+    let timeout = timeout.max(MIN_IO_TIMEOUT);
+    stream.set_write_timeout(Some(timeout))?;
+    stream.set_read_timeout(Some(timeout))?;
+
+    let paper_byte = query_dle_eot_on_stream(&mut stream, 4)?;
+    let error_byte = match query_dle_eot_on_stream(&mut stream, 3) {
+        Ok(b) => b,
+        Err(e)
+            if matches!(
+                e.kind(),
+                ErrorKind::UnexpectedEof
+                    | ErrorKind::ConnectionReset
+                    | ErrorKind::ConnectionAborted
+                    | ErrorKind::BrokenPipe
+            ) =>
+        {
+            query_error_status(host, port, timeout)?
+        }
+        Err(e) => return Err(e),
+    };
+    let printer_byte = match query_dle_eot_on_stream(&mut stream, 1) {
+        Ok(b) => b,
+        Err(e)
+            if matches!(
+                e.kind(),
+                ErrorKind::UnexpectedEof
+                    | ErrorKind::ConnectionReset
+                    | ErrorKind::ConnectionAborted
+                    | ErrorKind::BrokenPipe
+            ) =>
+        {
+            query_printer_status(host, port, timeout)?
+        }
+        Err(e) => return Err(e),
+    };
+
+    let paper = decode_dle_eot_paper(paper_byte);
+    let error = decode_dle_eot_error(error_byte);
+    let printer = decode_dle_eot_printer(printer_byte);
     Ok(blocking_condition(paper, error, printer))
 }
 
@@ -530,5 +588,33 @@ mod tests {
         );
         assert!(res.is_ok(), "expected Ok(()), got {res:?}");
         assert_eq!(server.join().unwrap(), payload);
+    }
+
+    #[test]
+    fn single_socket_persistent_dle_eot_probe() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accepts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let accepts_bg = accepts.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = match stream {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                accepts_bg.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut req = [0u8; 3];
+                while stream.read_exact(&mut req).is_ok() {
+                    let resp = 0x12u8;
+                    if stream.write_all(&[resp]).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+        let res = query_blocking_condition("127.0.0.1", port, Duration::from_secs(2))
+            .expect("persistent socket answers all 3 frames");
+        assert_eq!(res, None);
+        assert_eq!(accepts.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }

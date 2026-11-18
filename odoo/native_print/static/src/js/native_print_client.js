@@ -172,10 +172,12 @@ function isIpLiteral(value) {
  */
 export function formatFormsSummary(forms, rollLabel) {
     return (forms || []).map((f) => {
-        const size = f.size || f;
+        const size = (f && (f.size || f)) || {};
+        const w = Number.isFinite(Number(size.width_mm)) ? Math.round(Number(size.width_mm)) : "?";
+        const h = Number.isFinite(Number(size.height_mm)) ? Math.round(Number(size.height_mm)) : "?";
         return (
-            `${f.name} — ${Math.round(size.width_mm)}×${Math.round(size.height_mm)}mm` +
-            (f.roll ? " (" + rollLabel + ")" : "")
+            `${(f && f.name) || "Form"} — ${w}×${h}mm` +
+            (f && f.roll ? " (" + rollLabel + ")" : "")
         );
     });
 }
@@ -203,11 +205,29 @@ export function rollWidthMm(capabilities) {
     return null;
 }
 
+const NON_BLOCKING_STATUSES = new Set(["ready", "printing", "unknown"]);
+
+function isHealthyPrinter(printer) {
+    if (!printer || !printer.status) return true;
+    return NON_BLOCKING_STATUSES.has(String(printer.status).toLowerCase());
+}
+
+function findPrinterByName(printers, wantedName) {
+    if (!wantedName) return null;
+    const exact = printers.find((p) => p.name === wantedName);
+    if (exact) return exact;
+    const norm = String(wantedName).trim().toLowerCase();
+    return norm
+        ? (printers.find((p) => String(p.name || "").trim().toLowerCase() === norm) || null)
+        : null;
+}
+
 /**
  * Resolve the printer to use RIGHT NOW on this PC: the user's
  * selection when it is still connected, else a preferred-class
- * printer when asked (POS receipts prefer thermal/label), else the
- * OS default, else the first printer. Returns null when this PC has
+ * printer when asked (POS receipts prefer thermal/label, favoring
+ * healthy printers over offline ones), else the healthy OS default,
+ * else the first healthy printer. Returns null when this PC has
  * no printer at the moment — callers then keep Odoo's normal flow.
  */
 export async function resolveBridgeTarget(bridge, options = {}) {
@@ -216,9 +236,10 @@ export async function resolveBridgeTarget(bridge, options = {}) {
     if (!Array.isArray(printers) || !printers.length) return null;
     const prefer = options.preferClasses || [];
     const classOf = (p) => detectPrinterType(p).printerClass;
-    const selected = printers.find((p) => p.name === getSelectedPrinter()) || null;
+    const isDefault = (p) => Boolean(p && (p.is_default || p.isDefault));
+    const selected = findPrinterByName(printers, getSelectedPrinter());
     const selectedPos = options.isPos
-        ? (printers.find((p) => p.name === getSelectedPosPrinter()) || null)
+        ? findPrinterByName(printers, getSelectedPosPrinter())
         : null;
     let printer = null;
     // A reprint from the job log names the printer the job originally
@@ -226,7 +247,7 @@ export async function resolveBridgeTarget(bridge, options = {}) {
     // wins over every other preference; when it is not, resolution
     // falls through to the normal order below.
     if (options.preferPrinterName) {
-        printer = printers.find((p) => p.name === options.preferPrinterName) || null;
+        printer = findPrinterByName(printers, options.preferPrinterName);
     }
     // Dedicated POS printer selection (when explicitly configured) wins
     // for POS jobs without affecting normal report printing.
@@ -242,11 +263,20 @@ export async function resolveBridgeTarget(bridge, options = {}) {
         printer = selected;
     }
     if (!printer && prefer.length) {
-        printer = printers.find((p) => prefer.includes(classOf(p))) || null;
+        const classMatches = printers.filter((p) => prefer.includes(classOf(p)));
+        if (classMatches.length) {
+            printer =
+                classMatches.find((p) => isDefault(p) && isHealthyPrinter(p)) ||
+                classMatches.find((p) => isHealthyPrinter(p)) ||
+                classMatches.find((p) => isDefault(p)) ||
+                classMatches[0];
+        }
     }
     if (!printer) {
         printer =
-            printers.find((p) => p.is_default || p.isDefault) ||
+            printers.find((p) => isDefault(p) && isHealthyPrinter(p)) ||
+            printers.find((p) => isHealthyPrinter(p)) ||
+            printers.find((p) => isDefault(p)) ||
             printers[0];
     }
     let capabilities = null;

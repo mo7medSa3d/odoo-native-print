@@ -2702,21 +2702,11 @@ impl PrintBackend for NativePrintBackend {
         })?;
         let mut target_kind: Option<PrinterKind> = None;
         let mut target_class: Option<String> = None;
+        let mut cached_status: Option<PrinterStatus> = None;
         let target_name = if let Some(matched) = resolve_printer(&job.printer, &discovered) {
             target_kind = Some(matched.kind);
             target_class = Some(matched.printer_class.clone());
-            // Virtual writers have no paper, door or toner: their
-            // spooler status words carry writer-app state bits that
-            // decode as blocking conditions and would dead-end jobs
-            // that print perfectly well (POS receipt to OneNote,
-            // owner field report 2026-11-06). For a virtual target
-            // the GDI/spooler call itself is the real check.
-            if matched.kind != PrinterKind::Virtual && needs_intervention(matched.status) {
-                return Err(BackendError::retryable(
-                    Self::status_code(matched.status),
-                    &format!("printer {:?} status is {:?}", matched.name, matched.status),
-                ));
-            }
+            cached_status = Some(matched.status);
             matched.name.clone()
         } else if !discovered.is_empty() {
             return Err(BackendError::fatal(
@@ -2792,26 +2782,34 @@ impl PrintBackend for NativePrintBackend {
             }
         }
 
-        // Live multi-condition health: ANY blocking condition
-        // (paper out AND door open, toner empty AND paused, ...)
-        // blocks the job, where the old single-status read could
-        // only see the highest-priority flag. A failed read keeps
-        // the discovery-time status checked above as the gate
-        // rather than failing the job on a transient spooler
-        // read error; a failed read is never reported as Ready.
-        // Skipped for virtual writers (no physical conditions —
-        // see the status gate above).
+        // Live multi-condition health (bypasses the 5 s discovery cache
+        // so a printer whose cover was just closed or roll refilled prints
+        // immediately). Falls back to discovery-time cached status only if
+        // the live spooler read returns an error. Skipped for virtual
+        // writers (no physical conditions).
         if target_kind != Some(PrinterKind::Virtual) {
-            if let Ok(health) = print_win::printer_health(&target_name) {
-                if health.blocks_printing() {
-                    let status = health.primary_status();
-                    return Err(BackendError::retryable(
-                        Self::status_code(status),
-                        &format!(
-                            "printer {target_name:?} health blocks printing: {:?}",
-                            health.conditions
-                        ),
-                    ));
+            match print_win::printer_health(&target_name) {
+                Ok(health) => {
+                    if health.blocks_printing() {
+                        let status = health.primary_status();
+                        return Err(BackendError::retryable(
+                            Self::status_code(status),
+                            &format!(
+                                "printer {target_name:?} health blocks printing: {:?}",
+                                health.conditions
+                            ),
+                        ));
+                    }
+                }
+                Err(_) => {
+                    if let Some(st) = cached_status {
+                        if needs_intervention(st) {
+                            return Err(BackendError::retryable(
+                                Self::status_code(st),
+                                &format!("printer {target_name:?} status is {st:?}"),
+                            ));
+                        }
+                    }
                 }
             }
         }

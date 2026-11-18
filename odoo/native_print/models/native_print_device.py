@@ -1,4 +1,8 @@
-from odoo import fields, models
+import logging
+
+from odoo import api, fields, models
+
+_logger = logging.getLogger(__name__)
 
 
 class NativePrintDevice(models.Model):
@@ -22,6 +26,43 @@ class NativePrintDevice(models.Model):
     _name = "native.print.device"
     _description = "Native Print: printer seen in the job log"
     _order = "name"
+
+    @api.model
+    def _register_hook(self):
+        super()._register_hook()
+        try:
+            self.env.cr.execute(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name = %s",
+                [self._table],
+            )
+            if not self.env.cr.fetchone():
+                return
+            self.env.cr.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = %s",
+                [self._table],
+            )
+            existing = {row[0] for row in self.env.cr.fetchall()}
+            expected = {
+                "protocol": "varchar",
+                "printer_class": "varchar",
+                "forms_summary": "text",
+                "trays_summary": "text",
+                "caps_synced_at": "timestamp without time zone",
+            }
+            for col, col_type in expected.items():
+                if col not in existing:
+                    self.env.cr.execute(
+                        f'ALTER TABLE "{self._table}" ADD COLUMN IF NOT EXISTS "{col}" {col_type}'
+                    )
+                    _logger.warning(
+                        "native_print: added missing column %s.%s automatically",
+                        self._table,
+                        col,
+                    )
+        except Exception as exc:
+            _logger.debug("native_print: device schema check skipped (%s)", exc)
 
     name = fields.Char(
         required=True,

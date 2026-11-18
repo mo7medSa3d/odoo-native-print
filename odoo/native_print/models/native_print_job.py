@@ -1,13 +1,61 @@
 from datetime import timedelta
+import logging
 
-from odoo import _, fields, models
+from odoo import _, api, fields, models
 from odoo.exceptions import AccessError, UserError
+
+_logger = logging.getLogger(__name__)
 
 
 class NativePrintJob(models.Model):
     _name = "native.print.job"
     _description = "Native Print: job log"
     _order = "create_date desc, id desc"
+
+    @api.model
+    def _register_hook(self):
+        super()._register_hook()
+        # Defensive schema guard: if the module files on disk were
+        # updated and Odoo restarted without `-u native_print`, ensure
+        # newly added columns exist before any ORM read/prefetch runs.
+        try:
+            self.env.cr.execute(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_name = %s",
+                [self._table],
+            )
+            if not self.env.cr.fetchone():
+                return
+            self.env.cr.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = %s",
+                [self._table],
+            )
+            existing = {row[0] for row in self.env.cr.fetchall()}
+            expected = {
+                "device_id": "integer",
+                "source_type": "varchar DEFAULT 'report'",
+                "source_model": "varchar",
+                "source_ids": "varchar",
+                "copies": "integer DEFAULT 1",
+                "paper": "varchar",
+                "duplex": "boolean DEFAULT false",
+                "duplex_configured": "boolean DEFAULT false",
+                "color": "boolean DEFAULT true",
+                "mode": "varchar",
+            }
+            for col, col_type in expected.items():
+                if col not in existing:
+                    self.env.cr.execute(
+                        f'ALTER TABLE "{self._table}" ADD COLUMN IF NOT EXISTS "{col}" {col_type}'
+                    )
+                    _logger.warning(
+                        "native_print: added missing column %s.%s automatically (run -u native_print to complete module upgrade)",
+                        self._table,
+                        col,
+                    )
+        except Exception as exc:
+            _logger.debug("native_print: schema check skipped (%s)", exc)
 
     name = fields.Char(
         required=True,

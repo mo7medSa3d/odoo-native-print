@@ -9,13 +9,11 @@
   body {
     min-height: 100vh;
     display: flex; align-items: center; justify-content: center;
-    background:
-      radial-gradient(800px 420px at 50% 0%, var(--brand-soft), transparent 70%),
-      var(--bg-canvas);
+    background: var(--bg-canvas);
     padding: 20px;
   }
   .card {
-    width: min(92vw, 440px);
+    width: min(92vw, 430px);
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-xl);
@@ -24,36 +22,36 @@
     text-align: center;
   }
   .logo-wrap {
-    width: 60px; height: 60px; margin: 0 auto 16px;
-    border-radius: 14px; padding: 4px;
+    width: 56px; height: 56px; margin: 0 auto 16px;
+    border-radius: var(--radius-lg); padding: 4px;
     background: var(--bg-subtle); border: 1px solid var(--border);
     display: flex; align-items: center; justify-content: center;
   }
-  .logo { width: 100%; height: 100%; border-radius: 10px; display: block; }
+  .logo { width: 100%; height: 100%; border-radius: var(--radius-md); display: block; }
   .spinner {
-    width: 32px; height: 32px; margin: 0 auto 14px; border-radius: 50%;
-    border: 3px solid var(--border-strong); border-top-color: var(--brand);
-    animation: spin 0.85s linear infinite;
+    width: 28px; height: 28px; margin: 0 auto 14px; border-radius: 50%;
+    border: 2.5px solid var(--border-strong); border-top-color: var(--brand);
+    animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-  h1 { font-size: 18px; font-weight: 700; margin: 0 0 8px; color: var(--text-primary); }
-  p { color: var(--text-secondary); font-size: 13.5px; line-height: 1.65; margin: 0 0 18px; }
+  h1 { font-size: 16.5px; font-weight: 700; margin: 0 0 8px; color: var(--text-primary); letter-spacing: -0.01em; }
+  p { color: var(--text-secondary); font-size: 13px; line-height: 1.65; margin: 0 0 18px; }
   .origin {
     display: inline-block; direction: ltr; font-family: var(--font-mono);
-    font-size: 12.5px; font-weight: 600; color: var(--text-primary);
+    font-size: 12px; font-weight: 600; color: var(--text-primary);
     background: var(--bg-subtle); border: 1px solid var(--border);
-    padding: 2px 8px; border-radius: var(--radius-sm); word-break: break-all;
-    margin-top: 4px;
+    padding: 3px 9px; border-radius: var(--radius-xs); word-break: break-all;
+    margin-top: 6px;
   }
   .actions { display: none; flex-wrap: wrap; gap: 8px; justify-content: center; }
   .actions.show { display: flex; }
   button {
     border: 1px solid var(--border); border-radius: var(--radius-md);
-    padding: 8px 16px; font: inherit; font-size: 13px; font-weight: 500;
-    cursor: pointer; background: var(--bg-subtle); color: var(--text-primary);
-    transition: background-color .14s ease, border-color .14s ease, opacity .14s ease;
+    padding: 8px 15px; font: inherit; font-size: 12.5px; font-weight: 500;
+    cursor: pointer; background: var(--bg-surface); color: var(--text-primary);
+    transition: background-color .12s ease, border-color .12s ease, opacity .12s ease;
   }
-  button:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-strong); }
+  button:hover:not(:disabled) { background: var(--bg-subtle); border-color: var(--border-strong); }
   button:disabled { opacity: 0.55; cursor: not-allowed; }
   button.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); font-weight: 600; }
   button.primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
@@ -68,16 +66,16 @@
   <main class="card" role="status" aria-live="polite">
     <div class="logo-wrap"><img class="logo" src="app-icon.png" alt=""/></div>
     <div class="spinner" id="spinner" aria-hidden="true"></div>
-    <h1 id="title">جارٍ الاتصال بسيرفر Odoo</h1>
-    <p id="msg">بنجهّز مساحة العمل… <br><span class="origin" id="origin"></span></p>
+    <h1 id="title">جارٍ الاتصال بخادم Odoo</h1>
+    <p id="msg">تجهيز مساحة العمل… <br><span class="origin" id="origin"></span></p>
     <div class="actions" id="actions">
-      <button type="button" class="primary" id="retry">حاول الآن</button>
-      <button type="button" id="anyway">فتح Odoo على أي حال</button>
+      <button type="button" class="primary" id="retry">إعادة المحاولة</button>
+      <button type="button" id="anyway">الفتح على أي حال</button>
       <button type="button" id="cc">مركز التحكم</button>
     </div>
     <div class="count" id="count" aria-live="off"></div>
   </main>
-  <div class="credit" id="credit">تطوير وتشغيل Yaseir.com — جميع الحقوق محفوظة © يسير</div>
+  <div class="credit" id="credit">Yaseir Print © يسير</div>
 <script>
   "use strict";
   function invoke(cmd, args) {
@@ -88,40 +86,40 @@
   }
   var STR = {
     en: {
-      connecting: "Connecting to Odoo server",
+      connecting: "Connecting to Odoo",
       preparing: "Preparing workspace…",
-      downTitle: "Odoo server is not responding",
-      downPre: "Could not reach the server at ",
-      downPost: ". Make sure the server is running and reachable on the network; we will retry automatically.",
-      redirTitle: "Server redirected to a different address",
-      redirPre: "The server responded, but redirected to an address different from the configured origin (",
-      redirPost: "). Review the address in the Control Center so it matches the actual server URL.",
+      downTitle: "Odoo is unreachable",
+      downPre: "Could not reach ",
+      downPost: ". Check that the server is online — retrying automatically.",
+      redirTitle: "Origin mismatch",
+      redirPre: "The server redirected away from the configured origin (",
+      redirPost: "). Update the server URL in Control Center to match.",
       retryIn: "Retrying in ",
       secs: "s…",
       retryBtn: "Retry now",
-      anywayBtn: "Open Odoo anyway",
+      anywayBtn: "Open anyway",
       ccBtn: "Control Center",
-      initFailTitle: "Could not start connection",
-      initFailMsg: "Open the Control Center to check your Odoo connection settings.",
-      credit: "Developed & operated by Yaseir.com — All rights reserved © Yaseir"
+      initFailTitle: "Connection failed",
+      initFailMsg: "Open Control Center to verify your Odoo settings.",
+      credit: "Yaseir Print © Yaseir"
     },
     ar: {
-      connecting: "جارٍ الاتصال بسيرفر Odoo",
-      preparing: "بنجهّز مساحة العمل…",
-      downTitle: "سيرفر Odoo لا يستجيب",
-      downPre: "مش قادرين نوصل للسيرفر على ",
-      downPost: ". اتأكد إن السيرفر شغال وإن الشبكة واصلة، وهنحاول تاني تلقائيًا.",
-      redirTitle: "السيرفر بيحوّل لعنوان مختلف",
-      redirPre: "السيرفر ردّ لكنه بيحوّل الاتصال لعنوان غير العنوان المسجّل في الإعدادات (",
-      redirPost: "). راجع العنوان من مركز التحكم وخلّيه مطابق لعنوان السيرفر الفعلي.",
-      retryIn: "إعادة المحاولة بعد ",
-      secs: " ثوانٍ…",
-      retryBtn: "حاول الآن",
-      anywayBtn: "فتح Odoo على أي حال",
+      connecting: "جارٍ الاتصال بخادم Odoo",
+      preparing: "تجهيز مساحة العمل…",
+      downTitle: "تعذّر الوصول إلى خادم Odoo",
+      downPre: "الخادم غير مستجيب على ",
+      downPost: ". تحقّق من تشغيل الخادم واتصال الشبكة — سنعيد المحاولة تلقائياً.",
+      redirTitle: "عنوان الخادم مختلف",
+      redirPre: "أعاد الخادم توجيهاً لعنوان يختلف عن الرابط المحفوظ (",
+      redirPost: "). راجع رابط الاتصال من مركز التحكم ليطابق الخادم الفعلي.",
+      retryIn: "إعادة المحاولة خلال ",
+      secs: " ث…",
+      retryBtn: "إعادة المحاولة",
+      anywayBtn: "الفتح على أي حال",
       ccBtn: "مركز التحكم",
       initFailTitle: "تعذّر بدء الاتصال",
-      initFailMsg: "افتح مركز التحكم لمراجعة إعدادات اتصال Odoo.",
-      credit: "تطوير وتشغيل Yaseir.com — جميع الحقوق محفوظة © يسير"
+      initFailMsg: "افتح مركز التحكم لمراجعة إعدادات الخادم.",
+      credit: "Yaseir Print © يسير"
     }
   };
   var lang = "ar";

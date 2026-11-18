@@ -30,18 +30,27 @@ const PRINTER_STATUS_USER_INTERVENTION: u32 = 0x0010_0000;
 
 /// Normalize spooler status flags so transient/informational flags and
 /// driver quirks do not falsely block job submission. Virtual writers and
-/// USB printers frequently raise `PRINTER_STATUS_USER_INTERVENTION` even
-/// when the Windows Spooler accepts and prints jobs normally; real physical
-/// faults (paper out/jam, door open, offline, paused, error) are preserved.
+/// POS/thermal/serial/USB/Bluetooth printers frequently raise
+/// `PRINTER_STATUS_USER_INTERVENTION` even when the Windows Spooler accepts
+/// and prints jobs normally; real physical faults (paper out/jam, door open,
+/// offline, paused, error) are preserved.
 pub fn tolerant_spooler_flags(
     status: u32,
     kind: PrinterKind,
     port_name: &str,
 ) -> u32 {
+    let p = port_name.trim_start().to_ascii_uppercase();
+    let tolerant_port = p.starts_with("USB")
+        || p.starts_with("TMUSB")
+        || p.starts_with("COM")
+        || p.starts_with("LPT")
+        || p.starts_with("BTH")
+        || p.starts_with("TS")
+        || p.starts_with("NE");
     if matches!(
         kind,
         PrinterKind::Virtual | PrinterKind::Shared | PrinterKind::Network
-    ) || port_name.trim_start().to_ascii_uppercase().starts_with("USB")
+    ) || tolerant_port
     {
         status & !PRINTER_STATUS_USER_INTERVENTION
     } else {
@@ -342,5 +351,17 @@ mod tests {
         assert_eq!(info.kind, PrinterKind::Shared);
         assert_eq!(info.status, PrinterStatus::Ready);
         assert!(!info.health.as_ref().unwrap().blocks_printing());
+    }
+
+    #[test]
+    fn serial_bluetooth_and_tmusb_ports_tolerate_user_intervention() {
+        for port in ["COM3:", "LPT1:", "BTHENUM\\POS80", "TMUSB001"] {
+            let mut p = raw(0x0010_0000, 0);
+            p.printer_name = "POS-80 Receipt".into();
+            p.port_name = port.into();
+            let info = convert(&p);
+            assert_eq!(info.status, PrinterStatus::Ready, "port {port}");
+            assert!(!info.health.as_ref().unwrap().blocks_printing(), "port {port}");
+        }
     }
 }

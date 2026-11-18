@@ -220,13 +220,29 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
                     }
                     return state;
                 }
-                // Retryable outcome (failed / dead_letter): notify
-                // once per attempt, then KEEP WATCHING. The worker
-                // may re-queue the job; stopping here would leave
-                // the retry's outcome unposted and the server log
-                // stuck on the first failure. The existing
-                // 5-minute-no-progress / 30-minute ladder bounds
-                // the extended watch.
+                // Quiet retry check: if the desktop worker hit a transient
+                // error (busy/offline) and auto-requeued into `queued` or
+                // `printing` immediately, wait one brief tick before firing
+                // a sticky error toast so temporary retries remain silent.
+                if (state === "failed" && typeof bridge.jobDetail === "function") {
+                    await new Promise((resolve) => setTimeout(resolve, 900));
+                    const recheck = await bridge.jobDetail(jobId).catch(() => null);
+                    if (recheck && recheck.state && !TERMINAL_STATES.has(recheck.state)) {
+                        lastState = recheck.state;
+                        lastPages = recheck.pages || lastPages;
+                        lastAttempts = recheck.attempts || lastAttempts;
+                        lastProgressAt = Date.now();
+                        continue;
+                    }
+                    if (recheck && recheck.state === "done") {
+                        notifyUser(
+                            env,
+                            _t('Sent "%s" to %s', meta.reportName, printerLabel),
+                            "success",
+                        );
+                        return "done";
+                    }
+                }
                 const failureKey = state + ":" + attempts;
                 if (notifiedFailure !== failureKey) {
                     notifiedFailure = failureKey;

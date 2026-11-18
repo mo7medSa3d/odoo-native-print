@@ -8,93 +8,221 @@
 <style>
   html, body { height: 100%; overflow: hidden; }
   body {
-    background: var(--bg-surface);
+    background: var(--bg-chrome);
     color: var(--text-primary);
     border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 6px;
-    padding: 0 8px;
-    height: 46px;
-    user-select: none; -webkit-user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    height: 44px;
+    user-select: none;
+    -webkit-user-select: none;
   }
+
+  .nav-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: 0 0 auto;
+  }
+  .tb-btn {
+    width: 28px;
+    height: 28px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: inherit;
+    transition: background-color .12s ease, color .12s ease, border-color .12s ease;
+  }
+  .tb-btn:hover {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border-color: var(--border);
+  }
+  .tb-btn svg { width: 15px; height: 15px; }
+
+  .divider {
+    width: 1px;
+    height: 18px;
+    background: var(--border-strong);
+    flex: 0 0 auto;
+    margin: 0 2px;
+    opacity: 0.7;
+  }
+
   .tabs {
-    flex: 1 1 auto; display: flex; align-items: center; gap: 4px;
-    overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
-    height: 100%; padding: 6px 2px;
+    flex: 1 1 auto;
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    height: 100%;
+    padding-top: 6px;
   }
   .tabs::-webkit-scrollbar { display: none; }
+
   .tab {
-    flex: 0 1 196px; min-width: 96px; max-width: 196px; height: 32px;
-    display: flex; align-items: center; gap: 6px;
+    flex: 0 1 206px;
+    min-width: 108px;
+    max-width: 206px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
     padding-inline: 10px 6px;
-    background: transparent; color: var(--text-secondary);
+    background: transparent;
+    color: var(--text-secondary);
     border: 1px solid transparent;
-    border-radius: var(--radius-md); cursor: grab; white-space: nowrap;
-    transition: background-color .14s ease, color .14s ease, border-color .14s ease;
+    border-bottom: 0;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    cursor: grab;
+    white-space: nowrap;
     position: relative;
+    transition: background-color .12s ease, color .12s ease, border-color .12s ease;
   }
-  .tab:hover { background: var(--bg-subtle); color: var(--text-primary); }
-  .tab.dragging { opacity: .45; cursor: grabbing; }
-  .tab.drop-hint { background: var(--brand-soft); color: var(--text-primary); border-color: var(--brand); }
-  .tab.active {
-    background: var(--bg-elevated);
+  .tab:hover {
+    background: var(--bg-subtle);
     color: var(--text-primary);
-    border-color: var(--border-strong);
-    box-shadow: var(--shadow-sm), inset 0 -2px 0 var(--brand);
-    font-weight: 600;
   }
-  .tab .t-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
+  .tab.dragging { opacity: 0.45; cursor: grabbing; }
+  .tab.drop-hint {
+    background: var(--brand-soft);
+    color: var(--text-primary);
+    border-color: var(--brand);
+  }
+  .tab.active {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border-color: var(--border);
+    font-weight: 600;
+    box-shadow: inset 0 2px 0 var(--brand);
+    z-index: 2;
+  }
+  .tab .t-icon {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .tab.active .t-icon { color: var(--brand); }
+  .tab .t-title {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 12px;
+    letter-spacing: -0.005em;
+  }
   .tab .t-pos {
-    flex: 0 0 auto; font-size: 9.5px; font-weight: 700; letter-spacing: .04em;
-    background: var(--accent-cyan); color: #fff; border-radius: 4px; padding: 1px 5px;
-    line-height: 1.3;
+    flex: 0 0 auto;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--accent-cyan);
+    line-height: 1;
   }
   .tab .t-close {
-    flex: 0 0 auto; width: 18px; height: 18px; border: 0; border-radius: 5px;
-    background: transparent; color: var(--text-muted); cursor: pointer; font-size: 13px;
-    display: flex; align-items: center; justify-content: center; line-height: 1;
-    transition: background-color .12s ease, color .12s ease;
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    opacity: 0.72;
+    transition: background-color .12s ease, color .12s ease, opacity .12s ease;
   }
+  .tab:hover .t-close, .tab.active .t-close { opacity: 1; }
   .tab .t-close:hover { background: var(--err-bg); color: var(--err-fg); }
+
   .tab-add {
-    flex: 0 0 auto; width: 28px; height: 28px; border: 0; border-radius: var(--radius-md);
-    background: transparent; color: var(--text-secondary); cursor: pointer;
-    display: flex; align-items: center; justify-content: center; margin: 0 2px;
-    transition: background-color .12s ease, color .12s ease;
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    align-self: center;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-inline: 2px;
+    transition: background-color .12s ease, color .12s ease, border-color .12s ease;
   }
-  .tab-add:hover { background: var(--bg-subtle); color: var(--brand); }
-  .tab-add svg { width: 15px; height: 15px; }
-
-  .divider { width: 1px; height: 20px; background: var(--border); flex: 0 0 auto; margin: 0 2px; }
-
-  .nav-group { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
-  .tb-btn {
-    width: 30px; height: 30px; border: 0; border-radius: var(--radius-md);
-    background: transparent; color: var(--text-secondary); cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    transition: background-color .12s ease, color .12s ease;
+  .tab-add:hover {
+    background: var(--bg-surface);
+    border-color: var(--border);
+    color: var(--brand);
   }
-  .tb-btn:hover { background: var(--bg-subtle); color: var(--text-primary); }
-  .tb-btn svg { width: 16px; height: 16px; }
+  .tab-add svg { width: 14px; height: 14px; }
+
+  .tb-utilities {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;
+  }
 
   .tb-action {
-    flex: 0 0 auto; height: 30px; border: 1px solid var(--border); border-radius: var(--radius-md);
-    cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 0 10px;
-    background: var(--bg-subtle); color: var(--text-primary);
-    font-size: 12px; font-weight: 500; font-family: inherit;
+    flex: 0 0 auto;
+    height: 28px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 9px;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-size: 11.5px;
+    font-weight: 500;
+    font-family: inherit;
     transition: background-color .12s ease, border-color .12s ease;
   }
-  .tb-action:hover { background: var(--bg-hover); border-color: var(--border-strong); }
-  .tb-action.brand { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); }
-  .tb-action.brand:hover { background: var(--brand-hover); border-color: var(--brand-hover); }
-  .tb-action img { width: 16px; height: 16px; border-radius: 4px; }
-  .tb-action svg { width: 14px; height: 14px; }
+  .tb-action:hover {
+    background: var(--bg-subtle);
+    border-color: var(--border-strong);
+  }
+  .tb-action.brand {
+    background: var(--brand);
+    border-color: var(--brand);
+    color: var(--brand-fg);
+    font-weight: 600;
+  }
+  .tb-action.brand:hover {
+    background: var(--brand-hover);
+    border-color: var(--brand-hover);
+  }
+  .tb-action img { width: 14px; height: 14px; border-radius: 3px; }
+  .tb-action svg { width: 13px; height: 13px; }
+
+  @media (max-width: 640px) {
+    .tb-action span { display: none; }
+    .tb-action { padding: 0 7px; }
+  }
 </style>
 </head>
 <body>
-  <div class="tabs" id="tabs" role="tablist"></div>
-
-  <div class="divider" aria-hidden="true"></div>
-
   <div class="nav-group">
     <button type="button" class="tb-btn" id="btnBack" title="رجوع" aria-label="رجوع">
       <svg class="flip-rtl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
@@ -109,20 +237,20 @@
 
   <div class="divider" aria-hidden="true"></div>
 
-  <button type="button" class="tb-btn" id="btnTabTheme" title="المظهر" aria-label="المظهر">
-    <svg id="iconSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
-    <svg id="iconMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-  </button>
-  <button type="button" class="tb-btn" id="btnTabLang" title="Language / اللغة" aria-label="Switch language" style="width:auto;padding:0 8px;font-size:11.5px;font-weight:600;">EN</button>
+  <div class="tabs" id="tabs" role="tablist"></div>
 
-  <button type="button" class="tb-action brand" id="btnCc" title="مركز التحكم">
-    <img src="app-icon.png" alt="" aria-hidden="true"/>
-    <span data-i18n="cc">مركز التحكم</span>
-  </button>
-  <button type="button" class="tb-action" id="btnSettings" title="الإعدادات">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-    <span data-i18n="settings">الإعدادات</span>
-  </button>
+  <div class="divider" aria-hidden="true"></div>
+
+  <div class="tb-utilities">
+    <button type="button" class="tb-action brand" id="btnCc" title="مركز التحكم">
+      <img src="app-icon.png" alt="" aria-hidden="true"/>
+      <span data-i18n="cc">مركز التحكم</span>
+    </button>
+    <button type="button" class="tb-action" id="btnSettings" title="الإعدادات">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span data-i18n="settings">الإعدادات</span>
+    </button>
+  </div>
 
 <script>
   "use strict";
@@ -135,13 +263,11 @@
   var STR = {
     ar: {
       new_tab: "تبويب جديد", cc: "مركز التحكم", settings: "الإعدادات",
-      back: "رجوع", forward: "تقدّم", reload: "إعادة تحميل",
-      theme: "تبديل المظهر", lang_tip: "Switch to English", close_tab: "إغلاق التبويب"
+      back: "رجوع", forward: "تقدّم", reload: "تحديث", close_tab: "إغلاق"
     },
     en: {
-      new_tab: "New Tab", cc: "Control Center", settings: "Settings",
-      back: "Back", forward: "Forward", reload: "Reload",
-      theme: "Toggle theme", lang_tip: "التبديل للعربية", close_tab: "Close tab"
+      new_tab: "New tab", cc: "Control Center", settings: "Settings",
+      back: "Back", forward: "Forward", reload: "Reload", close_tab: "Close"
     }
   };
   var lang = "";
@@ -165,8 +291,6 @@
         ["btnBack", STR[lang].back],
         ["btnForward", STR[lang].forward],
         ["btnReload", STR[lang].reload],
-        ["btnTabTheme", STR[lang].theme],
-        ["btnTabLang", STR[lang].lang_tip],
         ["btnCc", STR[lang].cc],
         ["btnSettings", STR[lang].settings]
       ];
@@ -174,26 +298,29 @@
         var b = document.getElementById(pair[0]);
         if (b) { b.title = pair[1]; b.setAttribute("aria-label", pair[1]); }
       });
-      var langBtn = document.getElementById("btnTabLang");
-      if (langBtn) langBtn.textContent = lang === "ar" ? "EN" : "ع";
       if (currentTabs.length) render(currentTabs);
     }
     var nextTheme = savedTheme === "dark" ? "dark" : "light";
     if (nextTheme !== theme || !document.documentElement.getAttribute("data-theme")) {
       theme = nextTheme;
       document.documentElement.setAttribute("data-theme", theme);
-      var sun = document.getElementById("iconSun");
-      var moon = document.getElementById("iconMoon");
-      if (sun && moon) {
-        sun.style.display = theme === "dark" ? "block" : "none";
-        moon.style.display = theme === "dark" ? "none" : "block";
-      }
     }
   }
   var lastSignature = "";
   var currentTabs = [];
   var dragLabel = null;
   var refreshing = false;
+
+  function tabIconSvg(tab) {
+    var u = String(tab.url || "");
+    if (u.indexOf("index.html") >= 0) {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>';
+    }
+    if (u.indexOf("settings.html") >= 0) {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M2 12h3M19 12h3"/></svg>';
+    }
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="3.6" y1="9" x2="20.4" y2="9"/><line x1="3.6" y1="15" x2="20.4" y2="15"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
+  }
 
   function dropIndexFor(i, clientX, rect) {
     var width = rect.width || 1;
@@ -213,7 +340,7 @@
   function render(tabs) {
     if (!Array.isArray(tabs)) return;
     var sig = lang + "|" + tabs.map(function (t) {
-      return t.label + ":" + t.title + ":" + (t.active ? 1 : 0) + ":" + (t.is_pos ? 1 : 0);
+      return t.label + ":" + t.title + ":" + t.url + ":" + (t.active ? 1 : 0) + ":" + (t.is_pos ? 1 : 0);
     }).join("|");
     if (sig === lastSignature) return;
     lastSignature = sig;
@@ -261,6 +388,10 @@
         clearDropHints(strip);
         invoke("tab_move", { label: label, toIndex: idx }).then(refresh).catch(function () {});
       });
+      var icon = document.createElement("span");
+      icon.className = "t-icon";
+      icon.innerHTML = tabIconSvg(t);
+      el.appendChild(icon);
       var title = document.createElement("span");
       title.className = "t-title";
       title.textContent = t.title;
@@ -296,12 +427,13 @@
     var add = document.createElement("button");
     add.type = "button";
     add.className = "tab-add";
+    add.id = "btnNewTab";
     add.title = STR[lang].new_tab;
     add.setAttribute("aria-label", STR[lang].new_tab);
     add.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
     add.addEventListener("click", function () {
       invoke("tab_open", { url: "" }).then(refresh).catch(function () {
-        invoke("open_control_center", {}).catch(function () {});
+        invoke("open_control_center", {}).then(refresh).catch(function () {});
       });
     });
     strip.appendChild(add);
@@ -343,24 +475,16 @@
   document.getElementById("btnReload").addEventListener("click", function () {
     invoke("nav_reload", {}).catch(function () {});
   });
-  document.getElementById("btnTabTheme").addEventListener("click", function () {
-    try { localStorage.setItem("np_cc_theme", theme === "dark" ? "light" : "dark"); } catch (e) {}
-    applyPrefs();
-  });
-  document.getElementById("btnTabLang").addEventListener("click", function () {
-    try { localStorage.setItem("np_cc_lang", lang === "ar" ? "en" : "ar"); } catch (e) {}
-    applyPrefs();
-  });
   document.getElementById("btnSettings").addEventListener("click", function () {
-    invoke("open_settings", {}).catch(function () {});
+    invoke("open_settings", {}).then(refresh).catch(function () {});
   });
   document.getElementById("btnCc").addEventListener("click", function () {
-    invoke("open_control_center", {}).catch(function () {});
+    invoke("open_control_center", {}).then(refresh).catch(function () {});
   });
   window.addEventListener("storage", applyPrefs);
   applyPrefs();
   refresh();
-  window.setInterval(refresh, 700);
+  window.setInterval(refresh, 650);
 </script>
 </body>
 </html>
