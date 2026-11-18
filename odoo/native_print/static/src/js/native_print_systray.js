@@ -1,5 +1,5 @@
 /** @odoo-module **/
-import { Component, onMounted, onWillDestroy, onWillStart, useState } from "@odoo/owl";
+import { Component, onMounted, onWillStart, onWillUnmount, useState } from "@odoo/owl";
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { rpc } from "@web/core/network/rpc";
@@ -118,6 +118,8 @@ export class NativePrintSystray extends Component {
             await this.refreshStats();
         });
 
+        this._unmounted = false;
+
         onMounted(() => {
             window.addEventListener("click", this._onOutsideClick);
             // Keep workstation inventory and online/offline state current
@@ -129,7 +131,8 @@ export class NativePrintSystray extends Component {
             }, 60_000);
         });
 
-        onWillDestroy(() => {
+        onWillUnmount(() => {
+            this._unmounted = true;
             window.removeEventListener("click", this._onOutsideClick);
             if (this._printerRefreshTimer) {
                 window.clearInterval(this._printerRefreshTimer);
@@ -153,6 +156,7 @@ export class NativePrintSystray extends Component {
             // Live discovery only: printers belong to this PC and are
             // never stored on the server.
             const local = await bridge.appOverview();
+            if (this._unmounted) return;
             const printers = Array.isArray(local && local.printers) ? local.printers : [];
             this.state.printersCount = printers.length;
             this.state.defaultPrinter = local && local.defaultPrinter || null;
@@ -160,7 +164,7 @@ export class NativePrintSystray extends Component {
                 (p) => ({ ...p, meta: printerMeta(p) }));
             this.state.selectedPrinter = getSelectedPrinter();
             this.state.selectedPosPrinter = getSelectedPosPrinter();
-            this.maybeSyncDeviceCaps(printers);
+            this.maybeSyncDeviceCaps(printers, showNotice);
             if (showNotice) this.notification.add(
                 _t("%s printer(s) found on this PC.", printers.length),
                 { title: _t("Printers Refreshed"), type: "success" },
@@ -170,11 +174,13 @@ export class NativePrintSystray extends Component {
             // localized explanation, not an English stack message
             // (audit JS-L3).
             console.error(error);
-            if (showNotice) this.notification.add(
+            if (showNotice && !this._unmounted) this.notification.add(
                 _t("Could not read this PC's printers. Check the desktop app and try again."),
                 { title: _t("Printer Refresh Failed"), type: "danger" });
         } finally {
-            this.state.syncingPrinters = false;
+            if (!this._unmounted) {
+                this.state.syncingPrinters = false;
+            }
         }
     }
 
@@ -184,7 +190,7 @@ export class NativePrintSystray extends Component {
     // Throttled per printer: re-sent only when the capability set
     // changes or after 6 hours; failures stay in the console — the
     // panel never blocks on bookkeeping.
-    async maybeSyncDeviceCaps(printers) {
+    async maybeSyncDeviceCaps(printers, force = false) {
         const bridge = window.__NATIVE_PRINT__ || null;
         if (!bridge || typeof bridge.printerCapabilities !== "function") return;
         const wanted = getSelectedPrinter() || this.state.defaultPrinter;
@@ -195,14 +201,21 @@ export class NativePrintSystray extends Component {
             store = JSON.parse(localStorage.getItem("npCapsSyncV1") || "{}");
         } catch (_e) { store = {}; }
         const prev = store[target.name] || {};
+        const now = Date.now();
+        const metaKey = `${target.protocol || ""}|${target.printer_class || ""}`;
+        // Skip querying Windows driver capabilities on 60s background polls
+        // when this printer's capabilities were already synced within 6 hours
+        // and its protocol/class did not change. Manual refresh passes force=true.
+        if (!force && prev.at && now - prev.at < 6 * 3600 * 1000 && prev.meta === metaKey) {
+            return;
+        }
         try {
             const caps = await bridge.printerCapabilities(target.name);
-            if (!caps) return;
+            if (!caps || this._unmounted) return;
             const forms = formatFormsSummary(caps.forms, _t("Roll"));
             const trays = Array.isArray(caps.bins) ? caps.bins.slice() : [];
             const hash = JSON.stringify(
                 [target.protocol, target.printer_class, forms, trays]);
-            const now = Date.now();
             if (prev.hash === hash && now - (prev.at || 0) < 6 * 3600 * 1000) return;
             const res = await rpc("/native_print/sync_device", {
                 name: target.name,
@@ -211,7 +224,7 @@ export class NativePrintSystray extends Component {
                 forms, trays,
             }, { silent: true });
             if (res && res.ok) {
-                store[target.name] = { at: now, hash };
+                store[target.name] = { at: now, hash, meta: metaKey };
                 localStorage.setItem("npCapsSyncV1", JSON.stringify(store));
             }
         } catch (error) {
@@ -220,21 +233,30 @@ export class NativePrintSystray extends Component {
     }
 
     async refreshStats() {
-        const bridge = window.__NATIVE_PRINT__ || null;
-        this.state.bridgeActive = Boolean(bridge);
-        this.state.appOutdated = bridgeIsOutdated(bridge && bridge.version);
-        if (bridge) {
-            await this.syncDiscoveredPrinters(false);
-        }
+        if (this._refreshingStats || this._unmounted) return;
+        this._refreshingStats = true;
         try {
-            const srv = await rpc("/native_print/overview", {}, { silent: true });
-            if (srv && srv.ok) {
-                this.state.activeJobs = srv.active_jobs || 0;
-                this.state.doneJobs = srv.done_jobs || 0;
-                this.state.failedJobs = srv.failed_jobs || 0;
+            const bridge = window.__NATIVE_PRINT__ || null;
+            this.state.bridgeActive = Boolean(bridge);
+            this.state.appOutdated = bridgeIsOutdated(bridge && bridge.version);
+            const overviewTask = rpc("/native_print/overview", {}, { silent: true })
+                .then((srv) => {
+                    if (!this._unmounted && srv && srv.ok) {
+                        this.state.activeJobs = srv.active_jobs || 0;
+                        this.state.doneJobs = srv.done_jobs || 0;
+                        this.state.failedJobs = srv.failed_jobs || 0;
+                    }
+                })
+                .catch(() => {
+                    // Ignore background refresh error.
+                });
+            if (bridge) {
+                await Promise.all([this.syncDiscoveredPrinters(false), overviewTask]);
+            } else {
+                await overviewTask;
             }
-        } catch (_err) {
-            // Ignore background refresh error.
+        } finally {
+            this._refreshingStats = false;
         }
     }
 

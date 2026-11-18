@@ -16,11 +16,11 @@ are rejected). HTTP is unencrypted; the Control Center warns about it.
   - Queued durably in SQLite WAL with `JobOptions` and immediately dispatched by the background worker to GDI (`print-win`), ESC/POS raster, ZPL/TSPL/EPL, TCP 9100, or IPP.
 
 - **`window.__NATIVE_PRINT__.printText({ idempotencyKey, reportName, printerPattern, text, cut })`**
-  - `qweb-text` reports (kitchen tickets). Encoded to ESC/POS text lines + feed + partial cut and queued with priority `10`.
+  - `qweb-text` reports (kitchen tickets). `text` must be non-empty and `<= 1 MiB` (`1,048,576` bytes; rejected with `bad_text_size` otherwise). Encoded to ESC/POS text lines + feed + partial cut and queued with priority `10`.
 
 - **`window.__NATIVE_PRINT__.printImage({ idempotencyKey, reportName, printerPattern, mode, copies, bytes })`** (legacy `paper` is optional; new POS jobs omit it so the native worker resolves the roll width from the driver)
   - `bytes`: PNG image bytes captured by the POS receipt extension (`point_of_sale.receipt`).
-  - Validated at the door via `print_render::decode_png` (`<= 20 MiB`, `<= 20,000 px` side, `<= 50M` pixels), queued with priority `10`, and printed by the worker via ESC/POS raster (`80mm` -> 576 dots, `58mm` -> 384 dots), ZPL/TSPL/EPL, or GDI.
+  - Validated at the door via `print_render::decode_png` (`<= 20 MiB`, `<= 40,000 px` side, `<= 50M` pixels), queued with priority `10`, and printed by the worker via ESC/POS raster (`80mm` -> 576 dots, `58mm` -> 384 dots), ZPL/TSPL/EPL, or GDI.
 
 ### Status, Discovery & Control Center Commands
 

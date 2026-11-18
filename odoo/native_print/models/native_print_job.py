@@ -156,7 +156,7 @@ class NativePrintJob(models.Model):
         # model ACL merely because a recordset was obtained. Check ACLs only:
         # the job-log "own jobs" record rule must not block reprinting a job
         # owned by another user (e.g. one created by an admin on their behalf).
-        self.check_access_rights("read")
+        self.browse().check_access("read")
         ids = []
         if self.source_ids:
             ids = [int(x) for x in self.source_ids.split(",")

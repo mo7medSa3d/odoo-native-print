@@ -849,14 +849,7 @@ fn print_canvas_gdi_with_caps(
         } else {
             matched.kind
         };
-        let page = print_render::RenderedPage {
-            width_px: canvas.width,
-            height_px: canvas.height,
-            mode: print_render::RenderMode::Grayscale,
-            dpi: 203,
-            pixels: canvas.px.clone(),
-        };
-        let dib = crate::dib::build_dib(&page);
+        let dib = crate::dib::build_grayscale_dib(canvas.width, canvas.height, &canvas.px);
         for _ in 0..copies.max(1) {
             match blit_dib_page(dc.0, &dib, Some(page_size), blit_kind) {
                 Ok(()) => sent += 1,
@@ -915,18 +908,20 @@ fn print_canvas_pages(
         return Err("receipt image has no rows to print".to_string());
     }
     let mut sent = 0usize;
+    let width_usize = canvas.width as usize;
     for _ in 0..copies.max(1) {
-        for (start, rows) in &chunks {
-            let chunk = print_render::bitmap::slice_canvas_rows(canvas, *start, *rows);
-            let page = print_render::RenderedPage {
-                width_px: chunk.width,
-                height_px: chunk.height,
-                mode: print_render::RenderMode::Grayscale,
-                dpi: 203,
-                pixels: chunk.px.clone(),
-            };
-            let dib = crate::dib::build_dib(&page);
-            let drawn_h = ((chunk.height as f64 * scale).round() as u32)
+        for &(start, rows) in &chunks {
+            let start_row = start.min(canvas.height) as usize;
+            let end_row = start.saturating_add(rows).min(canvas.height) as usize;
+            let chunk_h = (end_row - start_row) as u32;
+            let max_end = end_row.saturating_mul(width_usize).min(canvas.px.len());
+            let min_start = start_row.saturating_mul(width_usize).min(max_end);
+            let dib = crate::dib::build_grayscale_dib(
+                canvas.width,
+                chunk_h,
+                &canvas.px[min_start..max_end],
+            );
+            let drawn_h = ((chunk_h as f64 * scale).round() as u32)
                 .min(area_h as u32)
                 .max(1);
             blit_dib_rect(dc, &dib, 0, 0, target_w as u32, drawn_h)?;
@@ -978,10 +973,9 @@ fn blit_dib_rect(
         )
     };
     if drawn == GDI_ERROR || drawn == 0 {
-        // Capture GetLastError before EndPage can overwrite it.
-        let err = last_error();
-        unsafe { EndPage(dc) };
-        return Err(format!("StretchDIBits: {err}"));
+        // Leave the failed page un-ended so the caller's AbortDoc
+        // cancels it instead of committing a blank/partial page.
+        return Err(format!("StretchDIBits: {}", last_error()));
     }
     if unsafe { EndPage(dc) } <= 0 {
         return Err(format!("EndPage: {}", last_error()));

@@ -462,21 +462,51 @@ fn split_http_response(mut raw: &[u8]) -> Result<Option<ParsedHttpResponse<'_>>,
         }
         let body = &raw[split + 4..];
         let lower = headers.to_ascii_lowercase();
-        let is_chunked = lower.lines().any(|l| {
-            l.split_once(':')
-                .is_some_and(|(k, v)| k.trim() == "transfer-encoding" && v.contains("chunked"))
-        });
+        let mut has_transfer_encoding = false;
+        let mut is_chunked = false;
+        let mut content_length: Option<usize> = None;
+        for line in lower.lines().skip(1) {
+            let Some((k, v)) = line.split_once(':') else {
+                continue;
+            };
+            match k.trim() {
+                "transfer-encoding" => {
+                    has_transfer_encoding = true;
+                    if v.split(',').any(|t| t.trim() == "chunked") {
+                        is_chunked = true;
+                    }
+                }
+                "content-length" => {
+                    for part in v.split(',') {
+                        let s = part.trim();
+                        if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+                            return Err(IppError::Parse("invalid Content-Length".into()));
+                        }
+                        let len = s
+                            .parse::<usize>()
+                            .map_err(|_| IppError::Parse("invalid Content-Length".into()))?;
+                        match content_length {
+                            Some(prev) if prev != len => {
+                                return Err(IppError::Parse(
+                                    "conflicting Content-Length headers".into(),
+                                ));
+                            }
+                            _ => content_length = Some(len),
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        // RFC 9112 §6.3: reject messages carrying both Transfer-Encoding and Content-Length.
+        if has_transfer_encoding && content_length.is_some() {
+            return Err(IppError::Parse(
+                "conflicting Transfer-Encoding and Content-Length".into(),
+            ));
+        }
         let framing = if is_chunked {
             HttpFraming::Chunked
-        } else if let Some(len) = lower.lines().find_map(|l| {
-            l.split_once(':').and_then(|(k, v)| {
-                if k.trim() == "content-length" {
-                    v.trim().parse::<usize>().ok()
-                } else {
-                    None
-                }
-            })
-        }) {
+        } else if let Some(len) = content_length {
             HttpFraming::ContentLength(len)
         } else {
             HttpFraming::Close
@@ -879,6 +909,46 @@ mod tests {
         assert!(dechunk(b"5\r\nhello\r\n0\r\n").is_err());
         assert!(dechunk(b"+5\r\nhello\r\n0\r\n\r\n").is_err());
         assert!(parse_http_response(b"HTTP/1.1\r\n200 OK\r\n\r\n").is_err());
+    }
+
+    #[test]
+    fn http_framing_rejects_smuggling_and_conflicting_content_length() {
+        // Conflicting duplicate Content-Length headers (RFC 9112 §6.3).
+        assert!(matches!(
+            parse_http_response(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nContent-Length: 8\r\n\r\n12345678"
+            ),
+            Err(IppError::Parse(_))
+        ));
+        // Conflicting comma-separated Content-Length values.
+        assert!(matches!(
+            parse_http_response(b"HTTP/1.1 200 OK\r\nContent-Length: 4, 8\r\n\r\n12345678"),
+            Err(IppError::Parse(_))
+        ));
+        // Identical duplicate Content-Length values remain accepted.
+        assert_eq!(
+            parse_http_response(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nContent-Length: 4\r\n\r\ntest"
+            )
+            .unwrap(),
+            b"test"
+        );
+        // Malformed / signed Content-Length must fail, not fall back to Close.
+        assert!(matches!(
+            parse_http_response(b"HTTP/1.1 200 OK\r\nContent-Length: +4\r\n\r\ntest"),
+            Err(IppError::Parse(_))
+        ));
+        assert!(matches!(
+            parse_http_response(b"HTTP/1.1 200 OK\r\nContent-Length: abc\r\n\r\ntest"),
+            Err(IppError::Parse(_))
+        ));
+        // Transfer-Encoding + Content-Length smuggling combination.
+        assert!(matches!(
+            parse_http_response(
+                b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: 4\r\n\r\n4\r\ntest\r\n0\r\n\r\n"
+            ),
+            Err(IppError::Parse(_))
+        ));
     }
 
     #[test]

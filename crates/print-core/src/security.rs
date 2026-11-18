@@ -34,7 +34,7 @@ pub fn origin_host_port(origin: &str) -> Option<(String, u16)> {
     Some((bare, port))
 }
 
-fn scheme_allowed(origin: &(String, String, u16)) -> bool {
+fn scheme_allowed(origin: &(&'static str, String, u16)) -> bool {
     origin.0 == "https"
         || (origin.0 == "http" && (origin.1 == "localhost" || host_is_ip_literal(&origin.1)))
 }
@@ -51,8 +51,11 @@ fn host_is_ip_literal(host: &str) -> bool {
 }
 
 /// Minimal strict origin parser: scheme://host[:port] and nothing else.
-/// Returns (scheme, host_lowercase, effective_port).
-fn parse_origin(s: &str) -> Option<(String, String, u16)> {
+/// Returns (scheme, canonical_host_lowercase, effective_port).
+/// Canonicalizes IP literals via `Display` and strips one trailing dot
+/// from hostnames so admin-typed origins match webview URL serialization
+/// (audit L3).
+fn parse_origin(s: &str) -> Option<(&'static str, String, u16)> {
     let (scheme, rest) = s.split_once("://")?;
     if rest.is_empty()
         || rest.contains(['/', '?', '#', '@', '\\'])
@@ -60,19 +63,16 @@ fn parse_origin(s: &str) -> Option<(String, String, u16)> {
     {
         return None;
     }
-    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
-        return None;
-    }
-    let default_port = if scheme.eq_ignore_ascii_case("https") {
-        443
+    let (scheme_norm, default_port) = if scheme.eq_ignore_ascii_case("https") {
+        ("https", 443)
+    } else if scheme.eq_ignore_ascii_case("http") {
+        ("http", 80)
     } else {
-        80
+        return None;
     };
-    let (host, port) = if let Some(after_open) = rest.strip_prefix('[') {
+    if let Some(after_open) = rest.strip_prefix('[') {
         let (ipv6, after_close) = after_open.split_once(']')?;
-        if ipv6.parse::<std::net::Ipv6Addr>().is_err() {
-            return None;
-        }
+        let ip: std::net::Ipv6Addr = ipv6.parse().ok()?;
         let port = if after_close.is_empty() {
             default_port
         } else {
@@ -82,30 +82,37 @@ fn parse_origin(s: &str) -> Option<(String, String, u16)> {
             }
             p.parse::<u16>().ok()?
         };
-        (format!("[{ipv6}]"), port)
-    } else {
-        match rest.rsplit_once(':') {
-            Some((h, p)) => {
-                if h.is_empty()
-                    || h.contains(':')
-                    || p.is_empty()
-                    || !p.chars().all(|c| c.is_ascii_digit())
-                {
-                    return None;
-                }
-                (h.to_string(), p.parse::<u16>().ok()?)
-            }
-            None => (rest.to_string(), default_port),
+        if port == 0 {
+            return None;
         }
+        return Some((scheme_norm, format!("[{ip}]"), port));
+    }
+    let (raw_host, port) = match rest.rsplit_once(':') {
+        Some((h, p)) => {
+            if h.is_empty()
+                || h.contains(':')
+                || p.is_empty()
+                || !p.chars().all(|c| c.is_ascii_digit())
+            {
+                return None;
+            }
+            (h, p.parse::<u16>().ok()?)
+        }
+        None => (rest, default_port),
     };
-    if host.contains(char::is_whitespace) || port == 0 {
+    if raw_host.contains(char::is_whitespace) || port == 0 {
         return None;
     }
-    let host = canonical_host(&host.to_ascii_lowercase());
-    if host.is_empty() || (!host_is_ip_literal(&host) && !is_valid_hostname(&host)) {
-        return None;
-    }
-    Some((scheme.to_ascii_lowercase(), host, port))
+    let host = if let Ok(ip) = raw_host.parse::<std::net::Ipv4Addr>() {
+        ip.to_string()
+    } else {
+        let trimmed = raw_host.strip_suffix('.').unwrap_or(raw_host);
+        if trimmed.is_empty() || !is_valid_hostname(trimmed) {
+            return None;
+        }
+        trimmed.to_ascii_lowercase()
+    };
+    Some((scheme_norm, host, port))
 }
 
 fn is_valid_hostname(host: &str) -> bool {
@@ -121,29 +128,6 @@ fn is_valid_hostname(host: &str) -> bool {
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
     })
-}
-
-/// Canonicalize a parsed host the way the webview's URL serializer
-/// reports it, applied to BOTH sides of every origin comparison
-/// (audit L3): an admin who types an uncompressed IPv6 literal
-/// (`[0:0:0:0:0:0:0:1]`) or a trailing-dot hostname otherwise passes
-/// save-time validation (self-comparison) while the webview reports
-/// the canonical form (`[::1]`) — every runtime check then fails and
-/// the app locks itself out with no visible reason. IP literals are
-/// round-tripped through `IpAddr`'s Display; hostnames lose one
-/// trailing dot.
-fn canonical_host(host: &str) -> String {
-    use std::net::IpAddr;
-    if let Some(inner) = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
-        if let Ok(ip) = inner.parse::<IpAddr>() {
-            return format!("[{ip}]");
-        }
-        return host.to_string();
-    }
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return ip.to_string();
-    }
-    host.strip_suffix('.').unwrap_or(host).to_string()
 }
 
 /// Hard limits for job input (spec sections 5 and 7).

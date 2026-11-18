@@ -9,8 +9,9 @@ import assert from "node:assert";
 const src = fs.readFileSync(
     new URL("../static/src/js/pos_native_print.js", import.meta.url), "utf8");
 function extract(name) {
-    const start = src.indexOf(`function ${name}(`);
+    let start = src.indexOf(`function ${name}(`);
     assert.ok(start >= 0, `${name} exists`);
+    if (start >= 6 && src.slice(start - 6, start) === "async ") start -= 6;
     let depth = 0;
     for (let i = src.indexOf("{", start); i < src.length; i++) {
         if (src[i] === "{") depth++;
@@ -66,4 +67,102 @@ assert.strictEqual(
     "42",
     "falls through to order.user_id.id",
 );
+
+// Phase 3 regression test: single-pass getComputedStyle, root backgroundImage inlining,
+// URL fetch deduplication, and timeout/error fallback in inlineStyles + inlineMedia.
+{
+    const helpers = [
+        "const MEDIA_FETCH_TIMEOUT_MS = 8000;",
+        'const TRANSPARENT_PIXEL = "data:image/png;base64,TRANSPARENT";',
+        extract("inlineStyles"),
+        extract("fetchAsDataUrl"),
+        extract("inlineMedia"),
+        "globalThis.__inlineStyles = inlineStyles; globalThis.__inlineMedia = inlineMedia;",
+    ].join("\n");
+    eval(helpers);
+
+    const makeNode = (tag, { attrs = {}, bg = "none", cssText = "color:black;", children = [] } = {}) => ({
+        tag,
+        _attrs: { ...attrs },
+        _bg: bg,
+        _cssText: cssText,
+        style: {},
+        children,
+        get src() { return this._attrs.src || ""; },
+        get currentSrc() { return this._attrs.src || ""; },
+        setAttribute(k, v) { this._attrs[k] = v; },
+        getAttribute(k) { return this._attrs[k] ?? null; },
+        querySelectorAll(sel) {
+            const out = [];
+            const walk = (n) => {
+                for (const c of n.children) {
+                    if (c.tag === sel) out.push(c);
+                    walk(c);
+                }
+            };
+            walk(this);
+            return out;
+        },
+    });
+
+    const srcImg1 = makeNode("img", { attrs: { src: "https://shop.test/logo.png" } });
+    const srcImg2 = makeNode("img", { attrs: { src: "https://shop.test/logo.png" } });
+    const srcDiv = makeNode("div", { bg: 'url("https://shop.test/broken.png")' });
+    const srcRoot = makeNode("div", { bg: 'url("https://shop.test/bg.png")', children: [srcImg1, srcImg2, srcDiv] });
+
+    const clImg1 = makeNode("img", { attrs: { src: "https://shop.test/logo.png" } });
+    const clImg2 = makeNode("img", { attrs: { src: "https://shop.test/logo.png" } });
+    const clDiv = makeNode("div", {});
+    const clRoot = makeNode("div", { children: [clImg1, clImg2, clDiv] });
+
+    let computedCalls = 0;
+    const prevWindow = globalThis.window;
+    const prevFetch = globalThis.fetch;
+    const prevFileReader = globalThis.FileReader;
+    globalThis.window = {
+        getComputedStyle(node) {
+            computedCalls++;
+            return { cssText: node._cssText, backgroundImage: node._bg, length: 0 };
+        },
+    };
+    const fetchedUrls = [];
+    globalThis.fetch = async (url) => {
+        fetchedUrls.push(url);
+        if (url.includes("broken")) return { ok: false };
+        return { ok: true, blob: async () => url };
+    };
+    globalThis.FileReader = class {
+        readAsDataURL(blob) {
+            this.result = "data:image/png;base64,INLINE_" + blob.split("/").pop();
+            this.onload();
+        }
+    };
+    try {
+        const bgTargets = globalThis.__inlineStyles(srcRoot, clRoot);
+        await globalThis.__inlineMedia(srcRoot, clRoot, bgTargets);
+        assert.strictEqual(computedCalls, 4, "getComputedStyle runs exactly once per node (single pass)");
+        assert.strictEqual(
+            fetchedUrls.filter((u) => u === "https://shop.test/logo.png").length,
+            1,
+            "duplicate <img> URL is fetched only once per capture",
+        );
+        assert.strictEqual(clImg1.getAttribute("src"), "data:image/png;base64,INLINE_logo.png");
+        assert.strictEqual(clImg2.getAttribute("src"), "data:image/png;base64,INLINE_logo.png");
+        assert.strictEqual(
+            clRoot.style.backgroundImage,
+            'url("data:image/png;base64,INLINE_bg.png")',
+            "root receipt element background-image is inlined",
+        );
+        assert.strictEqual(
+            clDiv.style.backgroundImage,
+            "none",
+            "unfetchable background-image falls back to none",
+        );
+    } finally {
+        globalThis.window = prevWindow;
+        globalThis.fetch = prevFetch;
+        globalThis.FileReader = prevFileReader;
+    }
+}
+
 console.log("pos key tests: ALL PASS");

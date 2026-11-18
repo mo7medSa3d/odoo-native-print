@@ -129,6 +129,8 @@ pub fn query_paper_status(host: &str, port: u16, timeout: Duration) -> std::io::
 
 fn query_dle_eot(host: &str, port: u16, n: u8, timeout: Duration) -> std::io::Result<u8> {
     let mut stream = connect_any(host, port, timeout)?;
+    // Avoid Nagle/delayed-ACK 40-200 ms stalls on 3-byte DLE EOT queries.
+    let _ = stream.set_nodelay(true);
     let timeout = timeout.max(MIN_IO_TIMEOUT);
     stream.set_write_timeout(Some(timeout))?;
     stream.set_read_timeout(Some(timeout))?;
@@ -292,6 +294,8 @@ pub fn query_blocking_condition(
     timeout: Duration,
 ) -> std::io::Result<Option<(&'static str, &'static str)>> {
     let mut stream = connect_any(host, port, timeout)?;
+    // Avoid Nagle/delayed-ACK 40-200 ms stalls across sequential 3-byte DLE EOT probes.
+    let _ = stream.set_nodelay(true);
     let timeout = timeout.max(MIN_IO_TIMEOUT);
     stream.set_write_timeout(Some(timeout))?;
     stream.set_read_timeout(Some(timeout))?;

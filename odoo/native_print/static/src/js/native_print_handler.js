@@ -41,10 +41,36 @@ function buildReportIdempotencyKey(prefix, action) {
     return `${prefix}-${safeTag}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+// Upper safety timeout for fetching a rendered report from Odoo:
+// generous enough for slow QWeb-PDF renders, bounded so a hung
+// network response cannot lock the report action forever.
+export const REPORT_FETCH_TIMEOUT_MS = 120_000;
+export const IN_FLIGHT_STALE_MS = REPORT_FETCH_TIMEOUT_MS + 10_000;
+
+async function fetchReportBody(url, readBody, timeoutMs = REPORT_FETCH_TIMEOUT_MS) {
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+        const opts = controller
+            ? { credentials: "same-origin", signal: controller.signal }
+            : { credentials: "same-origin" };
+        const resp = await fetch(url, opts);
+        if (!resp.ok) {
+            return null;
+        }
+        return await readBody(resp);
+    } finally {
+        if (timer !== null) {
+            clearTimeout(timer);
+        }
+    }
+}
+
 // Report submissions currently between click and desktop enqueue,
-// keyed by report + target records. A second invocation for the same
-// key is a duplicate of the SAME user intent, not a new print.
-const inFlightReports = new Set();
+// keyed by report + target records -> { startedAt }. A second
+// invocation while fresh is a duplicate of the SAME user intent;
+// an expired entry cannot lock the action forever.
+const inFlightReports = new Map();
 
 export function nativePrintBridge() {
     return window.__NATIVE_PRINT__ || null;
@@ -332,12 +358,11 @@ async function handleReportSubmission(action, options, env, bridge) {
         const textUrl = buildReportUrl(action, "text", env);
         let text;
         try {
-            const resp = await fetch(textUrl, { credentials: "same-origin" });
-            if (!resp.ok) {
+            text = await fetchReportBody(textUrl, (resp) => resp.text());
+            if (text === null) {
                 // Let Odoo's default flow handle (and report) it.
                 return undefined;
             }
-            text = await resp.text();
         } catch (_fetchError) {
             // Network failure / server restart mid-click: the
             // fallback contract is "return undefined and Odoo
@@ -447,12 +472,12 @@ async function handleReportSubmission(action, options, env, bridge) {
     const url = buildReportUrl(action, "pdf", env);
     let rawBytes;
     try {
-        const response = await fetch(url, { credentials: "same-origin" });
-        if (!response.ok) {
+        const buf = await fetchReportBody(url, (resp) => resp.arrayBuffer());
+        if (buf === null) {
             // Let Odoo's default flow handle (and report) it.
             return undefined;
         }
-        rawBytes = new Uint8Array(await response.arrayBuffer());
+        rawBytes = new Uint8Array(buf);
     } catch (_fetchError) {
         // Same fallback contract as the text branch. (Audit F1.)
         return undefined;
@@ -587,17 +612,22 @@ registry.category("ir.actions.report handlers").add(
                     "",
             ) +
             `|${dataFingerprint}`;
-        if (inFlightReports.has(guardKey)) {
+        const now = Date.now();
+        const existing = inFlightReports.get(guardKey);
+        if (existing && now - existing.startedAt < IN_FLIGHT_STALE_MS) {
             // The same report for the same records is already
             // being submitted (double-click, key repeat): the
             // duplicate must not print twice.
             return true;
         }
-        inFlightReports.add(guardKey);
+        const token = { startedAt: now };
+        inFlightReports.set(guardKey, token);
         try {
             return await handleReportSubmission(action, options, env, bridge);
         } finally {
-            inFlightReports.delete(guardKey);
+            if (inFlightReports.get(guardKey) === token) {
+                inFlightReports.delete(guardKey);
+            }
         }
     },
 );

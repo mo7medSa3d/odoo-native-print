@@ -17,6 +17,7 @@
   }
 
   .hidden { display: none !important; }
+  button, input, select, a, [tabindex], .tab-pane, .card { scroll-margin-top: 112px; }
 
   /* ── Top Application Bar (Desktop Workbench Chrome) ── */
   .topbar {
@@ -90,18 +91,19 @@
   .nav-tabs::-webkit-scrollbar { display: none; }
   .nav-tab {
     display: flex; align-items: center; gap: 0.6rem;
+    min-height: 36px;
     padding: 0.5rem 0.8rem;
     border: 1px solid transparent; border-radius: var(--radius-md);
     background: transparent; color: var(--text-secondary);
     font: inherit; font-size: 0.83rem; font-weight: 500;
     cursor: pointer; white-space: nowrap; text-align: start;
     position: relative;
-    transition: background-color .12s ease, color .12s ease, border-color .12s ease;
+    transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
   }
   .nav-tab:hover { background: var(--bg-subtle); color: var(--text-primary); }
   .nav-tab.active {
     background: var(--bg-elevated);
-    color: var(--brand);
+    color: var(--brand-text);
     border-color: var(--border);
     font-weight: 600;
     box-shadow: var(--shadow-sm);
@@ -174,7 +176,7 @@
       bottom: 7px;
       width: 3px;
       border-radius: 2px;
-      background: var(--brand);
+      background: var(--brand-text);
     }
     .sidebar-status { display: block; }
   }
@@ -215,15 +217,16 @@
   /* ── Buttons ── */
   .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+    min-height: 32px;
     border: 1px solid var(--border); border-radius: var(--radius-md);
     padding: 0.45rem 0.85rem; font: inherit; font-size: 0.81rem; font-weight: 500;
     cursor: pointer; background: var(--bg-surface); color: var(--text-primary);
-    transition: background-color .12s ease, border-color .12s ease, opacity .12s ease;
+    transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
     white-space: nowrap;
   }
   .btn:hover:not(:disabled) { background: var(--bg-subtle); border-color: var(--border-strong); }
   .btn:disabled { opacity: 0.48; cursor: not-allowed; }
-  .btn-sm { padding: 0.32rem 0.65rem; font-size: 0.76rem; border-radius: var(--radius-sm); }
+  .btn-sm { min-height: 28px; padding: 0.3rem 0.65rem; font-size: 0.76rem; border-radius: var(--radius-sm); }
   .btn-primary { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); font-weight: 600; }
   .btn-primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
   .btn-secondary { background: var(--bg-surface); border-color: var(--border-strong); color: var(--text-primary); }
@@ -259,16 +262,18 @@
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 0.95rem 1.05rem;
+    padding: var(--space-4);
     box-shadow: var(--shadow-sm);
-    display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;
+    display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3);
+    transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
   }
+  .kpi-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); transform: translateY(-1px); }
   .kpi-body { min-width: 0; flex: 1 1 auto; }
-  .kpi-label { font-size: 0.75rem; color: var(--text-muted); font-weight: 600; }
+  .kpi-label { font-size: var(--text-xs); color: var(--text-muted); font-weight: 600; letter-spacing: 0.01em; }
   .kpi-value {
-    font-size: 1.7rem; font-weight: 700; color: var(--text-primary);
+    font-size: var(--text-xl); font-weight: 700; color: var(--text-primary);
     font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
-    line-height: 1.2; margin: 0.28rem 0 0.25rem;
+    line-height: 1.2; margin: var(--space-1) 0;
   }
   .kpi-meta {
     font-size: 0.74rem; color: var(--text-secondary);
@@ -325,20 +330,21 @@
     pointer-events: none;
   }
   .queue-search {
-    height: 31px;
+    height: 32px;
     width: 185px;
     padding-inline: 1.85rem 0.65rem;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
     background: var(--bg-canvas);
     color: var(--text-primary);
     font: inherit;
     font-size: 0.78rem;
-    transition: border-color .12s ease, width .15s ease;
+    transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), width var(--dur-med) var(--ease-out);
   }
   .queue-search:focus {
-    outline: none;
-    border-color: var(--brand);
+    outline: 2px solid transparent;
+    border-color: var(--brand-text);
+    box-shadow: var(--focus-ring);
     width: 220px;
     background: var(--bg-surface);
   }
@@ -348,10 +354,12 @@
     border-radius: var(--radius-md); padding: 2px; gap: 2px; flex-wrap: wrap;
   }
   .filter-pill {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 28px;
     border: 0; background: transparent; color: var(--text-secondary); cursor: pointer;
     font: inherit; font-size: 0.76rem; font-weight: 500;
-    padding: 0.25rem 0.62rem; border-radius: var(--radius-sm);
-    transition: background-color .12s ease, color .12s ease;
+    padding: 0.25rem 0.65rem; border-radius: var(--radius-sm);
+    transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
   }
   .filter-pill:hover { color: var(--text-primary); }
   .filter-pill.active {
@@ -404,9 +412,9 @@
     border: 1px solid var(--border-strong); border-radius: var(--radius-md);
     background: var(--bg-surface); color: var(--text-primary);
     font: inherit; font-size: 0.82rem;
-    transition: border-color .12s ease, box-shadow .12s ease;
+    transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
   }
-  .input:focus, .select:focus { border-color: var(--brand); outline: none; box-shadow: 0 0 0 3px var(--brand-soft); }
+  .input:focus, .select:focus { border-color: var(--brand-text); outline: 2px solid transparent; box-shadow: var(--focus-ring); }
   .input.invalid, .select.invalid { border-color: var(--err-fg); }
   .form-help { font-size: 0.75rem; color: var(--text-muted); line-height: 1.5; }
   .form-error {
@@ -425,28 +433,45 @@
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 1.05rem 1.1rem;
+    padding: var(--space-4) var(--space-5);
     box-shadow: var(--shadow-sm);
     display: flex; flex-direction: column; gap: 0.7rem;
-    transition: border-color .12s ease;
+    transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
   }
-  .printer-card:hover { border-color: var(--border-strong); }
+  .printer-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); transform: translateY(-1px); }
   .printer-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
   .printer-identity { display: flex; align-items: flex-start; gap: 0.65rem; min-width: 0; }
   .printer-type-icon {
     width: 34px; height: 34px; border-radius: var(--radius-md);
     background: var(--bg-subtle); border: 1px solid var(--border);
-    color: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    color: var(--brand-text); display: flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
   .printer-type-icon svg { width: 17px; height: 17px; }
-  .printer-name { font-size: 0.92rem; font-weight: 700; color: var(--text-primary); word-break: break-word; }
+  .printer-name { font-size: var(--text-md); font-weight: 700; color: var(--text-primary); word-break: break-word; }
   .printer-subline {
     display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
-    margin-top: 0.15rem; font-size: 0.74rem; color: var(--text-muted);
+    margin-top: 0.15rem; font-size: var(--text-xs); color: var(--text-muted);
   }
   .printer-default-tag {
     font-weight: 700;
-    color: var(--brand);
+    color: var(--brand-text);
+  }
+  .empty-state {
+    text-align: center;
+    padding: var(--space-8) var(--space-4);
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+  }
+  .empty-state-card {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: var(--space-8) var(--space-5);
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    background: var(--bg-elevated);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
   }
   .printer-meta-list {
     display: flex; flex-direction: column; gap: 0.28rem; font-size: 0.77rem;
@@ -507,7 +532,7 @@
     font-family: var(--font-mono);
     font-size: 0.72rem;
     font-weight: 700;
-    color: var(--brand);
+    color: var(--brand-text);
     margin-bottom: 0.25rem;
   }
   .guide-step-title { font-size: 0.83rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.2rem; }
@@ -548,8 +573,11 @@
   .toast-icon { font-weight: 700; flex-shrink: 0; }
   .toast-msg { flex: 1 1 auto; }
   .toast-close {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 28px; min-height: 28px; border-radius: var(--radius-sm);
     border: 0; background: transparent; color: inherit; cursor: pointer;
-    font-size: 1rem; line-height: 1; padding: 2px 4px; opacity: 0.75;
+    font-size: 1rem; line-height: 1; padding: 0; opacity: 0.75;
+    transition: opacity var(--dur-fast) var(--ease-out);
   }
   .toast-close:hover { opacity: 1; }
 
@@ -608,7 +636,7 @@
     </div>
 
     <div class="topbar-actions">
-      <button class="btn btn-primary" id="btnOpenOdoo" data-action="open-odoo">
+      <button type="button" class="btn btn-primary" id="btnOpenOdoo" data-action="open-odoo">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
           <polyline points="15 3 21 3 21 9"></polyline>
@@ -617,7 +645,7 @@
         <span data-i18n="btn_open_odoo">فتح Odoo</span>
       </button>
 
-      <button class="btn btn-glass" id="btnRefresh" data-action="manual-refresh" title="Refresh">
+      <button type="button" class="btn btn-glass" id="btnRefresh" data-action="manual-refresh" title="Refresh">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="23 4 23 10 17 10"></polyline>
           <polyline points="1 20 1 14 7 14"></polyline>
@@ -626,14 +654,14 @@
         <span data-i18n="btn_refresh">تحديث</span>
       </button>
 
-      <button class="btn btn-glass" data-action="toggle-theme" id="btnTheme">
+      <button type="button" class="btn btn-glass" data-action="toggle-theme" id="btnTheme">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
         </svg>
         <span data-i18n="btn_theme">المظهر</span>
       </button>
 
-      <button class="btn btn-glass" data-action="toggle-lang" id="btnLang">
+      <button type="button" class="btn btn-glass" data-action="toggle-lang" id="btnLang">
         <span>English</span>
       </button>
     </div>
@@ -644,19 +672,19 @@
   <aside class="tabsbar">
     <div class="sidebar-section-label" data-i18n="nav_section">مساحة العمل</div>
     <nav class="nav-tabs" role="tablist">
-      <button class="nav-tab active" role="tab" aria-selected="true" aria-controls="tab-dashboard" data-tab="dashboard" data-action="switch-tab">
+      <button type="button" class="nav-tab active" role="tab" aria-selected="true" aria-controls="tab-dashboard" data-tab="dashboard" data-action="switch-tab">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect></svg>
         <span data-i18n="tab_dashboard">لوحة المراقبة</span>
       </button>
-      <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-printers" data-tab="printers" data-action="switch-tab">
+      <button type="button" class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-printers" data-tab="printers" data-action="switch-tab">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
         <span data-i18n="tab_printers">الطابعات والمعايرة</span>
       </button>
-      <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-settings" data-tab="settings" data-action="switch-tab">
+      <button type="button" class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-settings" data-tab="settings" data-action="switch-tab">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         <span data-i18n="tab_settings">اتصال Odoo</span>
       </button>
-      <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-diagnostics" data-tab="diagnostics" data-action="switch-tab">
+      <button type="button" class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-diagnostics" data-tab="diagnostics" data-action="switch-tab">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
         <span data-i18n="tab_diagnostics">التشخيص</span>
       </button>
@@ -688,7 +716,7 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
         <span id="originAlertText" data-i18n="origin_not_configured">أدخل رابط خادم Odoo للبدء.</span>
       </div>
-      <button class="btn btn-sm btn-primary" data-action="switch-tab" data-tab="settings" data-i18n="btn_configure_now">إعداد الرابط</button>
+      <button type="button" class="btn btn-sm btn-primary" data-action="switch-tab" data-tab="settings" data-i18n="btn_configure_now">إعداد الرابط</button>
     </div>
 
     <!-- TAB 1: DASHBOARD & QUEUE -->
@@ -759,12 +787,12 @@
               <input type="search" id="queueSearchInput" class="queue-search" placeholder="بحث…" aria-label="Search queue"/>
             </div>
             <div class="filter-pills">
-              <button class="filter-pill active" data-filter="all" aria-pressed="true" data-action="set-job-filter" data-i18n="filter_all">الكل</button>
-              <button class="filter-pill" data-filter="active" aria-pressed="false" data-action="set-job-filter" data-i18n="filter_active">نشطة</button>
-              <button class="filter-pill" data-filter="attention" aria-pressed="false" data-action="set-job-filter" data-i18n="filter_attention">متعثرة</button>
-              <button class="filter-pill" data-filter="done" aria-pressed="false" data-action="set-job-filter" data-i18n="filter_done">مكتملة</button>
+              <button type="button" class="filter-pill active" data-filter="all" aria-pressed="true" data-action="set-job-filter" data-i18n="filter_all">الكل</button>
+              <button type="button" class="filter-pill" data-filter="active" aria-pressed="false" data-action="set-job-filter" data-i18n="filter_active">نشطة</button>
+              <button type="button" class="filter-pill" data-filter="attention" aria-pressed="false" data-action="set-job-filter" data-i18n="filter_attention">متعثرة</button>
+              <button type="button" class="filter-pill" data-filter="done" aria-pressed="false" data-action="set-job-filter" data-i18n="filter_done">مكتملة</button>
             </div>
-            <button class="btn btn-sm btn-secondary" id="btnClearFinished" data-action="clear-finished">
+            <button type="button" class="btn btn-sm btn-secondary" id="btnClearFinished" data-action="clear-finished">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
               <span data-i18n="btn_clear_done">مسح المكتملة</span>
             </button>
@@ -785,7 +813,7 @@
               </tr>
             </thead>
             <tbody id="jobsTableBody">
-              <tr><td colspan="8" style="text-align:center;padding:2.2rem;color:var(--text-muted);" data-i18n="no_jobs">لا توجد مهام حالياً.</td></tr>
+              <tr><td colspan="8" class="empty-state" data-i18n="no_jobs">لا توجد مهام حالياً.</td></tr>
             </tbody>
           </table>
         </div>
@@ -829,7 +857,7 @@
               </select>
             </div>
             <div>
-              <button class="btn btn-primary" id="btnCustomTestPrint" data-action="custom-test-print" style="width:100%;">
+              <button type="button" class="btn btn-primary" id="btnCustomTestPrint" data-action="custom-test-print" style="width:100%;">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
                 <span data-i18n="btn_send_test">إرسال اختبار</span>
               </button>
@@ -909,11 +937,11 @@
           </div>
 
           <div style="margin-top:1.25rem;display:flex;align-items:center;gap:0.65rem;flex-wrap:wrap;">
-            <button class="btn btn-primary" id="btnSaveOrigin" data-action="save-origin">
+            <button type="button" class="btn btn-primary" id="btnSaveOrigin" data-action="save-origin">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
               <span data-i18n="btn_save_origin">حفظ</span>
             </button>
-            <button class="btn btn-secondary" id="btnSaveAndOpen" data-action="save-and-open">
+            <button type="button" class="btn btn-secondary" id="btnSaveAndOpen" data-action="save-and-open">
               <span data-i18n="btn_save_and_launch">حفظ وفتح Odoo</span>
             </button>
           </div>
@@ -965,7 +993,7 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
               <span data-i18n="env_title">بيئة التشغيل</span>
             </div>
-            <button class="btn btn-sm btn-secondary" id="btnClearWebData" data-action="clear-web-data" data-i18n="btn_clear_web">مسح البيانات</button>
+            <button type="button" class="btn btn-sm btn-secondary" id="btnClearWebData" data-action="clear-web-data" data-i18n="btn_clear_web">مسح البيانات</button>
           </div>
           <div class="card-body">
             <p style="font-size:0.8rem;color:var(--text-secondary);margin:0 0 0.85rem;" data-i18n="env_desc">
@@ -982,9 +1010,9 @@
               <span data-i18n="diag_title">حزمة التشخيص</span>
             </div>
             <div style="display:flex;gap:0.45rem;flex-wrap:wrap;justify-content:flex-end;">
-              <button class="btn btn-sm btn-secondary" id="btnGenerateDiagnostics" data-action="generate-diagnostics" data-i18n="btn_generate_diag">توليد</button>
-              <button class="btn btn-sm btn-secondary" id="btnCopyDiagnostics" data-action="copy-diagnostics" data-i18n="btn_copy_diag">نسخ JSON</button>
-              <button class="btn btn-sm btn-primary" id="btnDownloadDiagnostics" data-action="download-diagnostics" data-i18n="btn_download_diag">تنزيل JSON</button>
+              <button type="button" class="btn btn-sm btn-secondary" id="btnGenerateDiagnostics" data-action="generate-diagnostics" data-i18n="btn_generate_diag">توليد</button>
+              <button type="button" class="btn btn-sm btn-secondary" id="btnCopyDiagnostics" data-action="copy-diagnostics" data-i18n="btn_copy_diag">نسخ JSON</button>
+              <button type="button" class="btn btn-sm btn-primary" id="btnDownloadDiagnostics" data-action="download-diagnostics" data-i18n="btn_download_diag">تنزيل JSON</button>
             </div>
           </div>
           <div class="card-body">
@@ -1000,7 +1028,7 @@
   </main>
   </div>
 
-  <div class="toast-container" id="toastContainer"></div>
+  <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="false"></div>
 
   <!-- In-app confirmation dialog -->
   <div id="confirmOverlay" class="modal-overlay hidden">
@@ -1011,8 +1039,8 @@
       </div>
       <p id="confirmMessage" class="modal-message"></p>
       <div class="modal-actions">
-        <button class="btn btn-glass" id="confirmCancelBtn" data-action="confirm-cancel">إلغاء</button>
-        <button class="btn btn-danger" id="confirmOkBtn" data-action="confirm-ok">تأكيد</button>
+        <button type="button" class="btn btn-glass" id="confirmCancelBtn" data-action="confirm-cancel">إلغاء</button>
+        <button type="button" class="btn btn-danger" id="confirmOkBtn" data-action="confirm-ok">تأكيد</button>
       </div>
     </div>
   </div>
@@ -1791,7 +1819,7 @@
     const scrollY = window.scrollY;
 
     if (!filtered.length) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:2.5rem 1rem;color:var(--text-muted);">${escapeHtml(I18N[currentLang].no_jobs)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">${escapeHtml(I18N[currentLang].no_jobs)}</td></tr>`;
       if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
       return;
     }
@@ -1811,8 +1839,8 @@
           <td class="mono" style="color:${j.error_code ? "var(--err-fg)" : "var(--text-muted)"};">${escapeHtml(j.error_code || "—")}</td>
           <td>
             <div style="display:flex;gap:0.35rem;">
-              ${canRetry ? `<button class="btn btn-sm btn-primary" data-action="retry-job" data-job-id="${escapeHtml(j.id)}">${currentLang === "ar" ? "إعادة محاولة" : "Retry"}</button>` : ""}
-              ${canCancel ? `<button class="btn btn-sm btn-danger" data-action="cancel-job" data-job-id="${escapeHtml(j.id)}">${currentLang === "ar" ? "إلغاء" : "Cancel"}</button>` : ""}
+              ${canRetry ? `<button type="button" class="btn btn-sm btn-primary" data-action="retry-job" data-job-id="${escapeHtml(j.id)}">${currentLang === "ar" ? "إعادة محاولة" : "Retry"}</button>` : ""}
+              ${canCancel ? `<button type="button" class="btn btn-sm btn-danger" data-action="cancel-job" data-job-id="${escapeHtml(j.id)}">${currentLang === "ar" ? "إلغاء" : "Cancel"}</button>` : ""}
               ${!canRetry && !canCancel ? `<span style="color:var(--text-muted);font-size:0.75rem;">—</span>` : ""}
             </div>
           </td>
@@ -1937,7 +1965,7 @@
     const row = (label, cls, inner) => `<label style="display:flex;flex-direction:column;gap:0.25rem;flex:1 1 45%;min-width:120px;"><span style="color:var(--text-muted);font-weight:600;">${escapeHtml(label)}</span><select class="select ${cls}" style="height:32px;font-size:0.78rem;">${inner}</select></label>`;
     return `
       <div data-settings-wrap data-printer="${escapeHtml(p.name)}">
-        <button class="btn btn-sm btn-secondary" data-action="toggle-settings" aria-expanded="${openSettingsPrinters.has(p.name) ? "true" : "false"}">
+        <button type="button" class="btn btn-sm btn-secondary" data-action="toggle-settings" aria-expanded="${openSettingsPrinters.has(p.name) ? "true" : "false"}">
           ${escapeHtml(d.ps_title)}
         </button>
         <div class="settings-box${openSettingsPrinters.has(p.name) ? "" : " hidden"}" style="margin-top:0.55rem;font-size:0.75rem;background:var(--bg-subtle);border:1px solid var(--border);padding:0.7rem;border-radius:var(--radius-md);">
@@ -1948,7 +1976,7 @@
             ${caps.color ? row(d.ps_color, "ps-color", triOpts(cur.color)) : ""}
           </div>
           <div style="color:var(--text-muted);margin-top:0.45rem;">${escapeHtml(d.ps_hint)}</div>
-          <button class="btn btn-sm btn-primary" style="margin-top:0.55rem;" data-action="save-settings">
+          <button type="button" class="btn btn-sm btn-primary" style="margin-top:0.55rem;" data-action="save-settings">
             ${escapeHtml(d.ps_save)}
           </button>
         </div>
@@ -2041,7 +2069,7 @@
 
     if (!printers.length) {
       grid.innerHTML = `
-        <div class="card" style="grid-column:1/-1;padding:2.2rem;text-align:center;color:var(--text-muted);">
+        <div class="empty-state-card">
           ${escapeHtml(I18N[currentLang].no_printers)}
         </div>`;
       if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
@@ -2084,22 +2112,22 @@
         <div id="forms-box-${idx}" class="hidden" style="background:var(--bg-subtle);border:1px solid var(--border);padding:0.6rem 0.7rem;border-radius:var(--radius-md);max-height:130px;overflow:auto;"></div>
 
         <div class="printer-actions">
-          <button class="btn btn-sm btn-primary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="pdf-a4">
+          <button type="button" class="btn btn-sm btn-primary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="pdf-a4">
             ${I18N[currentLang].qt_pdf}
           </button>
-          ${ccProtocol(p) === "escpos" ? `<button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="thermal-80mm">
+          ${ccProtocol(p) === "escpos" ? `<button type="button" class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="thermal-80mm">
             ${I18N[currentLang].qt_escpos}
           </button>` : ""}
-          ${ccProtocol(p) === "zpl" ? `<button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="zpl-label">
+          ${ccProtocol(p) === "zpl" ? `<button type="button" class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="zpl-label">
             ${I18N[currentLang].qt_zpl}
           </button>` : ""}
-          ${ccProtocol(p) === "tspl" ? `<button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="tspl-label">
+          ${ccProtocol(p) === "tspl" ? `<button type="button" class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="tspl-label">
             ${I18N[currentLang].qt_tspl}
           </button>` : ""}
-          ${ccProtocol(p) === "epl" ? `<button class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="epl-label">
+          ${ccProtocol(p) === "epl" ? `<button type="button" class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="epl-label">
             ${I18N[currentLang].qt_epl}
           </button>` : ""}
-          <button class="btn btn-sm btn-secondary" data-action="inspect-forms" data-printer="${escapeHtml(p.name)}" data-idx="${idx}" aria-expanded="false">
+          <button type="button" class="btn btn-sm btn-secondary" data-action="inspect-forms" data-printer="${escapeHtml(p.name)}" data-idx="${idx}" aria-expanded="false">
             ${currentLang === "ar" ? "المقاسات" : "Paper sizes"}
           </button>
         </div>
@@ -2692,7 +2720,10 @@
     }
   });
   refreshAll();
-  setInterval(() => refreshAll({ silent: true }), 5000);
+  setInterval(() => { if (!document.hidden) refreshAll({ silent: true }); }, 5000);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshAll({ silent: true });
+  });
 
 </script>
 </body>

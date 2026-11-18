@@ -10,15 +10,21 @@ use crate::printer::{needs_intervention, PrinterInfo, PrinterStatus};
 /// characters). Without `*` the match is exact. Case-insensitive.
 /// Examples: "HP LaserJet" exact; "HP*" prefix; "*thermal*" contains.
 pub fn printer_pattern_matches(pattern: &str, printer_name: &str) -> bool {
-    let p = pattern.trim().to_lowercase();
-    let n = printer_name.trim().to_lowercase();
-    if !p.contains('*') {
-        return p == n;
+    let p_trim = pattern.trim();
+    let n_trim = printer_name.trim();
+    if !p_trim.contains('*') {
+        if p_trim.is_ascii() && n_trim.is_ascii() {
+            return p_trim.eq_ignore_ascii_case(n_trim);
+        }
+        return p_trim.to_lowercase() == n_trim.to_lowercase();
     }
+    let p = p_trim.to_lowercase();
+    let n = n_trim.to_lowercase();
     // Glob with * segments: match segments in order.
-    let segments: Vec<&str> = p.split('*').collect();
     let mut pos = 0usize;
-    for (i, seg) in segments.iter().enumerate() {
+    let mut last_seg = "";
+    for (i, seg) in p.split('*').enumerate() {
+        last_seg = seg;
         if seg.is_empty() {
             continue;
         }
@@ -33,10 +39,8 @@ pub fn printer_pattern_matches(pattern: &str, printer_name: &str) -> bool {
         }
     }
     // A trailing segment (after the last *) must anchor at the end.
-    if let Some(last) = segments.last() {
-        if !last.is_empty() && !n.ends_with(last) {
-            return false;
-        }
+    if !last_seg.is_empty() && !n.ends_with(last_seg) {
+        return false;
     }
     true
 }
@@ -45,28 +49,28 @@ pub fn printer_pattern_matches(pattern: &str, printer_name: &str) -> bool {
 /// printers that need intervention, and within a tier the OS default
 /// printer wins over non-default printers; among equals, the first wins.
 pub fn resolve_printer<'a>(pattern: &str, printers: &'a [PrinterInfo]) -> Option<&'a PrinterInfo> {
-    let matches: Vec<&PrinterInfo> = printers
-        .iter()
-        .filter(|p| printer_pattern_matches(pattern, &p.name))
-        .collect();
-    let is_healthy =
-        |p: &&PrinterInfo| p.status == PrinterStatus::Ready || p.status == PrinterStatus::Printing;
-    if let Some(p) = matches.iter().find(|p| is_healthy(p) && p.is_default) {
-        return Some(p);
+    let mut best: Option<(u8, &'a PrinterInfo)> = None;
+    for p in printers {
+        if !printer_pattern_matches(pattern, &p.name) {
+            continue;
+        }
+        let healthy = p.status == PrinterStatus::Ready || p.status == PrinterStatus::Printing;
+        let rank = if healthy && p.is_default {
+            return Some(p);
+        } else if healthy {
+            1
+        } else if !needs_intervention(p.status) && p.is_default {
+            2
+        } else if !needs_intervention(p.status) {
+            3
+        } else {
+            4
+        };
+        if best.is_none_or(|(best_rank, _)| rank < best_rank) {
+            best = Some((rank, p));
+        }
     }
-    if let Some(p) = matches.iter().find(|p| is_healthy(p)) {
-        return Some(p);
-    }
-    if let Some(p) = matches
-        .iter()
-        .find(|p| !needs_intervention(p.status) && p.is_default)
-    {
-        return Some(p);
-    }
-    if let Some(p) = matches.iter().find(|p| !needs_intervention(p.status)) {
-        return Some(p);
-    }
-    matches.first().copied()
+    best.map(|(_, p)| p)
 }
 
 #[cfg(test)]
@@ -142,5 +146,18 @@ mod tests {
         ));
         let chosen = resolve_printer(r"\\*\XP-80C", &printers).unwrap();
         assert_eq!(chosen.name, r"\\POS-2\XP-80C");
+    }
+
+    #[test]
+    fn resolve_printer_respects_unknown_default_over_offline() {
+        let mut unk_default = printer("HP Unknown Default", PrinterStatus::Unknown);
+        unk_default.is_default = true;
+        let printers = vec![
+            printer("HP Offline", PrinterStatus::Offline),
+            printer("HP Unknown", PrinterStatus::Unknown),
+            unk_default,
+        ];
+        let chosen = resolve_printer("HP*", &printers).unwrap();
+        assert_eq!(chosen.name, "HP Unknown Default");
     }
 }

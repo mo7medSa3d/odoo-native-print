@@ -505,12 +505,17 @@ impl PdfDocument {
                     ceiling: PER_PAGE_CEILING_BYTES,
                 });
             }
-            let mut pixels = vec![0u8; row_bytes * bh as usize];
-            for row in 0..bh as usize {
-                let src = buf.add(row * stride);
-                let dst = &mut pixels[row * row_bytes..(row + 1) * row_bytes];
-                std::ptr::copy_nonoverlapping(src, dst.as_mut_ptr(), row_bytes);
-            }
+            let total_bytes = row_bytes * bh as usize;
+            let pixels = if stride == row_bytes {
+                std::slice::from_raw_parts(buf, total_bytes).to_vec()
+            } else {
+                let mut out = Vec::with_capacity(total_bytes);
+                for row in 0..bh as usize {
+                    let row_slice = std::slice::from_raw_parts(buf.add(row * stride), row_bytes);
+                    out.extend_from_slice(row_slice);
+                }
+                out
+            };
             (api.bitmap_destroy)(bitmap);
             pixels
         };

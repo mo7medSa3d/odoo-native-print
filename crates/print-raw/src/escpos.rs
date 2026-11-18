@@ -59,6 +59,9 @@ impl EscPos {
             debug_assert!(false, "bitmap not representable as ESC/POS raster");
             return self;
         }
+        let slices = (total_h as usize).div_ceil(MAX_RASTER_SLICE_HEIGHT as usize);
+        self.buf
+            .reserve(expected.saturating_add(slices.saturating_mul(8)));
         let x = bpr as u16;
         let mut row_start = 0u32;
         while row_start < total_h {
@@ -110,6 +113,7 @@ impl EscPos {
     /// 0x7F) so untrusted report text can never inject raw ESC/POS hardware
     /// commands (e.g. cash drawer kick, CAN, FF, or extra line breaks).
     pub fn text_line(mut self, line: &str) -> Self {
+        self.buf.reserve(line.len().saturating_add(1));
         for &b in line.as_bytes() {
             if b >= 0x20 && b != 0x7F {
                 self.buf.push(b);

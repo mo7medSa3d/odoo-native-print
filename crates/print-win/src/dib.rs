@@ -60,9 +60,17 @@ fn header(width: u32, height: u32, bit_count: u16, image_bytes: usize) -> [u8; 4
 
 fn repack_rows(src: &[u8], src_row_bytes: usize, w: u32, h: u32, bit_count: u16) -> Vec<u8> {
     let dst_row = dib_row_bytes(w, bit_count);
-    let mut out = vec![0u8; dst_row * h as usize];
+    let Some(total) = dst_row.checked_mul(h as usize) else {
+        return Vec::new();
+    };
+    if src_row_bytes == dst_row && src.len() >= total {
+        return src[..total].to_vec();
+    }
+    let mut out = vec![0u8; total];
     for row in 0..h as usize {
-        let src_start = row * src_row_bytes;
+        let Some(src_start) = row.checked_mul(src_row_bytes) else {
+            break;
+        };
         if src_start >= src.len() {
             break;
         }
@@ -71,6 +79,24 @@ fn repack_rows(src: &[u8], src_row_bytes: usize, w: u32, h: u32, bit_count: u16)
             .copy_from_slice(&src[src_start..src_start + copy_len]);
     }
     out
+}
+
+/// Build an 8-bpp grayscale DIB directly from a packed grayscale slice
+/// without wrapping it in a `RenderedPage`.
+pub fn build_grayscale_dib(width: u32, height: u32, pixels: &[u8]) -> DibImage {
+    let mut palette = Vec::with_capacity(256 * 4);
+    for i in 0..256u32 {
+        palette.extend_from_slice(&[i as u8, i as u8, i as u8, 0]);
+    }
+    let bits = repack_rows(pixels, width as usize, width, height, 8);
+    DibImage {
+        width,
+        height,
+        header: header(width, height, 8, bits.len()),
+        palette,
+        bits,
+        bit_count: 8,
+    }
 }
 
 /// Build the DIB for one rendered page.
@@ -88,21 +114,7 @@ pub fn build_dib(page: &RenderedPage) -> DibImage {
                 bit_count: 32,
             }
         }
-        RenderMode::Grayscale => {
-            let mut palette = Vec::with_capacity(256 * 4);
-            for i in 0..256u32 {
-                palette.extend_from_slice(&[i as u8, i as u8, i as u8, 0]);
-            }
-            let bits = repack_rows(&page.pixels, w as usize, w, h, 8);
-            DibImage {
-                width: w,
-                height: h,
-                header: header(w, h, 8, bits.len()),
-                palette,
-                bits,
-                bit_count: 8,
-            }
-        }
+        RenderMode::Grayscale => build_grayscale_dib(w, h, &page.pixels),
         RenderMode::Threshold => {
             // PDFium bits here are 1 = black; a DIB palette index 1
             // must be black, index 0 white, and PDFium/MonoBitmap bit
@@ -179,6 +191,10 @@ mod tests {
         assert_eq!(d.bits[0], 200);
         assert_eq!(d.bits[5], 0, "padding is zeroed");
         assert_eq!(dib_row_bytes(5, 8), 8);
+        // Direct grayscale helper on a 4-byte-aligned width uses the fast path.
+        let aligned = build_grayscale_dib(4, 2, &[10, 20, 30, 40, 50, 60, 70, 80]);
+        assert_eq!(aligned.bit_count, 8);
+        assert_eq!(aligned.bits, vec![10, 20, 30, 40, 50, 60, 70, 80]);
     }
 
     #[test]

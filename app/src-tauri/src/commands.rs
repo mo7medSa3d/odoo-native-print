@@ -94,6 +94,8 @@ const TCP_WRITE_TIMEOUT: Duration = Duration::from_secs(20);
 /// enough for a healthy printer to answer, short enough to
 /// never noticeably delay the job it guards.
 const DLE_PROBE_TIMEOUT: Duration = Duration::from_millis(700);
+/// Cap expanded multi-copy raw byte streams to prevent OOM on large payloads * copies.
+const MAX_RAW_EXPANDED_BYTES: usize = 100 * 1024 * 1024;
 
 pub struct AppState {
     pub queue: Arc<Mutex<Queue>>,
@@ -2084,6 +2086,55 @@ impl NativePrintBackend {
         }
     }
 
+    fn is_blocked_metadata_ip(ip: std::net::IpAddr) -> bool {
+        const METADATA_V4: [u8; 4] = [169, 254, 169, 254];
+        match ip {
+            std::net::IpAddr::V4(v4) => v4.octets() == METADATA_V4,
+            std::net::IpAddr::V6(v6) => {
+                let o = v6.octets();
+                o[..10] == [0u8; 10] && o[10] == 0xff && o[11] == 0xff && o[12..] == METADATA_V4
+            }
+        }
+    }
+
+    fn is_valid_hostname(host: &str) -> bool {
+        if host.is_empty() || host.len() > 253 {
+            return false;
+        }
+        let trimmed = host.strip_suffix('.').unwrap_or(host);
+        if trimmed.is_empty() || !trimmed.bytes().any(|b| b.is_ascii_alphabetic()) {
+            return false;
+        }
+        trimmed.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        })
+    }
+
+    fn repeat_raw_copies(bytes: &[u8], copies: u16) -> Result<Vec<u8>, BackendError> {
+        let count = copies.max(1) as usize;
+        let total = bytes
+            .len()
+            .checked_mul(count)
+            .filter(|&n| n <= MAX_RAW_EXPANDED_BYTES)
+            .ok_or_else(|| {
+                BackendError::fatal(
+                    "PAYLOAD_TOO_LARGE",
+                    "expanded raw print payload exceeds 100 MiB limit",
+                )
+            })?;
+        let mut out = Vec::with_capacity(total);
+        for _ in 0..count {
+            out.extend_from_slice(bytes);
+        }
+        Ok(out)
+    }
+
     fn parse_host_port(
         spec: &str,
         default_port: u16,
@@ -2098,7 +2149,7 @@ impl NativePrintBackend {
             Some((hp, p)) => (hp, format!("/{p}")),
             None => (rest, "/ipp/print".to_string()),
         };
-        let (host, port) = if let Some(after_open) = host_port.strip_prefix('[') {
+        let (host, port, is_ipv6) = if let Some(after_open) = host_port.strip_prefix('[') {
             let (ipv6, after_close) = after_open.split_once(']').ok_or_else(|| {
                 BackendError::fatal("BAD_PRINTER_ADDRESS", "unclosed IPv6 bracket")
             })?;
@@ -2114,7 +2165,7 @@ impl NativePrintBackend {
                     "invalid IPv6 host:port",
                 ));
             };
-            (ipv6.to_string(), port)
+            (ipv6.to_string(), port, true)
         } else {
             match host_port.rsplit_once(':') {
                 Some((h, p)) => {
@@ -2124,15 +2175,44 @@ impl NativePrintBackend {
                             "invalid port in printer address",
                         )
                     })?;
-                    (h.to_string(), parsed)
+                    (h.to_string(), parsed, false)
                 }
-                None => (host_port.to_string(), default_port),
+                None => (host_port.to_string(), default_port, false),
             }
         };
         if host.is_empty() {
             return Err(BackendError::fatal(
                 "BAD_PRINTER_ADDRESS",
                 "empty printer host",
+            ));
+        }
+        if port == 0 {
+            return Err(BackendError::fatal(
+                "BAD_PRINTER_ADDRESS",
+                "printer port must be 1..=65535",
+            ));
+        }
+        if is_ipv6 {
+            let v6 = host.parse::<std::net::Ipv6Addr>().map_err(|_| {
+                BackendError::fatal("BAD_PRINTER_ADDRESS", "invalid IPv6 printer host")
+            })?;
+            if Self::is_blocked_metadata_ip(std::net::IpAddr::V6(v6)) {
+                return Err(BackendError::fatal(
+                    "BAD_PRINTER_ADDRESS",
+                    "cloud metadata address is not allowed",
+                ));
+            }
+        } else if let Ok(v4) = host.parse::<std::net::Ipv4Addr>() {
+            if Self::is_blocked_metadata_ip(std::net::IpAddr::V4(v4)) {
+                return Err(BackendError::fatal(
+                    "BAD_PRINTER_ADDRESS",
+                    "cloud metadata address is not allowed",
+                ));
+            }
+        } else if !Self::is_valid_hostname(&host) {
+            return Err(BackendError::fatal(
+                "BAD_PRINTER_ADDRESS",
+                "invalid printer host",
             ));
         }
         Ok((host, port, path))
@@ -2353,11 +2433,7 @@ impl NativePrintBackend {
                 let single =
                     print_render::receipt_png_to_escpos_width(png_bytes, target_width_dots)
                         .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
-                let mut out = Vec::with_capacity(single.len() * copies.max(1) as usize);
-                for _ in 0..copies.max(1) {
-                    out.extend_from_slice(&single);
-                }
-                Ok(out)
+                Self::repeat_raw_copies(&single, copies)
             }
             _ => Err(BackendError::fatal(
                 "UNKNOWN_MODE",
@@ -2558,13 +2634,7 @@ impl PrintBackend for NativePrintBackend {
                         label_gap_mm: opts.label_gap_mm,
                     },
                 )?,
-                _ => {
-                    let mut v = Vec::with_capacity(data.len() * opts.copies.max(1) as usize);
-                    for _ in 0..opts.copies.max(1) {
-                        v.extend_from_slice(&data);
-                    }
-                    v
-                }
+                _ => Self::repeat_raw_copies(&data, opts.copies)?,
             };
             // A connect-phase failure proves zero bytes reached
             // the printer (it is off, asleep, or unreachable), so
@@ -3275,6 +3345,42 @@ mod tests {
         assert_eq!(h6, "::1");
         assert_eq!(p6, 631);
         assert_eq!(path6, "/ipp/print");
+        let (hn, pn, _) =
+            NativePrintBackend::parse_host_port("ipp://printer.local:631/ipp/print", 631).unwrap();
+        assert_eq!((hn.as_str(), pn), ("printer.local", 631));
+        for bad in [
+            "tcp://192.168.1.200:0",
+            "ipp://[::1]:0/ipp/print",
+            "tcp://169.254.169.254:80",
+            "ipp://169.254.169.254:631/ipp/print",
+            "tcp://[::ffff:169.254.169.254]:9100",
+            "tcp://   :9100",
+            "tcp://user@192.168.1.10:9100",
+            "tcp://bad host:9100",
+            "tcp://999.999.999.999:9100",
+            "tcp://2852039166:80",
+            "ipp://[not-ipv6]:631/ipp/print",
+        ] {
+            let err = NativePrintBackend::parse_host_port(bad, 9100).unwrap_err();
+            assert_eq!(err.code, "BAD_PRINTER_ADDRESS", "expected reject for {bad}");
+        }
+        assert!(NativePrintBackend::parse_host_port("tcp://192.168.1.200", 0).is_err());
+    }
+
+    #[test]
+    fn repeat_raw_copies_enforces_cap() {
+        assert_eq!(
+            NativePrintBackend::repeat_raw_copies(b"abc", 3).unwrap(),
+            b"abcabcabc"
+        );
+        assert_eq!(
+            NativePrintBackend::repeat_raw_copies(b"abc", 0).unwrap(),
+            b"abc"
+        );
+        let one_mib = vec![0u8; 1024 * 1024];
+        let err = NativePrintBackend::repeat_raw_copies(&one_mib, 101).unwrap_err();
+        assert_eq!(err.code, "PAYLOAD_TOO_LARGE");
+        assert!(!err.retryable);
     }
 
     #[test]

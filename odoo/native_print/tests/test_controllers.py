@@ -258,6 +258,21 @@ class TestNativePrintControllers(HttpCase):
         self.assertEqual(overview["done_jobs"], 0)
         self.assertEqual(overview["failed_jobs"], 0)
 
+    def test_overview_aggregates_all_state_buckets(self):
+        for idx, state in enumerate((
+            "queued", "rendering", "spooling", "printing",
+            "done", "failed", "dead_letter", "canceled",
+        )):
+            self._rpc("/native_print/job_status", {
+                "idempotency_key": f"overview-bucket-{idx}-{state}",
+                "state": state,
+            })
+        overview = self._rpc("/native_print/overview", {})
+        self.assertTrue(overview["ok"])
+        self.assertEqual(overview["active_jobs"], 4)
+        self.assertEqual(overview["done_jobs"], 1)
+        self.assertEqual(overview["failed_jobs"], 2)
+
     def test_sync_device_upserts_capabilities_without_duplicates(self):
         # The capability snapshot lands on the ONE registry row for
         # the printer (unique name+company): syncing twice updates,
@@ -298,12 +313,14 @@ class TestNativePrintControllers(HttpCase):
             "idempotency_key": JOB_KEY, "state": "queued",
             "byte_size": 25 * 1024 * 1024,
             "device": {"bad": True},
+            "report_name": {"bad": True},
         })
         self.assertTrue(res["ok"], res)
         job = self.env["native.print.job"].search([("name", "=", JOB_KEY)])
         self.assertEqual(job.byte_size, 25 * 1024 * 1024)
         self.assertFalse(job.device)
         self.assertFalse(job.device_id)
+        self.assertFalse(job.report_name)
 
 
 @tagged("post_install", "-at_install")

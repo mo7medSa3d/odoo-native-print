@@ -18,7 +18,7 @@ impl TsplLabel {
     pub fn new(width_mm: u32, height_mm: u32, gap_mm: u32) -> Self {
         let w = width_mm.max(1);
         let h = height_mm.max(1);
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(64);
         buf.extend_from_slice(format!("SIZE {w} mm,{h} mm\r\n").as_bytes());
         buf.extend_from_slice(format!("GAP {gap_mm} mm,0 mm\r\n").as_bytes());
         buf.extend_from_slice(b"CLS\r\n");
@@ -31,11 +31,10 @@ impl TsplLabel {
         if expected == 0 || bm.data.len() < expected {
             return self;
         }
+        self.buf.reserve(expected.saturating_add(48));
         self.buf
             .extend_from_slice(format!("BITMAP {x},{y},{bpr},{},0,", bm.height_dots).as_bytes());
-        for &b in &bm.data[..expected] {
-            self.buf.push(!b);
-        }
+        self.buf.extend(bm.data[..expected].iter().map(|&b| !b));
         self.buf.extend_from_slice(b"\r\n");
         self
     }

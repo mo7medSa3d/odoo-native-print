@@ -211,6 +211,9 @@ impl Queue {
         // (a duplicate). Enqueue rates here are human-scale, so the
         // stronger durability costs nothing measurable (see bench).
         conn.pragma_update(None, "synchronous", "FULL")?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        conn.pragma_update(None, "temp_store", "MEMORY")?;
+        conn.pragma_update(None, "wal_autocheckpoint", 1000)?;
         // Run DDL and migrations inside IMMEDIATE when user_version < 2
         // so concurrent Queue::open calls cannot race on ALTER TABLE
         // and steady-state opens take no schema write lock.
@@ -241,7 +244,8 @@ impl Queue {
                        job_id TEXT NOT NULL,
                        ts INTEGER NOT NULL,
                        event TEXT NOT NULL,
-                       detail TEXT);",
+                       detail TEXT);
+                     CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id, ts);",
                 )?;
                 let has_updated_at: bool = tx.query_row(
                     "SELECT EXISTS(SELECT 1 FROM pragma_table_info('jobs') WHERE name='updated_at')",
@@ -281,6 +285,19 @@ impl Queue {
                 tx.pragma_update(None, "user_version", 2)?;
             }
             tx.commit()?;
+        }
+        // Idempotent index for pre-existing v2 databases without bumping
+        // user_version; steady-state opens take no schema write lock.
+        let has_events_idx: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_job_events_job_id')",
+            [],
+            |r| r.get::<_, i64>(0),
+        )? == 1;
+        if !has_events_idx {
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id, ts)",
+                [],
+            )?;
         }
         Ok(Self {
             conn,
@@ -502,13 +519,14 @@ impl Queue {
         Ok(removed)
     }
 
-    /// Distinct printer patterns that currently have queued jobs, ordered by
-    /// highest priority and earliest arrival.
+    /// Distinct printer patterns that currently have claimable queued jobs
+    /// (`available_at <= now`), ordered by highest priority and earliest arrival.
     pub fn queued_printers(&self) -> Result<Vec<String>, QueueError> {
+        let now = now_unix();
         let mut stmt = self.conn.prepare(
-            "SELECT printer FROM jobs WHERE state='queued' GROUP BY printer ORDER BY MAX(priority) DESC, MIN(seq) ASC",
+            "SELECT printer FROM jobs WHERE state='queued' AND available_at<=?1 GROUP BY printer ORDER BY MAX(priority) DESC, MIN(seq) ASC",
         )?;
-        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let rows = stmt.query_map(params![now], |r| r.get::<_, String>(0))?;
         let mut out = Vec::new();
         for r in rows {
             out.push(r?);
@@ -1610,5 +1628,60 @@ mod tests {
         assert_eq!(q.purge_stale_failed_payloads(-31_557_600_000).unwrap(), 1);
         assert_eq!(q.purge_stale_failed_jobs(-31_557_600_000).unwrap(), 1);
         assert!(q.get("ev0").is_err());
+    }
+
+    #[test]
+    fn init_sets_pragmas_and_creates_job_events_index_on_existing_v2() {
+        let dir = std::env::temp_dir().join(format!("pq-v2-idx-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("q.db");
+        let p = path.to_str().unwrap().to_string();
+        {
+            let q = Queue::open(&p).unwrap();
+            let fk: i64 = q
+                .conn
+                .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+                .unwrap();
+            let ts: i64 = q
+                .conn
+                .query_row("PRAGMA temp_store", [], |r| r.get(0))
+                .unwrap();
+            let wal: i64 = q
+                .conn
+                .query_row("PRAGMA wal_autocheckpoint", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(fk, 1);
+            assert_eq!(ts, 2);
+            assert_eq!(wal, 1000);
+            // Simulate a pre-existing v2 database that lacks idx_job_events_job_id.
+            q.conn
+                .execute("DROP INDEX idx_job_events_job_id", [])
+                .unwrap();
+        }
+        let q = Queue::open(&p).unwrap();
+        let has_idx: i64 = q
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_job_events_job_id')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_idx, 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn queued_printers_skips_printers_in_backoff() {
+        let mut q = Queue::in_memory().unwrap();
+        q.enqueue(&job("b1", "k-b1", "p-delay", 10)).unwrap();
+        q.enqueue(&job("b2", "k-b2", "p-ready", 0)).unwrap();
+        let claimed = q.claim_next("p-delay").unwrap().unwrap();
+        assert_eq!(claimed.id, "b1");
+        q.requeue_with_delay("b1", 60_000, "OFFLINE").unwrap();
+        assert_eq!(q.queued_printers().unwrap(), vec!["p-ready"]);
+        // Manual retry clears backoff so the printer becomes claimable immediately.
+        q.retry_job("b1").unwrap();
+        assert_eq!(q.queued_printers().unwrap(), vec!["p-delay", "p-ready"]);
     }
 }

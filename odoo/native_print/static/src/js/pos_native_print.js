@@ -111,24 +111,42 @@ async function waitForReceiptElement(orderRef, timeoutMs = 2000) {
     return null;
 }
 
-function inlineStyles(source, clone) {
+const MEDIA_FETCH_TIMEOUT_MS = 8000;
+
+function inlineStyles(source, clone, bgTargets = []) {
     const computed = window.getComputedStyle(source);
-    let css = "";
-    for (let i = 0; i < computed.length; i++) {
-        const prop = computed[i];
-        css += `${prop}:${computed.getPropertyValue(prop)};`;
+    let css = computed.cssText;
+    if (!css) {
+        css = "";
+        for (let i = 0; i < computed.length; i++) {
+            const prop = computed[i];
+            css += `${prop}:${computed.getPropertyValue(prop)};`;
+        }
     }
     clone.setAttribute("style", css);
+    // Collect external CSS background images during the same walk (including
+    // the root receipt node) to avoid a second getComputedStyle DOM pass.
+    const bg = computed.backgroundImage;
+    const match = bg && bg.match(/url\(["']?(.*?)["']?\)/);
+    if (match && match[1] && !match[1].startsWith("data:")) {
+        bgTargets.push({ node: clone, url: match[1] });
+    }
     const sourceKids = source.children;
     const cloneKids = clone.children;
     for (let i = 0; i < sourceKids.length && i < cloneKids.length; i++) {
-        inlineStyles(sourceKids[i], cloneKids[i]);
+        inlineStyles(sourceKids[i], cloneKids[i], bgTargets);
     }
+    return bgTargets;
 }
 
-async function fetchAsDataUrl(url) {
+async function fetchAsDataUrl(url, timeoutMs = MEDIA_FETCH_TIMEOUT_MS) {
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
     try {
-        const resp = await fetch(url, { credentials: "same-origin" });
+        const opts = controller
+            ? { credentials: "same-origin", signal: controller.signal }
+            : { credentials: "same-origin" };
+        const resp = await fetch(url, opts);
         if (!resp.ok) {
             return null;
         }
@@ -141,6 +159,10 @@ async function fetchAsDataUrl(url) {
         });
     } catch (_err) {
         return null;
+    } finally {
+        if (timer !== null) {
+            clearTimeout(timer);
+        }
     }
 }
 
@@ -154,13 +176,20 @@ async function fetchAsDataUrl(url) {
 const TRANSPARENT_PIXEL =
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
-async function inlineMedia(source, clone) {
+async function inlineMedia(source, clone, bgTargets = []) {
+    const urlCache = new Map();
+    const cachedFetch = (url) => {
+        if (!urlCache.has(url)) {
+            urlCache.set(url, fetchAsDataUrl(url));
+        }
+        return urlCache.get(url);
+    };
     const sourceImgs = source.querySelectorAll("img");
     const cloneImgs = clone.querySelectorAll("img");
     for (let i = 0; i < sourceImgs.length && i < cloneImgs.length; i++) {
         const src = sourceImgs[i].currentSrc || sourceImgs[i].src;
         if (src && !src.startsWith("data:")) {
-            const dataUrl = await fetchAsDataUrl(src);
+            const dataUrl = await cachedFetch(src);
             cloneImgs[i].setAttribute("src", dataUrl || TRANSPARENT_PIXEL);
         }
     }
@@ -181,24 +210,15 @@ async function inlineMedia(source, clone) {
             // Leave cross-origin canvas as-is.
         }
     }
-    // CSS background images (shop logos are often background art,
-    // not <img>): the SVG rasterizer cannot load external URLs, so
-    // an un-inlined background silently vanishes from the printed
-    // receipt (audit JS-L9). Fetch them to data URLs like <img>s.
-    const sourceAll = source.querySelectorAll("*");
-    const cloneAll = clone.querySelectorAll("*");
-    for (let i = 0; i < sourceAll.length && i < cloneAll.length; i++) {
-        const bg = window.getComputedStyle(sourceAll[i]).backgroundImage;
-        const match = bg && bg.match(/url\(["']?(.*?)["']?\)/);
-        if (match && match[1] && !match[1].startsWith("data:")) {
-            const dataUrl = await fetchAsDataUrl(match[1]);
-            if (dataUrl) {
-                cloneAll[i].style.backgroundImage = `url("${dataUrl}")`;
-            } else {
-                // Same rule as <img>: an external background URL
-                // left in the SVG can fail the whole capture.
-                cloneAll[i].style.backgroundImage = "none";
-            }
+    // CSS background images collected during inlineStyles() (audit JS-L9).
+    for (const { node, url } of bgTargets) {
+        const dataUrl = await cachedFetch(url);
+        if (dataUrl) {
+            node.style.backgroundImage = `url("${dataUrl}")`;
+        } else {
+            // Same rule as <img>: an external background URL
+            // left in the SVG can fail the whole capture.
+            node.style.backgroundImage = "none";
         }
     }
 }
@@ -245,8 +265,8 @@ async function elementToPngBytes(element, scale = 2) {
             Math.min(scale, 14000 / height, 4096 / width),
         );
         const clone = element.cloneNode(true);
-        inlineStyles(element, clone);
-        await inlineMedia(element, clone);
+        const bgTargets = inlineStyles(element, clone);
+        await inlineMedia(element, clone, bgTargets);
         clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
         // Strip control characters that are illegal in XML 1.0 foreignObject trees.
         const serializedClone = new XMLSerializer()
@@ -337,9 +357,6 @@ function posReceiptKey(safeRef, userId) {
         // The 15 s window stays anchored at the first submission:
         // refreshing it on every reuse would let repeated prints
         // dedupe into one desktop job indefinitely. (Audit F12.)
-        try {
-            sessionStorage.setItem(storeKey, JSON.stringify(record));
-        } catch (_err) { /* ignore */ }
         return record.key;
     }
     const attempt = (record && record.attempt ? record.attempt : 0) + 1;

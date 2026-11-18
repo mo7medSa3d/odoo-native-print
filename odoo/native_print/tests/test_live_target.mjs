@@ -350,4 +350,189 @@ try {
     globalThis.fetch = origFetch;
     delete globalThis.window.__NATIVE_PRINT__;
 }
+
+// 5. Phase 3 regression tests: hung fetch AbortController timeout & stale inFlightReports recovery.
+{
+    const origFetch2 = globalThis.fetch;
+    const origSetTimeout2 = globalThis.setTimeout;
+    const origClearTimeout2 = globalThis.clearTimeout;
+    const origDateNow = Date.now;
+    let fakeNow = origDateNow();
+    Date.now = () => fakeNow;
+    try {
+        globalThis.window.__NATIVE_PRINT__ = {
+            listPrinters: async () => [{ name: "HP LaserJet", driver: "HP PCL", kind: "local", is_default: true }],
+            printerCapabilities: async () => ({ forms: [], color: true }),
+            printPdf: async (req) => req.idempotencyKey,
+            jobDetail: async () => ({ state: "done", pages: 1, attempts: 1 }),
+        };
+
+        // 5a. Hung fetch is aborted by AbortController timeout, falls back to undefined, and releases lock.
+        let sawAborted = false;
+        let clearedTimer = false;
+        globalThis.setTimeout = (fn, ms) => {
+            if (ms === h.REPORT_FETCH_TIMEOUT_MS) {
+                queueMicrotask(fn);
+                return 4242;
+            }
+            return origSetTimeout2(fn, ms);
+        };
+        globalThis.clearTimeout = (id) => {
+            if (id === 4242) clearedTimer = true;
+            return origClearTimeout2(id);
+        };
+        globalThis.fetch = (_url, opts) => new Promise((_resolve, reject) => {
+            opts.signal.addEventListener("abort", () => {
+                sawAborted = true;
+                reject(new Error("AbortError"));
+            });
+        });
+        const hungRes = await registeredHandler(
+            { report_type: "qweb-pdf", report_name: "r.hung", context: { active_ids: [101] } },
+            {},
+            testEnv,
+        );
+        eq(hungRes, undefined, "hung fetch aborts and falls back to Odoo download");
+        eq(sawAborted, true, "hung fetch received AbortSignal abort");
+        eq(clearedTimer, true, "fetch timeout timer is cleared in finally");
+
+        // Next call for same report/record succeeds (lock was released).
+        globalThis.setTimeout = origSetTimeout2;
+        globalThis.clearTimeout = origClearTimeout2;
+        globalThis.fetch = async () => ({
+            ok: true,
+            arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]).buffer,
+        });
+        const retryAfterTimeout = await registeredHandler(
+            { report_type: "qweb-pdf", report_name: "r.hung", context: { active_ids: [101] } },
+            {},
+            testEnv,
+        );
+        eq(retryAfterTimeout, true, "report prints normally after prior timeout released lock");
+
+        // 5b. Stale inFlightReports entry expires and late first finally does NOT clear newer lock.
+        let fetchCount = 0;
+        const resolvers = [];
+        globalThis.fetch = () => {
+            fetchCount++;
+            return new Promise((resolve) => {
+                resolvers.push(() => resolve({
+                    ok: true,
+                    arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]).buffer,
+                }));
+            });
+        };
+        const staleAction = { report_type: "qweb-pdf", report_name: "r.stale", context: { active_ids: [202] } };
+        const pFirst = registeredHandler(staleAction, {}, testEnv);
+        await new Promise((r) => origSetTimeout2(r, 10));
+        eq(fetchCount, 1, "first submission started fetch");
+
+        // Duplicate while fresh is suppressed.
+        const pDup = await registeredHandler(staleAction, {}, testEnv);
+        eq(pDup, true, "fresh duplicate returns true");
+        eq(fetchCount, 1, "fresh duplicate does not start a second fetch");
+
+        // Advance clock past IN_FLIGHT_STALE_MS -> new submission is allowed.
+        fakeNow += h.IN_FLIGHT_STALE_MS + 1000;
+        const pSecond = registeredHandler(staleAction, {}, testEnv);
+        await new Promise((r) => origSetTimeout2(r, 10));
+        eq(fetchCount, 2, "stale in-flight entry allows new submission");
+
+        // Settle first (stale) submission while second is still running.
+        resolvers[0]();
+        await pFirst;
+
+        // A third click while second is still fresh must STILL be deduped (first finally did not clobber lock).
+        const pDup2 = await registeredHandler(staleAction, {}, testEnv);
+        eq(pDup2, true, "second submission lock survives stale first finally");
+        eq(fetchCount, 2, "stale finally did not release active second lock");
+
+        // Settle second submission.
+        resolvers[1]();
+        eq(await pSecond, true, "second submission completes");
+    } finally {
+        Date.now = origDateNow;
+        globalThis.fetch = origFetch2;
+        globalThis.setTimeout = origSetTimeout2;
+        globalThis.clearTimeout = origClearTimeout2;
+        delete globalThis.window.__NATIVE_PRINT__;
+    }
+}
+
+// 6. Phase 3 systray regression tests: onWillUnmount cleanup & maybeSyncDeviceCaps throttle.
+{
+    let unmountHook = null;
+    let mountedHook = null;
+    const listeners = [];
+    const intervals = [];
+    const clearedIntervals = [];
+    const systraySrc = readFileSync(
+        new URL("../static/src/js/native_print_systray.js", import.meta.url),
+        "utf8",
+    )
+        .replace(
+            'import { Component, onMounted, onWillStart, onWillUnmount, useState } from "@odoo/owl";',
+            'class Component {} const onMounted = (fn) => { globalThis.__npOnMounted = fn; }; const onWillStart = () => {}; const onWillUnmount = (fn) => { globalThis.__npOnWillUnmount = fn; }; const useState = (s) => s;',
+        )
+        .replace('import { registry } from "@web/core/registry";', 'const registry = { category: () => ({ add: () => {} }) };')
+        .replace('import { useService } from "@web/core/utils/hooks";', 'const useService = () => ({ add: () => {}, doAction: () => {} });')
+        .replace('import { rpc } from "@web/core/network/rpc";', 'const rpc = async (url, params) => { globalThis.__npSystrayRpcs.push({ url, params }); return { ok: true }; };')
+        .replace('import { _t } from "@web/core/l10n/translation";', 'const _t = (s) => s;')
+        .replace('from "./native_print_client";', `from "${tmp}";`);
+    globalThis.__npSystrayRpcs = [];
+    const tmpSystray = join(tmpdir(), "np_systray_test.mjs");
+    writeFileSync(tmpSystray, systraySrc);
+    const sMod = await import(tmpSystray);
+
+    const prevLocalStorage = globalThis.localStorage;
+    const prevDocument = globalThis.document;
+    globalThis.localStorage = globalThis.window.localStorage;
+    globalThis.document = { visibilityState: "visible" };
+    globalThis.window.addEventListener = (ev, fn) => listeners.push({ ev, fn });
+    globalThis.window.removeEventListener = (ev, fn) => {
+        const idx = listeners.findIndex((x) => x.ev === ev && x.fn === fn);
+        if (idx >= 0) listeners.splice(idx, 1);
+    };
+    globalThis.window.setInterval = (fn, ms) => { intervals.push({ fn, ms }); return 777; };
+    globalThis.window.clearInterval = (id) => { clearedIntervals.push(id); };
+
+    try {
+        let capCalls = 0;
+        globalThis.window.__NATIVE_PRINT__ = {
+            printerCapabilities: async () => {
+                capCalls++;
+                return { forms: [{ name: "A4", size: { width_mm: 210, height_mm: 297 }, roll: false }], bins: ["Tray 1"] };
+            },
+        };
+        const comp = new sMod.NativePrintSystray();
+        comp.setup();
+        mountedHook = globalThis.__npOnMounted;
+        unmountHook = globalThis.__npOnWillUnmount;
+
+        // Verify mounted registers click + interval and onWillUnmount cleans both up.
+        mountedHook();
+        eq(listeners.length, 1, "onMounted registers click listener");
+        eq(intervals.length, 1, "onMounted registers refresh interval");
+
+        const printerList = [{ name: "HP LaserJet", protocol: "gdi", printer_class: "office" }];
+        await comp.maybeSyncDeviceCaps(printerList, false);
+        eq(capCalls, 1, "first maybeSyncDeviceCaps queries driver capabilities");
+        await comp.maybeSyncDeviceCaps(printerList, false);
+        eq(capCalls, 1, "background poll within 6h skips redundant printerCapabilities call");
+        await comp.maybeSyncDeviceCaps(printerList, true);
+        eq(capCalls, 2, "manual refresh (force=true) queries printerCapabilities");
+        await comp.maybeSyncDeviceCaps([{ name: "HP LaserJet", protocol: "escpos", printer_class: "thermal" }], false);
+        eq(capCalls, 3, "protocol/class change triggers fresh printerCapabilities query");
+
+        unmountHook();
+        eq(listeners.length, 0, "onWillUnmount removes click listener");
+        eq(clearedIntervals.includes(777), true, "onWillUnmount clears refresh interval");
+        eq(comp._unmounted, true, "onWillUnmount marks component unmounted");
+    } finally {
+        globalThis.localStorage = prevLocalStorage;
+        globalThis.document = prevDocument;
+        delete globalThis.window.__NATIVE_PRINT__;
+    }
+}
+
 console.log("JS LIVE TARGET TESTS: ALL PASS");

@@ -1,4 +1,72 @@
+@mixin np-dark-tokens {
+    --np-surface: #111724;
+    --np-subtle: #1b2436;
+    --np-hover: #243047;
+    --np-border: #232f45;
+    --np-text: #f1f5f9;
+    --np-text-secondary: #cbd5e1;
+    --np-text-muted: #8b9bb4;
+    --np-brand: #60a5fa;
+    --np-brand-soft: rgba(59, 130, 246, 0.16);
+    --np-info-bg: rgba(59, 130, 246, 0.16);
+    --np-info-border: rgba(59, 130, 246, 0.34);
+    --np-ok: #34d399;
+    --np-ok-ring: rgba(52, 211, 153, 0.28);
+    --np-err: #f87171;
+    --np-err-bg: rgba(239, 68, 68, 0.15);
+    --np-err-border: rgba(239, 68, 68, 0.34);
+    --np-shadow: 0 18px 46px rgba(0, 0, 0, 0.58);
+    --np-brand-shadow: 0 6px 14px -6px rgba(96, 165, 250, 0.4);
+    --np-focus-ring: 0 0 0 3px rgba(96, 165, 250, 0.30);
+}
+
 .o_native_print_systray {
+    // Scoped design tokens aligned with app/dist/theme.css (WCAG 2.2 AA).
+    --np-surface: #ffffff;
+    --np-subtle: #eff2f7;
+    --np-hover: #e5e9f2;
+    --np-border: #dce1ec;
+    --np-text: #0f172a;
+    --np-text-secondary: #334155;
+    --np-text-muted: #526075;
+    --np-brand: #0f52e6;
+    --np-brand-soft: rgba(15, 82, 230, 0.09);
+    --np-info-bg: #eff6ff;
+    --np-info-border: #bfdbfe;
+    --np-ok: #067647;
+    --np-ok-ring: rgba(6, 118, 71, 0.22);
+    --np-err: #b91c1c;
+    --np-err-bg: #fef2f2;
+    --np-err-border: #fecaca;
+    --np-shadow: 0 14px 36px rgba(15, 23, 42, 0.13), 0 2px 6px rgba(15, 23, 42, 0.06);
+    --np-brand-shadow: 0 6px 14px -6px rgba(15, 82, 230, 0.45);
+    --np-focus-ring: 0 0 0 3px rgba(15, 82, 230, 0.22);
+    --np-dur-fast: 120ms;
+    --np-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+    @media (prefers-color-scheme: dark) {
+        @include np-dark-tokens;
+    }
+
+    .o_dark_mode &,
+    [data-color-scheme="dark"] & {
+        @include np-dark-tokens;
+    }
+
+    button,
+    .btn {
+        transition:
+            background-color var(--np-dur-fast) var(--np-ease-out),
+            border-color var(--np-dur-fast) var(--np-ease-out),
+            color var(--np-dur-fast) var(--np-ease-out);
+
+        &:focus-visible {
+            outline: 2px solid var(--np-brand);
+            outline-offset: 2px;
+            box-shadow: var(--np-focus-ring);
+        }
+    }
+
     .o_native_print_dot {
         display: inline-block;
         width: 8px;
@@ -6,11 +74,11 @@
         border-radius: 50%;
     }
     .o_native_print_dot_online {
-        background-color: #10b981;
-        box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+        background-color: var(--np-ok);
+        box-shadow: 0 0 0 2px var(--np-ok-ring);
     }
     .o_native_print_dot_browser {
-        background-color: #94a3b8;
+        background-color: var(--np-text-muted);
     }
 
     .o_native_print_dropdown {
@@ -33,9 +101,11 @@
         max-width: 92vw;
         z-index: 1055;
         padding: 14px;
-        border: 1px solid rgba(15, 23, 42, 0.08);
-        border-radius: 16px;
-        box-shadow: 0 18px 44px -12px rgba(15, 23, 42, 0.28);
+        background-color: var(--np-surface);
+        color: var(--np-text);
+        border: 1px solid var(--np-border);
+        border-radius: 14px;
+        box-shadow: var(--np-shadow);
     }
 
     /* Header */
@@ -45,7 +115,7 @@
         gap: 10px;
         padding-bottom: 10px;
         margin-bottom: 10px;
-        border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+        border-bottom: 1px solid var(--np-border);
     }
     .np-brand-tile {
         width: 36px;
@@ -57,7 +127,7 @@
         align-items: center;
         justify-content: center;
         font-size: 16px;
-        box-shadow: 0 6px 14px -6px rgba(9, 83, 222, 0.65);
+        box-shadow: var(--np-brand-shadow);
         overflow: hidden;
     }
     .np-head-text {
@@ -68,10 +138,11 @@
         font-weight: 700;
         font-size: 0.95rem;
         line-height: 1.15;
+        color: var(--np-text);
     }
     .np-head-sub {
         font-size: 0.72rem;
-        color: #64748b;
+        color: var(--np-text-muted);
     }
     .np-mode-pill {
         flex: 0 0 auto;
@@ -83,13 +154,13 @@
         display: flex;
         gap: 8px;
         align-items: flex-start;
-        background: #f2f6ff;
-        border: 1px solid #dbe7fd;
-        border-radius: 12px;
+        background: var(--np-info-bg);
+        border: 1px solid var(--np-info-border);
+        border-radius: 10px;
         padding: 9px 11px;
         font-size: 0.8rem;
         line-height: 1.5;
-        color: #334155;
+        color: var(--np-text-secondary);
         margin-bottom: 10px;
     }
     .np-info-rows {
@@ -103,18 +174,19 @@
         width: 100%;
     }
     .np-info-icon {
-        color: #0953de;
+        color: var(--np-brand);
         margin-top: 2px;
     }
     .np-info-row .np-info-icon {
         margin-top: 0;
     }
     .np-info-label {
-        color: #64748b;
+        color: var(--np-text-muted);
     }
     .np-info-value {
         margin-inline-start: auto;
         font-weight: 600;
+        color: var(--np-text);
         max-width: 55%;
     }
 
@@ -130,10 +202,11 @@
         align-items: center;
         gap: 8px;
         padding: 6px 8px;
-        border-radius: 9px;
+        border-radius: 8px;
+        transition: background-color var(--np-dur-fast) var(--np-ease-out);
     }
     .np-printer-row:hover {
-        background: #f2f6ff;
+        background: var(--np-brand-soft);
     }
     .np-printer-name {
         overflow: hidden;
@@ -141,6 +214,7 @@
         white-space: nowrap;
         font-size: 0.8rem;
         font-family: monospace;
+        color: var(--np-text);
     }
     .np-printer-text {
         flex: 1 1 auto;
@@ -153,7 +227,7 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         font-size: 0.68rem;
-        color: #64748b;
+        color: var(--np-text-muted);
     }
     .np-systray-icon {
         width: 20px;
@@ -174,11 +248,12 @@
         padding: 0;
         font-size: 0.78rem;
         text-decoration: none;
+        color: var(--np-brand);
     }
 
     .np-refresh-btn {
         margin-bottom: 10px;
-        border-radius: 9px;
+        border-radius: 8px;
     }
 
     /* Job counters */
@@ -189,20 +264,22 @@
         margin-bottom: 12px;
     }
     .np-stat {
-        background: #f8fafc;
-        border: 1px solid #e6eaf2;
-        border-radius: 12px;
+        background: var(--np-subtle);
+        border: 1px solid var(--np-border);
+        border-radius: 10px;
         padding: 8px 4px 7px;
         text-align: center;
     }
     .np-stat-alert {
-        background: #fef2f2;
-        border-color: #fecaca;
+        background: var(--np-err-bg);
+        border-color: var(--np-err-border);
     }
     .np-stat-num {
         font-size: 1.08rem;
         font-weight: 700;
         line-height: 1.2;
+        font-variant-numeric: tabular-nums;
+        color: var(--np-text);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -210,7 +287,7 @@
     }
     .np-stat-label {
         font-size: 0.68rem;
-        color: #64748b;
+        color: var(--np-text-muted);
         margin-top: 1px;
     }
     .np-dot {
@@ -220,13 +297,13 @@
         display: inline-block;
     }
     .np-dot-active {
-        background: #0953de;
+        background: var(--np-brand);
     }
     .np-dot-done {
-        background: #10b981;
+        background: var(--np-ok);
     }
     .np-dot-failed {
-        background: #dc2626;
+        background: var(--np-err);
     }
 
     /* Actions */
@@ -236,7 +313,7 @@
         gap: 8px;
     }
     .np-primary-action {
-        border-radius: 9px;
+        border-radius: 8px;
         font-weight: 600;
         padding-top: 7px;
         padding-bottom: 7px;
@@ -247,8 +324,20 @@
         gap: 8px;
     }
     .np-action-row .btn {
-        border-radius: 9px;
+        border-radius: 8px;
         white-space: normal;
         line-height: 1.3;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .np-printer-row,
+        button,
+        .btn {
+            transition-duration: 0.01ms !important;
+        }
+        .fa-spin {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+        }
     }
 }

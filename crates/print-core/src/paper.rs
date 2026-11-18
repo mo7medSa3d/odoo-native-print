@@ -125,7 +125,7 @@ pub fn match_paper(
             policy,
             available: forms
                 .iter()
-                .map(|f| f.name.clone())
+                .map(|f| f.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", "),
         });
@@ -180,7 +180,7 @@ pub fn match_paper(
         policy,
         ScalePolicy::NearestLargerCentered | ScalePolicy::NearestLargerFit
     ) {
-        let mut larger: Vec<&Form> = forms
+        if let Some(f) = forms
             .iter()
             .filter(|f| valid_sheet(f))
             .filter(|f| {
@@ -189,14 +189,13 @@ pub fn match_paper(
                     || (f.size.width_mm + EXACT_TOLERANCE_MM >= page.height_mm
                         && f.size.height_mm + EXACT_TOLERANCE_MM >= page.width_mm)
             })
-            .collect();
-        larger.sort_by(|a, b| {
-            let area = |f: &Form| f.size.width_mm * f.size.height_mm;
-            area(a)
-                .partial_cmp(&area(b))
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        if let Some(f) = larger.first() {
+            .min_by(|a, b| {
+                let area = |f: &Form| f.size.width_mm * f.size.height_mm;
+                area(a)
+                    .partial_cmp(&area(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+        {
             let kind = if policy == ScalePolicy::NearestLargerCentered {
                 MatchKind::NearestLargerCentered
             } else {
@@ -204,7 +203,7 @@ pub fn match_paper(
             };
             return Ok(PaperMatch {
                 kind,
-                form: (*f).clone(),
+                form: f.clone(),
             });
         }
         // 3b. Wider roll form when no sheet form fits.
@@ -241,7 +240,7 @@ pub fn match_paper(
         policy,
         available: forms
             .iter()
-            .map(|f| f.name.clone())
+            .map(|f| f.name.as_str())
             .collect::<Vec<_>>()
             .join(", "),
     })
@@ -320,7 +319,7 @@ pub fn match_paper_auto(
             available: capabilities
                 .forms
                 .iter()
-                .map(|f| f.name.clone())
+                .map(|f| f.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", "),
         });

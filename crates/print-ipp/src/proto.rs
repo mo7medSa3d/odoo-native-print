@@ -156,7 +156,7 @@ pub fn encode_request(
     job_attrs: &[Attr],
     document: Option<&[u8]>,
 ) -> Vec<u8> {
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(document.map_or(0, |d| d.len()).saturating_add(256));
     write_header(&mut out, operation, request_id);
     out.push(tag::GROUP_OPERATION);
     for a in base_operation_attrs(printer_uri) {
@@ -311,7 +311,11 @@ pub fn parse_message(bytes: &[u8]) -> Result<IppMessage, String> {
             pos += 1;
             break;
         }
-        // RFC 8010 section 3.5.1: delimiter tags are 0x00..=0x0F (0x03 is handled above).
+        // RFC 8010 section 3.5.1: delimiter tags are 0x00..=0x0F (0x00 is reserved,
+        // 0x03 is end-of-attributes handled above).
+        if b == 0x00 {
+            return Err(format!("reserved delimiter tag 0x00 at {pos}"));
+        }
         if (0x01..=0x0F).contains(&b) {
             if groups.len() >= MAX_IPP_GROUPS {
                 return Err(format!("too many IPP groups at {pos}"));
@@ -414,5 +418,23 @@ mod tests {
         }
         msg.push(tag::END_OF_ATTRIBUTES);
         assert!(parse_message(&msg).is_err());
+    }
+
+    #[test]
+    fn rejects_reserved_zero_delimiter_tag_and_excessive_groups() {
+        let mut bad_tag = Vec::new();
+        write_header(&mut bad_tag, 0x0000, 1);
+        bad_tag.push(tag::GROUP_OPERATION);
+        bad_tag.push(0x00);
+        bad_tag.push(tag::END_OF_ATTRIBUTES);
+        assert!(parse_message(&bad_tag).is_err());
+
+        let mut too_many_groups = Vec::new();
+        write_header(&mut too_many_groups, 0x0000, 1);
+        for _ in 0..=MAX_IPP_GROUPS {
+            too_many_groups.push(tag::GROUP_OPERATION);
+        }
+        too_many_groups.push(tag::END_OF_ATTRIBUTES);
+        assert!(parse_message(&too_many_groups).is_err());
     }
 }

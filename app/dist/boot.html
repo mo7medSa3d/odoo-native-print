@@ -10,60 +10,93 @@
     min-height: 100vh;
     display: flex; align-items: center; justify-content: center;
     background: var(--bg-canvas);
-    padding: 20px;
+    padding: var(--space-5);
   }
   .card {
     width: min(92vw, 430px);
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-lg);
-    padding: 28px 26px;
+    box-shadow: var(--shadow-md);
+    padding: var(--space-8) var(--space-6);
     text-align: center;
+    transition: border-color var(--dur-med) var(--ease-out), box-shadow var(--dur-med) var(--ease-out);
+  }
+  .card[data-state="down"],
+  .card[data-state="initFail"] {
+    border-color: var(--err-border);
+    box-shadow: inset 0 3px 0 var(--err-fg), var(--shadow-md);
+  }
+  .card[data-state="redirected"] {
+    border-color: var(--warn-border);
+    box-shadow: inset 0 3px 0 var(--warn-fg), var(--shadow-md);
   }
   .logo-wrap {
-    width: 56px; height: 56px; margin: 0 auto 16px;
-    border-radius: var(--radius-lg); padding: 4px;
-    background: var(--bg-subtle); border: 1px solid var(--border);
+    width: 56px; height: 56px; margin: 0 auto var(--space-4);
+    border-radius: var(--radius-lg); padding: var(--space-1);
+    background: var(--brand-soft); border: 1px solid var(--info-border);
     display: flex; align-items: center; justify-content: center;
+    transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+  }
+  .card[data-state="down"] .logo-wrap,
+  .card[data-state="initFail"] .logo-wrap {
+    background: var(--err-bg); border-color: var(--err-border);
+  }
+  .card[data-state="redirected"] .logo-wrap {
+    background: var(--warn-bg); border-color: var(--warn-border);
   }
   .logo { width: 100%; height: 100%; border-radius: var(--radius-md); display: block; }
   .spinner {
-    width: 28px; height: 28px; margin: 0 auto 14px; border-radius: 50%;
-    border: 2.5px solid var(--border-strong); border-top-color: var(--brand);
+    width: 28px; height: 28px; margin: 0 auto var(--space-4); border-radius: 50%;
+    border: 2.5px solid var(--brand-soft); border-top-color: var(--brand-text);
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-  h1 { font-size: 16.5px; font-weight: 700; margin: 0 0 8px; color: var(--text-primary); letter-spacing: -0.01em; }
-  p { color: var(--text-secondary); font-size: 13px; line-height: 1.65; margin: 0 0 18px; }
-  .origin {
-    display: inline-block; direction: ltr; font-family: var(--font-mono);
-    font-size: 12px; font-weight: 600; color: var(--text-primary);
-    background: var(--bg-subtle); border: 1px solid var(--border);
-    padding: 3px 9px; border-radius: var(--radius-xs); word-break: break-all;
-    margin-top: 6px;
+  h1 {
+    font-size: var(--text-lg); font-weight: 700; margin: 0 0 var(--space-2);
+    color: var(--text-primary); letter-spacing: -0.01em;
+    transition: color var(--dur-fast) var(--ease-out);
   }
-  .actions { display: none; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .card[data-state="down"] h1,
+  .card[data-state="initFail"] h1 { color: var(--err-fg); }
+  .card[data-state="redirected"] h1 { color: var(--warn-fg); }
+  p { color: var(--text-secondary); font-size: var(--text-sm); line-height: 1.65; margin: 0 0 var(--space-5); }
+  .origin {
+    display: inline-block; direction: ltr; unicode-bidi: isolate; font-family: var(--font-mono);
+    font-size: var(--text-xs); font-weight: 600; color: var(--text-primary);
+    background: var(--bg-subtle); border: 1px solid var(--border);
+    padding: 3px var(--space-2); border-radius: var(--radius-xs); word-break: break-all;
+    margin-top: var(--space-2);
+  }
+  .card[data-state="down"] .origin {
+    background: var(--err-bg); border-color: var(--err-border); color: var(--err-fg);
+  }
+  .card[data-state="redirected"] .origin {
+    background: var(--warn-bg); border-color: var(--warn-border); color: var(--warn-fg);
+  }
+  .actions { display: none; flex-wrap: wrap; gap: var(--space-2); justify-content: center; }
   .actions.show { display: flex; }
   button {
+    min-height: 38px;
     border: 1px solid var(--border); border-radius: var(--radius-md);
-    padding: 8px 15px; font: inherit; font-size: 12.5px; font-weight: 500;
+    padding: var(--space-2) var(--space-4); font: inherit; font-size: var(--text-sm); font-weight: 500;
     cursor: pointer; background: var(--bg-surface); color: var(--text-primary);
-    transition: background-color .12s ease, border-color .12s ease, opacity .12s ease;
+    transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
   }
   button:hover:not(:disabled) { background: var(--bg-subtle); border-color: var(--border-strong); }
+  button:focus-visible { box-shadow: var(--focus-ring); }
   button:disabled { opacity: 0.55; cursor: not-allowed; }
   button.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); font-weight: 600; }
   button.primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
-  .count { font-size: 12px; color: var(--text-muted); margin-top: 14px; min-height: 1.2em; font-variant-numeric: tabular-nums; }
+  .count { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--space-4); min-height: 1.2em; font-variant-numeric: tabular-nums; }
   .credit {
-    position: fixed; inset-inline: 0; bottom: 14px; text-align: center;
-    color: var(--text-muted); font-size: 11.5px;
+    position: fixed; inset-inline: 0; bottom: var(--space-4); text-align: center;
+    color: var(--text-muted); font-size: var(--text-xs);
   }
 </style>
 </head>
 <body>
-  <main class="card" role="status" aria-live="polite">
+  <main class="card" data-state="connecting" role="status" aria-live="polite">
     <div class="logo-wrap"><img class="logo" src="app-icon.png" alt=""/></div>
     <div class="spinner" id="spinner" aria-hidden="true"></div>
     <h1 id="title">جارٍ الاتصال بخادم Odoo</h1>
@@ -125,6 +158,11 @@
   var lang = "ar";
   var T = STR.ar;
   var viewState = "connecting";
+  var cardEl = document.querySelector(".card");
+  function setCardState(state) {
+    viewState = state;
+    if (cardEl) cardEl.setAttribute("data-state", state);
+  }
 
   function applyPrefs() {
     var savedLang = null, savedTheme = null;
@@ -169,7 +207,7 @@
   }
 
   function showDown(keepTimer) {
-    viewState = "down";
+    setCardState("down");
     document.getElementById("spinner").style.display = "none";
     document.getElementById("title").textContent = T.downTitle;
     setMsgWithOrigin(T.downPre, T.downPost);
@@ -179,7 +217,7 @@
     else if (left > 0) document.getElementById("count").textContent = T.retryIn + left + T.secs;
   }
   function showRedirected() {
-    viewState = "redirected";
+    setCardState("redirected");
     disarmNavWatchdog();
     stopCountdown();
     document.getElementById("spinner").style.display = "none";
@@ -190,7 +228,7 @@
     document.getElementById("count").textContent = "";
   }
   function showInitFail() {
-    viewState = "initFail";
+    setCardState("initFail");
     document.getElementById("title").textContent = T.initFailTitle;
     document.getElementById("msg").textContent = T.initFailMsg;
     document.getElementById("spinner").style.display = "none";

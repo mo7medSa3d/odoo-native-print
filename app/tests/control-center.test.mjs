@@ -181,3 +181,137 @@ test("Control Center bridge calls align with lib.rs BRIDGE_JS and registered com
     assert.ok(facadeMethods.has(call[1]), "index.html calls missing bridge method: " + call[1]);
   }
 });
+
+test("background polling pauses when document.hidden is true and refreshes on visibilitychange", () => {
+  const bootIdx = script.lastIndexOf("refreshAll();");
+  assert.ok(bootIdx >= 0, "boot refreshAll() call not found");
+  const tail = script.slice(bootIdx);
+  let intervalFn = null;
+  let intervalMs = null;
+  const listeners = new Map();
+  const calls = [];
+  const doc = {
+    hidden: false,
+    addEventListener(type, fn) { listeners.set(type, fn); },
+  };
+  new vm.Script(tail).runInNewContext({
+    document: doc,
+    refreshAll(opts) { calls.push(opts || null); },
+    setInterval(fn, ms) { intervalFn = fn; intervalMs = ms; return 1; },
+  });
+  assert.equal(intervalMs, 5000);
+  assert.equal(typeof intervalFn, "function");
+  assert.equal(typeof listeners.get("visibilitychange"), "function", "missing visibilitychange listener");
+  assert.equal(calls.length, 1, "expected initial refreshAll()");
+
+  doc.hidden = true;
+  intervalFn();
+  assert.equal(calls.length, 1, "poll must not run while document.hidden is true");
+  listeners.get("visibilitychange")();
+  assert.equal(calls.length, 1, "visibilitychange while hidden must not refresh");
+
+  doc.hidden = false;
+  listeners.get("visibilitychange")();
+  assert.equal(calls.length, 2, "becoming visible must trigger immediate silent refresh");
+  assert.equal(calls[1]?.silent, true);
+
+  intervalFn();
+  assert.equal(calls.length, 3, "poll must resume while visible");
+  assert.equal(calls[2]?.silent, true);
+});
+
+test("settings has no dead .example links and all desktop pages declare button types and toast live region", () => {
+  const settingsHtml = readFileSync(new URL("../dist/settings.html", import.meta.url), "utf8");
+  assert.doesNotMatch(settingsHtml, /<a\b[^>]*\.example/i, "settings.html must not link to dead .example URLs");
+  assert.doesNotMatch(settingsHtml, /\.row\s+\.v\s+a\b/, "dead anchor CSS in settings.html must be removed");
+  assert.match(html, /id="toastContainer"[^>]*aria-live="polite"/, "toastContainer must declare aria-live=polite");
+  for (const file of ["index.html", "settings.html", "boot.html", "tabbar.html"]) {
+    const pageHtml = readFileSync(new URL("../dist/" + file, import.meta.url), "utf8");
+    const badButtons = [...pageHtml.matchAll(/<button\b[^>]*>/gi)]
+      .map(m => m[0])
+      .filter(tag => !/\btype=["'](?:button|submit|reset)["']/i.test(tag));
+    assert.deepEqual(badButtons, [], file + " has <button> elements without explicit type=");
+  }
+});
+
+test("theme.css Light and Dark tokens meet WCAG 2.2 AA contrast thresholds", () => {
+  const css = readFileSync(new URL("../dist/theme.css", import.meta.url), "utf8");
+  const parseBlock = (re) => {
+    const m = css.match(re);
+    assert.ok(m, "missing CSS token block: " + re);
+    const vars = {};
+    for (const [, k, v] of m[1].matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/gi)) {
+      vars[k] = v.trim();
+    }
+    return vars;
+  };
+  const parseColor = (val, baseRgb) => {
+    const hex = val.match(/^#([0-9a-f]{6})$/i);
+    if (hex) {
+      const n = parseInt(hex[1], 16);
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    }
+    const rgba = val.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)$/i);
+    if (rgba) {
+      const r = +rgba[1], g = +rgba[2], b = +rgba[3], a = rgba[4] === undefined ? 1 : +rgba[4];
+      if (a >= 1 || !baseRgb) return [r, g, b];
+      return [
+        Math.round(r * a + baseRgb[0] * (1 - a)),
+        Math.round(g * a + baseRgb[1] * (1 - a)),
+        Math.round(b * a + baseRgb[2] * (1 - a)),
+      ];
+    }
+    assert.fail("unsupported color format: " + val);
+  };
+  const luminance = ([r, g, b]) => {
+    const lin = (c) => {
+      const s = c / 255;
+      return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  };
+  const ratio = (fg, bg) => {
+    const l1 = luminance(fg), l2 = luminance(bg);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  };
+
+  const themes = [
+    ["light", parseBlock(/:root\s*\{([\s\S]*?)\n\}/)],
+    ["dark", parseBlock(/:root\[data-theme="dark"\]\s*\{([\s\S]*?)\n\}/)],
+  ];
+
+  for (const [name, vars] of themes) {
+    const surface = parseColor(vars["--bg-surface"]);
+    const canvas = parseColor(vars["--bg-canvas"]);
+    const subtle = parseColor(vars["--bg-subtle"]);
+
+    // Core text tokens >= 4.5:1 on surface, canvas, and subtle
+    for (const token of ["--text-primary", "--text-secondary", "--text-muted", "--brand-text", "--accent-cyan"]) {
+      const fg = parseColor(vars[token]);
+      for (const [bgName, bg] of [["--bg-surface", surface], ["--bg-canvas", canvas], ["--bg-subtle", subtle]]) {
+        const cr = ratio(fg, bg);
+        assert.ok(cr >= 4.5, `${name} ${token} on ${bgName} contrast ${cr.toFixed(2)}:1 < 4.5:1`);
+      }
+    }
+
+    // Brand button text >= 4.5:1 on brand & brand-hover
+    for (const bgToken of ["--brand", "--brand-hover"]) {
+      const cr = ratio(parseColor(vars["--brand-fg"]), parseColor(vars[bgToken]));
+      assert.ok(cr >= 4.5, `${name} --brand-fg on ${bgToken} contrast ${cr.toFixed(2)}:1 < 4.5:1`);
+    }
+
+    // Semantic status fg >= 4.5:1 on surface and on its own status bg
+    for (const kind of ["ok", "warn", "err", "info"]) {
+      const fg = parseColor(vars[`--${kind}-fg`]);
+      const crSurface = ratio(fg, surface);
+      assert.ok(crSurface >= 4.5, `${name} --${kind}-fg on --bg-surface contrast ${crSurface.toFixed(2)}:1 < 4.5:1`);
+      const statusBg = parseColor(vars[`--${kind}-bg`], surface);
+      const crStatus = ratio(fg, statusBg);
+      assert.ok(crStatus >= 4.5, `${name} --${kind}-fg on --${kind}-bg contrast ${crStatus.toFixed(2)}:1 < 4.5:1`);
+    }
+
+    // Non-text UI control border >= 3.0:1 on surface (WCAG 1.4.11)
+    const crBorder = ratio(parseColor(vars["--border-strong"]), surface);
+    assert.ok(crBorder >= 3.0, `${name} --border-strong on --bg-surface contrast ${crBorder.toFixed(2)}:1 < 3.0:1`);
+  }
+});

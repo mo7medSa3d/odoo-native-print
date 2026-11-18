@@ -1,4 +1,4 @@
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError
 from odoo.tests.common import TransactionCase
 
 
@@ -180,6 +180,16 @@ class TestNativePrintJobLog(TransactionCase):
         user = self._plain_print_user(extra_group_ids=[parent_group.id])
         action = job.with_user(user).action_reprint()
         self.assertEqual(action.get("type"), "ir.actions.report")
+
+    def test_action_reprint_rejects_user_without_model_acl(self):
+        portal_user = self.env["res.users"].create({
+            "name": "NP Portal User",
+            "login": "np_portal_user",
+            "group_ids": [(6, 0, [self.env.ref("base.group_portal").id])],
+        })
+        job = self._job("job-key-portal")
+        with self.assertRaises(AccessError):
+            job.with_user(portal_user).action_reprint()
 
     def test_action_reprint_without_source_fails_loudly(self):
         job = self._job()

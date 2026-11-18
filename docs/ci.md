@@ -32,11 +32,16 @@ known toolchain).
   and flake on loaded shared runners), then bench / chaos /
   calibration with outputs uploaded as `ci-evidence-linux`.
   All cargo invocations use `--locked`.
-- **Supply chain**: cargo audit against **all three lockfiles**
-  (workspace ~50 packages, app ~420, print-win) + cargo-deny on the
-  workspace. Extending cargo-deny to the app tree needs a license
-  policy decision first: the Tauri dependency tree carries MPL/LGPL/
-  BSL licenses the root allow-list rejects.
+- **Supply chain**: `cargo-audit` (`rustsec/audit-check@v2`) against
+  **all three lockfiles** (workspace ~47 packages, `crates/print-win`,
+  and `app/src-tauri` ~422 packages), plus `cargo-deny` (using root
+  `deny.toml` with `--locked`): full checks (`advisories`, `bans`,
+  `licenses`, `sources`) on the workspace and `crates/print-win`, and
+  `bans` + `sources` on `app/src-tauri`. Extending `cargo-deny`
+  `licenses` and `unmaintained` advisory checks to the app tree needs
+  a policy decision first: the Tauri dependency tree carries
+  MPL/LGPL/BSL licenses and unmaintained GTK3 bindings that the root
+  `deny.toml` rejects.
 - **Windows — workspace tests + print-win**: the whole test suite on
   a real Windows/MSVC runner, clippy, print-win tests (the real
   winspool FFI compiles here for the first time), and the
@@ -68,9 +73,9 @@ known toolchain).
   are collected with a `SHA256SUMS.txt`.
 - Publish: creates the GitHub Release (pre-release when the tag
   contains `-rc`) with the MSI, the NSIS exe, the source tarball and
-  checksums. Release notes state plainly that installers are unsigned
-  until the company's certificate is wired in (see the comment in
-  the workflow for where the signing step goes).
+  checksums. Release notes reflect the actual signing status passed
+  from the Windows build job (reporting Authenticode-signed when
+  `WINDOWS_CERTIFICATE_BASE64` is configured, or unsigned otherwise).
 
 ## odoo.yml — manual, on release tags, and on odoo/** changes
 Runs on `workflow_dispatch`, on `v*` tag pushes, and on pushes/PRs to

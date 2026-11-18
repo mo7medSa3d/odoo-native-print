@@ -187,18 +187,21 @@ pub fn decode_png(bytes: &[u8]) -> Result<Canvas, ImageError> {
     if frame.width != width || frame.height != height || frame.bit_depth != png::BitDepth::Eight {
         return Err(ImageError::BadFrame);
     }
-    let data = &buf[..frame.buffer_size()];
     let px_count = (width as usize)
         .checked_mul(height as usize)
         .ok_or(ImageError::DimensionsTooLarge(width, height))?;
+    let frame_len = frame.buffer_size();
+    if frame.color_type == png::ColorType::Grayscale {
+        if frame_len < px_count || buf.len() < px_count {
+            return Err(ImageError::BadFrame);
+        }
+        buf.truncate(px_count);
+        return Ok(Canvas { width, height, px: buf });
+    }
+    let data = &buf[..frame_len];
     let mut px = vec![255u8; px_count];
     match frame.color_type {
-        png::ColorType::Grayscale => {
-            if data.len() < px_count {
-                return Err(ImageError::BadFrame);
-            }
-            px.copy_from_slice(&data[..px_count]);
-        }
+        png::ColorType::Grayscale => unreachable!(),
         png::ColorType::GrayscaleAlpha => {
             if data.len() < px_count * 2 {
                 return Err(ImageError::BadFrame);

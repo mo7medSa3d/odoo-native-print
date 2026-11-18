@@ -1,19 +1,27 @@
 use crate::mono::MonoBitmap;
 use std::fmt::Write as _;
 
-/// ZPL ^GFA graphic field: ^GFA,<total_bytes>,<total_bytes>,<bytes_per_row>,<hex data>
-/// Hex is uppercase ASCII, one nibble pair per byte, no compression (correct
-/// first; compression is an optimisation, not a correctness feature).
-pub fn zpl_graphic_field(bm: &MonoBitmap) -> String {
+fn write_zpl_graphic_field(out: &mut String, bm: &MonoBitmap) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let bpr = bm.bytes_per_row();
     let expected = bpr.saturating_mul(bm.height_dots as usize);
     let data = &bm.data[..expected.min(bm.data.len())];
     let total = data.len();
-    let mut hex = String::with_capacity(total * 2);
-    for b in data {
-        let _ = write!(hex, "{b:02X}");
+    out.reserve(total.saturating_mul(2).saturating_add(48));
+    let _ = write!(out, "^GFA,{total},{total},{bpr},");
+    for &b in data {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0F) as usize] as char);
     }
-    format!("^GFA,{total},{total},{bpr},{hex}")
+}
+
+/// ZPL ^GFA graphic field: ^GFA,<total_bytes>,<total_bytes>,<bytes_per_row>,<hex data>
+/// Hex is uppercase ASCII, one nibble pair per byte, no compression (correct
+/// first; compression is an optimisation, not a correctness feature).
+pub fn zpl_graphic_field(bm: &MonoBitmap) -> String {
+    let mut out = String::new();
+    write_zpl_graphic_field(&mut out, bm);
+    out
 }
 
 /// Complete ZPL II label format: `^FO0,0` (Field Origin) must precede `^GFA`
@@ -34,12 +42,18 @@ pub fn zpl_label_with_options(
     let copies = copies.max(1);
     let lh_x = offset_x_dots.max(0);
     let lh_y = offset_y_dots.max(0);
-    format!(
-        "^XA^PW{}^LL{}^LH{lh_x},{lh_y}^FO0,0{}^FS^PQ{copies},0,1,Y^XZ",
+    let expected = bm.bytes_per_row().saturating_mul(bm.height_dots as usize);
+    let data_len = expected.min(bm.data.len());
+    let mut out = String::with_capacity(data_len.saturating_mul(2).saturating_add(128));
+    let _ = write!(
+        out,
+        "^XA^PW{}^LL{}^LH{lh_x},{lh_y}^FO0,0",
         bm.width_dots.max(2),
         bm.height_dots.max(1),
-        zpl_graphic_field(bm)
-    )
+    );
+    write_zpl_graphic_field(&mut out, bm);
+    let _ = write!(out, "^FS^PQ{copies},0,1,Y^XZ");
+    out
 }
 
 /// ZPL host status: the `~HS` command (a preparser command,

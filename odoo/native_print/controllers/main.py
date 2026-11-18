@@ -80,7 +80,8 @@ def _safe_int(val, default=None):
 
 _STATUS_LOCK_FIELDS = (
     "state", "user_id", "company_id", "attempts", "device", "device_id",
-    "source_ids", "source_model", "duplex", "duplex_configured",
+    "source_ids", "source_model", "report_name", "report_id",
+    "duplex", "duplex_configured",
 )
 
 def _lock_status_job(job):
@@ -187,6 +188,11 @@ class NativePrintController(http.Controller):
             return {"ok": True, "job_id": job.id, "state": job.state,
                     "ignored": "illegal_transition"}
         device_name = (device.strip()[:256] or None) if isinstance(device, str) else None
+        clean_report_name = (
+            report_name.strip()[:256]
+            if isinstance(report_name, str) and report_name.strip()
+            else False
+        )
         vals = {
             "state": state,
             "error_code": error_code.strip()[:128] if isinstance(error_code, str) and error_code.strip() else False,
@@ -225,14 +231,14 @@ class NativePrintController(http.Controller):
         created = False
         if not job:
             report = False
-            if report_name and isinstance(report_name, str):
+            if clean_report_name:
                 report = request.env["ir.actions.report"].sudo().search(
-                    [("report_name", "=", report_name)], limit=1)
+                    [("report_name", "=", clean_report_name)], limit=1)
             parsed_bytes = _safe_int(byte_size, 0)
             create_vals = dict(vals, **{
                 "name": idempotency_key,
                 "report_id": report.id if report else False,
-                "report_name": str(report_name)[:256] if report_name else False,
+                "report_name": clean_report_name,
                 "source_type": source_type if source_type in SOURCE_TYPES
                                else "report",
                 "source_model": _safe_model_name(source_model),
@@ -303,11 +309,11 @@ class NativePrintController(http.Controller):
                 parsed_model = _safe_model_name(source_model)
                 if parsed_model:
                     vals["source_model"] = parsed_model
-            if not job.report_name and report_name and isinstance(report_name, str):
-                vals["report_name"] = str(report_name)[:256]
-            if not job.report_id and report_name and isinstance(report_name, str):
+            if not job.report_name and clean_report_name:
+                vals["report_name"] = clean_report_name
+            if not job.report_id and clean_report_name:
                 report = request.env["ir.actions.report"].sudo().search(
-                    [("report_name", "=", report_name)], limit=1)
+                    [("report_name", "=", clean_report_name)], limit=1)
                 if report:
                     vals["report_id"] = report.id
             job.write(vals)
@@ -366,13 +372,17 @@ class NativePrintController(http.Controller):
         # scope exactly this company.
         Job = request.env["native.print.job"].sudo()
         domain = [("company_id", "=", request.env.company.id)]
+        counts = dict(
+            Job._read_group(domain, groupby=["state"], aggregates=["__count"])
+        )
         return {
             "ok": True,
-            "active_jobs": Job.search_count(
-                domain + [("state", "in", ["queued", "rendering", "spooling", "printing"])]
+            "active_jobs": sum(
+                counts.get(s, 0)
+                for s in ("queued", "rendering", "spooling", "printing")
             ),
-            "done_jobs": Job.search_count(domain + [("state", "=", "done")]),
-            "failed_jobs": Job.search_count(
-                domain + [("state", "in", ["failed", "dead_letter"])]
+            "done_jobs": counts.get("done", 0),
+            "failed_jobs": (
+                counts.get("failed", 0) + counts.get("dead_letter", 0)
             ),
         }

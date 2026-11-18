@@ -24,44 +24,40 @@ const POS_SELECTION_KEY = "native_print.selected_pos_printer";
  */
 export const JOB_TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);
 
-export function getSelectedPrinter() {
+function readStorage(key) {
     try {
-        return window.localStorage.getItem(SELECTION_KEY) || null;
+        return window.localStorage.getItem(key) || null;
     } catch (_error) {
         return null;
     }
+}
+
+function writeStorage(key, name) {
+    try {
+        if (name) {
+            window.localStorage.setItem(key, name);
+        } else {
+            window.localStorage.removeItem(key);
+        }
+    } catch (_error) {
+        // Selection is a convenience; printing must not depend on it.
+    }
+}
+
+export function getSelectedPrinter() {
+    return readStorage(SELECTION_KEY);
 }
 
 export function setSelectedPrinter(name) {
-    try {
-        if (name) {
-            window.localStorage.setItem(SELECTION_KEY, name);
-        } else {
-            window.localStorage.removeItem(SELECTION_KEY);
-        }
-    } catch (_error) {
-        // Selection is a convenience; printing must not depend on it.
-    }
+    writeStorage(SELECTION_KEY, name);
 }
 
 export function getSelectedPosPrinter() {
-    try {
-        return window.localStorage.getItem(POS_SELECTION_KEY) || null;
-    } catch (_error) {
-        return null;
-    }
+    return readStorage(POS_SELECTION_KEY);
 }
 
 export function setSelectedPosPrinter(name) {
-    try {
-        if (name) {
-            window.localStorage.setItem(POS_SELECTION_KEY, name);
-        } else {
-            window.localStorage.removeItem(POS_SELECTION_KEY);
-        }
-    } catch (_error) {
-        // Selection is a convenience; printing must not depend on it.
-    }
+    writeStorage(POS_SELECTION_KEY, name);
 }
 
 /** Conservative protocol inference from the installed driver identity. */
