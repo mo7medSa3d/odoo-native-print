@@ -31,9 +31,8 @@ impl TsplLabel {
         if expected == 0 || bm.data.len() < expected {
             return self;
         }
-        self.buf.extend_from_slice(
-            format!("BITMAP {x},{y},{bpr},{},0,", bm.height_dots).as_bytes(),
-        );
+        self.buf
+            .extend_from_slice(format!("BITMAP {x},{y},{bpr},{},0,", bm.height_dots).as_bytes());
         for &b in &bm.data[..expected] {
             self.buf.push(!b);
         }

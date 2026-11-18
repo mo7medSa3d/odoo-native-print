@@ -81,8 +81,7 @@ type FnClosePage = unsafe extern "C" fn(FpdfPage);
 type FnGetPageWidthF = unsafe extern "C" fn(FpdfPage) -> f32;
 type FnGetPageHeightF = unsafe extern "C" fn(FpdfPage) -> f32;
 type FnBitmapCreateEx = unsafe extern "C" fn(c_int, c_int, c_int, *mut c_void, c_int) -> FpdfBitmap;
-type FnBitmapFillRect =
-    unsafe extern "C" fn(FpdfBitmap, c_int, c_int, c_int, c_int, c_ulong);
+type FnBitmapFillRect = unsafe extern "C" fn(FpdfBitmap, c_int, c_int, c_int, c_int, c_ulong);
 type FnRenderPageBitmap =
     unsafe extern "C" fn(FpdfBitmap, FpdfPage, c_int, c_int, c_int, c_int, c_int, c_int);
 type FnBitmapGetBuffer = unsafe extern "C" fn(FpdfBitmap) -> *mut c_void;
@@ -235,9 +234,7 @@ impl Pdfium {
         })?;
         let owned = bytes.to_vec();
         let _guard = call_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let doc = unsafe {
-            (self.api.load_mem_document)(owned.as_ptr(), len, std::ptr::null())
-        };
+        let doc = unsafe { (self.api.load_mem_document)(owned.as_ptr(), len, std::ptr::null()) };
         if doc.is_null() {
             #[allow(clippy::unnecessary_cast)]
             let code = unsafe { (self.api.get_last_error)() } as u32;
@@ -449,7 +446,9 @@ impl PdfDocument {
             RenderMode::Color => 4,
             RenderMode::Grayscale | RenderMode::Threshold => 1,
         };
-        let staging = (w as u64).saturating_mul(h as u64).saturating_mul(staging_bpp);
+        let staging = (w as u64)
+            .saturating_mul(h as u64)
+            .saturating_mul(staging_bpp);
         // PDFium's backing bitmap and the row-packed Vec coexist while
         // copying. Budget both before asking PDFium to allocate the bitmap.
         let needed = staging.saturating_mul(2).max(plan.bytes_estimate);
@@ -473,8 +472,7 @@ impl PdfDocument {
             }
             _ => FPDF_ANNOT | FPDF_PRINTING,
         };
-        let bitmap =
-            unsafe { (api.bitmap_create_ex)(w_c, h_c, format, std::ptr::null_mut(), 0) };
+        let bitmap = unsafe { (api.bitmap_create_ex)(w_c, h_c, format, std::ptr::null_mut(), 0) };
         if bitmap.is_null() {
             return Err(PdfiumError::BitmapFailed(w, h));
         }

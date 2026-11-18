@@ -70,8 +70,7 @@ pub fn send_raw_phased(
     connect_timeout: Duration,
     io_timeout: Duration,
 ) -> Result<(), SendPhaseError> {
-    let mut stream =
-        connect_any(host, port, connect_timeout).map_err(SendPhaseError::Connect)?;
+    let mut stream = connect_any(host, port, connect_timeout).map_err(SendPhaseError::Connect)?;
     let io_timeout = io_timeout.max(MIN_IO_TIMEOUT);
     stream
         .set_write_timeout(Some(io_timeout))
@@ -83,11 +82,14 @@ pub fn send_raw_phased(
         stream.write_all(chunk).map_err(SendPhaseError::Write)?;
     }
     stream.flush().map_err(SendPhaseError::Write)?;
-    // Some printer firmwares close the socket immediately upon seeing the
-    // end-of-job command; ignore NotConnected on half-close after all bytes
-    // were written.
+    // Some printer firmwares close or reset the socket immediately upon
+    // seeing the end-of-job command; ignore half-close errors after all bytes
+    // were written and flushed.
     if let Err(e) = stream.shutdown(std::net::Shutdown::Write) {
-        if e.kind() != ErrorKind::NotConnected {
+        if !matches!(
+            e.kind(),
+            ErrorKind::NotConnected | ErrorKind::ConnectionReset | ErrorKind::BrokenPipe
+        ) {
             return Err(SendPhaseError::Write(e));
         }
     }
@@ -455,14 +457,7 @@ mod tests {
             s.read_to_end(&mut buf).unwrap();
             buf
         });
-        send_raw(
-            "127.0.0.1",
-            port,
-            &payload,
-            Duration::ZERO,
-            Duration::ZERO,
-        )
-        .unwrap();
+        send_raw("127.0.0.1", port, &payload, Duration::ZERO, Duration::ZERO).unwrap();
         assert_eq!(server.join().unwrap(), expected);
     }
 
@@ -510,5 +505,30 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, SendPhaseError::Connect(_)), "{err:?}");
+    }
+
+    #[test]
+    fn send_raw_phased_succeeds_when_peer_closes_after_reading() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let payload = b"RAW-PRINT-BYTES";
+        let expected_len = payload.len();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut buf = vec![0u8; expected_len];
+            s.read_exact(&mut buf).unwrap();
+            let _ = s.shutdown(std::net::Shutdown::Both);
+            drop(s);
+            buf
+        });
+        let res = send_raw_phased(
+            "127.0.0.1",
+            port,
+            payload,
+            Duration::from_secs(2),
+            Duration::from_secs(2),
+        );
+        assert!(res.is_ok(), "expected Ok(()), got {res:?}");
+        assert_eq!(server.join().unwrap(), payload);
     }
 }

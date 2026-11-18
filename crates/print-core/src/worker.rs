@@ -104,6 +104,7 @@ pub struct Worker<'a, B: PrintBackend> {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
     Idle,
+    Skipped,
     Done(String),
     Retried(String),
     Failed(String),
@@ -129,7 +130,7 @@ impl<'a, B: PrintBackend> Worker<'a, B> {
                 // User canceled the job on another connection between claim_next
                 // and Printing: stop cleanly without logging a spurious error.
                 Err(QueueError::Transition(ref t)) if t.from == JobState::Canceled => {
-                    return Ok(Outcome::Idle);
+                    return Ok(Outcome::Skipped);
                 }
                 Err(e) => return Err(e),
             }
@@ -153,7 +154,8 @@ impl<'a, B: PrintBackend> Worker<'a, B> {
                 // Failed, then re-queued after a durable backoff: the
                 // audit trail shows both transitions, and the worker
                 // thread is free to serve other printers meanwhile.
-                let delay = backoff_delay_ms(&self.cfg, job.attempts.saturating_sub(1), self.entropy);
+                let delay =
+                    backoff_delay_ms(&self.cfg, job.attempts.saturating_sub(1), self.entropy);
                 self.queue.requeue_with_delay(&job.id, delay, &e.code)?;
                 Ok(Outcome::Retried(job.id))
             }

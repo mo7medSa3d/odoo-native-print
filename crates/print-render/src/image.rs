@@ -246,7 +246,9 @@ pub fn scale_to_width(img: &Canvas, target_width: u32) -> Canvas {
             for y in y0..y1 {
                 if let Some(row_off) = (y as usize).checked_mul(src_w) {
                     for x in x0..x1 {
-                        if let Some(val) = row_off.checked_add(x as usize).and_then(|i| img.px.get(i)) {
+                        if let Some(val) =
+                            row_off.checked_add(x as usize).and_then(|i| img.px.get(i))
+                        {
                             sum += *val as u64;
                             count += 1;
                         }

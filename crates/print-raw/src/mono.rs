@@ -47,7 +47,9 @@ impl MonoBitmap {
             });
         }
         let bpr = (width as usize).div_ceil(8);
-        let total = bpr.checked_mul(height as usize).ok_or(MonoError::BadInput)?;
+        let total = bpr
+            .checked_mul(height as usize)
+            .ok_or(MonoError::BadInput)?;
         let mut data = vec![0u8; total];
         for y in 0..height as usize {
             for x in 0..width as usize {

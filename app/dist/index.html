@@ -375,7 +375,7 @@
     </div>
 
     <div class="topbar-actions">
-      <button class="btn btn-primary" id="btnOpenOdoo" onclick="openOdooApp()">
+      <button class="btn btn-primary" id="btnOpenOdoo" data-action="open-odoo">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
           <polyline points="15 3 21 3 21 9"></polyline>
@@ -384,7 +384,7 @@
         <span data-i18n="btn_open_odoo">فتح نظام Odoo</span>
       </button>
 
-      <button class="btn btn-glass" id="btnRefresh" onclick="manualRefresh()" title="Refresh">
+      <button class="btn btn-glass" id="btnRefresh" data-action="manual-refresh" title="Refresh">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="23 4 23 10 17 10"></polyline>
           <polyline points="1 20 1 14 7 14"></polyline>
@@ -393,14 +393,14 @@
         <span data-i18n="btn_refresh">تحديث</span>
       </button>
 
-      <button class="btn btn-glass" onclick="toggleTheme()" id="btnTheme">
+      <button class="btn btn-glass" data-action="toggle-theme" id="btnTheme">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
         </svg>
         <span data-i18n="btn_theme">المظهر</span>
       </button>
 
-      <button class="btn btn-glass" onclick="toggleLang()" id="btnLang">
+      <button class="btn btn-glass" data-action="toggle-lang" id="btnLang">
         <span>English</span>
       </button>
     </div>
@@ -410,19 +410,19 @@
   <!-- Navigation Tabs (sidebar on desktop, strip on narrow screens) -->
   <div class="tabsbar">
   <nav class="nav-tabs" role="tablist">
-    <button class="nav-tab active" role="tab" aria-selected="true" aria-controls="tab-dashboard" data-tab="dashboard" onclick="switchTab('dashboard')">
+    <button class="nav-tab active" role="tab" aria-selected="true" aria-controls="tab-dashboard" data-tab="dashboard" data-action="switch-tab">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
       <span data-i18n="tab_dashboard">لوحة المراقبة وطابور الطباعة</span>
     </button>
-    <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-printers" data-tab="printers" onclick="switchTab('printers')">
+    <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-printers" data-tab="printers" data-action="switch-tab">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
       <span data-i18n="tab_printers">الطابعات ومعمل المعايرة</span>
     </button>
-    <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-settings" data-tab="settings" onclick="switchTab('settings')">
+    <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-settings" data-tab="settings" data-action="switch-tab">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
       <span data-i18n="tab_settings">إعدادات اتصال Odoo والأمان</span>
     </button>
-    <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-diagnostics" data-tab="diagnostics" onclick="switchTab('diagnostics')">
+    <button class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-diagnostics" data-tab="diagnostics" data-action="switch-tab">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
       <span data-i18n="tab_diagnostics">حزمة التشخيص والدعم الفني</span>
     </button>
@@ -438,7 +438,7 @@
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
         <span id="originAlertText" data-i18n="origin_not_configured">لم يتم ضبط رابط Odoo بعد. أدخل عنوان IP والمنفذ من الإعدادات.</span>
       </div>
-      <button class="btn btn-sm btn-primary" onclick="switchTab('settings')" data-i18n="btn_configure_now">ضبط الرابط الآن</button>
+      <button class="btn btn-sm btn-primary" data-action="switch-tab" data-tab="settings" data-i18n="btn_configure_now">ضبط الرابط الآن</button>
     </div>
 
     <!-- TAB 1: DASHBOARD & QUEUE -->
@@ -498,12 +498,12 @@
           </div>
           <div style="display:flex;align-items:center;gap:0.65rem;flex-wrap:wrap;">
             <div class="filter-pills">
-              <button class="filter-pill active" data-filter="all" aria-pressed="true" onclick="setJobFilter('all')" data-i18n="filter_all">الكل</button>
-              <button class="filter-pill" data-filter="active" aria-pressed="false" onclick="setJobFilter('active')" data-i18n="filter_active">نشطة</button>
-              <button class="filter-pill" data-filter="attention" aria-pressed="false" onclick="setJobFilter('attention')" data-i18n="filter_attention">فاشلة / Dead Letter</button>
-              <button class="filter-pill" data-filter="done" aria-pressed="false" onclick="setJobFilter('done')" data-i18n="filter_done">مكتملة</button>
+              <button class="filter-pill active" data-filter="all" aria-pressed="true" data-action="set-job-filter" data-i18n="filter_all">الكل</button>
+              <button class="filter-pill" data-filter="active" aria-pressed="false" data-action="set-job-filter" data-i18n="filter_active">نشطة</button>
+              <button class="filter-pill" data-filter="attention" aria-pressed="false" data-action="set-job-filter" data-i18n="filter_attention">فاشلة / Dead Letter</button>
+              <button class="filter-pill" data-filter="done" aria-pressed="false" data-action="set-job-filter" data-i18n="filter_done">مكتملة</button>
             </div>
-            <button class="btn btn-sm btn-secondary" id="btnClearFinished" onclick="clearFinishedJobs()">
+            <button class="btn btn-sm btn-secondary" id="btnClearFinished" data-action="clear-finished">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
               <span data-i18n="btn_clear_done">مسح المكتملة</span>
             </button>
@@ -544,14 +544,14 @@
           <div class="form-grid" style="align-items:end;">
             <div class="form-group">
               <label class="form-label" for="customPrinterSelect" data-i18n="lbl_target_printer">اختر الطابعة</label>
-              <select id="customPrinterSelect" class="select" onchange="onTestPrinterChange()"></select>
+              <select id="customPrinterSelect" class="select" data-action="test-printer-change"></select>
               <input type="text" id="customPrinterUri" class="input mono hidden" dir="ltr" placeholder="tcp://192.168.1.200:9100" autocomplete="off" spellcheck="false" aria-describedby="customPrinterUriHelp customPrinterUriError" style="margin-top:0.5rem;" />
               <div class="form-help hidden" id="customPrinterUriHelp" data-i18n="custom_printer_uri_help">TCP/RAW: tcp://IP:9100 أو IPP: ipp://IP:631/ipp/print</div>
               <div class="form-error hidden" id="customPrinterUriError" role="alert"></div>
             </div>
             <div class="form-group">
               <label class="form-label" for="customTestKind" data-i18n="lbl_test_type">نوع صفحة المعايرة والاختبار</label>
-              <select id="customTestKind" class="select" onchange="updateCalWarning()">
+              <select id="customTestKind" class="select" data-action="update-cal-warning">
                 <option value="pdf-a4" data-i18n="opt_calibration_pdf">PDF test page (GDI + PDFium • rulers + sizing square + barcode)</option>
                 <option value="thermal-80mm" data-i18n="opt_cal_thermal80">Thermal 80mm Receipt Calibration (ESC/POS • 576 dots)</option>
                 <option value="thermal-58mm" data-i18n="opt_cal_thermal58">Thermal 58mm Receipt Calibration (ESC/POS • 384 dots)</option>
@@ -561,7 +561,7 @@
               </select>
             </div>
             <div>
-              <button class="btn btn-primary" id="btnCustomTestPrint" onclick="triggerCustomTestPrint()" style="width:100%;">
+              <button class="btn btn-primary" id="btnCustomTestPrint" data-action="custom-test-print" style="width:100%;">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
                 <span data-i18n="btn_send_test">إرسال صفحة المعايرة للطابعة</span>
               </button>
@@ -634,11 +634,11 @@
           </div>
 
           <div style="margin-top:1.25rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
-            <button class="btn btn-primary" id="btnSaveOrigin" onclick="saveOriginSettings()">
+            <button class="btn btn-primary" id="btnSaveOrigin" data-action="save-origin">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
               <span data-i18n="btn_save_origin">حفظ الإعدادات</span>
             </button>
-            <button class="btn btn-primary" id="btnSaveAndOpen" onclick="saveAndOpenOdoo()">
+            <button class="btn btn-primary" id="btnSaveAndOpen" data-action="save-and-open">
               <span data-i18n="btn_save_and_launch">حفظ وفتح Odoo</span>
             </button>
           </div>
@@ -656,7 +656,7 @@
             <span data-i18n="env_title">بيئة العرض المدمجة</span>
           </div>
           <div style="display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:flex-end;">
-            <button class="btn btn-sm btn-secondary" id="btnClearWebData" onclick="clearWebData()" data-i18n="btn_clear_web">مسح بيانات التصفح</button>
+            <button class="btn btn-sm btn-secondary" id="btnClearWebData" data-action="clear-web-data" data-i18n="btn_clear_web">مسح بيانات التصفح</button>
           </div>
         </div>
         <div class="card-body">
@@ -673,9 +673,9 @@
             <span data-i18n="diag_title">حزمة التشخيص الآمنة (Redacted Diagnostics Bundle)</span>
           </div>
           <div style="display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:flex-end;">
-            <button class="btn btn-sm btn-secondary" id="btnGenerateDiagnostics" onclick="loadDiagnosticsBundle()" data-i18n="btn_generate_diag">توليد الحزمة</button>
-            <button class="btn btn-sm btn-secondary" id="btnCopyDiagnostics" onclick="copyDiagnosticsBundle()" data-i18n="btn_copy_diag">نسخ JSON</button>
-            <button class="btn btn-sm btn-primary" id="btnDownloadDiagnostics" onclick="downloadDiagnosticsBundle()" data-i18n="btn_download_diag">تنزيل ملف JSON</button>
+            <button class="btn btn-sm btn-secondary" id="btnGenerateDiagnostics" data-action="generate-diagnostics" data-i18n="btn_generate_diag">توليد الحزمة</button>
+            <button class="btn btn-sm btn-secondary" id="btnCopyDiagnostics" data-action="copy-diagnostics" data-i18n="btn_copy_diag">نسخ JSON</button>
+            <button class="btn btn-sm btn-primary" id="btnDownloadDiagnostics" data-action="download-diagnostics" data-i18n="btn_download_diag">تنزيل ملف JSON</button>
           </div>
         </div>
         <div class="card-body">
@@ -691,6 +691,21 @@
   </div>
 
   <div class="toast-container" id="toastContainer"></div>
+
+  <!-- In-app confirmation dialog -->
+  <div id="confirmOverlay" class="modal-overlay hidden">
+    <div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
+      <div class="modal-head">
+        <img src="app-icon.png" alt="" width="34" height="34" style="border-radius: 9px; display: block;"/>
+        <div id="confirmTitle" class="modal-title">تأكيد الإجراء</div>
+      </div>
+      <p id="confirmMessage" class="modal-message"></p>
+      <div class="modal-actions">
+        <button class="btn btn-glass" id="confirmCancelBtn" data-action="confirm-cancel">إلغاء</button>
+        <button class="btn btn-danger" id="confirmOkBtn" data-action="confirm-ok">تأكيد</button>
+      </div>
+    </div>
+  </div>
 
 <script>
   const I18N = {
@@ -1820,13 +1835,37 @@
     const btn = ev.target && ev.target.closest ? ev.target.closest("[data-action]") : null;
     if (!btn) return;
     const action = btn.getAttribute("data-action");
-    if (action === "retry-job") { btn.disabled = true; retryJob(btn.getAttribute("data-job-id")).finally(() => { btn.disabled = false; }); }
+    if (action === "open-odoo") openOdooApp();
+    else if (action === "manual-refresh") manualRefresh();
+    else if (action === "toggle-theme") toggleTheme();
+    else if (action === "toggle-lang") toggleLang();
+    else if (action === "switch-tab") switchTab(btn.getAttribute("data-tab"));
+    else if (action === "set-job-filter") setJobFilter(btn.getAttribute("data-filter"));
+    else if (action === "clear-finished") clearFinishedJobs();
+    else if (action === "custom-test-print") triggerCustomTestPrint();
+    else if (action === "save-origin") saveOriginSettings();
+    else if (action === "save-and-open") saveAndOpenOdoo();
+    else if (action === "clear-web-data") clearWebData();
+    else if (action === "generate-diagnostics") loadDiagnosticsBundle();
+    else if (action === "copy-diagnostics") copyDiagnosticsBundle();
+    else if (action === "download-diagnostics") downloadDiagnosticsBundle();
+    else if (action === "confirm-cancel") settleConfirm(false);
+    else if (action === "confirm-ok") settleConfirm(true);
+    else if (action === "retry-job") { btn.disabled = true; retryJob(btn.getAttribute("data-job-id")).finally(() => { btn.disabled = false; }); }
     else if (action === "cancel-job") { btn.disabled = true; cancelJob(btn.getAttribute("data-job-id")).finally(() => { btn.disabled = false; }); }
     else if (action === "test-print") runPrinterTest(btn.getAttribute("data-printer"), btn.getAttribute("data-kind"));
     else if (action === "inspect-forms") inspectForms(btn.getAttribute("data-printer"), Number(btn.getAttribute("data-idx")));
     else if (action === "toggle-settings") toggleSettings(btn);
     else if (action === "save-settings") { btn.disabled = true; saveSettings(btn).finally(() => { btn.disabled = false; }); }
   });
+  document.addEventListener("change", (ev) => {
+    const el = ev.target && ev.target.closest ? ev.target.closest("[data-action]") : null;
+    if (!el) return;
+    const action = el.getAttribute("data-action");
+    if (action === "test-printer-change") onTestPrinterChange();
+    else if (action === "update-cal-warning") updateCalWarning();
+  });
+  document.getElementById("confirmOverlay").addEventListener("click", confirmOverlayClicked);
 
   function isRawTestKind(kind) {
     return kind !== "pdf-a4" && kind !== "pdf" && kind !== "gdi";
@@ -2410,20 +2449,5 @@
   setInterval(() => refreshAll({ silent: true }), 5000);
 
 </script>
-
-  <!-- In-app confirmation dialog -->
-  <div id="confirmOverlay" class="modal-overlay hidden" onclick="confirmOverlayClicked(event)">
-    <div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
-      <div class="modal-head">
-        <img src="app-icon.png" alt="" width="34" height="34" style="border-radius: 9px; display: block;"/>
-        <div id="confirmTitle" class="modal-title">تأكيد الإجراء</div>
-      </div>
-      <p id="confirmMessage" class="modal-message"></p>
-      <div class="modal-actions">
-        <button class="btn btn-glass" id="confirmCancelBtn" onclick="settleConfirm(false)">إلغاء</button>
-        <button class="btn btn-danger" id="confirmOkBtn" onclick="settleConfirm(true)">تأكيد</button>
-      </div>
-    </div>
-  </div>
 </body>
 </html>

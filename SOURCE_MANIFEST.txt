@@ -1,13 +1,13 @@
 Yaseir Print / Odoo Native Print — source manifest
 App version: 1.5.7 — Odoo addon version: 19.0.2.23.0
-Generated: 2026-11-16
+Generated: 2026-11-18
 Root directory in archive: odoo-native-print-main/
 Files listed relative to the project root, sorted, with byte sizes.
 
-5959 ./.github/workflows/ci.yml
-3457 ./.github/workflows/odoo.yml
-3982 ./.github/workflows/printer-lab.yml
-5769 ./.github/workflows/release.yml
+5795 ./.github/workflows/ci.yml
+3426 ./.github/workflows/odoo.yml
+3688 ./.github/workflows/printer-lab.yml
+5905 ./.github/workflows/release.yml
 430 ./.gitignore
 10718 ./CHANGELOG_ENGINEERING.md
 10726 ./Cargo.lock
@@ -28,7 +28,7 @@ Files listed relative to the project root, sorted, with byte sizes.
 234588 ./app/dist/fonts/thmanyahsans-Light.otf
 242116 ./app/dist/fonts/thmanyahsans-Medium.otf
 241292 ./app/dist/fonts/thmanyahsans-Regular.otf
-126301 ./app/dist/index.html
+127709 ./app/dist/index.html
 19964 ./app/dist/settings.html
 16995 ./app/dist/tabbar.html
 3589 ./app/dist/theme.css
@@ -37,7 +37,7 @@ Files listed relative to the project root, sorted, with byte sizes.
 107648 ./app/src-tauri/Cargo.lock
 852 ./app/src-tauri/Cargo.toml
 1154 ./app/src-tauri/build.rs
-537 ./app/src-tauri/capabilities/main.json
+542 ./app/src-tauri/capabilities/main.json
 680 ./app/src-tauri/capabilities/remote.json
 407 ./app/src-tauri/capabilities/toolbar.json
 9871 ./app/src-tauri/icons/128x128.png
@@ -45,15 +45,15 @@ Files listed relative to the project root, sorted, with byte sizes.
 1810 ./app/src-tauri/icons/32x32.png
 124759 ./app/src-tauri/icons/icon.ico
 45878 ./app/src-tauri/icons/icon.png
-2690 ./app/src-tauri/permissions/print.toml
+2996 ./app/src-tauri/permissions/print.toml
 1184 ./app/src-tauri/resources/pdfium-LICENSE.txt
 7586816 ./app/src-tauri/resources/pdfium.dll
-128321 ./app/src-tauri/src/commands.rs
+129169 ./app/src-tauri/src/commands.rs
 12977 ./app/src-tauri/src/config.rs
 37409 ./app/src-tauri/src/lib.rs
 182 ./app/src-tauri/src/main.rs
-1251 ./app/src-tauri/tauri.conf.json
-7776 ./app/tests/control-center.test.mjs
+1235 ./app/src-tauri/tauri.conf.json
+8117 ./app/tests/control-center.test.mjs
 7092 ./app/tests/jsdom/cc-capabilities.test.mjs
 4078 ./app/tests/jsdom/control-center-behavior.test.mjs
 2985 ./app/tests/jsdom/errortap.test.mjs
@@ -63,36 +63,36 @@ Files listed relative to the project root, sorted, with byte sizes.
 4907 ./app/tests/jsdom/watchdog.test.mjs
 288 ./crates/print-core/Cargo.toml
 4315 ./crates/print-core/src/diagnostics.rs
-22654 ./crates/print-core/src/health.rs
+22675 ./crates/print-core/src/health.rs
 986 ./crates/print-core/src/lib.rs
 2772 ./crates/print-core/src/page.rs
-22752 ./crates/print-core/src/paper.rs
-42124 ./crates/print-core/src/printer.rs
+22655 ./crates/print-core/src/paper.rs
+42270 ./crates/print-core/src/printer.rs
 4729 ./crates/print-core/src/profiles.rs
-65579 ./crates/print-core/src/queue.rs
-5721 ./crates/print-core/src/routing.rs
+66637 ./crates/print-core/src/queue.rs
+5713 ./crates/print-core/src/routing.rs
 14217 ./crates/print-core/src/security.rs
-3862 ./crates/print-core/src/state.rs
-12451 ./crates/print-core/src/worker.rs
+3914 ./crates/print-core/src/state.rs
+12487 ./crates/print-core/src/worker.rs
 192 ./crates/print-ipp/Cargo.toml
-29732 ./crates/print-ipp/src/client.rs
+33957 ./crates/print-ipp/src/client.rs
 638 ./crates/print-ipp/src/lib.rs
-14011 ./crates/print-ipp/src/proto.rs
+14045 ./crates/print-ipp/src/proto.rs
 192 ./crates/print-raw/Cargo.toml
 2850 ./crates/print-raw/src/epl.rs
 8929 ./crates/print-raw/src/escpos.rs
 764 ./crates/print-raw/src/lib.rs
-4407 ./crates/print-raw/src/mono.rs
-19129 ./crates/print-raw/src/tcp9100.rs
-8352 ./crates/print-raw/src/tspl.rs
+4433 ./crates/print-raw/src/mono.rs
+20050 ./crates/print-raw/src/tcp9100.rs
+8342 ./crates/print-raw/src/tspl.rs
 7642 ./crates/print-raw/src/zpl.rs
 305 ./crates/print-render/Cargo.toml
 7802 ./crates/print-render/src/bitmap.rs
 14360 ./crates/print-render/src/calibration.rs
-18556 ./crates/print-render/src/image.rs
+18608 ./crates/print-render/src/image.rs
 842 ./crates/print-render/src/lib.rs
-17099 ./crates/print-render/src/pdf.rs
-24354 ./crates/print-render/src/pdfium.rs
+17111 ./crates/print-render/src/pdf.rs
+24344 ./crates/print-render/src/pdfium.rs
 8092 ./crates/print-render/src/plan.rs
 6520 ./crates/print-render/tests/pdfium_render.rs
 10655 ./crates/print-win/Cargo.lock
@@ -119,8 +119,8 @@ Files listed relative to the project root, sorted, with byte sizes.
 8117 ./docs/engineering-hardening-2026-11-03.md
 10401 ./docs/engineering-mission-2026-11-03.md
 7972 ./docs/error-catalog.md
-1437 ./docs/hardware/validation-kit.md
 3584 ./docs/hardware-test-matrix.md
+1437 ./docs/hardware/validation-kit.md
 3198 ./docs/odoo-setup.md
 2442 ./docs/pdfium.md
 4847 ./docs/release-checklist.md
@@ -172,7 +172,7 @@ Files listed relative to the project root, sorted, with byte sizes.
 2322 ./odoo/native_print/tests/test_pos_keys.mjs
 2089 ./odoo/native_print/views/login_fallback_templates.xml
 14810 ./odoo/native_print/views/native_print_views.xml
-9203 ./tools/check_command_surface.py
+9577 ./tools/check_command_surface.py
 2328 ./tools/check_versions.py
 1538 ./tools/fetch-pdfium.sh
 1585 ./tools/results-2026-11-02.md

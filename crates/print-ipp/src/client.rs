@@ -206,9 +206,8 @@ fn connect_any(host: &str, port: u16, timeout: Duration) -> std::io::Result<TcpS
             Err(e) => last_err = Some(e),
         }
     }
-    Err(last_err.unwrap_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "no address")
-    }))
+    Err(last_err
+        .unwrap_or_else(|| std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "no address")))
 }
 
 impl IppClient {
@@ -236,8 +235,13 @@ impl IppClient {
             .trim_start_matches('[')
             .trim_end_matches(']');
         if bare_host.is_empty()
-            || bare_host.chars().any(|c| c.is_control() || c.is_whitespace())
-            || self.path.chars().any(|c| c.is_control() || c.is_whitespace())
+            || bare_host
+                .chars()
+                .any(|c| c.is_control() || c.is_whitespace())
+            || self
+                .path
+                .chars()
+                .any(|c| c.is_control() || c.is_whitespace())
         {
             return Err(IppError::Parse("invalid host or path".into()));
         }
@@ -265,17 +269,28 @@ impl IppClient {
         // IPP attribute responses are small; cap the read so a
         // broken or hostile endpoint cannot stream forever and grow
         // memory without bound on the worker thread.
-        const MAX_IPP_RESPONSE_BYTES: u64 = 1 << 20;
+        const MAX_IPP_RESPONSE_BYTES: usize = 1 << 20;
         let mut raw = Vec::new();
-        std::io::Read::by_ref(&mut stream)
-            .take(MAX_IPP_RESPONSE_BYTES + 1)
-            .read_to_end(&mut raw)?;
-        if raw.len() as u64 > MAX_IPP_RESPONSE_BYTES {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "IPP response exceeds the 1 MiB safety cap",
-            )
-            .into());
+        let mut buf = [0u8; 8192];
+        loop {
+            if raw.len() > MAX_IPP_RESPONSE_BYTES {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "IPP response exceeds the 1 MiB safety cap",
+                )
+                .into());
+            }
+            if http_response_complete(&raw) {
+                break;
+            }
+            let remaining = (MAX_IPP_RESPONSE_BYTES + 1) - raw.len();
+            let to_read = buf.len().min(remaining);
+            match stream.read(&mut buf[..to_read]) {
+                Ok(0) => break,
+                Ok(n) => raw.extend_from_slice(&buf[..n]),
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e.into()),
+            }
         }
         parse_http_response(&raw)
     }
@@ -405,6 +420,48 @@ fn base_format(f: &str) -> String {
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase()
+}
+
+fn http_response_complete(mut raw: &[u8]) -> bool {
+    loop {
+        let Some(split) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
+            return false;
+        };
+        let headers = String::from_utf8_lossy(&raw[..split]);
+        let Some(status) = headers
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse::<u16>().ok())
+        else {
+            return true;
+        };
+        if (100..200).contains(&status) {
+            raw = &raw[split + 4..];
+            continue;
+        }
+        if status != 200 {
+            return true;
+        }
+        let body = &raw[split + 4..];
+        let lower = headers.to_ascii_lowercase();
+        let is_chunked = lower.lines().any(|l| {
+            l.split_once(':')
+                .is_some_and(|(k, v)| k.trim() == "transfer-encoding" && v.contains("chunked"))
+        });
+        if is_chunked {
+            return body.ends_with(b"\r\n\r\n") && dechunk(body).is_ok();
+        }
+        let content_length = lower.lines().find_map(|l| {
+            l.split_once(':').and_then(|(k, v)| {
+                if k.trim() == "content-length" {
+                    v.trim().parse::<usize>().ok()
+                } else {
+                    None
+                }
+            })
+        });
+        return content_length.is_some_and(|len| body.len() >= len);
+    }
 }
 
 fn parse_http_response(mut raw: &[u8]) -> Result<Vec<u8>, IppError> {
@@ -817,9 +874,70 @@ mod tests {
     #[test]
     fn post_rejects_crlf_in_host_or_path() {
         let mut bad_host = IppClient::new("127.0.0.1\r\nEvil: 1", 631);
-        assert!(matches!(bad_host.get_printer_attributes(), Err(IppError::Parse(_))));
+        assert!(matches!(
+            bad_host.get_printer_attributes(),
+            Err(IppError::Parse(_))
+        ));
         let mut bad_path = IppClient::new("127.0.0.1", 631);
         bad_path.path = "/ipp/print\r\nEvil: 1".into();
-        assert!(matches!(bad_path.get_printer_attributes(), Err(IppError::Parse(_))));
+        assert!(matches!(
+            bad_path.get_printer_attributes(),
+            Err(IppError::Parse(_))
+        ));
+    }
+
+    #[test]
+    fn post_returns_promptly_when_server_keeps_socket_open() {
+        let response = caps_response();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut raw = Vec::new();
+            let mut buf = [0u8; 4096];
+            let header_end = loop {
+                let n = s.read(&mut buf).unwrap();
+                raw.extend_from_slice(&buf[..n]);
+                if let Some(p) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break p + 4;
+                }
+            };
+            let headers = String::from_utf8_lossy(&raw[..header_end]).to_string();
+            let len: usize = headers
+                .to_lowercase()
+                .lines()
+                .find(|l| l.starts_with("content-length:"))
+                .and_then(|l| l.split(':').nth(1))
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(0);
+            while raw.len() < header_end + len {
+                let n = s.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                raw.extend_from_slice(&buf[..n]);
+            }
+            let http = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/ipp\r\nContent-Length: {}\r\n\r\n",
+                response.len()
+            );
+            s.write_all(http.as_bytes()).unwrap();
+            s.write_all(&response).unwrap();
+            s.flush().unwrap();
+            // Intentionally keep the socket open without shutdown/drop.
+            std::thread::sleep(Duration::from_secs(2));
+        });
+
+        let mut client = IppClient::new("127.0.0.1", port);
+        client.timeout = Duration::from_secs(2);
+        let start = std::time::Instant::now();
+        let caps = client.get_printer_attributes().unwrap();
+        let elapsed = start.elapsed();
+        assert_eq!(caps.name, "MockJet");
+        assert!(
+            elapsed < Duration::from_millis(1000),
+            "expected prompt return without waiting for EOF/timeout, took {elapsed:?}"
+        );
+        let _ = server.join();
     }
 }

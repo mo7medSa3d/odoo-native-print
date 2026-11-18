@@ -398,8 +398,8 @@ pub fn detect_protocol(
     // Xprinter / Gprinter TSPL barcode/label models (must be checked BEFORE
     // generic "xprinter" / "gprinter" thermal tokens below).
     const TSPL_LABEL_MODELS: [&str; 14] = [
-        "xp-235", "xp-350", "xp-365", "xp-370", "xp-420", "xp-450", "xp-460",
-        "xp-470", "xp-490", "gp-1124", "gp-1324", "gp-1924", "gp-2120", "gp-3120",
+        "xp-235", "xp-350", "xp-365", "xp-370", "xp-420", "xp-450", "xp-460", "xp-470", "xp-490",
+        "gp-1124", "gp-1324", "gp-1924", "gp-2120", "gp-3120",
     ];
     if has_word("tsc")
         || has_word("tspl")
@@ -413,8 +413,18 @@ pub fn detect_protocol(
     // Office printer families must never be misclassified as thermal POS
     // even if a queue is named "Receipt LaserJet".
     const OFFICE_EXCLUSIONS: [&str; 12] = [
-        "laserjet", "deskjet", "officejet", "inkjet", "ecosys", "bizhub",
-        "ricoh", "xerox", "kyocera", "brother hl", "brother dcp", "brother mfc",
+        "laserjet",
+        "deskjet",
+        "officejet",
+        "inkjet",
+        "ecosys",
+        "bizhub",
+        "ricoh",
+        "xerox",
+        "kyocera",
+        "brother hl",
+        "brother dcp",
+        "brother mfc",
     ];
     if OFFICE_EXCLUSIONS.iter().any(|t| signature.contains(t)) {
         return ("gdi", "office");
@@ -1110,12 +1120,17 @@ mod tests {
             PrinterKind::Network
         );
         assert!(stable_printer_id("Generic / Text Only", r"\\POS-PC\XP-80C").is_some());
-        assert!(
-            stable_printer_id("Microsoft IPP Class Driver", "http://192.168.1.50:631/ipp/print")
-                .is_some()
-        );
+        assert!(stable_printer_id(
+            "Microsoft IPP Class Driver",
+            "http://192.168.1.50:631/ipp/print"
+        )
+        .is_some());
         assert_eq!(
-            detect_protocol(r"\\POS-PC\XP-80C", "POS Printer Driver", PrinterKind::Shared),
+            detect_protocol(
+                r"\\POS-PC\XP-80C",
+                "POS Printer Driver",
+                PrinterKind::Shared
+            ),
             ("escpos", "thermal")
         );
         assert_eq!(

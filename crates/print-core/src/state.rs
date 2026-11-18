@@ -109,8 +109,12 @@ mod tests {
         assert!(JobState::Failed.transition_to(JobState::DeadLetter).is_ok());
         assert!(JobState::DeadLetter.transition_to(JobState::Queued).is_ok());
         assert!(JobState::Failed.transition_to(JobState::Canceled).is_ok());
-        assert!(JobState::DeadLetter.transition_to(JobState::Canceled).is_ok());
+        assert!(JobState::DeadLetter
+            .transition_to(JobState::Canceled)
+            .is_ok());
         assert!(JobState::Done.transition_to(JobState::Canceled).is_err());
-        assert!(JobState::Printing.transition_to(JobState::Canceled).is_err());
+        assert!(JobState::Printing
+            .transition_to(JobState::Canceled)
+            .is_err());
     }
 }

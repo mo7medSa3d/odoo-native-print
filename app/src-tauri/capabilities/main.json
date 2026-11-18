@@ -10,7 +10,7 @@
     "allow-local-tools",
     "allow-app-shell",
     "allow-web-data-reset",
-    "allow-toolbar"
+    "allow-settings-nav"
   ],
   "webviews": [
     "tab-*"

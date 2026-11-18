@@ -49,9 +49,8 @@ pub fn resolve_printer<'a>(pattern: &str, printers: &'a [PrinterInfo]) -> Option
         .iter()
         .filter(|p| printer_pattern_matches(pattern, &p.name))
         .collect();
-    let is_healthy = |p: &&PrinterInfo| {
-        p.status == PrinterStatus::Ready || p.status == PrinterStatus::Printing
-    };
+    let is_healthy =
+        |p: &&PrinterInfo| p.status == PrinterStatus::Ready || p.status == PrinterStatus::Printing;
     if let Some(p) = matches.iter().find(|p| is_healthy(p) && p.is_default) {
         return Some(p);
     }

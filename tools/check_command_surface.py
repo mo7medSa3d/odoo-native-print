@@ -84,8 +84,13 @@ def main():
         problems.append(f"lib.rs handler != build.rs manifest: only-handler={sorted(handler - manifest)} only-manifest={sorted(manifest - handler)}")
     if handler != granted:
         problems.append(f"handler != permissions union: ungranted={sorted(handler - granted)} unknown-grants={sorted(granted - handler)}")
-    if caps["main.json"] != handler:
-        problems.append(f"local capability != handler: missing={sorted(handler - caps['main.json'])}")
+    local_union = caps["main.json"] | caps.get("toolbar.json", set())
+    if local_union != handler:
+        problems.append(f"local capabilities (main+toolbar) != handler: missing={sorted(handler - local_union)}")
+    toolbar_only = caps.get("toolbar.json", set()) - perms.get("allow-app-shell", set()) - perms.get("allow-settings-nav", set())
+    toolbar_leaked = caps["main.json"] & toolbar_only
+    if toolbar_leaked:
+        problems.append(f"main.json leaks toolbar-only commands: {sorted(toolbar_leaked)}")
     remote_extra = caps["remote.json"] - handler
     if remote_extra:
         problems.append(f"remote capability grants unknown commands: {sorted(remote_extra)}")

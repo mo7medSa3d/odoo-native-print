@@ -266,15 +266,13 @@ pub fn pick_sheet_form(forms: &[Form], page_width_mm: f64) -> Option<Form> {
             .min_by(|a, b| {
                 let a_portrait = a.size.width_mm <= a.size.height_mm;
                 let b_portrait = b.size.width_mm <= b.size.height_mm;
-                b_portrait
-                    .cmp(&a_portrait)
-                    .then_with(|| {
-                        let a_short = a.size.width_mm.min(a.size.height_mm);
-                        let b_short = b.size.width_mm.min(b.size.height_mm);
-                        a_short
-                            .partial_cmp(&b_short)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
+                b_portrait.cmp(&a_portrait).then_with(|| {
+                    let a_short = a.size.width_mm.min(a.size.height_mm);
+                    let b_short = b.size.width_mm.min(b.size.height_mm);
+                    a_short
+                        .partial_cmp(&b_short)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
             });
         if let Some(form) = office {
             return Some(form.clone());
@@ -382,7 +380,8 @@ pub fn match_paper_auto(
             // Tolerant close-sheet fallback (e.g. A4 <-> US Letter) so
             // slightly different regional sheet standards scale-to-fit instead
             // of failing the print job.
-            let within_rel = |a: f64, b: f64| (a - b).abs() / b.max(1.0) <= CLOSE_SHEET_REL_TOLERANCE;
+            let within_rel =
+                |a: f64, b: f64| (a - b).abs() / b.max(1.0) <= CLOSE_SHEET_REL_TOLERANCE;
             let orient_delta = |f: &Form| -> Option<f64> {
                 let direct = within_rel(f.size.width_mm, page.width_mm)
                     && within_rel(f.size.height_mm, page.height_mm);
@@ -565,10 +564,7 @@ mod tests {
     #[test]
     fn narrowest_roll_wins_when_multiple_rolls_present() {
         let caps = PrinterCapabilities {
-            forms: vec![
-                Form::roll("80mm Roll", 80.0),
-                Form::roll("58mm Roll", 58.0),
-            ],
+            forms: vec![Form::roll("80mm Roll", 80.0), Form::roll("58mm Roll", 58.0)],
             ..Default::default()
         };
         let selected = match_paper_auto(PageSize::new(57.5, 150.0), &caps).unwrap();

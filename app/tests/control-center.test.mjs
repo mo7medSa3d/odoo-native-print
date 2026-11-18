@@ -12,13 +12,16 @@ test("embedded Control Center JavaScript parses", () => {
   assert.doesNotThrow(() => new vm.Script(script));
 });
 
-test("inline button and field handlers resolve to functions", () => {
-  const functions = new Set([...script.matchAll(/(?:async\s+)?function\s+([\w$]+)\s*\(/g)].map(m => m[1]));
-  const handlers = [...html.matchAll(/\bon(?:click|change|input|submit)=["']([^"']+)["']/gi)];
-  assert.ok(handlers.length >= 20);
-  for (const handler of handlers) {
-    const name = handler[1].match(/^\s*([\w$]+)\s*\(/)?.[1];
-    assert.ok(name && functions.has(name), "unresolved handler: " + handler[1]);
+test("no inline event handlers remain and all data-action bindings resolve", () => {
+  const inlineHandlers = [...html.matchAll(/\bon(?:click|change|input|submit)=["']([^"']+)["']/gi)];
+  assert.equal(inlineHandlers.length, 0, "inline event handlers must be removed for strict CSP");
+  const actions = [...html.matchAll(/data-action=["']([^"']+)["']/g)].map(m => m[1]);
+  assert.ok(actions.length >= 25, "expected data-action bindings on controls");
+  assert.match(script, /document\.addEventListener\("click"/);
+  assert.match(script, /document\.addEventListener\("change"/);
+  assert.match(script, /getElementById\("confirmOverlay"\)\.addEventListener\("click", confirmOverlayClicked\)/);
+  for (const action of new Set(actions)) {
+    assert.ok(script.includes(`action === "${action}"`), "unhandled data-action: " + action);
   }
 });
 

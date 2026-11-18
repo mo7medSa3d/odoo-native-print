@@ -2983,59 +2983,83 @@ pub fn spawn_worker_loop(
             }
         }
         let mut entropy: u64 = 0x5EED_2026;
+        let mut worker_queue: Option<Queue> = None;
+        let mut last_reconcile: Option<Instant> = None;
         loop {
             let mut did_work = false;
-            match Queue::open(&db_path) {
-                Ok(mut worker_queue) => {
-                    // Fail jobs wedged in a working state by a dead or
-                    // stuck worker (RECONCILED_STALE) instead of letting
-                    // them hang forever; fresh jobs are never touched.
-                    if let Err(e) = worker_queue.reconcile_stale() {
-                        eprintln!("Yaseir Print: stale-job reconciliation failed: {e}");
+            if worker_queue.is_none() {
+                match Queue::open(&db_path) {
+                    Ok(q) => worker_queue = Some(q),
+                    Err(e) => {
+                        eprintln!("Yaseir Print: cannot open the print queue: {e}");
                     }
-                    let printers = match worker_queue.queued_printers() {
+                }
+            }
+            let mut reset_queue = false;
+            if let Some(queue) = worker_queue.as_mut() {
+                // Fail jobs wedged in a working state by a dead or
+                // stuck worker (RECONCILED_STALE) instead of letting
+                // them hang forever; fresh jobs are never touched.
+                if last_reconcile.map_or(true, |t| t.elapsed() >= Duration::from_secs(15)) {
+                    last_reconcile = Some(Instant::now());
+                    if let Err(e) = queue.reconcile_stale() {
+                        eprintln!("Yaseir Print: stale-job reconciliation failed: {e}");
+                        reset_queue = true;
+                    }
+                }
+                let printers = if reset_queue {
+                    Vec::new()
+                } else {
+                    match queue.queued_printers() {
                         Ok(p) => p,
                         Err(e) => {
                             eprintln!("Yaseir Print: queued_printers failed: {e}");
+                            reset_queue = true;
                             Vec::new()
                         }
+                    }
+                };
+                for printer in printers {
+                    entropy = entropy.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    let mut worker = Worker {
+                        queue,
+                        backend: NativePrintBackend {
+                            db_path: db_path.clone(),
+                            config_dir: config_dir.clone(),
+                        },
+                        cfg: WorkerConfig::default(),
+                        entropy,
                     };
-                    for printer in printers {
-                        entropy = entropy.wrapping_mul(6364136223846793005).wrapping_add(1);
-                        let mut worker = Worker {
-                            queue: &mut worker_queue,
-                            backend: NativePrintBackend {
-                                db_path: db_path.clone(),
-                                config_dir: config_dir.clone(),
-                            },
-                            cfg: WorkerConfig::default(),
-                            entropy,
-                        };
-                        // Panic isolation: one bad job or backend panic
-                        // must never kill the only worker thread and
-                        // silently stop all printing for the session.
-                        let outcome =
-                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                worker.run_once(&printer)
-                            }));
-                        match outcome {
-                            Ok(Ok(o)) => {
-                                if o != Outcome::Idle {
-                                    did_work = true;
-                                }
+                    // Panic isolation: one bad job or backend panic
+                    // must never kill the only worker thread and
+                    // silently stop all printing for the session.
+                    let outcome =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            worker.run_once(&printer)
+                        }));
+                    match outcome {
+                        Ok(Ok(o)) => {
+                            if o != Outcome::Idle {
+                                did_work = true;
                             }
-                            Ok(Err(e)) => {
-                                eprintln!("Yaseir Print: worker error on {printer}: {e}");
+                        }
+                        Ok(Err(e)) => {
+                            eprintln!("Yaseir Print: worker error on {printer}: {e}");
+                            if matches!(e, print_core::QueueError::Db(_)) {
+                                reset_queue = true;
+                                break;
                             }
-                            Err(_) => {
-                                eprintln!("Yaseir Print: worker panicked on {printer}; continuing");
-                            }
+                        }
+                        Err(_) => {
+                            eprintln!("Yaseir Print: worker panicked on {printer}; resetting queue");
+                            reset_queue = true;
+                            break;
                         }
                     }
                 }
-                Err(e) => {
-                    eprintln!("Yaseir Print: cannot open the print queue: {e}");
-                }
+            }
+            if reset_queue {
+                worker_queue = None;
             }
             if !did_work {
                 let (lock, cvar) = &*wake;

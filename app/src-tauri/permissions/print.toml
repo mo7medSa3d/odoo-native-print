@@ -50,6 +50,14 @@ commands.allow = [
 ]
 
 [[permission]]
+identifier = "allow-settings-nav"
+description = "Local settings and boot pages in tab-* webviews: read lightweight app identity and open the configured Odoo origin, without exposing tab-bar management or history navigation."
+commands.allow = [
+    "app_identity",
+    "open_odoo_origin",
+]
+
+[[permission]]
 identifier = "allow-toolbar"
 description = "Tab bar webview only (local, app-bundled tabbar.html): browser-style navigation of the active tab, tab management, the lightweight app identity, and switching between Odoo and the Control Center. Never granted to the remote Odoo origin."
 commands.allow = [

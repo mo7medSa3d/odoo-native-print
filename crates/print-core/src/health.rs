@@ -160,7 +160,9 @@ impl PrinterHealth {
         // observation): it is stale at every instant, including
         // before its own timestamp, so it can never be displayed
         // as a live reading.
-        self.ttl_secs == 0 || i64::try_from(self.ttl_secs).is_ok_and(|ttl| now_unix.saturating_sub(self.observed_at) > ttl)
+        self.ttl_secs == 0
+            || i64::try_from(self.ttl_secs)
+                .is_ok_and(|ttl| now_unix.saturating_sub(self.observed_at) > ttl)
     }
 
     pub fn blocks_printing(&self) -> bool {
@@ -585,7 +587,7 @@ mod tests {
             1000,
         );
         assert!(!warming.blocks_printing());
-        assert!(warming.blocks_printing_if_fresh(1010) == false);
+        assert!(!warming.blocks_printing_if_fresh(1010));
 
         let stale_err = PrinterHealth::from_ipp(5, &["media-empty"], Some(false), 1000);
         assert!(stale_err.blocks_printing_if_fresh(1010));

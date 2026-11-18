@@ -135,6 +135,33 @@ pub struct JobOptions {
     pub source_width_mm: Option<f64>,
 }
 
+impl JobOptions {
+    pub fn validate(&self) -> Result<(), QueueError> {
+        if let Some(w) = self.media_roll_width_mm {
+            if !w.is_finite() {
+                return Err(QueueError::BadOptions(format!(
+                    "non-finite media_roll_width_mm: {w}"
+                )));
+            }
+        }
+        if let Some(g) = self.label_gap_mm {
+            if !g.is_finite() {
+                return Err(QueueError::BadOptions(format!(
+                    "non-finite label_gap_mm: {g}"
+                )));
+            }
+        }
+        if let Some(w) = self.source_width_mm {
+            if !w.is_finite() {
+                return Err(QueueError::BadOptions(format!(
+                    "non-finite source_width_mm: {w}"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Default for JobOptions {
     fn default() -> Self {
         Self {
@@ -464,10 +491,7 @@ impl Queue {
             "DELETE FROM job_events WHERE job_id IN (SELECT id FROM jobs WHERE state IN ('done','canceled'))",
             [],
         )?;
-        let removed = tx.execute(
-            "DELETE FROM jobs WHERE state IN ('done','canceled')",
-            [],
-        )? as u64;
+        let removed = tx.execute("DELETE FROM jobs WHERE state IN ('done','canceled')", [])? as u64;
         tx.commit()?;
         Ok(removed)
     }
@@ -664,7 +688,9 @@ impl Queue {
             "INSERT INTO payloads(job_id, kind, data, payload_hash) VALUES(?1,?2,?3,?4)",
             params![job.id, kind, data, payload_fingerprint(data)],
         )?;
-        let json = serde_json::to_string(opts).map_err(|e| QueueError::BadOptions(e.to_string()))?;
+        opts.validate()?;
+        let json =
+            serde_json::to_string(opts).map_err(|e| QueueError::BadOptions(e.to_string()))?;
         tx.execute(
             "INSERT INTO job_options(job_id, options_json) VALUES(?1,?2)",
             params![job.id, json],
@@ -733,7 +759,9 @@ impl Queue {
 
     /// Store execution options for a job.
     pub fn store_options(&mut self, job_id: &str, opts: &JobOptions) -> Result<(), QueueError> {
-        let json = serde_json::to_string(opts).map_err(|e| QueueError::BadOptions(e.to_string()))?;
+        opts.validate()?;
+        let json =
+            serde_json::to_string(opts).map_err(|e| QueueError::BadOptions(e.to_string()))?;
         let job_exists: bool = self.conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM jobs WHERE id=?1)",
             params![job_id],
@@ -1520,17 +1548,30 @@ mod tests {
     #[test]
     fn cancel_job_works_from_failed_and_dead_letter() {
         let mut q = Queue::in_memory().unwrap();
-        q.enqueue_with_payload(&job("f1", "k-f1", "p1", 0), "pdf", b"PDF", &JobOptions::default())
+        q.enqueue_with_payload(
+            &job("f1", "k-f1", "p1", 0),
+            "pdf",
+            b"PDF",
+            &JobOptions::default(),
+        )
+        .unwrap();
+        q.set_state("f1", JobState::Failed, Some("OFFLINE"))
             .unwrap();
-        q.set_state("f1", JobState::Failed, Some("OFFLINE")).unwrap();
         q.cancel_job("f1").unwrap();
         assert_eq!(q.get("f1").unwrap().state, JobState::Canceled);
         assert!(q.payload("f1").unwrap().is_none());
 
-        q.enqueue_with_payload(&job("d1", "k-d1", "p1", 0), "pdf", b"PDF", &JobOptions::default())
+        q.enqueue_with_payload(
+            &job("d1", "k-d1", "p1", 0),
+            "pdf",
+            b"PDF",
+            &JobOptions::default(),
+        )
+        .unwrap();
+        q.set_state("d1", JobState::Failed, Some("OFFLINE"))
             .unwrap();
-        q.set_state("d1", JobState::Failed, Some("OFFLINE")).unwrap();
-        q.set_state("d1", JobState::DeadLetter, Some("OFFLINE")).unwrap();
+        q.set_state("d1", JobState::DeadLetter, Some("OFFLINE"))
+            .unwrap();
         q.cancel_job("d1").unwrap();
         assert_eq!(q.get("d1").unwrap().state, JobState::Canceled);
         assert!(q.payload("d1").unwrap().is_none());
@@ -1548,8 +1589,13 @@ mod tests {
     #[test]
     fn purge_stale_failed_jobs_falls_back_to_updated_at_without_events() {
         let mut q = Queue::in_memory().unwrap();
-        q.enqueue_with_payload(&job("ev0", "k-ev0", "P1", 0), "pdf", b"%PDF", &JobOptions::default())
-            .unwrap();
+        q.enqueue_with_payload(
+            &job("ev0", "k-ev0", "P1", 0),
+            "pdf",
+            b"%PDF",
+            &JobOptions::default(),
+        )
+        .unwrap();
         q.set_state("ev0", JobState::Failed, Some("BOOM")).unwrap();
         q.conn
             .execute("DELETE FROM job_events WHERE job_id='ev0'", [])

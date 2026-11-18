@@ -87,7 +87,8 @@ fn find_obj_header(chunk: &str) -> Option<(u32, u32, usize)> {
     while let Some(rel) = chunk[search_from..].find(" obj") {
         let pos = search_from + rel;
         let after = chunk[pos + 4..].chars().next();
-        let valid_after = after.is_none_or(|c| c.is_ascii_whitespace() || matches!(c, '<' | '[' | '/'));
+        let valid_after =
+            after.is_none_or(|c| c.is_ascii_whitespace() || matches!(c, '<' | '[' | '/'));
         if valid_after {
             let mut nums = chunk[..pos].split_whitespace().rev();
             if let (Some(gen_str), Some(id_str)) = (nums.next(), nums.next()) {

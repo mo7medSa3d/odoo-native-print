@@ -339,7 +339,10 @@ pub fn parse_message(bytes: &[u8]) -> Result<IppMessage, String> {
         let value_len_at = name_start
             .checked_add(name_len)
             .ok_or_else(|| format!("attribute name overflow at {pos}"))?;
-        if value_len_at.checked_add(2).is_none_or(|end| end > bytes.len()) {
+        if value_len_at
+            .checked_add(2)
+            .is_none_or(|end| end > bytes.len())
+        {
             return Err(format!("truncated attribute name at {pos}"));
         }
         let name = String::from_utf8_lossy(&bytes[name_start..value_len_at]).to_string();
