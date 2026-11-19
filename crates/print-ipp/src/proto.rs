@@ -431,9 +431,10 @@ mod tests {
 
         let mut too_many_groups = Vec::new();
         write_header(&mut too_many_groups, 0x0000, 1);
-        for _ in 0..=MAX_IPP_GROUPS {
-            too_many_groups.push(tag::GROUP_OPERATION);
-        }
+        too_many_groups.extend(std::iter::repeat_n(
+            tag::GROUP_OPERATION,
+            MAX_IPP_GROUPS + 1,
+        ));
         too_many_groups.push(tag::END_OF_ATTRIBUTES);
         assert!(parse_message(&too_many_groups).is_err());
     }

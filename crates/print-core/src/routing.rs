@@ -39,10 +39,7 @@ pub fn printer_pattern_matches(pattern: &str, printer_name: &str) -> bool {
         }
     }
     // A trailing segment (after the last *) must anchor at the end.
-    if !last_seg.is_empty() && !n.ends_with(last_seg) {
-        return false;
-    }
-    true
+    last_seg.is_empty() || n.ends_with(last_seg)
 }
 
 /// Pick the best printer satisfying a pattern. Healthy printers win over

@@ -196,7 +196,11 @@ pub fn decode_png(bytes: &[u8]) -> Result<Canvas, ImageError> {
             return Err(ImageError::BadFrame);
         }
         buf.truncate(px_count);
-        return Ok(Canvas { width, height, px: buf });
+        return Ok(Canvas {
+            width,
+            height,
+            px: buf,
+        });
     }
     let data = &buf[..frame_len];
     let mut px = vec![255u8; px_count];
