@@ -58,4 +58,4 @@ Target: Odoo 19 (17/18 expected to work; verify on spike S2 environments).
    `point_of_sale.receipt` appears. Repeat with **Automatic Receipt
    Printing** enabled in the POS settings, and reprint from the Orders
    list. Repeat in a normal browser: default POS printing happens.
-5. Log the results in docs/spikes/S1-S8.md and update its status.
+5. Record verification results against `docs/release-checklist.md`.

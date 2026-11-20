@@ -15,8 +15,7 @@ class NativePrintDevice(models.Model):
     the first time a printer produces a job; there is no
     configuration and no manual workflow for it. Managers get one
     small maintenance list (Printers, under the Native Print menu)
-    for the single lifecycle task the sync cannot do: deleting the
-    stale row of a renamed or retired printer (audit M2).
+    to delete stale rows for renamed or retired printers.
 
     Printing itself NEVER reads this registry: the target printer is
     resolved live on the user's PC through the desktop bridge (the
@@ -34,14 +33,14 @@ class NativePrintDevice(models.Model):
             with self.env.cr.savepoint():
                 self.env.cr.execute(
                     "SELECT 1 FROM information_schema.tables "
-                    "WHERE table_schema = 'public' AND table_name = %s",
+                    "WHERE table_schema = current_schema() AND table_name = %s",
                     [self._table],
                 )
                 if not self.env.cr.fetchone():
                     return
                 self.env.cr.execute(
                     "SELECT column_name FROM information_schema.columns "
-                    "WHERE table_schema = 'public' AND table_name = %s",
+                    "WHERE table_schema = current_schema() AND table_name = %s",
                     [self._table],
                 )
                 existing = {row[0] for row in self.env.cr.fetchall()}
@@ -77,12 +76,8 @@ class NativePrintDevice(models.Model):
         default=lambda s: s.env.company,
         string="Company",
     )
-    # Capability snapshot (2026-11-05): the desktop app reports what
-    # the printer's own driver declares — protocol, class, paper
-    # forms and trays — so the printer arrives in Odoo WITH its sizes
-    # and trays attached. Read-only reference for people browsing the
-    # log; printing still resolves everything live on the PC and
-    # never reads these fields.
+    # Read-only driver capability snapshot synced from the desktop app;
+    # printing always resolves capabilities live on the workstation.
     protocol = fields.Char(string="Protocol")
     printer_class = fields.Char(string="Printer Class")
     forms_summary = fields.Text(string="Paper Sizes")

@@ -334,7 +334,8 @@ impl PrinterHealth {
                 "input-tray-missing" | "output-full" | "intervention-needed" => {
                     set.insert(HealthCondition::UserIntervention);
                 }
-                "media-needed"
+                ""
+                | "media-needed"
                 | "media-ready"
                 | "none"
                 | "other"
@@ -595,7 +596,7 @@ mod tests {
 
         let warming = PrinterHealth::from_ipp(
             3,
-            &["warming-up", "ink-low", "connecting-to-device", "other"],
+            &["", "warming-up", "ink-low", "connecting-to-device", "other"],
             Some(true),
             1000,
         );

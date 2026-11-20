@@ -38,7 +38,7 @@ assert.match(k3, /-a2$/, "reprint after terminal is a fresh attempt");
 assert.notStrictEqual(k3, k1);
 // Different orders never share a key.
 assert.notStrictEqual(globalThis.__k("Order_2", "7"), globalThis.__k("Order_1", "7"));
-// Audit H1: the SAME order printed by a DIFFERENT cashier is a
+// Per-cashier scoping: the SAME order printed by a DIFFERENT cashier is a
 // different job — different key, and its own in-flight record (the
 // first cashier's record must not dedupe or clear it).
 const other = globalThis.__k("Order_1", "9");
@@ -162,6 +162,258 @@ assert.strictEqual(
         globalThis.window = prevWindow;
         globalThis.fetch = prevFetch;
         globalThis.FileReader = prevFileReader;
+    }
+}
+
+
+// Regression tests for POS_CAPTURE_FAILED root causes:
+// 1) inlineStyles strips external url(...) from cssText while preserving data: URLs.
+// 2) inlineMedia strips srcset from cloned <img> elements.
+// 3) elementToPngBytes uses data:image/svg+xml (never URL.createObjectURL which taints WebView2 canvas).
+// 4) renderReceiptCanvasFallback produces PNG bytes via 2D canvas without SVG.
+{
+    const helpers = [
+        "const MEDIA_FETCH_TIMEOUT_MS = 8000;",
+        'const TRANSPARENT_PIXEL = "data:image/png;base64,TRANSPARENT";',
+        extract("inlineStyles"),
+        extract("fetchAsDataUrl"),
+        extract("inlineMedia"),
+        extract("canvasToPngBytes"),
+        extract("withConnectedElement"),
+        extract("elementToPngBytes"),
+        extract("renderReceiptCanvasFallback"),
+        "globalThis.__testCapture = { inlineStyles, inlineMedia, elementToPngBytes, renderReceiptCanvasFallback };",
+    ].join("\n");
+    eval(helpers);
+
+    const removedAttrs = [];
+    const makeEl = (tag, { attrs = {}, bg = "none", cssText = "", children = [] } = {}) => {
+        const el = {
+            tagName: tag.toUpperCase(),
+            isConnected: true,
+            offsetWidth: 300,
+            offsetHeight: 400,
+            scrollHeight: 400,
+            _attrs: { ...attrs },
+            _bg: bg,
+            _cssText: cssText,
+            style: {},
+            children,
+            get src() { return this._attrs.src || ""; },
+            get currentSrc() { return this._attrs.src || ""; },
+            getAttribute(k) { return this._attrs[k] ?? null; },
+            setAttribute(k, v) { this._attrs[k] = String(v); },
+            removeAttribute(k) { removedAttrs.push(k); delete this._attrs[k]; },
+            getBoundingClientRect() { return { left: 0, top: 0, right: 300, bottom: 400, width: 300, height: 400 }; },
+            querySelectorAll(sel) {
+                const tags = sel.split(",").map((s) => s.trim().toUpperCase());
+                const out = [];
+                const walk = (n) => {
+                    for (const c of n.children) {
+                        if (tags.includes("*") || tags.includes(c.tagName)) out.push(c);
+                        walk(c);
+                    }
+                };
+                walk(this);
+                return out;
+            },
+            cloneNode() {
+                return makeEl(tag, {
+                    attrs: { ...this._attrs },
+                    bg: this._bg,
+                    cssText: this._cssText,
+                    children: this.children.map((c) => c.cloneNode(true)),
+                });
+            },
+        };
+        return el;
+    };
+
+    const srcImg = makeEl("img", { attrs: { src: "https://shop.test/logo.png", srcset: "https://shop.test/logo@2x.png 2x" } });
+    const srcRoot = makeEl("div", {
+        attrs: { dir: "rtl" },
+        cssText: 'color:black;mask-image:url("https://shop.test/mask.svg");background-image:url("data:image/png;base64,AA==");',
+        children: [srcImg],
+    });
+
+    const prevWindow = globalThis.window;
+    const prevDocument = globalThis.document;
+    const prevFetch = globalThis.fetch;
+    const prevFileReader = globalThis.FileReader;
+    const prevImage = globalThis.Image;
+    const prevXMLSerializer = globalThis.XMLSerializer;
+    const prevURL = globalThis.URL;
+
+    let createObjectUrlCalled = false;
+    let loadedImgSrc = "";
+    globalThis.window = {
+        getComputedStyle(node) {
+            return { cssText: node._cssText, backgroundImage: node._bg, direction: "rtl", length: 0 };
+        },
+    };
+    globalThis.document = {
+        documentElement: { dir: "rtl", lang: "ar" },
+        createElement(tag) {
+            if (tag === "canvas") {
+                return {
+                    width: 0,
+                    height: 0,
+                    getContext() {
+                        return {
+                            fillStyle: "",
+                            fillRect() {},
+                            scale() {},
+                            drawImage() {},
+                            fillText() {},
+                        };
+                    },
+                    toBlob(cb) {
+                        cb({ arrayBuffer: async () => new Uint8Array([137, 80, 78, 71]).buffer });
+                    },
+                };
+            }
+            return makeEl(tag);
+        },
+    };
+    globalThis.fetch = async () => ({ ok: false });
+    globalThis.FileReader = class { readAsDataURL() { this.onload(); } };
+    globalThis.XMLSerializer = class { serializeToString(node) { return `<div style="${node.getAttribute("style")}" dir="${node.getAttribute("dir")}"></div>`; } };
+    globalThis.Image = class {
+        set src(v) {
+            loadedImgSrc = v;
+            Promise.resolve().then(() => this.onload && this.onload());
+        }
+    };
+    globalThis.URL = {
+        createObjectURL() { createObjectUrlCalled = true; return "blob:bad"; },
+        revokeObjectURL() {},
+    };
+    try {
+        const bytes = await globalThis.__testCapture.elementToPngBytes(srcRoot, 2);
+        assert.deepStrictEqual(bytes, [137, 80, 78, 71], "SVG capture produces PNG bytes");
+        assert.strictEqual(createObjectUrlCalled, false, "must never use URL.createObjectURL for foreignObject SVG");
+        assert.ok(loadedImgSrc.startsWith("data:image/svg+xml;charset=utf-8,"), "uses data:image/svg+xml URI");
+        assert.ok(!decodeURIComponent(loadedImgSrc).includes("mask.svg"), "external CSS url(...) stripped");
+        assert.ok(decodeURIComponent(loadedImgSrc).includes("data:image/png;base64,AA=="), "data: CSS url preserved");
+        assert.ok(removedAttrs.includes("srcset"), "srcset stripped from cloned img");
+
+        const fallbackBytes = await globalThis.__testCapture.renderReceiptCanvasFallback(srcRoot, 2);
+        assert.deepStrictEqual(fallbackBytes, [137, 80, 78, 71], "2D canvas fallback produces PNG bytes");
+
+        // Detached element with an existing offscreen parent is temporarily mounted and restored.
+        let restoredToOrigParent = false;
+        let hostRemoved = false;
+        const origParent = {
+            insertBefore(child) {
+                if (child === detachedEl) restoredToOrigParent = true;
+            },
+        };
+        const detachedEl = makeEl("div", { cssText: "color:black;" });
+        detachedEl.isConnected = false;
+        detachedEl.parentNode = origParent;
+        detachedEl.nextSibling = null;
+        globalThis.document.body = { appendChild() {} };
+        const origCreateEl = globalThis.document.createElement;
+        globalThis.document.createElement = (tag) => {
+            const el = origCreateEl(tag);
+            if (tag === "div") {
+                el.appendChild = () => {};
+                el.remove = () => { hostRemoved = true; };
+            }
+            return el;
+        };
+        const detachedBytes = await globalThis.__testCapture.elementToPngBytes(detachedEl, 1);
+        assert.deepStrictEqual(detachedBytes, [137, 80, 78, 71], "detached element captures PNG bytes");
+        assert.strictEqual(restoredToOrigParent, true, "detached element restored to original parent after capture");
+        assert.strictEqual(hostRemoved, true, "temporary offscreen host removed after capture");
+        globalThis.document.createElement = origCreateEl;
+        delete globalThis.document.body;
+
+        // Hung SVG Image load times out instead of locking inFlightPosKeys forever.
+        const origImage2 = globalThis.Image;
+        const origSetTimeoutPos = globalThis.setTimeout;
+        globalThis.Image = class { set src(_v) { /* never fires onload/onerror */ } };
+        globalThis.setTimeout = (fn, ms) => {
+            if (ms === 8000) {
+                queueMicrotask(fn);
+                return 9001;
+            }
+            return origSetTimeoutPos(fn, ms);
+        };
+        try {
+            let timedOut = false;
+            try {
+                await globalThis.__testCapture.elementToPngBytes(srcRoot, 1);
+            } catch (err) {
+                timedOut = /timed out/i.test(err.message);
+            }
+            assert.strictEqual(timedOut, true, "hung SVG Image load rejects with timeout");
+        } finally {
+            globalThis.Image = origImage2;
+            globalThis.setTimeout = origSetTimeoutPos;
+        }
+    } finally {
+        globalThis.window = prevWindow;
+        globalThis.document = prevDocument;
+        globalThis.fetch = prevFetch;
+        globalThis.FileReader = prevFileReader;
+        globalThis.Image = prevImage;
+        globalThis.XMLSerializer = prevXMLSerializer;
+        globalThis.URL = prevURL;
+    }
+}
+
+// Event-driven systray refresh from POS watcher and declined attempts.
+{
+    const rpcCalls = [];
+    let jobUpdatedEvents = 0;
+    const prevWindow = globalThis.window;
+    const prevSetTimeout = globalThis.setTimeout;
+    globalThis.window = {
+        dispatchEvent(ev) {
+            if (ev && ev.type === "native_print:job_updated") jobUpdatedEvents++;
+            return true;
+        },
+    };
+    globalThis.setTimeout = (fn) => { fn(); return 0; };
+    try {
+        const posWatchHelpers = [
+            'const POS_RECEIPT_SOURCE = "point_of_sale.receipt";',
+            'const TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);',
+            'const _t = (s) => s;',
+            'const notifyUser = () => {};',
+            'const notifyJobUpdated = () => { if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") window.dispatchEvent(typeof CustomEvent === "function" ? new CustomEvent("native_print:job_updated") : new Event("native_print:job_updated")); };',
+            'const rpc = async (url, params) => { globalThis.__posRpcCalls.push({ url, params }); return { ok: true }; };',
+            extract("finishPosReceiptAttempt"),
+            extract("watchPosJob"),
+            extract("postPosDeclined"),
+            "globalThis.__watchPosJob = watchPosJob; globalThis.__postPosDeclined = postPosDeclined;",
+        ].join("\n");
+        globalThis.__posRpcCalls = rpcCalls;
+        eval(posWatchHelpers);
+
+        const order = { _printed: false };
+        await globalThis.__watchPosJob(
+            { jobDetail: async () => ({ state: "done", attempts: 1 }) },
+            "pos-ev-1",
+            { printer_pattern: "EPSON", copies: 1, mode: "escpos" },
+            128,
+            "Order_Ev1",
+            "EPSON",
+            null,
+            "7",
+            order,
+        );
+        assert.strictEqual(order._printed, true, "watchPosJob marks order printed on done");
+        assert.strictEqual(jobUpdatedEvents, 1, "watchPosJob dispatches native_print:job_updated on done");
+
+        globalThis.__postPosDeclined("pos-decl-1", "POS_NO_PRINTER", "Order_Ev2", "7", "EPSON", "escpos");
+        await new Promise((r) => prevSetTimeout(r, 10));
+        assert.strictEqual(jobUpdatedEvents, 2, "postPosDeclined dispatches native_print:job_updated");
+    } finally {
+        globalThis.window = prevWindow;
+        globalThis.setTimeout = prevSetTimeout;
+        delete globalThis.__posRpcCalls;
     }
 }
 

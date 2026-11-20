@@ -8,14 +8,8 @@ JOB_STATES = {
     "done", "failed", "canceled", "dead_letter",
 }
 
-# Only `done` and `canceled` are final. `failed` and
-# `dead_letter` are retryable outcomes, not terminal states:
-# the desktop worker re-queues a failed job automatically
-# (print-core: failed -> queued) and the operator may retry a
-# dead-letter job from the Control Center (dead_letter ->
-# queued). Treating them as final here used to discard the
-# retry's outcome posts, so a job that failed once and then
-# printed stayed `failed` in Odoo forever (audit, 2026-11-04).
+# Only `done` and `canceled` are final; `failed` and `dead_letter`
+# can re-enter `queued` when retried by the desktop worker or operator.
 TERMINAL_STATES = {"done", "canceled"}
 
 # The formal job state machine (mirrors the desktop queue, print-core):
@@ -52,18 +46,39 @@ def _safe_source_ids(val):
     """Sanitise a comma-separated record-id list from a status post."""
     if not val or not isinstance(val, str):
         return False
-    ids = [part.strip() for part in val.split(",")]
-    ids = [part for part in ids if part.isdigit()]
+    ids = []
+    total_len = 0
+    for raw in val.split(","):
+        part = raw.strip()
+        if not (part.isascii() and part.isdigit()):
+            continue
+        rec_id = int(part)
+        if not (1 <= rec_id <= 2_147_483_647):
+            continue
+        token = str(rec_id)
+        added_len = len(token) + (1 if ids else 0)
+        if len(ids) >= 200 or total_len + added_len > 1024:
+            break
+        ids.append(token)
+        total_len += added_len
     if not ids:
         return False
-    return ",".join(ids[:200])[:1024]
+    return ",".join(ids)
 
 
 def _safe_model_name(val):
     if not val or not isinstance(val, str):
         return False
     val = val.strip()
-    if len(val) > 128 or not all(c.isalnum() or c in "._" for c in val):
+    if (
+        not val
+        or len(val) > 128
+        or not val.isascii()
+        or not all(c.isalnum() or c in "._" for c in val)
+        or val[0] in "._"
+        or val[-1] in "._"
+        or ".." in val
+    ):
         return False
     return val
 
@@ -158,13 +173,10 @@ class NativePrintController(http.Controller):
                    mode=None, **kwargs):
         if not _has_print_access():
             return {"ok": False, "error": "forbidden"}
-        if (
-            not idempotency_key
-            or not isinstance(idempotency_key, str)
-            or not idempotency_key.strip()
-            or len(idempotency_key) > 128
-            or state not in JOB_STATES
-        ):
+        if not isinstance(idempotency_key, str):
+            return {"ok": False, "error": "bad_request"}
+        idempotency_key = idempotency_key.strip()
+        if not idempotency_key or len(idempotency_key) > 128 or state not in JOB_STATES:
             return {"ok": False, "error": "bad_request"}
         company = request.env.company.id
         Job = request.env["native.print.job"].sudo().with_context(
@@ -193,10 +205,13 @@ class NativePrintController(http.Controller):
             if isinstance(report_name, str) and report_name.strip()
             else False
         )
-        vals = {
-            "state": state,
-            "error_code": error_code.strip()[:128] if isinstance(error_code, str) and error_code.strip() else False,
-        }
+        vals = {"state": state}
+        if isinstance(error_code, str) and error_code.strip():
+            vals["error_code"] = error_code.strip()[:128]
+        elif not job or state != job.state or error_code == "":
+            # Clear stale error_code on state transitions or explicit clear,
+            # but preserve it on same-state metadata reposts where error_code is omitted.
+            vals["error_code"] = False
         if device_name:
             vals["device"] = device_name
         # `duplex=None` means leave the driver default in force. Only a
@@ -244,11 +259,11 @@ class NativePrintController(http.Controller):
                 "source_model": _safe_model_name(source_model),
                 "source_ids": _safe_source_ids(source_ids),
                 "copies": parsed_copies,
-                "paper": str(paper)[:64] if isinstance(paper, str)
-                         and paper else False,
+                "paper": paper.strip()[:64] if isinstance(paper, str)
+                         and paper.strip() else False,
                 "duplex": bool(duplex) if isinstance(duplex, bool) else False,
                 "duplex_configured": isinstance(duplex, bool),
-                "color": bool(color) if color is not None else True,
+                "color": color if isinstance(color, bool) else True,
                 "mode": mode if mode in PRINT_MODES else False,
                 "pages": parsed_pages if (parsed_pages and parsed_pages > 0) else 1,
                 "byte_size": max(0, parsed_bytes or 0),
@@ -272,16 +287,10 @@ class NativePrintController(http.Controller):
                 ], limit=1)
                 job = _lock_status_job(job)
                 if not job:
-                    # The winning transaction has not committed yet
-                    # (READ COMMITTED): there is no row to update, so
-                    # the post must not claim success for a job that
-                    # does not exist — the client reposts (audit L2).
+                    # Winning transaction not yet committed (READ COMMITTED): ask client to retry.
                     return {"ok": False, "error": "retry"}
-                # The guards above ran while no job existed: re-apply
-                # them to the winner's row before the update path, or
-                # the loser of the create race could overwrite a
-                # just-finished job's terminal state, another user's
-                # job, or its monotonic attempt count (audit M3).
+                # Re-apply ownership, terminal-state, transition, and attempt guards
+                # against the winner's row before updating.
                 if job.user_id.id != request.env.user.id:
                     return {"ok": False, "error": "forbidden"}
                 if job.state in TERMINAL_STATES:
@@ -298,6 +307,8 @@ class NativePrintController(http.Controller):
                     vals.pop("duplex_configured", None)
                 if job.device_id:
                     vals.pop("device_id", None)
+                if job.state == state and error_code is None:
+                    vals.pop("error_code", None)
         if job and not created:
             # A later post may carry the source reference the creating
             # post missed (or vice versa): fill blanks, never overwrite.
@@ -325,9 +336,8 @@ class NativePrintController(http.Controller):
                     forms=None, trays=None, **kwargs):
         """Attach a driver capability snapshot to a registry device.
 
-        The desktop app reports what the selected printer's driver
-        declares (paper forms + trays) so the printer is visible in
-        Odoo with its full sizes and trays (owner brief, 2026-11-05).
+        The desktop app reports the selected printer's driver capabilities
+        (paper forms and trays) for read-only display in Odoo.
         Upsert on the same (name, company) unique key the job sync
         uses: the same physical printer can never register twice.
         """
@@ -340,7 +350,7 @@ class NativePrintController(http.Controller):
         def _clean_list(val):
             if not isinstance(val, list):
                 return []
-            return [str(item)[:160] for item in val[:80]
+            return [" ".join(item.split())[:160] for item in val[:80]
                     if isinstance(item, str) and item.strip()]
 
         forms_list = _clean_list(forms)
@@ -364,14 +374,10 @@ class NativePrintController(http.Controller):
         """Job counters for the Native Print systray widget."""
         if not _has_print_access():
             return {"ok": False, "error": "forbidden"}
-        # Counters are company-wide for every role: the systray
-        # labels them "Completed Print Jobs" / "Failed Print Jobs",
-        # and the per-user record rule otherwise made the same
-        # widget show different numbers to cashiers and managers
-        # (audit L1). sudo + the explicit company domain keeps the
-        # scope exactly this company.
+        # Counters are company-wide across roles; sudo + explicit company
+        # domain bypasses the per-user record rule while keeping company scope.
         Job = request.env["native.print.job"].sudo()
-        domain = [("company_id", "=", request.env.company.id)]
+        domain = [("company_id", "in", request.env.companies.ids)]
         counts = dict(
             Job._read_group(domain, groupby=["state"], aggregates=["__count"])
         )

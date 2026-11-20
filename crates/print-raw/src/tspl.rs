@@ -27,7 +27,9 @@ impl TsplLabel {
     /// BITMAP x,y,width(bytes per row),height,mode(0 = overwrite),<inverted data>
     pub fn bitmap(mut self, x: u32, y: u32, bm: &MonoBitmap) -> Self {
         let bpr = bm.bytes_per_row();
-        let expected = bpr.saturating_mul(bm.height_dots as usize);
+        let Some(expected) = bpr.checked_mul(bm.height_dots as usize) else {
+            return self;
+        };
         if expected == 0 || bm.data.len() < expected {
             return self;
         }

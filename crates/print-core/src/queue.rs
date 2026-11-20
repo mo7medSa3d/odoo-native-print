@@ -281,23 +281,35 @@ impl Queue {
                     "CREATE INDEX IF NOT EXISTS idx_jobs_claim_available ON jobs(printer, state, available_at, priority DESC, seq)",
                     [],
                 )?;
+                tx.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_jobs_state_avail_printer ON jobs(state, available_at, printer, priority)",
+                    [],
+                )?;
                 // Schema version 2 = updated_at + payload_hash + available_at.
                 tx.pragma_update(None, "user_version", 2)?;
             }
             tx.commit()?;
         }
-        // Idempotent index for pre-existing v2 databases without bumping
+        // Idempotent indexes for pre-existing v2 databases without bumping
         // user_version; steady-state opens take no schema write lock.
-        let has_events_idx: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_job_events_job_id')",
-            [],
-            |r| r.get::<_, i64>(0),
-        )? == 1;
-        if !has_events_idx {
-            conn.execute(
+        for (name, ddl) in [
+            (
+                "idx_job_events_job_id",
                 "CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id, ts)",
-                [],
-            )?;
+            ),
+            (
+                "idx_jobs_state_avail_printer",
+                "CREATE INDEX IF NOT EXISTS idx_jobs_state_avail_printer ON jobs(state, available_at, printer, priority)",
+            ),
+        ] {
+            let has_idx: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1)",
+                params![name],
+                |r| r.get::<_, i64>(0),
+            )? == 1;
+            if !has_idx {
+                conn.execute(ddl, [])?;
+            }
         }
         Ok(Self {
             conn,
@@ -381,25 +393,34 @@ impl Queue {
     /// state machine rejects it, which is the honest behaviour.
     /// Payload bytes are purged on cancellation so canceled jobs do not leak disk space.
     pub fn cancel_job(&mut self, id: &str) -> Result<(), QueueError> {
-        self.conn.execute_batch("BEGIN IMMEDIATE")?;
-        let res = (|| {
-            self.set_state(id, JobState::Canceled, Some("CANCELED_BY_USER"))?;
-            self.purge_payload(id)?;
-            Ok(())
-        })();
-        match res {
-            Ok(()) => {
-                if let Err(e) = self.conn.execute_batch("COMMIT") {
-                    let _ = self.conn.execute_batch("ROLLBACK");
-                    return Err(e.into());
-                }
-                Ok(())
-            }
-            Err(e) => {
-                let _ = self.conn.execute_batch("ROLLBACK");
-                Err(e)
-            }
+        let now = now_unix();
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let current: String = tx
+            .query_row("SELECT state FROM jobs WHERE id=?1", params![id], |r| {
+                r.get(0)
+            })
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => QueueError::NotFound(id.to_string()),
+                other => QueueError::Db(other),
+            })?;
+        let from = parse_job_state(0, &current)?;
+        from.transition_to(JobState::Canceled)?;
+        let changed = tx.execute(
+            "UPDATE jobs SET state='canceled', error_code='CANCELED_BY_USER', updated_at=?1 WHERE id=?2 AND state=?3",
+            params![now, id, from.as_str()],
+        )?;
+        if changed == 0 {
+            return Err(QueueError::Transition(crate::state::TransitionError {
+                from,
+                to: JobState::Canceled,
+            }));
         }
+        tx.execute("DELETE FROM payloads WHERE job_id=?1", params![id])?;
+        tx.commit()?;
+        self.record_event_best_effort(id, "state:canceled", Some("CANCELED_BY_USER"));
+        Ok(())
     }
 
     /// Retry a failed or dead-letter job. The attempt counter is NOT
@@ -408,34 +429,40 @@ impl Queue {
     /// stay truthful across manual retries. A manual retry is
     /// immediate: any pending automatic backoff is cleared.
     pub fn retry_job(&mut self, id: &str) -> Result<(), QueueError> {
-        self.conn.execute_batch("BEGIN IMMEDIATE")?;
-        let res = (|| {
-            // A job waiting out its durable backoff is already queued:
-            // a manual retry clears the delay (and any stale error code)
-            // instead of failing on a queued -> queued transition.
-            let from = self.get(id)?.state;
-            if from != JobState::Queued {
-                self.set_state(id, JobState::Queued, None)?;
-            }
-            self.conn.execute(
-                "UPDATE jobs SET error_code=NULL, available_at=0 WHERE id=?1",
-                params![id],
-            )?;
-            Ok(())
-        })();
-        match res {
-            Ok(()) => {
-                if let Err(e) = self.conn.execute_batch("COMMIT") {
-                    let _ = self.conn.execute_batch("ROLLBACK");
-                    return Err(e.into());
-                }
-                Ok(())
-            }
-            Err(e) => {
-                let _ = self.conn.execute_batch("ROLLBACK");
-                Err(e)
-            }
+        let now = now_unix();
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let current: String = tx
+            .query_row("SELECT state FROM jobs WHERE id=?1", params![id], |r| {
+                r.get(0)
+            })
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => QueueError::NotFound(id.to_string()),
+                other => QueueError::Db(other),
+            })?;
+        let from = parse_job_state(0, &current)?;
+        // A job waiting out its durable backoff is already queued:
+        // a manual retry clears the delay (and any stale error code)
+        // instead of failing on a queued -> queued transition.
+        if from != JobState::Queued {
+            from.transition_to(JobState::Queued)?;
         }
+        let changed = tx.execute(
+            "UPDATE jobs SET state='queued', error_code=NULL, available_at=0, updated_at=?1 WHERE id=?2 AND state=?3",
+            params![now, id, from.as_str()],
+        )?;
+        if changed == 0 {
+            return Err(QueueError::Transition(crate::state::TransitionError {
+                from,
+                to: JobState::Queued,
+            }));
+        }
+        tx.commit()?;
+        if from != JobState::Queued {
+            self.record_event_best_effort(id, "state:queued", None);
+        }
+        Ok(())
     }
 
     /// Fail a printing job and re-queue it after `delay_ms`, in one
@@ -471,10 +498,16 @@ impl Queue {
         let from = parse_job_state(0, &current)?;
         from.transition_to(JobState::Failed)?;
         JobState::Failed.transition_to(JobState::Queued)?;
-        tx.execute(
+        let failed_rows = tx.execute(
             "UPDATE jobs SET state='failed', error_code=?1, updated_at=?2 WHERE id=?3 AND state=?4",
             params![error_code, now, id, from.as_str()],
         )?;
+        if failed_rows == 0 {
+            return Err(QueueError::Transition(crate::state::TransitionError {
+                from,
+                to: JobState::Failed,
+            }));
+        }
         tx.execute(
             "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'state:failed',?3)",
             params![id, now, error_code],
@@ -491,6 +524,57 @@ impl Queue {
         }
         tx.execute(
             "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'state:queued',?3)",
+            params![id, now, error_code],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Atomically transition a job `from -> failed -> dead_letter` in one
+    /// IMMEDIATE transaction so a crash or concurrent action between the
+    /// two states cannot leave the job stuck in `failed`.
+    pub fn fail_to_dead_letter(&mut self, id: &str, error_code: &str) -> Result<(), QueueError> {
+        let now = now_unix();
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let current: String = tx
+            .query_row("SELECT state FROM jobs WHERE id=?1", params![id], |r| {
+                r.get(0)
+            })
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => QueueError::NotFound(id.to_string()),
+                other => QueueError::Db(other),
+            })?;
+        let from = parse_job_state(0, &current)?;
+        from.transition_to(JobState::Failed)?;
+        JobState::Failed.transition_to(JobState::DeadLetter)?;
+        let failed_rows = tx.execute(
+            "UPDATE jobs SET state='failed', error_code=?1, updated_at=?2 WHERE id=?3 AND state=?4",
+            params![error_code, now, id, from.as_str()],
+        )?;
+        if failed_rows == 0 {
+            return Err(QueueError::Transition(crate::state::TransitionError {
+                from,
+                to: JobState::Failed,
+            }));
+        }
+        tx.execute(
+            "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'state:failed',?3)",
+            params![id, now, error_code],
+        )?;
+        let changed = tx.execute(
+            "UPDATE jobs SET state='dead_letter', error_code=?1, updated_at=?2 WHERE id=?3 AND state='failed'",
+            params![error_code, now, id],
+        )?;
+        if changed == 0 {
+            return Err(QueueError::Transition(crate::state::TransitionError {
+                from,
+                to: JobState::DeadLetter,
+            }));
+        }
+        tx.execute(
+            "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'state:dead_letter',?3)",
             params![id, now, error_code],
         )?;
         tx.commit()?;
@@ -590,10 +674,11 @@ impl Queue {
             return Err(QueueError::QueueFull("global".to_string()));
         }
         let now = now_unix();
+        let bytes_i64 = i64::try_from(job.bytes).unwrap_or(i64::MAX);
         tx.execute(
             "INSERT INTO jobs(id,idempotency_key,printer,report,pages,bytes,priority,state,attempts,error_code,updated_at)
              VALUES(?1,?2,?3,?4,?5,?6,?7,'queued',0,NULL,?8)",
-            params![job.id, job.idempotency_key, job.printer, job.report, job.pages, job.bytes as i64, job.priority, now],
+            params![job.id, job.idempotency_key, job.printer, job.report, job.pages, bytes_i64, job.priority, now],
         )?;
         tx.execute(
             "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'enqueued',?3)",
@@ -633,6 +718,9 @@ impl Queue {
         if data.len() > crate::security::MAX_JOB_BYTES {
             return Err(QueueError::PayloadTooLarge(crate::security::MAX_JOB_BYTES));
         }
+        opts.validate()?;
+        let opts_json =
+            serde_json::to_string(opts).map_err(|e| QueueError::BadOptions(e.to_string()))?;
         // IMMEDIATE, not deferred: the write lock is taken up front,
         // so a concurrent enqueue on another connection waits on the
         // busy timeout and then sees this job as a duplicate — a
@@ -668,13 +756,13 @@ impl Queue {
                 // Rows written before the hash column existed
                 // compare by length only.
                 Some((len, hash)) => {
-                    len as usize != data.len()
+                    usize::try_from(len).ok() != Some(data.len())
                         || hash.is_some_and(|h| h != payload_fingerprint(data))
                 }
                 None => false,
             };
             drop(tx);
-            if existing_bytes as u64 != job.bytes || payload_differs {
+            if u64::try_from(existing_bytes).ok() != Some(job.bytes) || payload_differs {
                 self.record_event_best_effort(
                     &existing_id,
                     "duplicate_conflict",
@@ -703,21 +791,19 @@ impl Queue {
             return Err(QueueError::QueueFull("global".to_string()));
         }
         let now = now_unix();
+        let bytes_i64 = i64::try_from(job.bytes).unwrap_or(i64::MAX);
         tx.execute(
             "INSERT INTO jobs(id,idempotency_key,printer,report,pages,bytes,priority,state,attempts,error_code,updated_at)
              VALUES(?1,?2,?3,?4,?5,?6,?7,'queued',0,NULL,?8)",
-            params![job.id, job.idempotency_key, job.printer, job.report, job.pages, job.bytes as i64, job.priority, now],
+            params![job.id, job.idempotency_key, job.printer, job.report, job.pages, bytes_i64, job.priority, now],
         )?;
         tx.execute(
             "INSERT INTO payloads(job_id, kind, data, payload_hash) VALUES(?1,?2,?3,?4)",
             params![job.id, kind, data, payload_fingerprint(data)],
         )?;
-        opts.validate()?;
-        let json =
-            serde_json::to_string(opts).map_err(|e| QueueError::BadOptions(e.to_string()))?;
         tx.execute(
             "INSERT INTO job_options(job_id, options_json) VALUES(?1,?2)",
-            params![job.id, json],
+            params![job.id, opts_json],
         )?;
         tx.execute(
             "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'enqueued',?3)",
@@ -755,7 +841,10 @@ impl Queue {
         if data.len() > crate::security::MAX_JOB_BYTES {
             return Err(QueueError::PayloadTooLarge(crate::security::MAX_JOB_BYTES));
         }
-        let job_exists: bool = self.conn.query_row(
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let job_exists: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM jobs WHERE id=?1)",
             params![job_id],
             |r| r.get::<_, i64>(0),
@@ -763,10 +852,11 @@ impl Queue {
         if !job_exists {
             return Err(QueueError::NotFound(job_id.to_string()));
         }
-        self.conn.execute(
+        tx.execute(
             "INSERT OR REPLACE INTO payloads(job_id, kind, data, payload_hash) VALUES(?1,?2,?3,?4)",
             params![job_id, kind, data, payload_fingerprint(data)],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -786,7 +876,10 @@ impl Queue {
         opts.validate()?;
         let json =
             serde_json::to_string(opts).map_err(|e| QueueError::BadOptions(e.to_string()))?;
-        let job_exists: bool = self.conn.query_row(
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let job_exists: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM jobs WHERE id=?1)",
             params![job_id],
             |r| r.get::<_, i64>(0),
@@ -794,10 +887,11 @@ impl Queue {
         if !job_exists {
             return Err(QueueError::NotFound(job_id.to_string()));
         }
-        self.conn.execute(
+        tx.execute(
             "INSERT OR REPLACE INTO job_options(job_id, options_json) VALUES(?1,?2)",
             params![job_id, json],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -948,24 +1042,35 @@ impl Queue {
     /// never sleeps for one printer while others have work.
     pub fn claim_next(&mut self, printer: &str) -> Result<Option<Job>, QueueError> {
         let now = now_unix();
-        let candidate: Option<String> = {
-            let mut stmt = self.conn.prepare(
-                "SELECT id FROM jobs WHERE printer=?1 AND state='queued' AND available_at<=?2 ORDER BY priority DESC, seq ASC LIMIT 1")?;
-            let mut rows = stmt.query(params![printer, now])?;
-            match rows.next()? {
-                Some(r) => Some(r.get(0)?),
-                None => None,
-            }
-        };
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let candidate: Option<String> = tx
+            .query_row(
+                "SELECT id FROM jobs WHERE printer=?1 AND state='queued' AND available_at<=?2 ORDER BY priority DESC, seq ASC LIMIT 1",
+                params![printer, now],
+                |r| r.get(0),
+            )
+            .optional()?;
         let Some(id) = candidate else { return Ok(None) };
-        let updated = self.conn.execute(
+        let updated = tx.execute(
             "UPDATE jobs SET state='rendering', error_code=NULL, attempts=attempts+1, updated_at=?2 WHERE id=?1 AND state='queued' AND available_at<=?3",
             params![id, now, now],
         )?;
         if updated == 0 {
             return Ok(None);
         }
-        let job = self.get(&id)?;
+        let job = tx
+            .query_row(
+                "SELECT id,idempotency_key,printer,report,pages,bytes,priority,state,attempts,error_code FROM jobs WHERE id=?1",
+                params![id],
+                row_to_job,
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => QueueError::NotFound(id),
+                other => QueueError::Db(other),
+            })?;
+        tx.commit()?;
         Ok(Some(job))
     }
 
@@ -1683,5 +1788,83 @@ mod tests {
         // Manual retry clears backoff so the printer becomes claimable immediately.
         q.retry_job("b1").unwrap();
         assert_eq!(q.queued_printers().unwrap(), vec!["p-delay", "p-ready"]);
+    }
+
+    #[test]
+    fn fail_to_dead_letter_is_atomic_and_rejects_done() {
+        let mut q = Queue::in_memory().unwrap();
+        q.enqueue(&job("dl1", "k-dl1", "p1", 0)).unwrap();
+        let claimed = q.claim_next("p1").unwrap().unwrap();
+        q.set_state(&claimed.id, JobState::Spooling, None).unwrap();
+        q.set_state(&claimed.id, JobState::Printing, None).unwrap();
+        q.fail_to_dead_letter(&claimed.id, "OFFLINE").unwrap();
+        let after = q.get(&claimed.id).unwrap();
+        assert_eq!(after.state, JobState::DeadLetter);
+        assert_eq!(after.error_code.as_deref(), Some("OFFLINE"));
+        // Rejects already-done job cleanly.
+        q.enqueue(&job("dl2", "k-dl2", "p1", 0)).unwrap();
+        let c2 = q.claim_next("p1").unwrap().unwrap();
+        q.set_state(&c2.id, JobState::Spooling, None).unwrap();
+        q.set_state(&c2.id, JobState::Printing, None).unwrap();
+        q.set_state(&c2.id, JobState::Done, None).unwrap();
+        assert!(q.fail_to_dead_letter(&c2.id, "ERR").is_err());
+    }
+
+    #[test]
+    fn init_creates_state_avail_printer_covering_index_and_wal_pragmas() {
+        let dir = std::env::temp_dir().join(format!("pq-state-idx-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("q.db");
+        let p = path.to_str().unwrap().to_string();
+        {
+            let q = Queue::open(&p).unwrap();
+            let busy: i64 = q
+                .conn
+                .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
+                .unwrap();
+            let journal: String = q
+                .conn
+                .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+                .unwrap();
+            let sync: i64 = q
+                .conn
+                .query_row("PRAGMA synchronous", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(busy, 30_000);
+            assert_eq!(journal.to_ascii_lowercase(), "wal");
+            assert_eq!(sync, 2); // FULL
+                                 // Simulate a pre-existing v2 database missing the covering index.
+            q.conn
+                .execute("DROP INDEX idx_jobs_state_avail_printer", [])
+                .unwrap();
+        }
+        let q = Queue::open(&p).unwrap();
+        let has_idx: i64 = q
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_jobs_state_avail_printer')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_idx, 1);
+        let mut stmt = q
+            .conn
+            .prepare(
+                "EXPLAIN QUERY PLAN SELECT printer FROM jobs WHERE state='queued' AND available_at<=?1 GROUP BY printer ORDER BY MAX(priority) DESC, MIN(seq) ASC",
+            )
+            .unwrap();
+        let plans: Vec<String> = stmt
+            .query_map(params![now_unix()], |r| r.get::<_, String>(3))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert!(
+            plans
+                .iter()
+                .any(|line| line.contains("COVERING INDEX idx_jobs_state_avail_printer")),
+            "expected covering index in query plan, got: {plans:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -10,19 +10,19 @@ import { _t } from "@web/core/l10n/translation";
 const SELECTION_KEY = "native_print.selected_printer";
 const POS_SELECTION_KEY = "native_print.selected_pos_printer";
 
-/*
- * The terminal job states — one half of the job-state contract
- * (the states themselves are identical in the page, the Rust
- * queue and the server log). Single-sourced here (2026-11-07):
- * the report handler and the POS patch each kept a private
- * copy, and a drift between them would make reports and
- * receipts disagree about when a job is finished. `failed` and
- * `dead_letter` belong to the set even though the desktop
- * worker may re-queue such a job: each watcher decides for
- * itself whether to stop there or keep observing for the
- * re-entry, but the state vocabulary is shared.
- */
+// Shared terminal job states matching the desktop queue and server log.
+// Watchers decide whether to keep observing after retryable outcomes (failed/dead_letter).
 export const JOB_TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);
+export const JOB_UPDATED_EVENT = "native_print:job_updated";
+
+export function notifyJobUpdated() {
+    if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+        const ev = typeof CustomEvent === "function"
+            ? new CustomEvent(JOB_UPDATED_EVENT)
+            : (typeof Event === "function" ? new Event(JOB_UPDATED_EVENT) : { type: JOB_UPDATED_EVENT });
+        window.dispatchEvent(ev);
+    }
+}
 
 function readStorage(key) {
     try {
@@ -60,6 +60,11 @@ export function setSelectedPosPrinter(name) {
     writeStorage(POS_SELECTION_KEY, name);
 }
 
+const WORD_RE_ZPL = /(^|[^a-z0-9])zpl([^a-z0-9]|$)/;
+const WORD_RE_TSC = /(^|[^a-z0-9])tsc([^a-z0-9]|$)/;
+const WORD_RE_TSPL = /(^|[^a-z0-9])tspl([^a-z0-9]|$)/;
+const WORD_RE_EPL = /(^|[^a-z0-9])epl([^a-z0-9]|$)/;
+
 /** Conservative protocol inference from the installed driver identity. */
 export function detectPrinterType(printer) {
     // The desktop bridge ships the app's own protocol detection on
@@ -83,24 +88,19 @@ export function detectPrinterType(printer) {
     const signature =
         `${(printer && printer.name) || ""} ${(printer && printer.driver) || ""}`
             .toLowerCase();
-    // Short protocol tokens match on word boundaries only (audit
-    // L10): a bare substring search classifies any name containing
-    // "epl" (e.g. "Repl…") or "tsc" as a raw label printer, and an
-    // office printer misclassified that way gets raw jobs instead
-    // of GDI.
-    const hasWord = (tok) =>
-        new RegExp(`(^|[^a-z0-9])${tok}([^a-z0-9]|$)`).test(signature);
-    if (["zdesigner", "zebra"].some((t) => signature.includes(t)) || hasWord("zpl")) {
+    // Match short protocol tokens on word boundaries so substrings like
+    // "Repl..." do not misclassify office printers as raw label targets.
+    if (signature.includes("zdesigner") || signature.includes("zebra") || WORD_RE_ZPL.test(signature)) {
         return { mode: "zpl", printerClass: "label" };
     }
     const tsplLabelModels = [
         "xp-235", "xp-350", "xp-365", "xp-370", "xp-420", "xp-450", "xp-460",
         "xp-470", "xp-490", "gp-1124", "gp-1324", "gp-1924", "gp-2120", "gp-3120",
     ];
-    if (hasWord("tsc") || hasWord("tspl") || tsplLabelModels.some((m) => signature.includes(m))) {
+    if (WORD_RE_TSC.test(signature) || WORD_RE_TSPL.test(signature) || tsplLabelModels.some((m) => signature.includes(m))) {
         return { mode: "tspl", printerClass: "label" };
     }
-    if (hasWord("epl")) {
+    if (WORD_RE_EPL.test(signature)) {
         return { mode: "epl", printerClass: "label" };
     }
     const officeExclusions = [
@@ -135,8 +135,7 @@ export function detectPrinterType(printer) {
 
 function isIpLiteral(value) {
     const text = String(value || "").trim();
-    // IPv4: dotted quads with real octet ranges — "999.1.1.1" is a
-    // hostname-shaped string, not an IP (audit L9).
+    // IPv4: validate octet ranges (0-255) so hostname-shaped strings are rejected.
     const v4 = text.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
     if (v4) return v4.slice(1).every((o) => Number(o) <= 255);
     if (!text.includes(":")) return false;
@@ -148,18 +147,7 @@ function isIpLiteral(value) {
         && (!text.endsWith(":") || text.endsWith("::"));
 }
 
-/** Raw printers reachable at an IP print directly; everything else
- * goes through its installed Windows queue by name. */
-/*
- * One-line-per-form summary of a capabilities payload, uploaded
- * to the device registry so the Odoo record shows the sizes the
- * driver offers. The bridge's forms nest their size
- * ({ name, size: { width_mm, height_mm }, roll }); flat fields
- * are accepted too so a differently-shaped payload degrades to
- * real numbers instead of NaN (field bug found by the
- * 2026-11-07 review: the systray read f.width_mm directly and
- * the registry filled with "NaN×NaNmm").
- */
+/** Format driver forms into one-line summaries (accepts nested f.size or flat fields). */
 export function formatFormsSummary(forms, rollLabel) {
     return (forms || []).map((f) => {
         const size = (f && (f.size || f)) || {};
@@ -177,20 +165,21 @@ export function printerPatternFor(printer, mode) {
     const rawModes = ["escpos", "zpl", "tspl", "epl"];
     const port = String((printer && printer.port) || "").trim();
     if (rawModes.includes(mode) && isIpLiteral(port)) {
-        // IPv6 literals need brackets in a URI authority, or the
-        // port suffix is ambiguous (audit L9).
+        // Bracket IPv6 literals in URI authority so the port suffix is unambiguous.
         const host = port.includes(":") ? `[${port}]` : port;
         return `tcp://${host}:9100`;
     }
-    return printer.name;
+    return (printer && printer.name) || "";
 }
 
 /** Receipt roll width from the driver-reported forms, if any. */
 export function rollWidthMm(capabilities) {
     const forms = (capabilities && capabilities.forms) || [];
     for (const form of forms) {
-        if (form && form.roll && form.size && form.size.width_mm) {
-            return form.size.width_mm;
+        const size = form && (form.size || form);
+        const w = size && Number(size.width_mm);
+        if (form && form.roll && Number.isFinite(w) && w > 0) {
+            return w;
         }
     }
     return null;
@@ -205,11 +194,11 @@ function isHealthyPrinter(printer) {
 
 function findPrinterByName(printers, wantedName) {
     if (!wantedName) return null;
-    const exact = printers.find((p) => p.name === wantedName);
+    const exact = printers.find((p) => p && p.name === wantedName);
     if (exact) return exact;
     const norm = String(wantedName).trim().toLowerCase();
     return norm
-        ? (printers.find((p) => String(p.name || "").trim().toLowerCase() === norm) || null)
+        ? (printers.find((p) => p && String(p.name || "").trim().toLowerCase() === norm) || null)
         : null;
 }
 
@@ -245,11 +234,8 @@ export async function resolveBridgeTarget(bridge, options = {}) {
     if (!printer && selectedPos) {
         printer = selectedPos;
     }
-    // The owner's model (2026-11-04): the printer picked in the
-    // panel is THE printer — for reports and receipts alike, real
-    // or virtual. An explicit selection therefore wins over the
-    // class preference; the preference only breaks the tie when
-    // nothing is selected.
+    // Explicit user selection wins over class preference; class preference
+    // only breaks ties when nothing is explicitly selected.
     if (!printer && selected) {
         printer = selected;
     }
@@ -288,12 +274,7 @@ export async function resolveBridgeTarget(bridge, options = {}) {
             paper: null,
             copies: 1,
             tray: null,
-            // Duplex is a CHOICE, not a capability (external
-            // review, 2026-11-07): a printer merely supporting
-            // duplex must not turn reports double-sided. null =
-            // nobody chose; the app then applies the saved
-            // per-printer default if one exists, else the driver
-            // default at the printer.
+            // Tri-state: null leaves saved per-printer or driver default in charge.
             duplex: null,
             color: !capabilities || capabilities.color !== false,
             scale_policy: "custom_allowed",

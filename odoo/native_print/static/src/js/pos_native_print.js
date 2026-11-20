@@ -5,7 +5,7 @@ import { TicketScreen } from "@point_of_sale/app/screens/ticket_screen/ticket_sc
 import { patch } from "@web/core/utils/patch";
 import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
-import { JOB_TERMINAL_STATES as TERMINAL_STATES, notifyUser, resolveBridgeTarget } from "./native_print_client";
+import { JOB_TERMINAL_STATES as TERMINAL_STATES, notifyJobUpdated, notifyUser, resolveBridgeTarget } from "./native_print_client";
 
 /*
  * Native Print for POS receipts (Odoo 17, 18, and 19 compatible).
@@ -58,10 +58,7 @@ function notifyPosNativeFailure(contextObj, reason) {
     // stays on screen and the cashier can fix the cause and click
     // Print again. Identical repeats are deduped inside notifyUser,
     // so the two wrapper layers below can never stack this toast.
-    // The reason rides along (owner field loop, 2026-11-06): the
-    // generic toast alone made every failure class — no printer,
-    // capture failure, enqueue rejection, job failure — look
-    // identical, including in screenshots sent for support.
+    // Append the failure reason so distinct failure classes are actionable.
     let message = _t("Native Print could not print this receipt, and nothing was printed. Check the printer and try again.");
     if (reason) {
         message += " " + reason;
@@ -69,9 +66,9 @@ function notifyPosNativeFailure(contextObj, reason) {
     notifyUser(notificationEnv(contextObj), message, "warning");
 }
 
-const POS_FAIL_NO_PRINTER = _t("Reason: no printer is available on this computer.");
-const POS_FAIL_NO_RECEIPT = _t("Reason: the receipt is not on screen.");
-const POS_FAIL_CAPTURE = _t("Reason: the receipt could not be captured as an image.");
+const posFailNoPrinter = () => _t("Reason: no printer is available on this computer.");
+const posFailNoReceipt = () => _t("Reason: the receipt is not on screen.");
+const posFailCapture = () => _t("Reason: the receipt could not be captured as an image.");
 
 const inFlightPosKeys = new Set();
 
@@ -123,6 +120,10 @@ function inlineStyles(source, clone, bgTargets = []) {
             css += `${prop}:${computed.getPropertyValue(prop)};`;
         }
     }
+    // Strip external url(...) references from serialized CSS so no uninlined
+    // resource (mask-image, cursor, list-style-image, multi-bg) can fail SVG
+    // foreignObject loading or taint the canvas in Chromium/WebView2.
+    css = css.replace(/url\(\s*(?:"(?!data:)[^"]*"|'(?!data:)[^']*'|(?![\s"']*data:)[^)]+)\s*\)/gi, "none");
     clone.setAttribute("style", css);
     // Collect external CSS background images during the same walk (including
     // the root receipt node) to avoid a second getComputedStyle DOM pass.
@@ -166,13 +167,8 @@ async function fetchAsDataUrl(url, timeoutMs = MEDIA_FETCH_TIMEOUT_MS) {
     }
 }
 
-// A 1x1 transparent PNG: the stand-in for an image that could not
-// be inlined. An external URL left in the serialized receipt is
-// fatal, not cosmetic — the receipt is rasterized as an SVG image,
-// and SVG-as-image cannot load external resources, so one
-// unfetchable logo/QR makes the whole capture throw and the
-// receipt never reaches a printer (owner field report,
-// 2026-11-06). Dropping the one image keeps the receipt printable.
+// 1x1 transparent PNG stand-in for unfetchable images so an external URL
+// never causes SVG foreignObject rasterization to fail the whole receipt.
 const TRANSPARENT_PIXEL =
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
@@ -184,13 +180,53 @@ async function inlineMedia(source, clone, bgTargets = []) {
         }
         return urlCache.get(url);
     };
+    const imgToDataUrlFallback = (imgEl) => {
+        try {
+            if (!imgEl || !imgEl.complete || !imgEl.naturalWidth || !imgEl.naturalHeight) {
+                return null;
+            }
+            if (typeof document === "undefined" || typeof document.createElement !== "function") {
+                return null;
+            }
+            const c = document.createElement("canvas");
+            c.width = imgEl.naturalWidth;
+            c.height = imgEl.naturalHeight;
+            const cx = c.getContext && c.getContext("2d");
+            if (!cx) return null;
+            cx.drawImage(imgEl, 0, 0);
+            return c.toDataURL("image/png");
+        } catch (_err) {
+            return null;
+        }
+    };
     const sourceImgs = source.querySelectorAll("img");
     const cloneImgs = clone.querySelectorAll("img");
     for (let i = 0; i < sourceImgs.length && i < cloneImgs.length; i++) {
+        if (typeof cloneImgs[i].removeAttribute === "function") {
+            cloneImgs[i].removeAttribute("srcset");
+            cloneImgs[i].removeAttribute("loading");
+            cloneImgs[i].removeAttribute("decoding");
+        }
         const src = sourceImgs[i].currentSrc || sourceImgs[i].src;
         if (src && !src.startsWith("data:")) {
-            const dataUrl = await cachedFetch(src);
+            const dataUrl = (await cachedFetch(src)) || imgToDataUrlFallback(sourceImgs[i]);
             cloneImgs[i].setAttribute("src", dataUrl || TRANSPARENT_PIXEL);
+        }
+    }
+    const sourceSvgImgs = source.querySelectorAll("image");
+    const cloneSvgImgs = clone.querySelectorAll("image");
+    for (let i = 0; i < sourceSvgImgs.length && i < cloneSvgImgs.length; i++) {
+        const href =
+            (typeof sourceSvgImgs[i].getAttribute === "function" &&
+                (sourceSvgImgs[i].getAttribute("href") ||
+                    sourceSvgImgs[i].getAttribute("xlink:href"))) ||
+            "";
+        if (href && !href.startsWith("data:")) {
+            const dataUrl = (await cachedFetch(href)) || TRANSPARENT_PIXEL;
+            cloneSvgImgs[i].setAttribute("href", dataUrl);
+            if (typeof cloneSvgImgs[i].removeAttribute === "function") {
+                cloneSvgImgs[i].removeAttribute("xlink:href");
+            }
         }
     }
     const sourceCanvases = source.querySelectorAll("canvas");
@@ -210,7 +246,7 @@ async function inlineMedia(source, clone, bgTargets = []) {
             // Leave cross-origin canvas as-is.
         }
     }
-    // CSS background images collected during inlineStyles() (audit JS-L9).
+    // Inline CSS background images collected during inlineStyles().
     for (const { node, url } of bgTargets) {
         const dataUrl = await cachedFetch(url);
         if (dataUrl) {
@@ -240,10 +276,33 @@ function extractReceiptText(element) {
         .trim();
 }
 
-async function elementToPngBytes(element, scale = 2) {
+async function canvasToPngBytes(canvas) {
+    if (typeof canvas.toBlob === "function") {
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+        if (blob) {
+            return Array.from(new Uint8Array(await blob.arrayBuffer()));
+        }
+    }
+    if (typeof canvas.toDataURL === "function") {
+        const dataUrl = canvas.toDataURL("image/png");
+        const idx = dataUrl.indexOf(",");
+        if (idx > 0) {
+            const bin = atob(dataUrl.slice(idx + 1));
+            const out = new Array(bin.length);
+            for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+            return out;
+        }
+    }
+    throw new Error("receipt canvas produced no image");
+}
+
+async function withConnectedElement(element, fn) {
     let offscreenHost = null;
-    let svgObjectUrl = null;
+    let prevParent = null;
+    let prevNext = null;
     if (!element.isConnected && document.body) {
+        prevParent = element.parentNode || null;
+        prevNext = element.nextSibling || null;
         offscreenHost = document.createElement("div");
         offscreenHost.className = "pos-receipt-container";
         offscreenHost.setAttribute(
@@ -254,6 +313,21 @@ async function elementToPngBytes(element, scale = 2) {
         document.body.appendChild(offscreenHost);
     }
     try {
+        return await fn();
+    } finally {
+        if (offscreenHost) {
+            if (prevParent && typeof prevParent.insertBefore === "function") {
+                prevParent.insertBefore(element, prevNext);
+            } else if (typeof element.remove === "function") {
+                element.remove();
+            }
+            offscreenHost.remove();
+        }
+    }
+}
+
+async function elementToPngBytes(element, scale = 2) {
+    return await withConnectedElement(element, async () => {
         const width = element.offsetWidth || 320;
         const height = element.offsetHeight || element.scrollHeight || 480;
         if (!width || !height) {
@@ -267,6 +341,18 @@ async function elementToPngBytes(element, scale = 2) {
         const clone = element.cloneNode(true);
         const bgTargets = inlineStyles(element, clone);
         await inlineMedia(element, clone, bgTargets);
+        // Reset root positioning/overflow so the receipt fills the foreignObject
+        // cleanly, and preserve direction/lang for RTL Arabic rendering.
+        const rootStyle = (clone.getAttribute("style") || "") +
+            ";margin:0 !important;position:static !important;transform:none !important;max-height:none !important;overflow:visible !important;box-sizing:border-box !important;";
+        clone.setAttribute("style", rootStyle);
+        const rootDir = element.getAttribute("dir") ||
+            (window.getComputedStyle && window.getComputedStyle(element).direction) ||
+            (document.documentElement && document.documentElement.dir) || "";
+        if (rootDir) clone.setAttribute("dir", rootDir);
+        const rootLang = element.getAttribute("lang") ||
+            (document.documentElement && document.documentElement.lang) || "";
+        if (rootLang) clone.setAttribute("lang", rootLang);
         clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
         // Strip control characters that are illegal in XML 1.0 foreignObject trees.
         const serializedClone = new XMLSerializer()
@@ -278,18 +364,29 @@ async function elementToPngBytes(element, scale = 2) {
             serializedClone +
             `</foreignObject></svg>`;
         const img = new Image();
+        let svgTimer = null;
         const loaded = new Promise((resolve, reject) => {
-            img.onload = resolve;
-            img.onerror = () => reject(new Error("receipt SVG failed to load"));
+            svgTimer = setTimeout(
+                () => reject(new Error("receipt SVG load timed out")),
+                MEDIA_FETCH_TIMEOUT_MS,
+            );
+            img.onload = () => {
+                clearTimeout(svgTimer);
+                resolve();
+            };
+            img.onerror = () => {
+                clearTimeout(svgTimer);
+                reject(new Error("receipt SVG failed to load"));
+            };
         });
-        if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
-            const svgBlob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-            svgObjectUrl = URL.createObjectURL(svgBlob);
-            img.src = svgObjectUrl;
-        } else {
-            img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
-        }
+        // Always use a data: URI (never URL.createObjectURL): in Chromium /
+        // Edge WebView2, a blob: SVG with <foreignObject> taints the target
+        // canvas and makes canvas.toBlob() throw SecurityError / return null.
+        img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
         await loaded;
+        if (typeof img.decode === "function") {
+            await img.decode().catch(() => {});
+        }
         const canvas = document.createElement("canvas");
         canvas.width = Math.max(1, Math.ceil(width * effectiveScale));
         canvas.height = Math.max(1, Math.ceil(height * effectiveScale));
@@ -298,23 +395,87 @@ async function elementToPngBytes(element, scale = 2) {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.scale(effectiveScale, effectiveScale);
         ctx.drawImage(img, 0, 0, width, height);
-        const blob = await new Promise((resolve) =>
-            canvas.toBlob(resolve, "image/png"),
-        );
-        if (!blob) {
-            throw new Error("receipt canvas produced no image");
+        return await canvasToPngBytes(canvas);
+    });
+}
+
+// Pure 2D canvas fallback when SVG foreignObject capture is blocked by a
+// WebView/CSP quirk: draws images/QR codes, horizontal rules, and positioned
+// text runs directly without SVG so receipts still print on every printer.
+async function renderReceiptCanvasFallback(element, scale = 2) {
+    return await withConnectedElement(element, async () => {
+        const rootRect = element.getBoundingClientRect();
+        const width = Math.ceil(element.offsetWidth || rootRect.width || 320);
+        const height = Math.ceil(element.offsetHeight || element.scrollHeight || rootRect.height || 480);
+        if (!width || !height) {
+            throw new Error("receipt element has no size");
         }
-        return Array.from(new Uint8Array(await blob.arrayBuffer()));
-    } finally {
-        if (svgObjectUrl && typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
+        const effectiveScale = Math.max(0.5, Math.min(scale, 14000 / height, 4096 / width));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.ceil(width * effectiveScale));
+        canvas.height = Math.max(1, Math.ceil(height * effectiveScale));
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.scale(effectiveScale, effectiveScale);
+
+        // Draw visible images (logo, QR code, barcodes) and canvases at their layout boxes.
+        for (const media of element.querySelectorAll("img, canvas")) {
+            const r = media.getBoundingClientRect();
+            if (!r.width || !r.height) continue;
+            if (media.tagName === "IMG" && (!media.complete || !media.naturalWidth)) continue;
             try {
-                URL.revokeObjectURL(svgObjectUrl);
-            } catch (_err) { /* ignore */ }
+                ctx.drawImage(media, r.left - rootRect.left, r.top - rootRect.top, r.width, r.height);
+            } catch (_err) { /* skip cross-origin image without tainting text */ }
         }
-        if (offscreenHost) {
-            offscreenHost.remove();
+
+        // Draw horizontal borders / dividers.
+        for (const el of element.querySelectorAll("*")) {
+            const st = window.getComputedStyle(el);
+            const r = el.getBoundingClientRect();
+            if (!r.width || !r.height) continue;
+            const bt = parseFloat(st.borderTopWidth) || 0;
+            if (bt > 0 && st.borderTopStyle !== "none") {
+                ctx.fillStyle = st.borderTopColor || "#000000";
+                ctx.fillRect(r.left - rootRect.left, r.top - rootRect.top, r.width, bt);
+            }
+            const bb = parseFloat(st.borderBottomWidth) || 0;
+            if (bb > 0 && st.borderBottomStyle !== "none") {
+                ctx.fillStyle = st.borderBottomColor || "#000000";
+                ctx.fillRect(r.left - rootRect.left, r.bottom - rootRect.top - bb, r.width, bb);
+            }
         }
-    }
+
+        // Draw visible text nodes at their exact layout rects.
+        if (typeof document.createTreeWalker === "function" && typeof document.createRange === "function") {
+            const walker = document.createTreeWalker(element, 4 /* NodeFilter.SHOW_TEXT */);
+            const range = document.createRange();
+            let node;
+            while ((node = walker.nextNode())) {
+                const text = (node.nodeValue || "").replace(/\s+/g, " ").trim();
+                if (!text) continue;
+                const parent = node.parentElement;
+                if (!parent) continue;
+                const st = window.getComputedStyle(parent);
+                if (st.visibility === "hidden" || st.display === "none") continue;
+                range.selectNodeContents(node);
+                const r = range.getBoundingClientRect();
+                if (!r.width || !r.height) continue;
+                const fontSize = st.fontSize || "13px";
+                const fontWeight = st.fontWeight || "400";
+                const fontFamily = st.fontFamily || "sans-serif";
+                ctx.font = `${fontWeight} ${fontSize} ${fontFamily}`;
+                ctx.fillStyle = st.color || "#000000";
+                ctx.textBaseline = "top";
+                const dir = st.direction || "ltr";
+                if ("direction" in ctx) ctx.direction = dir;
+                const x = dir === "rtl" ? (r.right - rootRect.left) : (r.left - rootRect.left);
+                ctx.textAlign = dir === "rtl" ? "right" : "left";
+                ctx.fillText(text, x, r.top - rootRect.top, Math.max(r.width + 4, 20));
+            }
+        }
+        return await canvasToPngBytes(canvas);
+    });
 }
 
 function extractCashierUserId(cashierObj, posStore, order) {
@@ -341,12 +502,8 @@ function posReceiptKey(safeRef, userId) {
     // job reaches a terminal state the watcher clears the record, so
     // a later deliberate reprint becomes a fresh attempt (a2, a3...).
     // The day stamp bounds key reuse to one business day.
-    // The cashier's user id is part of BOTH the storage key and the
-    // job key (audit H1): the server log scopes jobs per user, so a
-    // deterministic key shared across cashiers made the second
-    // cashier's identical order a forbidden collision — her print
-    // vanished from the log and her watcher read the first cashier's
-    // job. Per-user keys keep the dedupe semantics per cashier.
+    // Scope storage and job keys per cashier user id to prevent
+    // cross-cashier collisions on the per-user server job log.
     const storeKey = `np.pos.key.${safeRef}.u${userId}`;
     const now = Date.now();
     let record = null;
@@ -354,9 +511,7 @@ function posReceiptKey(safeRef, userId) {
         record = JSON.parse(sessionStorage.getItem(storeKey) || "null");
     } catch (_err) { /* storage unavailable: fall through */ }
     if (record && record.key && now - (record.ts || 0) < 15000) {
-        // The 15 s window stays anchored at the first submission:
-        // refreshing it on every reuse would let repeated prints
-        // dedupe into one desktop job indefinitely. (Audit F12.)
+        // Keep the 15s dedupe window anchored to the first submission.
         return record.key;
     }
     const attempt = (record && record.attempt ? record.attempt : 0) + 1;
@@ -455,7 +610,7 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
             // Quiet retry check: if the desktop worker hit a transient error
             // and already re-queued the receipt (`queued` / `printing`) or
             // succeeded on retry, avoid flashing a false red toast.
-            if (state === "failed" && typeof bridge.jobDetail === "function") {
+            if (state === "failed" && (state + ":" + attempts) !== lastOutcomeKey && typeof bridge.jobDetail === "function") {
                 await new Promise((resolve) => setTimeout(resolve, 900));
                 const recheck = await bridge.jobDetail(jobId).catch(() => null);
                 if (recheck && recheck.state && !TERMINAL_STATES.has(recheck.state)) {
@@ -499,6 +654,7 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
                 }
             }
             await syncJobStatus(state, errorCode, attempts);
+            notifyJobUpdated();
             if (state === "failed" || state === "dead_letter") {
                 notifyUser(
                     env,
@@ -525,13 +681,8 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
     }
 }
 
-// A declined POS attempt (no printer, capture failure, enqueue
-// rejection) creates no desktop job, so without this post it
-// leaves NO trace anywhere — not in the Control Center, not in
-// the server log — and every failure looked identical (owner
-// field loop, 2026-11-06). Post it to the job log with its reason
-// code, exactly like a real job's failure, so the cause is
-// readable in Odoo's Print Jobs afterwards.
+// Log declined POS attempts (no printer, capture failure, enqueue rejection)
+// with their reason code so failures remain visible in Print Jobs.
 function postPosDeclined(key, code, safeRef, userId, deviceName, mode) {
     if (!key) {
         return;
@@ -552,7 +703,9 @@ function postPosDeclined(key, code, safeRef, userId, deviceName, mode) {
     if (mode) {
         params.mode = mode;
     }
-    rpc("/native_print/job_status", params, { silent: true }).catch(() => {});
+    Promise.resolve(rpc("/native_print/job_status", params, { silent: true }))
+        .catch(() => {})
+        .then(() => notifyJobUpdated());
     // The attempt is over: rotate the key so the cashier's next
     // click is a fresh attempt (the posted row is terminal).
     if (safeRef) { finishPosReceiptAttempt(safeRef, userId); }
@@ -582,9 +735,7 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
         (order && (order.uuid || order.uid || order.name || order.pos_reference)) ||
         "pos-order";
     const safeRef = String(keyRef).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40);
-    // The cashier printing right now (audit H1): part of the job key
-    // and of the in-flight record, because the server log scopes jobs
-    // per user and one browser profile can serve several cashiers.
+    // Include cashier user id in the job key because the server log scopes jobs per user.
     const posStore = (contextObj && contextObj.pos) || contextObj || null;
     const cashierObj =
         (posStore && typeof posStore.get_cashier === "function" && posStore.get_cashier()) ||
@@ -593,7 +744,7 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
     const userId = extractCashierUserId(cashierObj, posStore, order);
     const idempotencyKey = posReceiptKey(safeRef, userId);
     if (!bridge || typeof bridge.printImage !== "function") {
-        return { reason: POS_FAIL_NO_PRINTER, code: "POS_NO_PRINTER", key: idempotencyKey, safeRef, userId };
+        return { reason: posFailNoPrinter(), code: "POS_NO_PRINTER", key: idempotencyKey, safeRef, userId };
     }
     if (inFlightPosKeys.has(idempotencyKey)) {
         return null;
@@ -611,39 +762,43 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
         }
         if (!target) {
             // No printer on this PC right now.
-            return { reason: POS_FAIL_NO_PRINTER, code: "POS_NO_PRINTER", key: idempotencyKey, safeRef, userId };
+            return { reason: posFailNoPrinter(), code: "POS_NO_PRINTER", key: idempotencyKey, safeRef, userId };
         }
         const element = explicitElement || (await waitForReceiptElement(order ? displayRef : null));
         if (!element) {
-            return { reason: POS_FAIL_NO_RECEIPT, code: "POS_RECEIPT_NOT_ON_SCREEN", key: idempotencyKey, safeRef, userId, device: target.printer.name, mode: target.rule.mode };
+            return { reason: posFailNoReceipt(), code: "POS_RECEIPT_NOT_ON_SCREEN", key: idempotencyKey, safeRef, userId, device: target.printer.name, mode: target.rule.mode };
         }
         const rule = target.rule;
         // The mode comes from the TARGET printer's detection (thermal
         // -> escpos, label languages, office/virtual -> gdi).
         const effectiveMode = rule.mode || "gdi";
-        const sourceWidthMm = element.offsetWidth
-            ? Math.round((element.offsetWidth * 25.4) / 96 * 10) / 10
+        const widthPx = element.offsetWidth || (!element.isConnected ? 300 : 0);
+        const sourceWidthMm = widthPx
+            ? Math.round((widthPx * 25.4) / 96 * 10) / 10
             : undefined;
         let bytes = null;
         let fallbackText = null;
         try {
             bytes = await elementToPngBytes(element, 2);
-        } catch (_firstCaptureError) {
-            // A capture can fail on canvas size alone (a very long
-            // receipt at scale 2); retry once at scale 1, and if raster
-            // capture still fails on a thermal ESC/POS printer, fall back
-            // to plain-text thermal output instead of aborting the receipt.
+        } catch (firstCaptureError) {
+            console.warn("Native Print: POS SVG capture (scale 2) failed, retrying at scale 1.", firstCaptureError);
             try {
                 bytes = await elementToPngBytes(element, 1);
-            } catch (_secondCaptureError) {
-                if (effectiveMode === "escpos" && typeof bridge.printText === "function") {
-                    const extracted = extractReceiptText(element);
-                    if (extracted) {
-                        fallbackText = extracted;
+            } catch (secondCaptureError) {
+                console.warn("Native Print: POS SVG capture (scale 1) failed, trying 2D canvas fallback.", secondCaptureError);
+                try {
+                    bytes = await renderReceiptCanvasFallback(element, 2);
+                } catch (canvasFallbackError) {
+                    console.warn("Native Print: POS 2D canvas fallback failed.", canvasFallbackError);
+                    if (effectiveMode === "escpos" && typeof bridge.printText === "function") {
+                        const extracted = extractReceiptText(element);
+                        if (extracted) {
+                            fallbackText = extracted;
+                        }
                     }
-                }
-                if (!fallbackText) {
-                    return { reason: POS_FAIL_CAPTURE, code: "POS_CAPTURE_FAILED", key: idempotencyKey, safeRef, userId, device: target.printer.name, mode: effectiveMode };
+                    if (!fallbackText) {
+                        return { reason: posFailCapture(), code: "POS_CAPTURE_FAILED", key: idempotencyKey, safeRef, userId, device: target.printer.name, mode: effectiveMode };
+                    }
                 }
             }
         }
@@ -724,8 +879,7 @@ function reportPosException(contextObj, error, label) {
     }
     notifyPosNativeFailure(
         contextObj,
-        _t("Reason: the print job could not be queued.") +
-            " " + String((error && error.message) || error || ""),
+        _t("Reason: the print job could not be queued."),
     );
 }
 
@@ -765,21 +919,12 @@ function wrapPosStorePrintReceipt(posStore) {
     const originalPrintReceipt = posStore.printReceipt.bind(posStore);
     posStore.printReceipt = async function (opts = {}) {
         if (!nativeBridge()) {
-            // Plain browser: Odoo's standard printing is the only
-            // printing there is (owner's standing rule for browsers).
+            // Plain browser: keep Odoo's standard print flow untouched.
             return await originalPrintReceipt(opts);
         }
         wrapPosPrinterService(posStore);
-        // Inside the desktop app a receipt prints silently through
-        // the bridge — or not at all. Odoo's standard flow ends in
-        // the browser print dialog (PosStore.printReceipt passes
-        // webPrintFallback: true), which the owner banned from the
-        // app after it reappeared in the field (2026-11-04): a
-        // declined or failed native attempt reports its reason and
-        // leaves the receipt on screen for another click instead of
-        // opening that dialog. Basic receipts are captured the same
-        // way; the on-screen receipt is rasterized either way, so
-        // the basic/full distinction does not change the output.
+        // Inside the desktop app, never fall back to the browser print dialog;
+        // report the reason and leave the receipt on screen for retry.
         try {
             const failure = await printPosReceiptNatively(posStore, opts && opts.order);
             if (!failure) {

@@ -44,16 +44,35 @@ impl Value {
             Value::Text(t, _) => *t,
         }
     }
-    fn encode(&self, out: &mut Vec<u8>) {
+    fn write_len_and_bytes(&self, out: &mut Vec<u8>) {
         match self {
-            Value::Integer(v) | Value::Enum(v) => out.extend_from_slice(&v.to_be_bytes()),
-            Value::Boolean(b) => out.push(if *b { 1 } else { 0 }),
-            Value::Text(_, s) => out.extend_from_slice(s.as_bytes()),
+            Value::Integer(v) | Value::Enum(v) => {
+                out.extend_from_slice(&4u16.to_be_bytes());
+                out.extend_from_slice(&v.to_be_bytes());
+            }
+            Value::Boolean(b) => {
+                out.extend_from_slice(&1u16.to_be_bytes());
+                out.push(if *b { 1 } else { 0 });
+            }
+            Value::Text(_, s) => {
+                let bytes = &s.as_bytes()[..s.len().min(u16::MAX as usize)];
+                out.extend_from_slice(&(bytes.len() as u16).to_be_bytes());
+                out.extend_from_slice(bytes);
+            }
         }
     }
     pub fn as_text(&self) -> Option<&str> {
         match self {
-            Value::Text(_, s) => Some(s),
+            // RFC 8010 string value tags only; exclude out-of-band (0x10..=0x1F)
+            // and binary/malformed tags that fell back to Value::Text.
+            Value::Text(t, s)
+                if matches!(
+                    *t,
+                    tag::TEXT_WITH_LANGUAGE | tag::NAME_WITH_LANGUAGE | 0x41..=0x4A
+                ) =>
+            {
+                Some(s)
+            }
             _ => None,
         }
     }
@@ -122,6 +141,9 @@ fn base_operation_attrs(printer_uri: &str) -> Vec<Attr> {
 }
 
 fn write_attr(out: &mut Vec<u8>, attr: &Attr) {
+    if attr.name.is_empty() {
+        return;
+    }
     let name_bytes = &attr.name.as_bytes()[..attr.name.len().min(u16::MAX as usize)];
     for (i, value) in attr.values.iter().enumerate() {
         out.push(value.tag());
@@ -132,11 +154,7 @@ fn write_attr(out: &mut Vec<u8>, attr: &Attr) {
             // Additional values: zero-length name (RFC 8010 section 3.1.4).
             out.extend_from_slice(&0u16.to_be_bytes());
         }
-        let mut vb = Vec::new();
-        value.encode(&mut vb);
-        let val_len = vb.len().min(u16::MAX as usize);
-        out.extend_from_slice(&(val_len as u16).to_be_bytes());
-        out.extend_from_slice(&vb[..val_len]);
+        value.write_len_and_bytes(out);
     }
 }
 
@@ -437,5 +455,14 @@ mod tests {
         ));
         too_many_groups.push(tag::END_OF_ATTRIBUTES);
         assert!(parse_message(&too_many_groups).is_err());
+    }
+
+    #[test]
+    fn out_of_band_tags_are_not_treated_as_text() {
+        // 0x13 = no-value, 0x12 = unknown (RFC 8010 section 3.5.2).
+        assert_eq!(parse_value(0x13, b"").as_text(), None);
+        assert_eq!(parse_value(0x12, b"").as_text(), None);
+        // Malformed 2-byte INTEGER must not leak raw bytes via as_text().
+        assert_eq!(parse_value(tag::INTEGER, b"ab").as_text(), None);
     }
 }

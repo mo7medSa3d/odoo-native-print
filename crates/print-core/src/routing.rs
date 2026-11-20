@@ -60,8 +60,10 @@ pub fn resolve_printer<'a>(pattern: &str, printers: &'a [PrinterInfo]) -> Option
             2
         } else if !needs_intervention(p.status) {
             3
-        } else {
+        } else if p.is_default {
             4
+        } else {
+            5
         };
         if best.is_none_or(|(best_rank, _)| rank < best_rank) {
             best = Some((rank, p));
@@ -156,5 +158,12 @@ mod tests {
         ];
         let chosen = resolve_printer("HP*", &printers).unwrap();
         assert_eq!(chosen.name, "HP Unknown Default");
+        let mut off_default = printer("HP Offline Default", PrinterStatus::Offline);
+        off_default.is_default = true;
+        let sick = vec![printer("HP PaperOut", PrinterStatus::PaperOut), off_default];
+        assert_eq!(
+            resolve_printer("HP*", &sick).unwrap().name,
+            "HP Offline Default"
+        );
     }
 }

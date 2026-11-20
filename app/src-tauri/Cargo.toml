@@ -26,3 +26,11 @@ print-win = { path = "../../crates/print-win" }
 
 [build-dependencies]
 tauri-build = { version = ">=2.6, <2.8" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+# Keep unwind: spawn_worker_loop in src/commands.rs uses std::panic::catch_unwind.
+panic = "unwind"

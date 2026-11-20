@@ -117,6 +117,26 @@ fn parse_box_array(array_content: &str) -> Option<(f64, f64)> {
     None
 }
 
+fn find_stream_keyword(dict: &str) -> Option<usize> {
+    let mut search_from = 0usize;
+    while let Some(rel) = dict[search_from..].find("stream") {
+        let pos = search_from + rel;
+        let before_ok = dict[..pos]
+            .chars()
+            .next_back()
+            .is_none_or(|c| c.is_ascii_whitespace() || c == '>');
+        let after_ok = matches!(
+            dict.as_bytes().get(pos + 6..).and_then(|b| b.first()),
+            Some(b'\r' | b'\n')
+        );
+        if before_ok && after_ok {
+            return Some(pos);
+        }
+        search_from = pos + 6;
+    }
+    None
+}
+
 fn parse_box_after(
     text: &str,
     start: usize,
@@ -140,7 +160,10 @@ fn parse_box_after(
     let obj_id: u32 = parts.next()?.parse().ok()?;
     let gen_id: u32 = parts.next()?.parse().ok()?;
     let r_tok = parts.next()?;
-    if r_tok.starts_with('R') {
+    if r_tok
+        .strip_prefix('R')
+        .is_some_and(|rest| is_pdf_delim(rest.chars().next()))
+    {
         return indirect_boxes.get(&(obj_id, gen_id)).copied();
     }
     None
@@ -173,9 +196,13 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
 
     // First pass: collect standalone array objects (`N G obj [x0 y0 x1 y1] endobj`)
     // so indirect `/MediaBox N G R` references resolve cleanly.
+    const MAX_INDIRECT_BOXES: usize = 4096;
     let mut indirect_boxes: std::collections::HashMap<(u32, u32), (f64, f64)> =
         std::collections::HashMap::new();
     for chunk in text.split("endobj") {
+        if indirect_boxes.len() >= MAX_INDIRECT_BOXES {
+            break;
+        }
         let Some((obj_id, gen_id, body_start)) = find_obj_header(chunk) else {
             continue;
         };
@@ -209,7 +236,7 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
         let dict = &chunk[body_start..];
         // Ignore stream payloads after `stream` keyword so content streams
         // never false-match dictionary keys.
-        let dict_header = match dict.find("stream") {
+        let dict_header = match find_stream_keyword(dict) {
             Some(s_idx) => &dict[..s_idx],
             None => dict,
         };
@@ -450,5 +477,16 @@ endobj
         let info = parse_pdf_info(s.as_bytes()).unwrap();
         assert_eq!(info.confidence, Confidence::Estimated);
         assert_eq!(info.pages.len(), 1);
+    }
+    #[test]
+    fn font_name_containing_stream_does_not_truncate_page_dict() {
+        let s = "%PDF-1.4
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /Resources << /Font << /BitstreamVera 4 0 R >> >> /MediaBox [0 0 283.46 425.20] >> endobj
+%%EOF";
+        let info = parse_pdf_info(s.as_bytes()).unwrap();
+        assert_eq!(info.confidence, Confidence::Exact);
+        assert_eq!(info.pages.len(), 1);
+        assert!((info.pages[0].size.width_mm - 100.0).abs() < 0.5);
     }
 }

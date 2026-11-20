@@ -22,14 +22,14 @@ class NativePrintJob(models.Model):
             with self.env.cr.savepoint():
                 self.env.cr.execute(
                     "SELECT 1 FROM information_schema.tables "
-                    "WHERE table_schema = 'public' AND table_name = %s",
+                    "WHERE table_schema = current_schema() AND table_name = %s",
                     [self._table],
                 )
                 if not self.env.cr.fetchone():
                     return
                 self.env.cr.execute(
                     "SELECT column_name FROM information_schema.columns "
-                    "WHERE table_schema = 'public' AND table_name = %s",
+                    "WHERE table_schema = current_schema() AND table_name = %s",
                     [self._table],
                 )
                 existing = {row[0] for row in self.env.cr.fetchall()}
@@ -50,10 +50,37 @@ class NativePrintJob(models.Model):
                         self.env.cr.execute(
                             f'ALTER TABLE "{self._table}" ADD COLUMN IF NOT EXISTS "{col}" {col_type}'
                         )
+                        existing.add(col)
                         _logger.warning(
                             "native_print: added missing column %s.%s automatically (run -u native_print to complete module upgrade)",
                             self._table,
                             col,
+                        )
+                # Composite indexes for /native_print/overview (company_id, state)
+                # and _cron_prune_job_log (state, create_date) at 50k+ rows.
+                # Check pg_indexes first so worker restarts take no SHARE lock once present.
+                self.env.cr.execute(
+                    "SELECT indexname FROM pg_indexes "
+                    "WHERE schemaname = current_schema() AND tablename = %s",
+                    [self._table],
+                )
+                existing_indexes = {row[0] for row in self.env.cr.fetchall()}
+                expected_indexes = (
+                    (f"{self._table}_company_state_idx", ("company_id", "state")),
+                    (f"{self._table}_state_create_date_idx", ("state", "create_date")),
+                )
+                for idx_name, cols in expected_indexes:
+                    if idx_name not in existing_indexes and set(cols) <= existing:
+                        col_sql = ", ".join(f'"{c}"' for c in cols)
+                        self.env.cr.execute(
+                            f'CREATE INDEX IF NOT EXISTS "{idx_name}" '
+                            f'ON "{self._table}" ({col_sql})'
+                        )
+                        _logger.info(
+                            "native_print: created composite index %s on %s(%s)",
+                            idx_name,
+                            self._table,
+                            ", ".join(cols),
                         )
         except Exception as exc:
             _logger.debug("native_print: schema check skipped (%s)", exc)
@@ -157,10 +184,26 @@ class NativePrintJob(models.Model):
         # the job-log "own jobs" record rule must not block reprinting a job
         # owned by another user (e.g. one created by an admin on their behalf).
         self.browse().check_access("read")
+        if (
+            not self.env.su
+            and self.company_id
+            and self.company_id not in self.env.user.company_ids
+        ):
+            raise AccessError(_(
+                "You do not have access to this company's print jobs."
+            ))
         ids = []
         if self.source_ids:
-            ids = [int(x) for x in self.source_ids.split(",")
-                   if x.strip().isdigit()]
+            seen = set()
+            for raw in self.source_ids.split(","):
+                part = raw.strip()
+                if part.isascii() and part.isdigit():
+                    rec_id = int(part)
+                    if 1 <= rec_id <= 2_147_483_647 and rec_id not in seen:
+                        seen.add(rec_id)
+                        ids.append(rec_id)
+                        if len(ids) >= 200:
+                            break
         # Report metadata is read with sudo: print users have no ACL on
         # ir.actions.report. Authorization is decided explicitly by the
         # group check below, not by that ACL.
@@ -175,24 +218,12 @@ class NativePrintJob(models.Model):
                 "or its records were not recorded for it (for "
                 "example, POS receipts are reprinted from the POS)."
             ))
-        # The log row is client-reported, so nothing on it is trusted
-        # on its own (audit L4): the report's OWN model decides which
-        # records are rendered — never the posted source_model — the
-        # records must still exist and be readable by this user, and
-        # a group-restricted report stays restricted here too.
-        #
-        # Access is judged the way Odoo itself judges group
-        # membership (field report, 2026-11-05): the previous check
-        # intersected the report's groups with env.user.group_ids,
-        # which in Odoo 19 holds DIRECT groups only — so an
-        # Administrator, whose reach comes through implied groups,
-        # was refused for almost every restricted report ("You do
-        # not have access...") despite being Administrator.
-        # Administrators always qualify (the job log is their tool);
-        # everyone else is matched against their full group set,
-        # implied groups included.
+        # Never trust client-reported source_model: derive model from the
+        # report itself, enforce report group restrictions (expanding implied
+        # groups since Odoo 19 user.group_ids holds direct groups only),
+        # and verify record read access.
         if report.group_ids and not self.env.user._is_admin():
-            user_groups = self.env.user.group_ids
+            user_groups = self.env.user.sudo().group_ids
             frontier = user_groups
             while frontier:
                 implied = frontier.mapped("implied_ids") - user_groups
@@ -205,7 +236,7 @@ class NativePrintJob(models.Model):
                     "You do not have access to the report used by this job."
                 ))
         model = report.model
-        if not model or model not in self.env:
+        if not model or model not in self.env or self.env[model]._abstract:
             raise UserError(_(
                 "This job cannot be reprinted: its report has no valid model."
             ))
@@ -257,12 +288,13 @@ class NativePrintJob(models.Model):
         "A print job with this idempotency key already exists for this company.",
     )
 
+    @api.model
     def _cron_prune_job_log(self, days=180, batch_size=1000, max_batches=10):
         """Retention hook for the scheduled action (shipped
         INACTIVE — see data/native_print_cron.xml): delete
         terminal-state jobs older than `days`. The log is an audit
-        trail, so pruning is an explicit admin decision, never a
-        silent default (audit M2). Active jobs are never pruned:
+        trail, so pruning is an explicit admin decision rather than a
+        silent default. Active jobs are never pruned:
         their outcome is still owed to someone."""
         days = max(1, int(days))
         batch_size = max(1, int(batch_size))

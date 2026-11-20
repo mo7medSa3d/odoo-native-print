@@ -25,7 +25,11 @@ pub fn origin_is_allowed(configured: &str, actual: &str) -> bool {
 /// `parse_origin` rejects, so probe code never re-implements the
 /// security-critical parser in a second place (audit L5).
 pub fn origin_host_port(origin: &str) -> Option<(String, u16)> {
-    let (_scheme, host, port) = parse_origin(origin)?;
+    let parsed = parse_origin(origin)?;
+    if !scheme_allowed(&parsed) {
+        return None;
+    }
+    let (_scheme, host, port) = parsed;
     let bare = host
         .strip_prefix('[')
         .and_then(|h| h.strip_suffix(']'))
@@ -77,7 +81,10 @@ fn parse_origin(s: &str) -> Option<(&'static str, String, u16)> {
             default_port
         } else {
             let p = after_close.strip_prefix(':')?;
-            if p.is_empty() || !p.chars().all(|c| c.is_ascii_digit()) {
+            if p.is_empty()
+                || (p.len() > 1 && p.starts_with('0'))
+                || !p.chars().all(|c| c.is_ascii_digit())
+            {
                 return None;
             }
             p.parse::<u16>().ok()?
@@ -92,6 +99,7 @@ fn parse_origin(s: &str) -> Option<(&'static str, String, u16)> {
             if h.is_empty()
                 || h.contains(':')
                 || p.is_empty()
+                || (p.len() > 1 && p.starts_with('0'))
                 || !p.chars().all(|c| c.is_ascii_digit())
             {
                 return None;
@@ -107,7 +115,10 @@ fn parse_origin(s: &str) -> Option<(&'static str, String, u16)> {
         ip.to_string()
     } else {
         let trimmed = raw_host.strip_suffix('.').unwrap_or(raw_host);
-        if trimmed.is_empty() || !is_valid_hostname(trimmed) {
+        if trimmed.is_empty()
+            || !is_valid_hostname(trimmed)
+            || (raw_host.ends_with('.') && trimmed.parse::<std::net::Ipv4Addr>().is_ok())
+        {
             return None;
         }
         trimmed.to_ascii_lowercase()
@@ -352,6 +363,10 @@ mod tests {
         assert_eq!(origin_host_port("https://evil%2ecom:8069"), None);
         assert_eq!(origin_host_port("https://\u{0435}xample.com:8069"), None);
         assert_eq!(origin_host_port("https://odoo.local\n:8069"), None);
+        assert_eq!(origin_host_port("http://odoo.company.local:8069"), None);
+        assert_eq!(origin_host_port("http://127.0.0.1.:8069"), None);
+        assert_eq!(origin_host_port("http://127.0.0.1:0080"), None);
+        assert_eq!(origin_host_port("http://[::1]:0080"), None);
     }
     #[test]
     fn limits() {

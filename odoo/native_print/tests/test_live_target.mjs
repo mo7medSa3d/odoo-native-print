@@ -33,14 +33,14 @@ eq(m.detectPrinterType({ name: "Microsoft Print to PDF", kind: "virtual", protoc
 eq(m.detectPrinterType({ name: "Microsoft XPS Document Writer", kind: "virtual", protocol: "zpl", printer_class: "label" }).printerClass, "virtual", "virtual overrides conflicting label class");
 eq(m.printerPatternFor({ name: "EPSON TM-T88VII", port: "192.168.1.50" }, "escpos"), "tcp://192.168.1.50:9100", "tcp pattern");
 eq(m.printerPatternFor({ name: "HP LaserJet", port: "192.168.1.51" }, "gdi"), "HP LaserJet", "spooler pattern");
-// Audit L9/L10 hardening: IPv6 ports are bracketed, invalid IPv4
+// IP/protocol hardening: IPv6 ports are bracketed, invalid IPv4
 // octets are not IPs, and protocol tokens match on word boundaries.
 eq(m.printerPatternFor({ name: "Label", port: "::1" }, "zpl"), "tcp://[::1]:9100", "ipv6 bracketed");
 eq(m.printerPatternFor({ name: "Label", port: "999.1.1.1" }, "zpl"), "Label", "bad octet not an ip");
 eq(m.detectPrinterType({ name: "Replit OfficeJet", driver: "HP" }).mode, "gdi", "epl substring is not epl");
 eq(m.detectPrinterType({ name: "Zebra ZPL Label", driver: "Zebra" }).mode, "zpl", "zpl word");
 eq(m.detectPrinterType({ name: "TSC TTP-244", driver: "TSC" }).mode, "tspl", "tsc word");
-// The wider POS ecosystem (2026-11-06): the JS fallback table
+// Wider POS ecosystem: the JS fallback table
 // carries the same identities as the Rust detection, so a real
 // POS printer is recognized even with an old bridge.
 eq(m.detectPrinterType({ name: "XP-80C", driver: "USB Printing Support" }).mode, "escpos", "xprinter model name");
@@ -49,8 +49,11 @@ eq(m.detectPrinterType({ name: "80mm Mini Printer", driver: "Generic USB" }).pri
 eq(m.detectPrinterType({ name: "小票打印机", driver: "热敏驱动" }).mode, "escpos", "chinese clone driver");
 eq(m.rollWidthMm({ forms: [{ roll: true, size: { width_mm: 80 } }] }), 80, "roll width");
 eq(m.rollWidthMm({ forms: [{ roll: false, size: { width_mm: 210 } }] }), null, "no roll");
+eq(m.rollWidthMm({ forms: [{ roll: true, width_mm: 58 }] }), 58, "flat roll width tolerated");
+eq(m.rollWidthMm({ forms: [{ roll: true, size: { width_mm: 0 } }] }), null, "zero roll width ignored");
+eq(m.printerPatternFor(null, "gdi"), "", "null printer returns empty pattern");
 // Bridge-shipped detection wins over the name heuristic: the app
-// is the single detection authority (field bug, 2026-11-05 — the
+// is the single detection authority (the
 // two detectors disagreed and valid POS printers were refused).
 eq(m.detectPrinterType({ name: "POS Printer", driver: "Generic", protocol: "escpos", printer_class: "thermal" }).mode, "escpos", "bridge protocol wins");
 eq(m.detectPrinterType({ name: "EPSON TM-T88VII", driver: "EPSON", protocol: "gdi", printer_class: "office" }).mode, "gdi", "bridge protocol wins over heuristic");
@@ -86,7 +89,7 @@ eq(t.rule.printer_pattern, "tcp://192.168.1.50:9100", "selected tcp");
 eq(t.rule.media.roll_width_mm, 80, "selected roll");
 t = await m.resolveBridgeTarget(bridge, { preferClasses: ["thermal", "label"] });
 eq(t.printer.name, "EPSON TM-T88VII", "pos prefers thermal");
-// Owner's selection model (2026-11-04): an explicit panel
+// Selection precedence: an explicit panel
 // selection wins even over the POS class preference — the owner
 // picks the printer in the panel and everything goes there.
 m.setSelectedPrinter("HP LaserJet");
@@ -101,7 +104,7 @@ eq(t.printer.name, "HP LaserJet", "stale selection falls back to default");
 t = await m.resolveBridgeTarget({ listPrinters: async () => [] });
 eq(t, null, "no printers -> null");
 
-// Duplex is a choice, not a capability (2026-11-07): even a
+// Duplex is a choice, not a capability: even a
 // duplex-CAPABLE printer's rule must leave duplex unset, so the
 // driver default (or a saved per-printer default in the app)
 // decides — never the capability probe.
@@ -113,7 +116,7 @@ m.setSelectedPrinter(null);
 t = await m.resolveBridgeTarget(duplexBridge);
 eq(t.rule.duplex, null, "capable printer still leaves duplex unchosen");
 
-// forms_summary shape (2026-11-07): the bridge nests sizes
+// forms_summary shape: the bridge nests sizes
 // under f.size; the summary must show real numbers, never NaN.
 const summary = m.formatFormsSummary(
     [
@@ -138,7 +141,7 @@ eq(
     "whitespace-padded IP port is trimmed",
 );
 
-// Protocol-detection parity (2026-11-07): the thermal token
+// Protocol-detection parity: the thermal token
 // table and the label rules exist in TWO languages — this page
 // fallback and print-core's detect_protocol (the primary, which
 // ships on every PrinterInfo). They are one business rule; a
@@ -195,7 +198,44 @@ eq(ccSandbox.out.ccProtocol({ kind: "virtual", protocol: "escpos" }), "gdi", "Co
 eq(ccSandbox.out.ccClass({ kind: "virtual", printer_class: "thermal" }), "virtual", "Control Center virtual class override");
 for (const tok of ['"zdesigner"', '"zebra"', '"zpl"', '"tspl"', '"tsc"', '"epl"']) {
     if (!rustSrc.includes(tok)) throw new Error("rust detect_protocol lost label token " + tok);
+}
+for (const tok of ['"zdesigner"', '"zebra"']) {
     if (!src.includes(tok)) throw new Error("JS detectPrinterType lost label token " + tok);
+}
+for (const word of ["zpl", "tsc", "tspl", "epl"]) {
+    if (!src.includes(`/(^|[^a-z0-9])${word}([^a-z0-9]|$)/`)) {
+        throw new Error("JS detectPrinterType missing pre-compiled word regex for " + word);
+    }
+}
+{
+    const detectBody = src.slice(src.indexOf("export function detectPrinterType("), src.indexOf("function isIpLiteral("));
+    eq(detectBody.includes("new RegExp"), false, "detectPrinterType must not construct RegExp per call");
+    // Parity check: pre-compiled word-boundary regexes match the legacy dynamic RegExp oracle.
+    const legacyWord = (sig, tok) => new RegExp(`(^|[^a-z0-9])${tok}([^a-z0-9]|$)`).test(sig);
+    const parityCases = [
+        { name: "ZPL", driver: "" },
+        { name: "Printer-ZPL-203", driver: "" },
+        { name: "EZPL Printer", driver: "" },
+        { name: "ZPL2 Printer", driver: "" },
+        { name: "TSC", driver: "" },
+        { name: "My/TSC_Label", driver: "" },
+        { name: "ATSC Office", driver: "" },
+        { name: "TSC200", driver: "" },
+        { name: "TSPL Label", driver: "" },
+        { name: "MTSPL Office", driver: "" },
+        { name: "EPL", driver: "" },
+        { name: "Eltron (EPL)", driver: "" },
+        { name: "Replit Office", driver: "" },
+        { name: "EPL2 Printer", driver: "" },
+    ];
+    for (const p of parityCases) {
+        const sig = `${p.name} ${p.driver}`.toLowerCase();
+        const expectedMode = legacyWord(sig, "zpl") ? "zpl"
+            : (legacyWord(sig, "tsc") || legacyWord(sig, "tspl")) ? "tspl"
+            : legacyWord(sig, "epl") ? "epl"
+            : "gdi";
+        eq(m.detectPrinterType(p).mode, expectedMode, `pre-compiled regex parity for ${p.name}`);
+    }
 }
 // The terminal-state contract is single-sourced in the client:
 // neither consumer may keep a private copy.
@@ -241,11 +281,14 @@ const handlerSrc = readFileSync(
         'const registry = { category: () => ({ add: (_k, fn) => { globalThis.__npHandler = fn; } }) };')
     .replace('import { rpc } from "@web/core/network/rpc";',
         'const rpc = async (url, params) => { globalThis.__npRpcCalls.push({ url, params }); return { ok: true }; };')
+    .replace('import { user } from "@web/core/user";',
+        'const user = globalThis.__npUser;')
     .replace('import { _t } from "@web/core/l10n/translation";',
         'const _t = (s, ...args) => args.reduce((acc, v) => acc.replace("%s", String(v)), s);')
     .replace('from "./native_print_client";',
         `from "${tmp}";`);
 globalThis.__npRpcCalls = rpcCalls;
+globalThis.__npUser = { context: {} };
 const tmpHandler = join(tmpdir(), "np_handler_test.mjs");
 writeFileSync(tmpHandler, handlerSrc);
 const h = await import(tmpHandler);
@@ -304,6 +347,45 @@ try {
     eq(rpcCalls.length, 1, "quiet-retry canceled posts one status");
     eq(rpcCalls[0].params.state, "canceled", "quiet-retry canceled syncs canceled");
     eq(notices.length, 0, "quiet-retry canceled emits no danger toast");
+
+    // 2b. buildReportUrl uses @web/core/user context on Odoo 18/19 and wizard options.
+    globalThis.__npUser.context = { lang: "ar_001", allowed_company_ids: [2] };
+    const urlWithUserCtx = h.buildReportUrl({ report_name: "account.report_invoice", context: { active_ids: [5] } }, "pdf", {});
+    eq(urlWithUserCtx.includes("/report/pdf/account.report_invoice/5?context="), true, "buildReportUrl includes docids and context");
+    eq(decodeURIComponent(urlWithUserCtx).includes('"lang":"ar_001"'), true, "buildReportUrl inherits Odoo 18/19 user.context");
+    const wizardUrl = h.buildReportUrl({ report_name: "sale.report", data: { date_from: "2026-01-01" } }, "pdf", {});
+    eq(wizardUrl.includes("?options="), true, "wizard data encodes options query param");
+    eq(h.reportSource(null).ids, "", "reportSource tolerates null action");
+    globalThis.__npUser.context = {};
+
+    // 2c. Already-notified failed job does not repeat 900ms recheck IPC on subsequent polls.
+    rpcCalls.length = 0;
+    notices.length = 0;
+    let failedPolls = 0;
+    const origDateNowRetry = Date.now;
+    let fakeRetryNow = origDateNowRetry();
+    Date.now = () => fakeRetryNow;
+    try {
+        const steadyFailBridge = {
+            jobDetail: async () => {
+                failedPolls++;
+                // Poll 1 + its single 900ms recheck -> 2 calls; Poll 2 must NOT recheck (3rd call total),
+                // then advance past 5-minute progress cap to exit cleanly.
+                if (failedPolls >= 3) fakeRetryNow += 6 * 60 * 1000;
+                return { state: "failed", errorCode: "OFFLINE", pages: 1, attempts: 1 };
+            },
+        };
+        await h.watchJobToCompletion(
+            steadyFailBridge,
+            "job-steady-fail",
+            { reportName: "account.report_invoice", printerName: "HP", printerPattern: "HP", byteSize: 100 },
+            testEnv,
+        );
+        eq(failedPolls, 3, "already-notified failure skips duplicate recheck IPC");
+        eq(notices.length, 1, "steady failure notifies user only once");
+    } finally {
+        Date.now = origDateNowRetry;
+    }
 } finally {
     globalThis.setTimeout = origSetTimeout;
 }
@@ -346,6 +428,23 @@ try {
     eq(pdfRes, true, "dynamic long non-ASCII report prints");
     eq(capturedKey.length <= 128, true, "idempotencyKey length <= 128");
     eq(/^[!-~]+$/.test(capturedKey), true, "idempotencyKey is printable ASCII");
+
+    // 4b. Bridge failure must not leak raw exception details to UI toast and must tolerate null throw.
+    notices.length = 0;
+    globalThis.window.__NATIVE_PRINT__ = {
+        listPrinters: async () => [{ name: "HP LaserJet", driver: "HP PCL", kind: "local", is_default: true }],
+        printerCapabilities: async () => ({ forms: [], color: true }),
+        printPdf: async () => { throw new Error("INTERNAL_RUST_SECRET_TRACE"); },
+    };
+    const errRes = await registeredHandler({ report_type: "qweb-pdf", report_name: "r.err" }, {}, testEnv);
+    eq(errRes, undefined, "bridge printPdf error falls back to download");
+    eq(notices.length, 1, "bridge error emits one warning toast");
+    eq(notices[0].msg.includes("INTERNAL_RUST_SECRET_TRACE"), false, "raw exception text is not leaked to UI");
+
+    notices.length = 0;
+    globalThis.window.__NATIVE_PRINT__.printPdf = async () => { throw null; };
+    const nullErrRes = await registeredHandler({ report_type: "qweb-pdf", report_name: "r.nullerr" }, {}, testEnv);
+    eq(nullErrRes, undefined, "null bridge rejection falls back cleanly without TypeError");
 } finally {
     globalThis.fetch = origFetch;
     delete globalThis.window.__NATIVE_PRINT__;
@@ -450,6 +549,44 @@ try {
         // Settle second submission.
         resolvers[1]();
         eq(await pSecond, true, "second submission completes");
+
+        // 5c. When inFlightReports exceeds 20 entries, stale entries are pruned.
+        const sweepResolvers = [];
+        globalThis.fetch = () => new Promise((resolve) => {
+            sweepResolvers.push(() => resolve({
+                ok: true,
+                arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]).buffer,
+            }));
+        });
+        const stalePending = [];
+        for (let idx = 0; idx < 21; idx++) {
+            stalePending.push(registeredHandler(
+                { report_type: "qweb-pdf", report_name: `r.sweep.${idx}`, context: { active_ids: [idx + 1] } },
+                {},
+                testEnv,
+            ));
+        }
+        await new Promise((r) => origSetTimeout2(r, 10));
+        eq(sweepResolvers.length, 21, "21 in-flight entries created");
+        // Advance clock past IN_FLIGHT_STALE_MS and submit a 22nd report to trigger sweep.
+        fakeNow += h.IN_FLIGHT_STALE_MS + 1000;
+        const freshPromise = registeredHandler(
+            { report_type: "qweb-pdf", report_name: "r.sweep.fresh", context: { active_ids: [999] } },
+            {},
+            testEnv,
+        );
+        await new Promise((r) => origSetTimeout2(r, 10));
+        eq(sweepResolvers.length, 22, "22nd fresh submission starts and sweeps stale entries");
+        // A duplicate of the fresh 22nd report is still deduped (sweep kept fresh entry).
+        const freshDup = await registeredHandler(
+            { report_type: "qweb-pdf", report_name: "r.sweep.fresh", context: { active_ids: [999] } },
+            {},
+            testEnv,
+        );
+        eq(freshDup, true, "fresh entry survives stale sweep");
+        eq(sweepResolvers.length, 22, "fresh duplicate did not start a 23rd fetch");
+        for (const r of sweepResolvers) r();
+        await Promise.all([...stalePending, freshPromise]);
     } finally {
         Date.now = origDateNow;
         globalThis.fetch = origFetch2;
@@ -476,7 +613,7 @@ try {
         )
         .replace('import { registry } from "@web/core/registry";', 'const registry = { category: () => ({ add: () => {} }) };')
         .replace('import { useService } from "@web/core/utils/hooks";', 'const useService = () => ({ add: () => {}, doAction: () => {} });')
-        .replace('import { rpc } from "@web/core/network/rpc";', 'const rpc = async (url, params) => { globalThis.__npSystrayRpcs.push({ url, params }); return { ok: true }; };')
+        .replace('import { rpc } from "@web/core/network/rpc";', 'const rpc = async (url, params) => { globalThis.__npSystrayRpcs.push({ url, params }); if (url === "/native_print/overview") return globalThis.__npOverviewResp || { ok: true, active_jobs: 0, done_jobs: 0, failed_jobs: 0 }; return { ok: true }; };')
         .replace('import { _t } from "@web/core/l10n/translation";', 'const _t = (s) => s;')
         .replace('from "./native_print_client";', `from "${tmp}";`);
     globalThis.__npSystrayRpcs = [];
@@ -509,10 +646,36 @@ try {
         mountedHook = globalThis.__npOnMounted;
         unmountHook = globalThis.__npOnWillUnmount;
 
-        // Verify mounted registers click + interval and onWillUnmount cleans both up.
+        // Verify mounted registers click + job_updated + interval and onWillUnmount cleans all up.
+        globalThis.window.dispatchEvent = (ev) => {
+            for (const l of listeners.slice()) {
+                if (l.ev === ev.type) l.fn(ev);
+            }
+            return true;
+        };
         mountedHook();
-        eq(listeners.length, 1, "onMounted registers click listener");
+        eq(listeners.length, 2, "onMounted registers click and job_updated listeners");
+        eq(listeners.some((l) => l.ev === "native_print:job_updated"), true, "onMounted listens for native_print:job_updated");
         eq(intervals.length, 1, "onMounted registers refresh interval");
+
+        // Event-driven systray counter refresh: watchJobToCompletion -> native_print:job_updated -> refreshStats().
+        globalThis.__npOverviewResp = { ok: true, active_jobs: 0, done_jobs: 7, failed_jobs: 2 };
+        globalThis.__npSystrayRpcs.length = 0;
+        const prevSetTimeoutEv = globalThis.setTimeout;
+        globalThis.setTimeout = (fn) => { fn(); return 0; };
+        try {
+            await h.watchJobToCompletion(
+                { jobDetail: async () => ({ state: "done", pages: 1, attempts: 1 }) },
+                "job-ev-done",
+                { reportName: "account.report_invoice", printerName: "HP", printerPattern: "HP", byteSize: 50 },
+                testEnv,
+            );
+        } finally {
+            globalThis.setTimeout = prevSetTimeoutEv;
+        }
+        await new Promise((r) => setTimeout(r, 10));
+        eq(comp.state.doneJobs, 7, "native_print:job_updated immediately refreshes doneJobs");
+        eq(comp.state.failedJobs, 2, "native_print:job_updated immediately refreshes failedJobs");
 
         const printerList = [{ name: "HP LaserJet", protocol: "gdi", printer_class: "office" }];
         await comp.maybeSyncDeviceCaps(printerList, false);
@@ -525,8 +688,29 @@ try {
         eq(capCalls, 3, "protocol/class change triggers fresh printerCapabilities query");
 
         unmountHook();
-        eq(listeners.length, 0, "onWillUnmount removes click listener");
+        eq(listeners.length, 0, "onWillUnmount removes click and job_updated listeners");
+        // After unmount, dispatching native_print:job_updated must not call /native_print/overview.
+        const overviewCountAfterUnmount = globalThis.__npSystrayRpcs.filter((c) => c.url === "/native_print/overview").length;
+        m.notifyJobUpdated();
+        await new Promise((r) => setTimeout(r, 10));
+        eq(
+            globalThis.__npSystrayRpcs.filter((c) => c.url === "/native_print/overview").length,
+            overviewCountAfterUnmount,
+            "unmounted systray ignores native_print:job_updated",
+        );
         eq(clearedIntervals.includes(777), true, "onWillUnmount clears refresh interval");
+        // Corrupted non-object localStorage value does not crash maybeSyncDeviceCaps.
+        globalThis.localStorage.setItem("npCapsSyncV1", "null");
+        await comp.maybeSyncDeviceCaps(printerList, false);
+        eq(capCalls, 4, "corrupted null npCapsSyncV1 storage recovers safely");
+
+        // Escape key closes open systray dropdown.
+        comp.state.isOpen = true;
+        let stopped = false;
+        comp.onKeyDown({ key: "Escape", stopPropagation: () => { stopped = true; } });
+        eq(comp.state.isOpen, false, "Escape key closes systray menu");
+        eq(stopped, true, "Escape key stops propagation when closing");
+
         eq(comp._unmounted, true, "onWillUnmount marks component unmounted");
     } finally {
         globalThis.localStorage = prevLocalStorage;

@@ -13,6 +13,7 @@
 //! Placeholder hosts (`.invalid`, `example.*`) are rejected in release builds.
 
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -46,9 +47,13 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
         .unwrap_or("config.json");
     let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
     let tmp = parent.join(format!("{name}.{}.{seq}.tmp", std::process::id()));
-    if let Err(e) = std::fs::write(&tmp, content) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.to_string());
+    {
+        let mut f = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+        if let Err(e) = f.write_all(content.as_bytes()).and_then(|()| f.sync_all()) {
+            drop(f);
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.to_string());
+        }
     }
 
     let mut last_err = None;
@@ -88,6 +93,13 @@ pub fn validate_origin(origin: &str) -> Result<String, String> {
 
     if !print_core::security::origin_is_allowed(&candidate, &candidate) {
         return Err("invalid Odoo address (HTTPS, or HTTP to an IP address)".to_string());
+    }
+    if let Some((host, _)) = print_core::security::origin_host_port(&candidate) {
+        if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+            if crate::commands::is_blocked_metadata_ip(ip) {
+                return Err("cloud metadata address is not allowed".to_string());
+            }
+        }
     }
     if cfg!(not(debug_assertions)) {
         // Placeholder check by host labels, not substrings (audit
@@ -156,7 +168,7 @@ mod gpo {
                 &mut cb,
             )
         };
-        if st != ERROR_SUCCESS || cb < 2 {
+        if st != ERROR_SUCCESS || cb < 2 || cb > 8192 {
             return None;
         }
         let mut buf = vec![0u16; (cb as usize).div_ceil(2)];

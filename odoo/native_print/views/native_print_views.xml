@@ -272,7 +272,7 @@
     <menuitem id="menu_native_print_root"
               name="Native Print"
               web_icon="native_print,static/description/icon.png"
-              groups="native_print.group_native_print_user,base.group_user"
+              groups="native_print.group_native_print_user"
               sequence="95"/>
     <menuitem id="menu_jobs"
               name="Jobs"

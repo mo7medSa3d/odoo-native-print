@@ -131,7 +131,10 @@ pub fn match_paper(
         });
     }
     // 1. Exact match.
-    if let Some(f) = forms.iter().find(|f| !f.roll && same_size(f.size, page)) {
+    if let Some(f) = forms
+        .iter()
+        .find(|f| valid_sheet(f) && same_size(f.size, page))
+    {
         return Ok(PaperMatch {
             kind: MatchKind::Exact,
             form: f.clone(),
@@ -258,6 +261,9 @@ pub fn match_paper(
 /// sheets — instead of being refused for its height (owner
 /// directive, 2026-11-05).
 pub fn pick_sheet_form(forms: &[Form], page_width_mm: f64) -> Option<Form> {
+    if !page_width_mm.is_finite() || page_width_mm <= 0.0 {
+        return None;
+    }
     // A narrow strip (a receipt) landing on an office-class
     // printer belongs on the office sheet — the A4/Letter class
     // every office workflow expects — not on the smallest form
@@ -329,7 +335,7 @@ pub fn match_paper_auto(
     if let Some(form) = capabilities
         .forms
         .iter()
-        .find(|form| !form.roll && same_size(form.size, page))
+        .find(|form| valid_sheet(form) && same_size(form.size, page))
     {
         return Ok(PaperMatch {
             kind: MatchKind::Exact,
@@ -467,6 +473,10 @@ mod tests {
         }];
         assert!(pick_sheet_form(&rolls, 80.0).is_none());
         assert!(pick_sheet_form(&[], 80.0).is_none());
+        assert!(pick_sheet_form(&forms(), 0.0).is_none());
+        assert!(pick_sheet_form(&forms(), -10.0).is_none());
+        assert!(pick_sheet_form(&forms(), f64::NAN).is_none());
+        assert!(pick_sheet_form(&forms(), f64::INFINITY).is_none());
     }
 
     #[test]
@@ -484,6 +494,8 @@ mod tests {
     #[test]
     fn strict_rejects_label_size() {
         assert!(match_paper(PageSize::label_100x150(), &forms(), ScalePolicy::Strict).is_err());
+        let bad_forms = vec![Form::sheet("Zero", PageSize::new(0.0, 0.0))];
+        assert!(match_paper(PageSize::new(0.5, 0.5), &bad_forms, ScalePolicy::Strict).is_err());
     }
     #[test]
     fn custom_allowed() {

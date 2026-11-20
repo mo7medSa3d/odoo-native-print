@@ -46,14 +46,14 @@ impl PrinterCaps {
     pub fn accepts_pdf(&self) -> bool {
         self.formats_supported
             .iter()
-            .any(|f| base_format(f) == "application/pdf")
+            .any(|f| base_format(f).eq_ignore_ascii_case("application/pdf"))
     }
     pub fn choose_format(&self) -> Result<&str, IppError> {
         for pref in Self::FORMAT_PREFERENCE {
             if self
                 .formats_supported
                 .iter()
-                .any(|f| base_format(f) == pref)
+                .any(|f| base_format(f).eq_ignore_ascii_case(pref))
             {
                 return Ok(pref);
             }
@@ -426,12 +426,8 @@ impl IppClient {
 
 /// MIME base type of a document-format value: parameters after ';'
 /// and case are presentation details, not a different format.
-fn base_format(f: &str) -> String {
-    f.split(';')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase()
+fn base_format(f: &str) -> &str {
+    f.split(';').next().unwrap_or("").trim()
 }
 
 enum HttpFraming {
@@ -451,8 +447,14 @@ fn split_http_response(mut raw: &[u8]) -> Result<Option<ParsedHttpResponse<'_>>,
         let status: u16 = headers
             .lines()
             .next()
-            .and_then(|line| line.split_whitespace().nth(1))
-            .and_then(|s| s.parse().ok())
+            .and_then(|line| {
+                let mut parts = line.split_whitespace();
+                let proto = parts.next()?;
+                if !proto.starts_with("HTTP/") {
+                    return None;
+                }
+                parts.next()?.parse().ok()
+            })
             .ok_or_else(|| IppError::Parse("no HTTP status".into()))?;
         // Skip interim 1xx responses (e.g. `HTTP/1.1 100 Continue`) that CUPS
         // and embedded IPP servers frequently prepend before `HTTP/1.1 200 OK`.
@@ -472,8 +474,17 @@ fn split_http_response(mut raw: &[u8]) -> Result<Option<ParsedHttpResponse<'_>>,
             match k.trim() {
                 "transfer-encoding" => {
                     has_transfer_encoding = true;
-                    if v.split(',').any(|t| t.trim() == "chunked") {
-                        is_chunked = true;
+                    let mut saw_token = false;
+                    for t in v.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+                        saw_token = true;
+                        if t == "chunked" {
+                            is_chunked = true;
+                        } else {
+                            return Err(IppError::Parse("unsupported Transfer-Encoding".into()));
+                        }
+                    }
+                    if !saw_token {
+                        return Err(IppError::Parse("empty Transfer-Encoding".into()));
                     }
                 }
                 "content-length" => {
@@ -515,18 +526,25 @@ fn split_http_response(mut raw: &[u8]) -> Result<Option<ParsedHttpResponse<'_>>,
     }
 }
 
+fn chunked_body_complete(body: &[u8]) -> bool {
+    // Fast-path: every RFC 9112 terminated chunked body (with or without
+    // trailers) is at least 5 bytes ("0\r\n\r\n") and ends with "\r\n\r\n".
+    // Skip full chunk walking on partial read() buffers to avoid O(N^2) rescans.
+    body.len() >= 5 && body.ends_with(b"\r\n\r\n") && dechunk_into(body, None).is_ok()
+}
+
 fn http_response_complete(raw: &[u8]) -> bool {
     match split_http_response(raw) {
         Ok(None) => false,
         Err(_) => true,
         Ok(Some((status, _, _))) if status != 200 => true,
-        Ok(Some((_, HttpFraming::Chunked, body))) => dechunk(body).is_ok(),
+        Ok(Some((_, HttpFraming::Chunked, body))) => chunked_body_complete(body),
         Ok(Some((_, HttpFraming::ContentLength(len), body))) => body.len() >= len,
         Ok(Some((_, HttpFraming::Close, _))) => false,
     }
 }
 
-fn parse_http_response(raw: &[u8]) -> Result<Vec<u8>, IppError> {
+pub fn parse_http_response(raw: &[u8]) -> Result<Vec<u8>, IppError> {
     let (status, framing, body) = split_http_response(raw)?
         .ok_or_else(|| IppError::Parse("no HTTP header terminator".into()))?;
     if status != 200 {
@@ -544,8 +562,7 @@ fn parse_http_response(raw: &[u8]) -> Result<Vec<u8>, IppError> {
     }
 }
 
-fn dechunk(body: &[u8]) -> Result<Vec<u8>, String> {
-    let mut out = Vec::new();
+fn dechunk_into(body: &[u8], mut out: Option<&mut Vec<u8>>) -> Result<(), String> {
     let mut pos = 0usize;
     loop {
         let line_end = body[pos..]
@@ -553,8 +570,13 @@ fn dechunk(body: &[u8]) -> Result<Vec<u8>, String> {
             .position(|w| w == b"\r\n")
             .ok_or("bad chunk header")?
             + pos;
-        let size_str = String::from_utf8_lossy(&body[pos..line_end]);
-        let size_hex = size_str.split(';').next().unwrap_or("").trim();
+        let size_part = body[pos..line_end]
+            .split(|&b| b == b';')
+            .next()
+            .unwrap_or(b"");
+        let size_hex = std::str::from_utf8(size_part)
+            .map_err(|_| "bad chunk size")?
+            .trim();
         if size_hex.is_empty() || !size_hex.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err("bad chunk size".into());
         }
@@ -574,9 +596,17 @@ fn dechunk(body: &[u8]) -> Result<Vec<u8>, String> {
         if body.get(end..end + 2) != Some(b"\r\n") {
             return Err("bad chunk terminator".into());
         }
-        out.extend_from_slice(&body[start..end]);
+        if let Some(ref mut buf) = out {
+            buf.extend_from_slice(&body[start..end]);
+        }
         pos = end + 2;
     }
+    Ok(())
+}
+
+fn dechunk(body: &[u8]) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    dechunk_into(body, Some(&mut out))?;
     Ok(out)
 }
 
@@ -949,6 +979,16 @@ mod tests {
             ),
             Err(IppError::Parse(_))
         ));
+        // Unsupported Transfer-Encoding must fail, not fall back to Close.
+        assert!(matches!(
+            parse_http_response(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\n\r\ndata"),
+            Err(IppError::Parse(_))
+        ));
+        // Non-HTTP status line must be rejected.
+        assert!(matches!(
+            parse_http_response(b"FOO 200 OK\r\n\r\ndata"),
+            Err(IppError::Parse(_))
+        ));
     }
 
     #[test]
@@ -1019,5 +1059,26 @@ mod tests {
             "expected prompt return without waiting for EOF/timeout, took {elapsed:?}"
         );
         let _ = server.join();
+    }
+
+    #[test]
+    fn chunked_fast_path_handles_partial_trailers_and_embedded_terminators() {
+        let hdr = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
+        // Partial chunk (missing terminator): must not be treated as complete.
+        assert!(!http_response_complete(
+            &[hdr.as_slice(), b"5\r\nhello\r\n"].concat()
+        ));
+        assert!(!http_response_complete(
+            &[hdr.as_slice(), b"5\r\nhello\r\n0\r\n"].concat()
+        ));
+        // Payload that itself ends with "0\r\n\r\n" inside an incomplete chunk:
+        // suffix check passes, full zero-alloc scan rejects it as incomplete.
+        assert!(!chunked_body_complete(b"a\r\nabcd0\r\n\r\n"));
+        // Complete multi-chunk body with chunk extension and trailer.
+        let with_trailer = b"5;ext=1\r\nhello\r\n3\r\nipp\r\n0\r\nX-Check: ok\r\n\r\n";
+        assert!(chunked_body_complete(with_trailer));
+        let full = [hdr.as_slice(), with_trailer.as_slice()].concat();
+        assert!(http_response_complete(&full));
+        assert_eq!(parse_http_response(&full).unwrap(), b"helloipp");
     }
 }

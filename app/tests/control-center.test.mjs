@@ -223,6 +223,8 @@ test("background polling pauses when document.hidden is true and refreshes on vi
 test("settings has no dead .example links and all desktop pages declare button types and toast live region", () => {
   const settingsHtml = readFileSync(new URL("../dist/settings.html", import.meta.url), "utf8");
   assert.doesNotMatch(settingsHtml, /<a\b[^>]*\.example/i, "settings.html must not link to dead .example URLs");
+  assert.doesNotMatch(settingsHtml, /\.example\b/i, "settings.html must not contain .example placeholder strings");
+  assert.doesNotMatch(settingsHtml, /0000\s+0000/, "settings.html must not contain placeholder phone numbers");
   assert.doesNotMatch(settingsHtml, /\.row\s+\.v\s+a\b/, "dead anchor CSS in settings.html must be removed");
   assert.match(html, /id="toastContainer"[^>]*aria-live="polite"/, "toastContainer must declare aria-live=polite");
   for (const file of ["index.html", "settings.html", "boot.html", "tabbar.html"]) {
@@ -294,10 +296,12 @@ test("theme.css Light and Dark tokens meet WCAG 2.2 AA contrast thresholds", () 
       }
     }
 
-    // Brand button text >= 4.5:1 on brand & brand-hover
-    for (const bgToken of ["--brand", "--brand-hover"]) {
-      const cr = ratio(parseColor(vars["--brand-fg"]), parseColor(vars[bgToken]));
-      assert.ok(cr >= 4.5, `${name} --brand-fg on ${bgToken} contrast ${cr.toFixed(2)}:1 < 4.5:1`);
+    // Brand & danger button text >= 4.5:1 on fill & hover
+    for (const [fgToken, bgTokens] of [["--brand-fg", ["--brand", "--brand-hover"]], ["--danger-fg", ["--danger", "--danger-hover"]]]) {
+      for (const bgToken of bgTokens) {
+        const cr = ratio(parseColor(vars[fgToken]), parseColor(vars[bgToken]));
+        assert.ok(cr >= 4.5, `${name} ${fgToken} on ${bgToken} contrast ${cr.toFixed(2)}:1 < 4.5:1`);
+      }
     }
 
     // Semantic status fg >= 4.5:1 on surface and on its own status bg
@@ -314,4 +318,752 @@ test("theme.css Light and Dark tokens meet WCAG 2.2 AA contrast thresholds", () 
     const crBorder = ratio(parseColor(vars["--border-strong"]), surface);
     assert.ok(crBorder >= 3.0, `${name} --border-strong on --bg-surface contrast ${crBorder.toFixed(2)}:1 < 3.0:1`);
   }
+});
+
+test("all desktop pages enforce strict CSP (no inline handlers) and ARIA landmarks/SVG hygiene", () => {
+  for (const file of ["index.html", "boot.html", "tabbar.html", "settings.html"]) {
+    const pageHtml = readFileSync(new URL("../dist/" + file, import.meta.url), "utf8");
+    const markupOnly = pageHtml.slice(0, pageHtml.indexOf("<script"));
+    const inlineHandlers = [...markupOnly.matchAll(/\bon[a-z]+\s*=\s*["'][^"']*["']/gi)];
+    assert.deepEqual(inlineHandlers.map(m => m[0]), [], file + " must not contain inline event handlers");
+    const unhiddenSvgs = [...markupOnly.matchAll(/<svg\b[^>]*>/gi)]
+      .map(m => m[0])
+      .filter(tag => !/\baria-hidden=["']true["']/i.test(tag));
+    assert.deepEqual(unhiddenSvgs, [], file + " has decorative <svg> without aria-hidden=true");
+  }
+  const bootHtml = readFileSync(new URL("../dist/boot.html", import.meta.url), "utf8");
+  assert.doesNotMatch(bootHtml, /<main\b[^>]*role=["']status["']/i, "boot.html <main> must not be overridden by role=status");
+  const settingsHtml = readFileSync(new URL("../dist/settings.html", import.meta.url), "utf8");
+  for (const m of settingsHtml.matchAll(/<div\b[^>]*role=["']group["'][^>]*>/gi)) {
+    assert.match(m[0], /\baria-labelledby=["'][^"']+["']/, "settings.html role=group must have aria-labelledby");
+  }
+});
+
+// Minimal DOM harness for executing real page scripts in node:vm without external deps
+function createMiniDom(pageHtml, { lang = "ar", dir = "rtl" } = {}) {
+  const docListeners = new Map();
+  const winListeners = new Map();
+  const byId = new Map();
+  const allEls = [];
+
+  class MiniClassList {
+    constructor(el) { this.el = el; this.set = new Set(); }
+    add(...c) { c.forEach(x => x && this.set.add(x)); }
+    remove(...c) { c.forEach(x => this.set.delete(x)); }
+    contains(c) { return this.set.has(c); }
+    toggle(c, force) {
+      if (force === undefined) { if (this.set.has(c)) { this.set.delete(c); return false; } this.set.add(c); return true; }
+      if (force) this.set.add(c); else this.set.delete(c);
+      return !!force;
+    }
+  }
+
+  class MiniEl {
+    constructor(tag, id = "") {
+      this.tagName = String(tag || "DIV").toUpperCase();
+      this.id = id;
+      this.attrs = new Map();
+      if (id) this.attrs.set("id", id);
+      this.classList = new MiniClassList(this);
+      this.dataset = {};
+      this.style = {};
+      this.children = [];
+      this.parentNode = null;
+      this.listeners = new Map();
+      this._text = "";
+      this._html = "";
+      this.value = "";
+      this.disabled = false;
+      this.title = "";
+      this.placeholder = "";
+      this.draggable = false;
+      this.firstChild = { nodeType: 3, nodeValue: "" };
+      this.scrollIntoView = () => {};
+    }
+    get className() { return [...this.classList.set].join(" "); }
+    set className(v) { this.classList.set = new Set(String(v || "").split(/\s+/).filter(Boolean)); }
+    get textContent() { return this._text || this.children.map(c => c.textContent).join(""); }
+    set textContent(v) { this._text = String(v == null ? "" : v); this.children = []; this._html = ""; }
+    get innerHTML() { return this._html; }
+    set innerHTML(v) { this._html = String(v == null ? "" : v); this.children = []; this._text = ""; }
+    setAttribute(k, v) {
+      this.attrs.set(k, String(v));
+      if (k === "id") { this.id = String(v); byId.set(this.id, this); }
+      if (k === "class") this.className = String(v);
+      if (k.startsWith("data-")) {
+        const camel = k.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+        this.dataset[camel] = String(v);
+      }
+    }
+    getAttribute(k) { return this.attrs.has(k) ? this.attrs.get(k) : null; }
+    appendChild(child) {
+      if (child && typeof child === "object") {
+        child.parentNode = this;
+        this.children.push(child);
+        if (child.id) byId.set(child.id, child);
+      }
+      return child;
+    }
+    prepend(child) {
+      if (child && typeof child === "object") {
+        child.parentNode = this;
+        this.children.unshift(child);
+      }
+      return child;
+    }
+    remove() {
+      if (!this.parentNode) return;
+      const i = this.parentNode.children.indexOf(this);
+      if (i >= 0) this.parentNode.children.splice(i, 1);
+      this.parentNode = null;
+    }
+    contains(other) {
+      let cur = other;
+      while (cur) { if (cur === this) return true; cur = cur.parentNode; }
+      return false;
+    }
+    addEventListener(type, fn) {
+      if (!this.listeners.has(type)) this.listeners.set(type, []);
+      this.listeners.get(type).push(fn);
+    }
+    dispatch(type, ev = {}) {
+      const event = { target: this, currentTarget: this, preventDefault() {}, stopPropagation() {}, ...ev };
+      for (const fn of this.listeners.get(type) || []) fn(event);
+      return event;
+    }
+    focus() { document.activeElement = this; }
+    select() {}
+    getBoundingClientRect() { return { left: 0, width: 100, top: 0, height: 34 }; }
+    querySelectorAll(sel) {
+      const out = [];
+      const walk = (n) => {
+        for (const c of n.children) {
+          if (matchesSel(c, sel)) out.push(c);
+          walk(c);
+        }
+      };
+      walk(this);
+      return out;
+    }
+    querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+  }
+
+  function matchesSel(el, sel) {
+    if (!el || !el.classList) return false;
+    if (sel === ".tab") return el.classList.contains("tab");
+    if (sel === ".tab.active") return el.classList.contains("tab") && el.classList.contains("active");
+    if (sel === ".tab.drop-hint") return el.classList.contains("tab") && el.classList.contains("drop-hint");
+    if (sel === ".toast-close") return el.classList.contains("toast-close") || el._html.includes("toast-close");
+    if (sel === ".nav-tab") return el.classList.contains("nav-tab");
+    if (sel === ".tab-pane") return el.classList.contains("tab-pane");
+    if (sel === ".filter-pill") return el.classList.contains("filter-pill");
+    if (sel === ".main-container") return el.classList.contains("main-container");
+    if (sel === ".card") return el.classList.contains("card");
+    if (sel === "[data-i18n]") return el.attrs.has("data-i18n");
+    if (sel === "#sideNav button") return el.parentNode && el.parentNode.id === "sideNav" && el.tagName === "BUTTON";
+    if (sel === "section.page") return el.tagName === "SECTION" && el.classList.contains("page");
+    if (sel.startsWith('.tab[data-label="')) {
+      const lbl = sel.slice(17, -2);
+      return el.classList.contains("tab") && el.getAttribute("data-label") === lbl;
+    }
+    return false;
+  }
+
+  // Parse static elements with id, class, data-i18n, data-page, data-tab, data-filter from markup
+  const markup = pageHtml.slice(0, pageHtml.indexOf("<script"));
+  const body = new MiniEl("BODY");
+  const tagRe = /<(main|nav|section|div|button|input|select|pre|span|h1|p|footer|tbody)\b([^>]*)>/gi;
+  let currentParent = body;
+  for (const m of markup.matchAll(tagRe)) {
+    const tag = m[1], attrStr = m[2];
+    const el = new MiniEl(tag);
+    for (const a of attrStr.matchAll(/([\w-]+)=["']([^"']*)["']/g)) {
+      el.setAttribute(a[1], a[2]);
+    }
+    if (el.id === "sideNav") currentParent = el;
+    if (tag.toLowerCase() === "button" && el.attrs.has("data-page") && byId.has("sideNav")) {
+      byId.get("sideNav").appendChild(el);
+    } else if (tag.toLowerCase() === "button" && el.classList.contains("nav-tab") && byId.has("navTabs")) {
+      byId.get("navTabs").appendChild(el);
+    } else {
+      body.appendChild(el);
+    }
+    allEls.push(el);
+  }
+
+  const storage = new Map();
+  const timers = [];
+  const intervals = [];
+  const document = {
+    hidden: false,
+    title: "",
+    activeElement: null,
+    documentElement: {
+      lang, dir,
+      attrs: new Map([["lang", lang], ["dir", dir], ["data-theme", "light"]]),
+      setAttribute(k, v) { this.attrs.set(k, String(v)); if (k === "lang") this.lang = String(v); if (k === "dir") this.dir = String(v); },
+      getAttribute(k) { return this.attrs.get(k) || null; },
+    },
+    body,
+    getElementById(id) { return byId.get(id) || null; },
+    createElement(tag) { return new MiniEl(tag); },
+    createTextNode(t) { return { nodeType: 3, textContent: String(t) }; },
+    querySelectorAll(sel) {
+      if (sel.startsWith('[id^="forms-box-"]')) return [...byId.values()].filter(e => e.id.startsWith("forms-box-"));
+      if (sel.startsWith('[data-action="inspect-forms"]')) return [];
+      if (sel.startsWith('[data-action="test-print"]')) return [];
+      return allEls.filter(e => matchesSel(e, sel));
+    },
+    querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
+    addEventListener(type, fn) {
+      if (!docListeners.has(type)) docListeners.set(type, []);
+      docListeners.get(type).push(fn);
+    },
+    dispatch(type, ev = {}) {
+      for (const fn of docListeners.get(type) || []) fn(ev);
+    },
+  };
+
+  const replacedUrls = [];
+  const windowObj = {
+    document,
+    scrollY: 0,
+    scrollTo() {},
+    location: { replace(u) { replacedUrls.push(u); } },
+    setInterval(fn, ms) { const id = intervals.length + 1; intervals.push({ id, fn, ms, cleared: false }); return id; },
+    clearInterval(id) { const t = intervals.find(x => x.id === id); if (t) t.cleared = true; },
+    setTimeout(fn, ms) { const id = timers.length + 1; timers.push({ id, fn, ms, cleared: false }); return id; },
+    clearTimeout(id) { const t = timers.find(x => x.id === id); if (t) t.cleared = true; },
+    addEventListener(type, fn) {
+      if (!winListeners.has(type)) winListeners.set(type, []);
+      winListeners.get(type).push(fn);
+    },
+    localStorage: {
+      getItem(k) { return storage.has(k) ? storage.get(k) : null; },
+      setItem(k, v) { storage.set(k, String(v)); },
+    },
+    URL,
+    console: { error() {}, warn() {}, log() {} },
+  };
+  windowObj.window = windowObj;
+  return { windowObj, document, storage, timers, intervals, replacedUrls, MiniEl };
+}
+
+test("Control Center flows: overview, XSS escaping, race-free refresh, filters, test print, inspectForms, diagnostics, and i18n/theme", async () => {
+  const { windowObj, document, storage, MiniEl } = createMiniDom(html);
+  let overviewCalls = 0;
+  let resolveSlowOverview = null;
+  let nextOverviewPayload = {
+    appVersion: "1.5.7",
+    printers: [
+      { name: 'HP <img src=x onerror=alert(1)>', kind: "local", is_default: true, status: "ready", port: "USB001", driver: "HP" },
+      { name: "Microsoft Print to PDF", kind: "virtual", is_default: false, status: "ready", port: "PORTPROMPT:", driver: "MS" },
+    ],
+    defaultPrinter: 'HP <img src=x onerror=alert(1)>',
+    stateCounts: [["queued", 2], ["done", 5], ["failed", 1]],
+    pdfiumReady: true,
+    webviewVersion: "120.0",
+    environment: { es2022: true, localStorage: true, cookies: true, webSocket: true, secureContext: true, errors: ["<script>xss</script>"] },
+    odooOrigin: "https://odoo.example.com",
+    lockedByPolicy: false,
+    autoReprint: false,
+    recentJobs: [
+      { id: "j-1", report: "<b>Invoice</b>", printer: "HP", pages: 2, bytes: 2048, state: "failed", attempts: 2, error_code: "ERR_<x>" },
+      { id: "j-2", report: "Receipt", printer: "HP", pages: 1, bytes: 512, state: "done", attempts: 1, error_code: "" },
+    ],
+  };
+  const testPrints = [];
+  windowObj.__NATIVE_PRINT__ = {
+    async appOverview() {
+      overviewCalls++;
+      if (resolveSlowOverview) {
+        const fn = resolveSlowOverview;
+        resolveSlowOverview = null;
+        return new Promise((res) => fn(() => res(JSON.parse(JSON.stringify(nextOverviewPayload)))));
+      }
+      return JSON.parse(JSON.stringify(nextOverviewPayload));
+    },
+    async printerCapabilities() { return { forms: [{ name: "A4", size: { width_mm: 210, height_mm: 297 }, roll: false }], duplex: true, color: false, bins: ["Tray 1"] }; },
+    async getPrinterSettings() { return {}; },
+    async printerForms() { return [{ name: "A4", size: { width_mm: 210, height_mm: 297 } }, { name: "NoSizeForm", size: null }]; },
+    async runTestPrint(printer, kind, paper, opts) { testPrints.push({ printer, kind, paper, opts }); return "job-99"; },
+    async saveOrigin(origin, autoReprint) { return origin; },
+    async exportDiagnostics() { return JSON.stringify({ ok: true, jobs: 2 }); },
+  };
+  // Patch toastContainer prepend child to have querySelector(".toast-close")
+  const origCreate = document.createElement.bind(document);
+  document.createElement = (tag) => {
+    const el = origCreate(tag);
+    el.querySelector = () => new MiniEl("BUTTON");
+    return el;
+  };
+
+  const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout, clearInterval: windowObj.clearInterval, localStorage: windowObj.localStorage, navigator: {} });
+  new vm.Script(script).runInContext(ctx);
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  // Overview KPIs & XSS escaping
+  assert.equal(document.getElementById("kpiPrintersCount").textContent, "2");
+  assert.equal(document.getElementById("kpiActiveCount").textContent, "2");
+  assert.equal(document.getElementById("kpiDoneCount").textContent, "5");
+  assert.equal(document.getElementById("kpiFailedCount").textContent, "1");
+  const jobsHtml = document.getElementById("jobsTableBody").innerHTML;
+  assert.ok(jobsHtml.includes("&lt;b&gt;Invoice&lt;/b&gt;"), "job report must be HTML-escaped");
+  assert.ok(!jobsHtml.includes("<b>Invoice</b>"), "raw HTML must not appear in jobs table");
+  const gridHtml = document.getElementById("printersGrid").innerHTML;
+  assert.ok(gridHtml.includes("HP &lt;img src=x onerror=alert(1)&gt;"), "printer name must be HTML-escaped");
+  assert.ok(!gridHtml.includes("<img src=x"), "raw HTML must not appear in printers grid");
+  assert.ok(document.getElementById("envSummary").innerHTML.includes("&lt;script&gt;xss&lt;/script&gt;"));
+
+  // Filtering
+  ctx.setJobFilter("done");
+  assert.ok(document.getElementById("jobsTableBody").innerHTML.includes("Receipt"));
+  assert.ok(!document.getElementById("jobsTableBody").innerHTML.includes("Invoice"));
+  ctx.setJobFilter("all");
+
+  // Race-free refreshAll: slow background poll + concurrent manual refresh must NOT drop the manual refresh
+  let releasePoll = null;
+  resolveSlowOverview = (release) => { releasePoll = release; };
+  const callsBefore = overviewCalls;
+  const pollP = ctx.refreshAll({ silent: true });
+  const manualP = ctx.refreshAll(); // non-silent must coalesce and run after poll
+  const dupSilentP = ctx.refreshAll({ silent: true }); // redundant silent poll skips
+  assert.equal(await dupSilentP, false);
+  releasePoll();
+  assert.equal(await pollP, true);
+  assert.equal(await manualP, true);
+  assert.equal(overviewCalls, callsBefore + 2, "manual refresh must execute a fresh fetch after in-flight poll");
+
+  // Rejected IPC promise marks main-container stale and returns false cleanly
+  const savedOverview = windowObj.__NATIVE_PRINT__.appOverview;
+  windowObj.__NATIVE_PRINT__.appOverview = async () => { throw new Error("ipc_down"); };
+  assert.equal(await ctx.refreshAll({ silent: true }), false);
+  assert.equal(document.querySelector(".main-container").classList.contains("is-stale"), true);
+  windowObj.__NATIVE_PRINT__.appOverview = savedOverview;
+
+  // Test print: blocks raw print to virtual printer, allows PDF
+  assert.equal(await ctx.runPrinterTest("Microsoft Print to PDF", "zpl-label"), false);
+  assert.equal(testPrints.length, 0);
+  await ctx.runPrinterTest("Microsoft Print to PDF", "pdf-a4");
+  assert.equal(testPrints.length, 1);
+
+  // inspectForms: handles null f.size without throwing
+  const formsBox = new MiniEl("DIV", "forms-box-0");
+  formsBox.classList.add("hidden");
+  document.body.appendChild(formsBox);
+  await ctx.inspectForms("HP", 0);
+  assert.ok(formsBox.innerHTML.includes("210×297mm"));
+  assert.ok(formsBox.innerHTML.includes("NoSizeForm"));
+
+  // Diagnostics bundle load
+  assert.equal(await ctx.loadDiagnosticsBundle(), true);
+  assert.ok(document.getElementById("diagnosticsOutput").textContent.includes('"jobs": 2'));
+
+  // Theme & Language toggle (RTL <-> LTR, aria-label sync, aria-invalid)
+  ctx.toggleTheme();
+  assert.equal(document.documentElement.getAttribute("data-theme"), "dark");
+  assert.equal(storage.get("np_cc_theme"), "dark");
+  ctx.toggleLang();
+  assert.equal(document.documentElement.lang, "en");
+  assert.equal(document.documentElement.dir, "ltr");
+  assert.equal(document.getElementById("btnTheme").getAttribute("aria-label"), "Theme");
+  assert.equal(document.getElementById("queueSearchInput").getAttribute("aria-label"), "Search jobs…");
+
+  const originInput = document.getElementById("inputOdooOrigin");
+  originInput.value = "http://evil.example.com";
+  assert.equal(ctx.validateOriginField(), false);
+  assert.equal(originInput.getAttribute("aria-invalid"), "true");
+  originInput.value = "https://odoo.example.com";
+  assert.equal(ctx.validateOriginField(), true);
+  assert.equal(originInput.getAttribute("aria-invalid"), "false");
+});
+
+test("tabbar.html flows: safe titles, RTL/LTR drag reorder, mid-drag guard, keyboard nav, and visibilitychange polling", async () => {
+  const tabHtml = readFileSync(new URL("../dist/tabbar.html", import.meta.url), "utf8");
+  const tabScript = tabHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
+  const { windowObj, document, intervals } = createMiniDom(tabHtml);
+  const invoked = [];
+  const tabsFixture = [
+    { label: "t1", title: "Odoo", url: "https://odoo.example.com", active: true, is_pos: false },
+    { label: "t2", title: "", url: "https://odoo.example.com/pos", active: false, is_pos: true },
+    { label: "t3", title: null, url: "", active: false, is_pos: false },
+  ];
+  windowObj.__TAURI_INTERNALS__ = {
+    async invoke(cmd, args) {
+      invoked.push([cmd, args]);
+      if (cmd === "tab_list") return tabsFixture;
+      return {};
+    },
+  };
+  const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, localStorage: windowObj.localStorage });
+  new vm.Script(tabScript).runInContext(ctx);
+  await new Promise(r => setImmediate(r));
+
+  const strip = document.getElementById("tabs");
+  const tabEls = strip.children.filter(c => c.classList.contains("tab"));
+  assert.equal(tabEls.length, 3);
+  assert.equal(tabEls[1].querySelector(".t-title")?.textContent || tabEls[1].children[1].textContent, "https://odoo.example.com/pos");
+  assert.equal(tabEls[2].children[1].textContent, "تبويب جديد");
+
+  // Click tab switch & close button
+  tabEls[1].dispatch("click");
+  tabEls[1].children[3].dispatch("click");
+  await new Promise(r => setImmediate(r));
+  assert.ok(invoked.some(([c, a]) => c === "tab_switch" && a.label === "t2"));
+  assert.ok(invoked.some(([c, a]) => c === "tab_close" && a.label === "t2"));
+
+  // Keyboard navigation in RTL: ArrowLeft moves to next tab (0 -> 1)
+  tabEls[0].focus();
+  tabEls[0].dispatch("keydown", { key: "ArrowLeft" });
+  assert.equal(document.activeElement, tabEls[1], "RTL ArrowLeft must focus next tab");
+
+  // Drag-and-drop: mid-drag render guard + RTL dropIndexFor
+  tabEls[0].dispatch("dragstart", { dataTransfer: { setData() {} } });
+  const beforeDragChildren = strip.children.length;
+  ctx.render([{ label: "t99", title: "Mutated", url: "", active: true }]);
+  assert.equal(strip.children.length, beforeDragChildren, "render() must not wipe tabs mid-drag");
+  // Drop t1 on right half of t3 in RTL (frac=0.8 >= 0.5 -> before t3 -> index 1 after removing t1)
+  assert.equal(ctx.dropIndexFor(2, 80, { left: 0, width: 100 }), 1);
+  // Drop t1 on left half of t3 in RTL (frac=0.2 < 0.5 -> after t3 -> index 2 after removing t1)
+  assert.equal(ctx.dropIndexFor(2, 20, { left: 0, width: 100 }), 2);
+  tabEls[0].dispatch("dragend");
+
+  // Visibilitychange polling pause/resume
+  const callsBeforeHidden = invoked.filter(([c]) => c === "tab_list").length;
+  document.hidden = true;
+  intervals[0].fn();
+  await new Promise(r => setImmediate(r));
+  assert.equal(invoked.filter(([c]) => c === "tab_list").length, callsBeforeHidden, "tabbar must pause polling while hidden");
+  document.hidden = false;
+  document.dispatch("visibilitychange");
+  await new Promise(r => setImmediate(r));
+  assert.equal(invoked.filter(([c]) => c === "tab_list").length, callsBeforeHidden + 1, "tabbar must refresh on becoming visible");
+});
+
+test("boot.html flows: strict origin check, probe success redirect, probe failure down/retry, and initFail", async () => {
+  const bootHtml = readFileSync(new URL("../dist/boot.html", import.meta.url), "utf8");
+  const bootScript = bootHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
+
+  // Case 1: valid origin + probe_origin true -> redirects to origin
+  {
+    const { windowObj, replacedUrls } = createMiniDom(bootHtml);
+    windowObj.__TAURI_INTERNALS__ = {
+      async invoke(cmd) {
+        if (cmd === "app_overview") return { odooOrigin: "https://odoo.example.com" };
+        if (cmd === "probe_origin") return true;
+      },
+    };
+    const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout, localStorage: windowObj.localStorage });
+    new vm.Script(bootScript).runInContext(ctx);
+    await new Promise(r => setImmediate(r));
+    await new Promise(r => setImmediate(r));
+    assert.deepEqual(replacedUrls, ["https://odoo.example.com"]);
+    assert.equal(ctx.isHttpOrigin("http://"), false);
+    assert.equal(ctx.isHttpOrigin("javascript:alert(1)"), false);
+    assert.equal(ctx.isHttpOrigin("http://192.168.1.20:8069"), true);
+  }
+
+  // Case 2: probe fails -> enters down state, retry button re-probes
+  {
+    const { windowObj, document, intervals } = createMiniDom(bootHtml);
+    let probes = 0;
+    windowObj.__TAURI_INTERNALS__ = {
+      async invoke(cmd) {
+        if (cmd === "app_overview") return { odooOrigin: "http://192.168.1.20:8069" };
+        if (cmd === "probe_origin") { probes++; return false; }
+      },
+    };
+    const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout, localStorage: windowObj.localStorage });
+    new vm.Script(bootScript).runInContext(ctx);
+    await new Promise(r => setImmediate(r));
+    await new Promise(r => setImmediate(r));
+    assert.equal(document.querySelector(".card").getAttribute("data-state"), "down");
+    assert.equal(intervals.length, 1);
+    document.getElementById("retry").dispatch("click");
+    await new Promise(r => setImmediate(r));
+    assert.equal(probes, 2);
+  }
+
+  // Case 3: app_overview rejects -> initFail state
+  {
+    const { windowObj, document } = createMiniDom(bootHtml);
+    windowObj.__TAURI_INTERNALS__ = {
+      async invoke() { throw new Error("ipc_unavailable"); },
+    };
+    const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout, localStorage: windowObj.localStorage });
+    new vm.Script(bootScript).runInContext(ctx);
+    await new Promise(r => setImmediate(r));
+    assert.equal(document.querySelector(".card").getAttribute("data-state"), "initFail");
+  }
+});
+
+test("settings.html flows: tab switching + keyboard nav, theme/lang toggle, and app_identity error handling", async () => {
+  const settingsHtml = readFileSync(new URL("../dist/settings.html", import.meta.url), "utf8");
+  const settingsScript = settingsHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
+
+  // Case 1: app_identity resolves with origin + theme/lang/tab switching
+  {
+    const { windowObj, document, storage } = createMiniDom(settingsHtml);
+    const invoked = [];
+    windowObj.__TAURI_INTERNALS__ = {
+      async invoke(cmd) {
+        invoked.push(cmd);
+        if (cmd === "app_identity") return { appVersion: "1.5.7", odooOrigin: "https://odoo.example.com" };
+        return {};
+      },
+    };
+    const ctx = vm.createContext({ ...windowObj, localStorage: windowObj.localStorage });
+    new vm.Script(settingsScript).runInContext(ctx);
+    await new Promise(r => setImmediate(r));
+    assert.equal(document.getElementById("appVersion").textContent, "v1.5.7");
+    assert.equal(document.getElementById("btnOpenOdoo").disabled, false);
+
+    // Keyboard ArrowDown moves from About -> Prefs
+    document.getElementById("tab-about").dispatch("keydown", { key: "ArrowDown" });
+    assert.equal(document.getElementById("tab-prefs").getAttribute("aria-selected"), "true");
+    assert.equal(document.getElementById("page-prefs").classList.contains("active"), true);
+
+    // Theme & language toggle
+    document.getElementById("btnThemeDark").dispatch("click");
+    assert.equal(document.documentElement.getAttribute("data-theme"), "dark");
+    assert.equal(document.getElementById("btnThemeDark").getAttribute("aria-pressed"), "true");
+    document.getElementById("btnLangEn").dispatch("click");
+    assert.equal(document.documentElement.lang, "en");
+    assert.equal(document.documentElement.dir, "ltr");
+    assert.equal(document.title, "Yaseir Print — Settings");
+    assert.equal(storage.get("np_cc_lang"), "en");
+
+    // Support action button opens Control Center / Diagnostics
+    document.getElementById("btnOpenDiagnostics").dispatch("click");
+    assert.ok(invoked.includes("open_control_center"), "btnOpenDiagnostics must invoke open_control_center");
+  }
+
+  // Case 2: app_identity rejects -> btnOpenOdoo gracefully disabled
+  {
+    const { windowObj, document } = createMiniDom(settingsHtml);
+    windowObj.__TAURI_INTERNALS__ = {
+      async invoke() { throw new Error("bridge_down"); },
+    };
+    const ctx = vm.createContext({ ...windowObj, localStorage: windowObj.localStorage });
+    new vm.Script(settingsScript).runInContext(ctx);
+    await new Promise(r => setImmediate(r));
+    assert.equal(document.getElementById("btnOpenOdoo").disabled, true);
+  }
+});
+
+test("queue search input is debounced (~120ms) while filter clicks render immediately", async () => {
+  const { windowObj, document, timers, MiniEl } = createMiniDom(html);
+  windowObj.__NATIVE_PRINT__ = {
+    async appOverview() {
+      return {
+        appVersion: "1.5.7",
+        printers: [{ name: "HP", kind: "local", is_default: true, status: "ready", port: "USB001", driver: "HP" }],
+        defaultPrinter: "HP",
+        stateCounts: [["done", 2], ["failed", 1]],
+        pdfiumReady: true,
+        webviewVersion: "120.0",
+        environment: { es2022: true, localStorage: true, cookies: true, webSocket: true, secureContext: true, errors: [] },
+        odooOrigin: "https://odoo.example.com",
+        lockedByPolicy: false,
+        autoReprint: false,
+        recentJobs: [
+          { id: "j-1", report: "Invoice Alpha", printer: "HP", pages: 2, bytes: 2048, state: "failed", attempts: 2, error_code: "ERR" },
+          { id: "j-2", report: "Receipt Beta", printer: "HP", pages: 1, bytes: 512, state: "done", attempts: 1, error_code: "" },
+          { id: "j-3", report: "Shipping Gamma", printer: "HP", pages: 1, bytes: 1024, state: "done", attempts: 1, error_code: "" },
+        ],
+      };
+    },
+  };
+  const origCreate = document.createElement.bind(document);
+  document.createElement = (tag) => {
+    const el = origCreate(tag);
+    el.querySelector = () => new MiniEl("BUTTON");
+    return el;
+  };
+  const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout, clearInterval: windowObj.clearInterval, localStorage: windowObj.localStorage, navigator: {} });
+  new vm.Script(script).runInContext(ctx);
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  const tbody = document.getElementById("jobsTableBody");
+  const searchInput = document.getElementById("queueSearchInput");
+  let renderWrites = 0;
+  const desc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(tbody), "innerHTML");
+  Object.defineProperty(tbody, "innerHTML", {
+    get() { return desc.get.call(this); },
+    set(v) { renderWrites++; desc.set.call(this, v); },
+  });
+
+  // Rapid typing should coalesce into a single 120ms debounced render
+  const timersBefore = timers.length;
+  for (const val of ["R", "Re", "Rec"]) {
+    searchInput.value = val;
+    searchInput.dispatch("input", { target: searchInput });
+  }
+  assert.equal(renderWrites, 0, "rapid typing must not synchronously re-render jobs table");
+  const searchTimers = timers.slice(timersBefore);
+  assert.equal(searchTimers.length, 3, "expected one timer scheduled per keystroke");
+  assert.equal(searchTimers[0].cleared, true, "first keystroke timer must be cleared");
+  assert.equal(searchTimers[1].cleared, true, "second keystroke timer must be cleared");
+  assert.equal(searchTimers[2].cleared, false, "latest keystroke timer must remain active");
+  assert.equal(searchTimers[2].ms, 120, "debounce delay should be 120ms");
+
+  // Firing the debounced timer renders once with the latest query
+  searchTimers[2].fn();
+  assert.equal(renderWrites, 1, "firing debounced timer must render jobs table once");
+  assert.ok(tbody.innerHTML.includes("Receipt Beta"));
+  assert.ok(!tbody.innerHTML.includes("Invoice Alpha"));
+
+  // Immediate filter pill click must render synchronously and cancel any pending search timer
+  searchInput.value = "";
+  searchInput.dispatch("input", { target: searchInput });
+  const pendingTimer = timers[timers.length - 1];
+  assert.equal(pendingTimer.cleared, false);
+  const donePill = document.querySelectorAll(".filter-pill").find(p => p.getAttribute("data-filter") === "done");
+  assert.ok(donePill, "done filter pill must exist");
+  donePill.closest = () => donePill;
+  document.dispatch("click", { target: donePill });
+  assert.equal(renderWrites, 2, "filter pill click must render immediately without waiting for debounce");
+  assert.equal(pendingTimer.cleared, true, "filter click must cancel pending search debounce timer");
+  assert.ok(tbody.innerHTML.includes("Receipt Beta"));
+  assert.ok(tbody.innerHTML.includes("Shipping Gamma"));
+  assert.ok(!tbody.innerHTML.includes("Invoice Alpha"));
+});
+
+test("copy-diagnostics uses navigator.clipboard.writeText, falls back to execCommand, and shows localized toasts", async () => {
+  const { windowObj, document, MiniEl } = createMiniDom(html);
+  let exportCalls = 0;
+  windowObj.__NATIVE_PRINT__ = {
+    async appOverview() {
+      return {
+        appVersion: "1.5.7", printers: [], defaultPrinter: null, stateCounts: [],
+        pdfiumReady: true, webviewVersion: "120.0", environment: { errors: [] },
+        odooOrigin: "https://odoo.example.com", lockedByPolicy: false, autoReprint: false, recentJobs: [],
+      };
+    },
+    async exportDiagnostics() { exportCalls++; return JSON.stringify({ ok: true, jobs: 2 }); },
+  };
+  const origCreate = document.createElement.bind(document);
+  document.createElement = (tag) => {
+    const el = origCreate(tag);
+    el.querySelector = () => new MiniEl("BUTTON");
+    return el;
+  };
+  const copiedTexts = [];
+  let clipboardImpl = async (t) => { copiedTexts.push(t); };
+  let execCommandResult = true;
+  const execCommands = [];
+  document.execCommand = (cmd) => { execCommands.push(cmd); return execCommandResult; };
+
+  const ctx = vm.createContext({
+    ...windowObj,
+    setInterval: windowObj.setInterval,
+    setTimeout: windowObj.setTimeout,
+    clearTimeout: windowObj.clearTimeout,
+    clearInterval: windowObj.clearInterval,
+    localStorage: windowObj.localStorage,
+    navigator: { clipboard: { writeText: (t) => clipboardImpl(t) } },
+  });
+  new vm.Script(script).runInContext(ctx);
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  const btnCopy = document.getElementById("btnCopyDiagnostics");
+  assert.ok(btnCopy, "btnCopyDiagnostics must exist");
+  assert.equal(btnCopy.getAttribute("data-action"), "copy-diagnostics");
+  assert.equal(btnCopy.getAttribute("type"), "button");
+
+  // 1. One-click copy via delegated click auto-loads diagnostics and writes JSON to clipboard
+  btnCopy.closest = () => btnCopy;
+  document.dispatch("click", { target: btnCopy });
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+  assert.equal(exportCalls, 1, "one-click copy should auto-load diagnostics bundle");
+  assert.equal(copiedTexts.length, 1);
+  assert.ok(copiedTexts[0].includes('"jobs": 2'));
+  const toasts = document.getElementById("toastContainer");
+  assert.ok(toasts.children[0].className.includes("toast-success"));
+  assert.ok(toasts.children[0].innerHTML.includes("تم نسخ التقرير"));
+
+  // 2. Fallback to document.execCommand("copy") in English when clipboard API rejects
+  ctx.toggleLang();
+  clipboardImpl = async () => { throw new Error("denied"); };
+  await ctx.copyDiagnosticsBundle();
+  assert.deepEqual(execCommands, ["copy"]);
+  assert.ok(toasts.children[0].className.includes("toast-success"));
+  assert.ok(toasts.children[0].innerHTML.includes("Report copied"));
+
+  // 3. Graceful error toast when both clipboard API and execCommand fail
+  execCommandResult = false;
+  await ctx.copyDiagnosticsBundle();
+  assert.ok(toasts.children[0].className.includes("toast-error"));
+  assert.ok(toasts.children[0].innerHTML.includes("Automatic copy failed"));
+});
+
+test("Yaseir Precision v2: token-only CSS, RTL Arabic typography, semantic KPI/status pills, and actionable empty states", async () => {
+  const styleMatch = html.match(/<style\b[^>]*>([\s\S]*?)<\/style>/i);
+  assert.ok(styleMatch, "index.html must contain a <style> block");
+  const styleCss = styleMatch[1];
+
+  // 1. Strict theme.css token discipline: zero hardcoded hex colors in index.html CSS
+  const hexColors = [...styleCss.matchAll(/#[0-9a-f]{3,8}\b/gi)].map(m => m[0]);
+  assert.deepEqual(hexColors, [], "index.html CSS must use theme.css tokens, not hardcoded hex colors");
+
+  // 2. RTL Arabic typography: zero letter-spacing on Arabic headings/buttons/tabs & comfortable line-height
+  assert.match(styleCss, /\[dir="rtl"\]\s+body\s*\{[^}]*line-height:\s*1\.65/);
+  assert.match(styleCss, /\[dir="rtl"\]\s+\.brand-title[\s\S]*?letter-spacing:\s*0;/);
+  assert.match(styleCss, /\.printer-card:focus-within/);
+  assert.match(styleCss, /tbody tr\s*\{\s*transition:\s*background-color var\(--dur-fast\) var\(--ease-out\)/);
+
+  // 3. KPI semantic accent classes + tabular-nums
+  for (const cls of ["kpi-info", "kpi-warn", "kpi-ok", "kpi-err"]) {
+    assert.ok(html.includes(`kpi-card ${cls}`), "missing KPI semantic class: " + cls);
+    assert.ok(styleCss.includes(`.kpi-card.${cls}::before`), "missing KPI accent hairline CSS for: " + cls);
+  }
+  assert.equal([...html.matchAll(/class="kpi-value tabular-nums"/g)].length, 4, "all 4 KPI values must use tabular-nums");
+
+  // 4. Status pill differentiation (ready vs printing vs offline/error) and actionable empty states
+  const { windowObj, document, MiniEl } = createMiniDom(html);
+  windowObj.__NATIVE_PRINT__ = {
+    async appOverview() {
+      return {
+        appVersion: "1.5.7", printers: [], defaultPrinter: null, stateCounts: [],
+        pdfiumReady: true, webviewVersion: "120.0", environment: { errors: [] },
+        odooOrigin: "https://odoo.example.com", lockedByPolicy: false, autoReprint: false, recentJobs: [],
+      };
+    },
+  };
+  const origCreate = document.createElement.bind(document);
+  document.createElement = (tag) => {
+    const el = origCreate(tag);
+    el.querySelector = () => new MiniEl("BUTTON");
+    return el;
+  };
+  const ctx = vm.createContext({
+    ...windowObj,
+    setInterval: windowObj.setInterval,
+    setTimeout: windowObj.setTimeout,
+    clearTimeout: windowObj.clearTimeout,
+    clearInterval: windowObj.clearInterval,
+    localStorage: windowObj.localStorage,
+    navigator: {},
+  });
+  new vm.Script(script).runInContext(ctx);
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  assert.match(ctx.printerStatusBadge("ready"), /badge-ok/);
+  assert.match(ctx.printerStatusBadge("printing"), /badge-info/);
+  assert.match(ctx.printerStatusBadge("offline"), /badge-err/);
+  assert.match(ctx.printerStatusBadge("error"), /badge-err/);
+  assert.match(ctx.printerStatusBadge("paused"), /badge-warn/);
+
+  const emptyJobs = document.getElementById("jobsTableBody").innerHTML;
+  assert.ok(emptyJobs.includes("empty-state-inner"), "queue empty state must use calm framed wrapper");
+  assert.ok(emptyJobs.includes('data-action="switch-tab"'), "queue empty state must provide a clear next action");
+
+  const emptyPrinters = document.getElementById("printersGrid").innerHTML;
+  assert.ok(emptyPrinters.includes("empty-state-inner"), "printers empty state must use calm framed wrapper");
+  assert.ok(emptyPrinters.includes('data-action="manual-refresh"'), "printers empty state must provide a rescan action");
 });

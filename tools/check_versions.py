@@ -17,6 +17,7 @@ import json
 import os
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,14 +27,13 @@ def main():
     conf = json.loads((ROOT / "app/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
     pkg = json.loads((ROOT / "app/package.json").read_text(encoding="utf-8"))
     lock = json.loads((ROOT / "app/package-lock.json").read_text(encoding="utf-8"))
-    cargo = (ROOT / "app/src-tauri/Cargo.toml").read_text(encoding="utf-8")
-    m = re.search(r'^version\s*=\s*"([^"]+)"', cargo, re.M)
+    cargo = tomllib.loads((ROOT / "app/src-tauri/Cargo.toml").read_text(encoding="utf-8"))
     versions = {
         "tauri.conf.json": conf["version"],
         "package.json": pkg["version"],
         "package-lock.json": lock.get("version"),
         "package-lock packages['']": (lock.get("packages") or {}).get("", {}).get("version"),
-        "Cargo.toml": m.group(1) if m else None,
+        "Cargo.toml": (cargo.get("package") or {}).get("version"),
     }
     manifest = (ROOT / "odoo/native_print/__manifest__.py").read_text(encoding="utf-8")
     am = re.search(r'''["']version["']\s*:\s*["']([^"']+)["']''', manifest)
@@ -49,6 +49,8 @@ def main():
     ref_type = os.environ.get("GITHUB_REF_TYPE", "")
     ref = os.environ.get("GITHUB_REF", "")
     tag = os.environ.get("GITHUB_REF_NAME", "")
+    if not tag and ref.startswith("refs/tags/"):
+        tag = ref.removeprefix("refs/tags/")
     is_tag = (ref_type == "tag") or ref.startswith("refs/tags/") or (not ref_type and not ref and tag.startswith("v"))
     if is_tag and tag.startswith("v") and tag.removeprefix("v").split("-")[0] != app_version:
         print(f"TAG MISMATCH: tag {tag} vs app version {app_version}")

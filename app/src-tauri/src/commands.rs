@@ -226,8 +226,12 @@ pub fn tab_title_for(url: &str) -> String {
         return "Odoo".to_string();
     };
     if is_local_app_url(&u) {
-        if url.contains("index.html") {
+        let p = u.path();
+        if p == "/" || p.ends_with("/index.html") || url.contains("index.html") {
             return "Control Center".to_string();
+        }
+        if p.ends_with("/settings.html") || url.contains("settings.html") {
+            return "Settings".to_string();
         }
         return "Yaseir Print".to_string();
     }
@@ -296,10 +300,9 @@ fn pdfium_ready() -> bool {
 impl AppState {
     pub fn notify_worker(&self) {
         let (lock, cvar) = &*self.worker_wake;
-        if let Ok(mut pending) = lock.lock() {
-            *pending = true;
-            cvar.notify_all();
-        }
+        let mut pending = lock.lock().unwrap_or_else(|p| p.into_inner());
+        *pending = true;
+        cvar.notify_all();
     }
 }
 
@@ -320,9 +323,17 @@ where
     }
 
     match BytePayload::deserialize(deserializer)? {
-        BytePayload::Seq(v) => Ok(v),
+        BytePayload::Seq(v) => {
+            if v.len() > print_core::security::MAX_JOB_BYTES {
+                return Err(serde::de::Error::custom("payload_too_large"));
+            }
+            Ok(v)
+        }
         BytePayload::Str(s) => decode_base64(&s).map_err(serde::de::Error::custom),
         BytePayload::Map(m) => {
+            if m.len() > print_core::security::MAX_JOB_BYTES {
+                return Err(serde::de::Error::custom("payload_too_large"));
+            }
             // A sparse index map ({0:.., 2:..}) would silently
             // compress into a shorter, shifted payload. Reject gaps:
             // keys must be exactly 0..len in order (BTreeMap iterates
@@ -346,13 +357,19 @@ fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
     } else {
         input
     };
-    let clean: Vec<u8> = raw.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+    let max_b64_len = (print_core::security::MAX_JOB_BYTES / 3 + 1) * 4;
+    let mut clean = Vec::with_capacity(raw.len().min(max_b64_len));
+    for b in raw.bytes() {
+        if b.is_ascii_whitespace() {
+            continue;
+        }
+        if clean.len() >= max_b64_len {
+            return Err("payload_too_large".to_string());
+        }
+        clean.push(b);
+    }
     if clean.is_empty() {
         return Ok(Vec::new());
-    }
-    let max_b64_len = (print_core::security::MAX_JOB_BYTES / 3 + 1) * 4;
-    if clean.len() > max_b64_len {
-        return Err("payload_too_large".to_string());
     }
     if clean.len() % 4 == 1 {
         return Err("invalid base64 length".to_string());
@@ -391,7 +408,7 @@ fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
 /// or `http(s)://tauri.localhost`). Uses full host equality so CVE-2026-42184
 /// first-label tricks (`http://tauri.evil.com`) never match.
 pub fn is_local_app_url(url: &tauri::Url) -> bool {
-    if url.port().is_some() {
+    if url.port().is_some() || !url.username().is_empty() || url.password().is_some() {
         return false;
     }
     match url.scheme() {
@@ -401,7 +418,7 @@ pub fn is_local_app_url(url: &tauri::Url) -> bool {
     }
 }
 
-fn local_app_url(file: &str) -> Result<tauri::Url, String> {
+pub(crate) fn local_app_url(file: &str) -> Result<tauri::Url, String> {
     let raw = if cfg!(windows) {
         format!("http://tauri.localhost/{file}")
     } else {
@@ -482,8 +499,11 @@ pub async fn print_pdf(
     if !print_core::security::valid_idempotency_key(&req.idempotency_key) {
         return Err("bad_idempotency_key".to_string());
     }
-    if req.printer_pattern.trim().is_empty() {
+    if req.printer_pattern.trim().is_empty() || req.printer_pattern.len() > 512 {
         return Err("printer_required".to_string());
+    }
+    if req.report_name.len() > 512 {
+        return Err("bad_report_name".to_string());
     }
     let copies = req.copies.max(1);
     print_core::security::validate_payload_limits(req.bytes.len(), copies)
@@ -589,8 +609,11 @@ pub fn print_text(
     if !print_core::security::valid_idempotency_key(&req.idempotency_key) {
         return Err("bad_idempotency_key".to_string());
     }
-    if req.printer_pattern.trim().is_empty() {
+    if req.printer_pattern.trim().is_empty() || req.printer_pattern.len() > 512 {
         return Err("printer_required".to_string());
+    }
+    if req.report_name.len() > 512 {
+        return Err("bad_report_name".to_string());
     }
     if req.text.is_empty() || req.text.len() > 1_048_576 {
         return Err("bad_text_size".to_string());
@@ -678,8 +701,11 @@ pub async fn print_image(
     if !print_core::security::valid_idempotency_key(&req.idempotency_key) {
         return Err("bad_idempotency_key".to_string());
     }
-    if req.printer_pattern.trim().is_empty() {
+    if req.printer_pattern.trim().is_empty() || req.printer_pattern.len() > 512 {
         return Err("printer_required".to_string());
+    }
+    if req.report_name.len() > 512 {
+        return Err("bad_report_name".to_string());
     }
     print_core::security::validate_payload_limits(req.bytes.len(), copies)
         .map_err(|e| format!("{e:?}"))?;
@@ -823,11 +849,8 @@ pub async fn app_overview(
         auto_reprint,
         pdfium_ready,
         webview_version: tauri::webview_version().unwrap_or_else(|_| "unknown".to_string()),
-        environment: state
-            .environment
-            .read()
-            .ok()
-            .and_then(|g| g.clone())
+        environment: read_lock(&state.environment)
+            .clone()
             .and_then(|raw| serde_json::from_str(&raw).ok()),
         printers,
         default_printer,
@@ -854,7 +877,7 @@ pub async fn printer_forms(
 ) -> Result<Vec<Form>, String> {
     check_origin(&webview, &state)?;
     let trimmed = printer.trim().to_string();
-    if trimmed.is_empty() {
+    if trimmed.is_empty() || trimmed.len() > 512 {
         return Err("printer_required".to_string());
     }
     tauri::async_runtime::spawn_blocking(move || {
@@ -872,7 +895,7 @@ pub async fn printer_capabilities(
 ) -> Result<print_core::PrinterCapabilities, String> {
     check_origin(&webview, &state)?;
     let trimmed = printer.trim().to_string();
-    if trimmed.is_empty() {
+    if trimmed.is_empty() || trimmed.len() > 512 {
         return Err("printer_required".to_string());
     }
     tauri::async_runtime::spawn_blocking(move || {
@@ -908,6 +931,9 @@ pub async fn probe_origin(
         };
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
         for sock in addrs {
+            if is_blocked_metadata_ip(sock.ip()) {
+                continue;
+            }
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             if remaining.is_zero() {
                 break;
@@ -984,7 +1010,7 @@ pub async fn run_test_print(
     // Test prints are a Control Center feature: the Odoo page must
     // never fire raw calibrations at local printers (audit B1).
     check_local_only(&webview)?;
-    if printer.trim().is_empty() {
+    if printer.trim().is_empty() || printer.len() > 512 {
         return Err("printer_required".to_string());
     }
     let config_dir = state.config_dir.clone();
@@ -1269,7 +1295,7 @@ pub fn export_diagnostics(
     value["app_version"] = serde_json::json!(env!("CARGO_PKG_VERSION"));
     value["webview_version"] =
         serde_json::json!(tauri::webview_version().unwrap_or_else(|_| "unknown".to_string()));
-    if let Some(raw) = state.environment.read().ok().and_then(|g| g.clone()) {
+    if let Some(raw) = read_lock(&state.environment).clone() {
         if let Ok(env) = serde_json::from_str::<serde_json::Value>(&raw) {
             value["environment"] = env;
         }
@@ -1286,10 +1312,7 @@ pub fn export_diagnostics(
 /// never leaves the webview store; nothing is persisted by Rust.
 /// Best-effort by design: any failure just keeps the old behaviour.
 fn persist_session_cookie(webview: &tauri::Webview, state: &AppState) {
-    let origin = match state.configured_origin.read() {
-        Ok(guard) => guard.clone(),
-        Err(_) => None,
-    };
+    let origin = read_lock(&state.configured_origin).clone();
     let Some(origin) = origin else { return };
     let Ok(url) = origin.parse::<tauri::Url>() else {
         return;
@@ -1327,11 +1350,7 @@ pub fn app_identity(
     state: State<'_, AppState>,
 ) -> Result<AppIdentity, String> {
     check_local_only(&webview)?;
-    let origin = state
-        .configured_origin
-        .read()
-        .map_err(|_| "config_lock_poisoned".to_string())?
-        .clone();
+    let origin = read_lock(&state.configured_origin).clone();
     Ok(AppIdentity {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         odoo_origin: origin,
@@ -1373,7 +1392,9 @@ pub async fn open_tab_internal(
         tabs.urls.remove(&label);
         tabs.pos_tabs.remove(&label);
         if tabs.active.as_deref() == Some(label.as_str()) {
-            tabs.active = prev_active;
+            tabs.active = prev_active
+                .filter(|p| tabs.order.iter().any(|l| l == p))
+                .or_else(|| tabs.order.last().cloned());
         }
         return Err(err);
     }
@@ -1395,34 +1416,34 @@ pub async fn tab_open(
     // An empty URL is the tab bar's "new tab" action: a fresh tab
     // on the configured origin (the Control Center when none is
     // configured yet).
-    if url.trim().is_empty() {
-        let origin = state
-            .configured_origin
-            .read()
-            .map_err(|_| "config_lock_poisoned".to_string())?
-            .clone();
+    let raw = url.trim();
+    if raw.len() > 8192 {
+        return Err("bad_tab_url".to_string());
+    }
+    if raw.is_empty() {
+        let origin = read_lock(&state.configured_origin).clone();
         let parsed = match origin {
             Some(origin) => tauri::Url::parse(&origin).map_err(|_| "bad_tab_url".to_string())?,
             None => local_app_url("index.html")?,
         };
         return open_tab_internal(&app, &state, parsed).await;
     }
-    let parsed = if url.starts_with('/') {
+    let parsed = if raw.starts_with('/') {
         let configured = read_lock(&state.configured_origin)
             .clone()
             .ok_or_else(|| "no_origin_configured".to_string())?;
         let base = tauri::Url::parse(&configured).map_err(|_| "bad_tab_url".to_string())?;
-        base.join(&url).map_err(|_| "bad_tab_url".to_string())?
+        base.join(raw).map_err(|_| "bad_tab_url".to_string())?
     } else {
-        tauri::Url::parse(&url).map_err(|_| "bad_tab_url".to_string())?
+        tauri::Url::parse(raw).map_err(|_| "bad_tab_url".to_string())?
     };
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("bad_tab_url".to_string());
+    }
     if is_local_app_url(&parsed) {
         check_local_only(&webview)?;
     } else {
-        let configured = state
-            .configured_origin
-            .read()
-            .map_err(|_| "config_lock_poisoned".to_string())?
+        let configured = read_lock(&state.configured_origin)
             .clone()
             .ok_or_else(|| "no_origin_configured".to_string())?;
         let origin = parsed.origin().ascii_serialization();
@@ -1440,10 +1461,7 @@ pub fn tab_list(
     state: State<'_, AppState>,
 ) -> Result<Vec<TabInfo>, String> {
     check_local_only(&webview)?;
-    let tabs = state
-        .tabs
-        .read()
-        .map_err(|_| "tabs_lock_poisoned".to_string())?;
+    let tabs = read_lock(&state.tabs);
     Ok(tabs.snapshot())
 }
 
@@ -1457,10 +1475,7 @@ pub fn tab_switch(
 ) -> Result<(), String> {
     check_local_only(&webview)?;
     {
-        let tabs = state
-            .tabs
-            .read()
-            .map_err(|_| "tabs_lock_poisoned".to_string())?;
+        let tabs = read_lock(&state.tabs);
         if !tabs.order.iter().any(|l| l == &label) {
             return Err("unknown_tab".to_string());
         }
@@ -1480,10 +1495,7 @@ pub fn tab_move(
     to_index: usize,
 ) -> Result<(), String> {
     check_local_only(&webview)?;
-    let mut tabs = state
-        .tabs
-        .write()
-        .map_err(|_| "tabs_lock_poisoned".to_string())?;
+    let mut tabs = write_lock(&state.tabs);
     if tabs.move_to(&label, to_index) {
         Ok(())
     } else {
@@ -1503,10 +1515,7 @@ pub async fn tab_close(
 ) -> Result<(), String> {
     check_local_only(&webview)?;
     let (was_active, neighbor) = {
-        let mut tabs = state
-            .tabs
-            .write()
-            .map_err(|_| "tabs_lock_poisoned".to_string())?;
+        let mut tabs = write_lock(&state.tabs);
         let idx = tabs.order.iter().position(|l| l == &label);
         let Some(idx) = idx else {
             return Err("unknown_tab".to_string());
@@ -1520,7 +1529,7 @@ pub async fn tab_close(
         } else {
             Some(tabs.order[idx.min(tabs.order.len() - 1)].clone())
         };
-        if was_active {
+        if was_active || neighbor.is_none() {
             tabs.active = neighbor.clone();
         }
         (was_active, neighbor)
@@ -1528,15 +1537,11 @@ pub async fn tab_close(
     if let Some(wv) = app.get_webview(&label) {
         let _ = wv.close();
     }
-    if was_active {
+    if was_active || neighbor.is_none() {
         match neighbor {
             Some(next) => crate::activate_tab(&app, &next),
             None => {
-                let origin = state
-                    .configured_origin
-                    .read()
-                    .map_err(|_| "config_lock_poisoned".to_string())?
-                    .clone();
+                let origin = read_lock(&state.configured_origin).clone();
                 match origin {
                     Some(origin) => {
                         let url =
@@ -1557,10 +1562,7 @@ pub async fn tab_close(
 /// The active content webview, for the navigation commands.
 fn active_tab_webview(app: &tauri::AppHandle, state: &AppState) -> Result<tauri::Webview, String> {
     let label = {
-        let tabs = state
-            .tabs
-            .read()
-            .map_err(|_| "tabs_lock_poisoned".to_string())?;
+        let tabs = read_lock(&state.tabs);
         tabs.active.clone()
     }
     .ok_or_else(|| "no_active_tab".to_string())?;
@@ -1620,10 +1622,7 @@ pub async fn report_environment(
         return Err("environment_report_too_large".to_string());
     }
     {
-        let mut guard = state
-            .environment
-            .write()
-            .map_err(|_| "environment_lock_poisoned".to_string())?;
+        let mut guard = write_lock(&state.environment);
         *guard = Some(report);
     }
     // A page on the configured origin just loaded: if the user is
@@ -1658,10 +1657,7 @@ pub async fn clear_web_data_cmd(
     // sign in again — the same clean slate the single-webview
     // build produced.
     let labels = {
-        let tabs = state
-            .tabs
-            .read()
-            .map_err(|_| "tabs_lock_poisoned".to_string())?;
+        let tabs = read_lock(&state.tabs);
         tabs.order.clone()
     };
     for label in &labels {
@@ -1669,18 +1665,11 @@ pub async fn clear_web_data_cmd(
             wv.clear_all_browsing_data().map_err(|e| e.to_string())?;
         }
     }
-    let origin = state
-        .configured_origin
-        .read()
-        .map_err(|_| "config_lock_poisoned".to_string())?
-        .clone();
+    let origin = read_lock(&state.configured_origin).clone();
     if let Some(origin) = origin {
         let url = origin.parse::<tauri::Url>().map_err(|e| e.to_string())?;
         let snapshot = {
-            let tabs = state
-                .tabs
-                .read()
-                .map_err(|_| "tabs_lock_poisoned".to_string())?;
+            let tabs = read_lock(&state.tabs);
             tabs.snapshot()
         };
         for tab in snapshot.iter().filter(|t| !t.is_local) {
@@ -1703,24 +1692,15 @@ pub fn save_origin_cmd(
     if state.locked_by_policy {
         return Err("locked_by_policy".to_string());
     }
-    let current_auto = *state
-        .auto_reprint
-        .read()
-        .map_err(|_| "config_lock_poisoned".to_string())?;
+    let current_auto = *read_lock(&state.auto_reprint);
     let next_auto = auto_reprint.unwrap_or(current_auto);
     let validated = config::save_origin(&state.config_dir, &origin, next_auto)?;
     {
-        let mut guard = state
-            .configured_origin
-            .write()
-            .map_err(|_| "config_lock_poisoned".to_string())?;
+        let mut guard = write_lock(&state.configured_origin);
         *guard = Some(validated.clone());
     }
     {
-        let mut auto_guard = state
-            .auto_reprint
-            .write()
-            .map_err(|_| "config_lock_poisoned".to_string())?;
+        let mut auto_guard = write_lock(&state.auto_reprint);
         *auto_guard = next_auto;
     }
     Ok(validated)
@@ -1775,16 +1755,17 @@ async fn open_local_page(
     file: &str,
 ) -> Result<(), String> {
     let existing = {
-        let tabs = state
-            .tabs
-            .read()
-            .map_err(|_| "tabs_lock_poisoned".to_string())?;
+        let tabs = read_lock(&state.tabs);
         tabs.order
             .iter()
             .find(|label| {
                 tabs.url_of(label)
                     .and_then(|u| tauri::Url::parse(u).ok())
-                    .map(|u| is_local_app_url(&u) && u.path().ends_with(file))
+                    .map(|u| {
+                        is_local_app_url(&u)
+                            && (u.path().ends_with(file)
+                                || (file == "index.html" && u.path() == "/"))
+                    })
                     .unwrap_or(false)
             })
             .cloned()
@@ -1827,10 +1808,7 @@ pub async fn open_odoo_origin(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     check_local_only(&webview)?;
-    let origin = state
-        .configured_origin
-        .read()
-        .map_err(|_| "config_lock_poisoned".to_string())?
+    let origin = read_lock(&state.configured_origin)
         .clone()
         .ok_or_else(|| "no_origin_configured".to_string())?;
     let url: tauri::Url = origin.parse().map_err(|_| "bad_origin_url".to_string())?;
@@ -1840,10 +1818,7 @@ pub async fn open_odoo_origin(
     // the tab bar a fresh tab.
     let caller = webview.label().to_string();
     let (existing, caller_is_tab) = {
-        let tabs = state
-            .tabs
-            .read()
-            .map_err(|_| "tabs_lock_poisoned".to_string())?;
+        let tabs = read_lock(&state.tabs);
         let snapshot = tabs.snapshot();
         let existing = snapshot
             .iter()
@@ -1882,12 +1857,94 @@ struct RawRender<'a> {
     label_gap_mm: Option<f64>,
 }
 
+fn is_blocked_metadata_v4(o: [u8; 4]) -> bool {
+    matches!(
+        o,
+        [169, 254, 169, 254] | [169, 254, 170, 2] | [100, 100, 100, 200]
+    )
+}
+
+/// Block cloud instance metadata endpoints (AWS/GCP/Azure/ECS/Alibaba IPv4,
+/// AWS IPv6 IMDS `fd00:ec2::254`, and IPv4-mapped / IPv4-compatible / NAT64
+/// IPv6 encodings) against SSRF via printer URIs, origin config, or probes.
+pub(crate) fn is_blocked_metadata_ip(ip: std::net::IpAddr) -> bool {
+    const AWS_IMDS_V6: [u8; 16] = [
+        0xfd, 0x00, 0x0e, 0xc2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02, 0x54,
+    ];
+    const NAT64_PREFIX: [u8; 12] = [0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0];
+    match ip {
+        std::net::IpAddr::V4(v4) => is_blocked_metadata_v4(v4.octets()),
+        std::net::IpAddr::V6(v6) => {
+            let o = v6.octets();
+            if o == AWS_IMDS_V6 {
+                return true;
+            }
+            let v4_tail = [o[12], o[13], o[14], o[15]];
+            let embedded = (o[..10] == [0u8; 10] && o[10] == 0xff && o[11] == 0xff)
+                || o[..12] == [0u8; 12]
+                || o[..12] == NAT64_PREFIX;
+            embedded && is_blocked_metadata_v4(v4_tail)
+        }
+    }
+}
+
 struct NativePrintBackend {
     db_path: String,
     config_dir: std::path::PathBuf,
+    read_queue: Option<Queue>,
 }
 
 impl NativePrintBackend {
+    /// Reuse a persistent read handle across print jobs so each job does not
+    /// reopen SQLite and re-run WAL pragmas; drop the handle on DB errors so
+    /// the next attempt reopens cleanly.
+    fn load_job_data(
+        &mut self,
+        job_id: &str,
+    ) -> Result<(String, Vec<u8>, JobOptions), BackendError> {
+        if self.read_queue.is_none() {
+            let q = Queue::open(&self.db_path)
+                .map_err(|e| BackendError::retryable("QUEUE_DB_ERROR", &e.to_string()))?;
+            self.read_queue = Some(q);
+        }
+        let payload = {
+            let q = self.read_queue.as_ref().expect("read_queue initialized");
+            q.payload(job_id)
+        };
+        let (kind, data) = match payload {
+            Ok(Some(pair)) => pair,
+            Ok(None) => {
+                return Err(BackendError::fatal(
+                    "MISSING_PAYLOAD",
+                    "job payload not found",
+                ))
+            }
+            Err(e) => {
+                if matches!(e, print_core::QueueError::Db(_)) {
+                    self.read_queue = None;
+                }
+                return Err(BackendError::retryable("QUEUE_DB_ERROR", &e.to_string()));
+            }
+        };
+        let opts = {
+            let q = self.read_queue.as_ref().expect("read_queue initialized");
+            q.options(job_id)
+        };
+        let opts = match opts {
+            Ok(o) => o,
+            Err(e) => {
+                if matches!(e, print_core::QueueError::Db(_)) {
+                    self.read_queue = None;
+                }
+                return Err(BackendError::retryable(
+                    "QUEUE_DB_ERROR",
+                    &format!("stored job options unreadable: {e}"),
+                ));
+            }
+        };
+        Ok((kind, data, opts))
+    }
+
     fn status_code(s: PrinterStatus) -> &'static str {
         match s {
             PrinterStatus::Offline => "PRINTER_OFFLINE",
@@ -2087,14 +2144,33 @@ impl NativePrintBackend {
     }
 
     fn is_blocked_metadata_ip(ip: std::net::IpAddr) -> bool {
-        const METADATA_V4: [u8; 4] = [169, 254, 169, 254];
-        match ip {
-            std::net::IpAddr::V4(v4) => v4.octets() == METADATA_V4,
-            std::net::IpAddr::V6(v6) => {
-                let o = v6.octets();
-                o[..10] == [0u8; 10] && o[10] == 0xff && o[11] == 0xff && o[12..] == METADATA_V4
+        is_blocked_metadata_ip(ip)
+    }
+
+    fn is_blocked_metadata_host(host: &str) -> bool {
+        let h = host.trim_end_matches('.').to_ascii_lowercase();
+        matches!(
+            h.as_str(),
+            "metadata.google.internal" | "metadata.goog" | "instance-data"
+        )
+    }
+
+    fn reject_metadata_resolution(host: &str, port: u16) -> Result<(), BackendError> {
+        if host.parse::<std::net::IpAddr>().is_ok() {
+            return Ok(());
+        }
+        if let Ok(addrs) = (host, port).to_socket_addrs() {
+            if addrs
+                .into_iter()
+                .any(|sock| is_blocked_metadata_ip(sock.ip()))
+            {
+                return Err(BackendError::fatal(
+                    "BAD_PRINTER_ADDRESS",
+                    "cloud metadata address is not allowed",
+                ));
             }
         }
+        Ok(())
     }
 
     fn is_valid_hostname(host: &str) -> bool {
@@ -2149,6 +2225,12 @@ impl NativePrintBackend {
             Some((hp, p)) => (hp, format!("/{p}")),
             None => (rest, "/ipp/print".to_string()),
         };
+        if path.bytes().any(|b| b <= 0x20 || b == 0x7f) {
+            return Err(BackendError::fatal(
+                "BAD_PRINTER_ADDRESS",
+                "printer path contains invalid whitespace or control characters",
+            ));
+        }
         let (host, port, is_ipv6) = if let Some(after_open) = host_port.strip_prefix('[') {
             let (ipv6, after_close) = after_open.split_once(']').ok_or_else(|| {
                 BackendError::fatal("BAD_PRINTER_ADDRESS", "unclosed IPv6 bracket")
@@ -2213,6 +2295,11 @@ impl NativePrintBackend {
             return Err(BackendError::fatal(
                 "BAD_PRINTER_ADDRESS",
                 "invalid printer host",
+            ));
+        } else if Self::is_blocked_metadata_host(&host) {
+            return Err(BackendError::fatal(
+                "BAD_PRINTER_ADDRESS",
+                "cloud metadata address is not allowed",
             ));
         }
         Ok((host, port, path))
@@ -2547,20 +2634,15 @@ fn print_png_via_gdi(
     Ok(())
 }
 
+impl PrintBackend for &mut NativePrintBackend {
+    fn print(&mut self, job: &Job) -> Result<(), BackendError> {
+        <NativePrintBackend as PrintBackend>::print(*self, job)
+    }
+}
+
 impl PrintBackend for NativePrintBackend {
     fn print(&mut self, job: &Job) -> Result<(), BackendError> {
-        let q = Queue::open(&self.db_path)
-            .map_err(|e| BackendError::retryable("QUEUE_DB_ERROR", &e.to_string()))?;
-        let (kind, data) = q
-            .payload(&job.id)
-            .map_err(|e| BackendError::retryable("QUEUE_DB_ERROR", &e.to_string()))?
-            .ok_or_else(|| BackendError::fatal("MISSING_PAYLOAD", "job payload not found"))?;
-        let mut opts = q.options(&job.id).map_err(|e| {
-            BackendError::retryable(
-                "QUEUE_DB_ERROR",
-                &format!("stored job options unreadable: {e}"),
-            )
-        })?;
+        let (kind, data, mut opts) = self.load_job_data(&job.id)?;
         // Per-printer defaults from the Control Center fill what
         // this job did not specify (owner brief, 2026-11-05),
         // applied through the scoped helper: a saved DOCUMENT
@@ -2581,6 +2663,7 @@ impl PrintBackend for NativePrintBackend {
         // 1. Direct TCP 9100 transport (tcp://host:port or raw://host:port)
         if job.printer.starts_with("tcp://") || job.printer.starts_with("raw://") {
             let (host, port, _) = Self::parse_host_port(&job.printer, 9100)?;
+            Self::reject_metadata_resolution(&host, port)?;
             // Live sensor check for ESC/POS printers (2026-11-07):
             // ask the hardware itself (DLE EOT) before sending —
             // paper-end, a cutter fault or an offline/cover-open
@@ -2677,6 +2760,7 @@ impl PrintBackend for NativePrintBackend {
                 ));
             }
             let (host, port, path) = Self::parse_host_port(&job.printer, 631)?;
+            Self::reject_metadata_resolution(&host, port)?;
             let mut client = print_ipp::IppClient::new(&host, port);
             client.path = path.clone();
             client.printer_uri = Self::ipp_uri(&host, port, &path);
@@ -3043,6 +3127,16 @@ impl PrintBackend for NativePrintBackend {
     }
 }
 
+fn outcome_log_fields(outcome: &Outcome) -> Option<(&'static str, &str)> {
+    match outcome {
+        Outcome::Done(id) => Some(("done", id.as_str())),
+        Outcome::Retried(id) => Some(("retried", id.as_str())),
+        Outcome::Failed(id) => Some(("failed", id.as_str())),
+        Outcome::DeadLetter(id) => Some(("dead_letter", id.as_str())),
+        Outcome::Idle | Outcome::Skipped => None,
+    }
+}
+
 /// Spawn the background worker thread that drains queued jobs across all
 /// printer patterns using `print_core::Worker`.
 pub fn spawn_worker_loop(
@@ -3065,6 +3159,11 @@ pub fn spawn_worker_loop(
         }
         let mut entropy: u64 = 0x5EED_2026;
         let mut worker_queue: Option<Queue> = None;
+        let mut backend = NativePrintBackend {
+            db_path: db_path.clone(),
+            config_dir,
+            read_queue: None,
+        };
         let mut last_reconcile: Option<Instant> = None;
         loop {
             let mut did_work = false;
@@ -3104,27 +3203,34 @@ pub fn spawn_worker_loop(
                     entropy = entropy.wrapping_mul(6364136223846793005).wrapping_add(1);
                     let mut worker = Worker {
                         queue,
-                        backend: NativePrintBackend {
-                            db_path: db_path.clone(),
-                            config_dir: config_dir.clone(),
-                        },
+                        backend: &mut backend,
                         cfg: WorkerConfig::default(),
                         entropy,
                     };
                     // Panic isolation: one bad job or backend panic
                     // must never kill the only worker thread and
                     // silently stop all printing for the session.
+                    let started = Instant::now();
                     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         worker.run_once(&printer)
                     }));
+                    let elapsed_ms = started.elapsed().as_millis();
+                    drop(worker);
                     match outcome {
                         Ok(Ok(o)) => {
+                            if let Some((label, job_id)) = outcome_log_fields(&o) {
+                                eprintln!(
+                                    "Yaseir Print: job_id={job_id} printer={printer:?} outcome={label} elapsed_ms={elapsed_ms}"
+                                );
+                            }
                             if o != Outcome::Idle {
                                 did_work = true;
                             }
                         }
                         Ok(Err(e)) => {
-                            eprintln!("Yaseir Print: worker error on {printer}: {e}");
+                            eprintln!(
+                                "Yaseir Print: worker error printer={printer:?} elapsed_ms={elapsed_ms}: {e}"
+                            );
                             if matches!(e, print_core::QueueError::Db(_)) {
                                 reset_queue = true;
                                 break;
@@ -3132,7 +3238,7 @@ pub fn spawn_worker_loop(
                         }
                         Err(_) => {
                             eprintln!(
-                                "Yaseir Print: worker panicked on {printer}; resetting queue"
+                                "Yaseir Print: worker panicked printer={printer:?} elapsed_ms={elapsed_ms}; resetting queue"
                             );
                             reset_queue = true;
                             break;
@@ -3142,17 +3248,18 @@ pub fn spawn_worker_loop(
             }
             if reset_queue {
                 worker_queue = None;
+                backend.read_queue = None;
             }
             if !did_work {
                 let (lock, cvar) = &*wake;
-                if let Ok(mut pending) = lock.lock() {
-                    if !*pending {
-                        let _ = cvar.wait_timeout(pending, Duration::from_secs(2));
-                    } else {
-                        *pending = false;
-                    }
+                let mut pending = lock.lock().unwrap_or_else(|p| p.into_inner());
+                if !*pending {
+                    let (mut guard, _) = cvar
+                        .wait_timeout(pending, Duration::from_secs(2))
+                        .unwrap_or_else(|p| p.into_inner());
+                    *guard = false;
                 } else {
-                    std::thread::sleep(Duration::from_secs(2));
+                    *pending = false;
                 }
             }
         }
@@ -3282,6 +3389,11 @@ mod tests {
             tab_title_for("tauri://localhost/index.html"),
             "Control Center"
         );
+        assert_eq!(tab_title_for("http://tauri.localhost/"), "Control Center");
+        assert_eq!(
+            tab_title_for("http://tauri.localhost/settings.html"),
+            "Settings"
+        );
         assert_eq!(tab_title_for("tauri://localhost/boot.html"), "Yaseir Print");
         assert!(is_local_app_url(
             &tauri::Url::parse("tauri://localhost/index.html").unwrap()
@@ -3297,6 +3409,9 @@ mod tests {
         ));
         assert!(!is_local_app_url(
             &tauri::Url::parse("tauri://localhost:1234/index.html").unwrap()
+        ));
+        assert!(!is_local_app_url(
+            &tauri::Url::parse("http://user@tauri.localhost/index.html").unwrap()
         ));
         // POS detection: /pos and /pos/* only — a backend route that
         // merely contains "pos" must not divert into a POS tab.
@@ -3354,6 +3469,13 @@ mod tests {
             "tcp://169.254.169.254:80",
             "ipp://169.254.169.254:631/ipp/print",
             "tcp://[::ffff:169.254.169.254]:9100",
+            "tcp://[::169.254.169.254]:9100",
+            "tcp://[64:ff9b::169.254.169.254]:9100",
+            "tcp://[fd00:ec2::254]:80",
+            "tcp://169.254.170.2:80",
+            "tcp://100.100.100.200:80",
+            "ipp://metadata.google.internal:80/computeMetadata/v1/",
+            "ipp://192.168.1.50:631/ipp/print\r\nX-Injected: 1",
             "tcp://   :9100",
             "tcp://user@192.168.1.10:9100",
             "tcp://bad host:9100",
@@ -3415,5 +3537,61 @@ mod tests {
         // 3 mm at 203 dpi is the EPL default of 24 dots.
         assert_eq!(NativePrintBackend::label_gap_dots(None, 203), 24);
         assert_eq!(NativePrintBackend::label_gap_dots(Some(3.0), 300), 35);
+    }
+
+    #[test]
+    fn backend_reuses_read_queue_without_reopening() {
+        let mut q = Queue::in_memory().unwrap();
+        let job = Job {
+            id: "job-reuse-1".to_string(),
+            idempotency_key: "job-reuse-1".to_string(),
+            printer: "p1".to_string(),
+            report: None,
+            pages: 1,
+            bytes: 8,
+            priority: 0,
+            state: JobState::Queued,
+            attempts: 0,
+            error_code: None,
+        };
+        q.enqueue(&job).unwrap();
+        q.store_payload("job-reuse-1", "pdf", b"%PDF-1.4").unwrap();
+        let mut backend = NativePrintBackend {
+            db_path: String::new(),
+            config_dir: std::path::PathBuf::new(),
+            read_queue: Some(q),
+        };
+        let (kind1, data1, _) = backend.load_job_data("job-reuse-1").unwrap();
+        let (kind2, data2, _) = backend.load_job_data("job-reuse-1").unwrap();
+        assert_eq!(kind1, "pdf");
+        assert_eq!(data1, b"%PDF-1.4");
+        assert_eq!(kind2, "pdf");
+        assert_eq!(data2, b"%PDF-1.4");
+        let missing = backend.load_job_data("missing-job").unwrap_err();
+        assert_eq!(missing.code, "MISSING_PAYLOAD");
+        assert!(!missing.retryable);
+        assert!(backend.read_queue.is_some());
+    }
+
+    #[test]
+    fn outcome_log_fields_maps_terminal_and_retry_outcomes() {
+        assert_eq!(outcome_log_fields(&Outcome::Idle), None);
+        assert_eq!(outcome_log_fields(&Outcome::Skipped), None);
+        assert_eq!(
+            outcome_log_fields(&Outcome::Done("j1".into())),
+            Some(("done", "j1"))
+        );
+        assert_eq!(
+            outcome_log_fields(&Outcome::Retried("j2".into())),
+            Some(("retried", "j2"))
+        );
+        assert_eq!(
+            outcome_log_fields(&Outcome::Failed("j3".into())),
+            Some(("failed", "j3"))
+        );
+        assert_eq!(
+            outcome_log_fields(&Outcome::DeadLetter("j4".into())),
+            Some(("dead_letter", "j4"))
+        );
     }
 }

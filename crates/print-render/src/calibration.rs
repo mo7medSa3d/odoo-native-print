@@ -85,7 +85,8 @@ pub fn code39_runs(data: &str) -> Result<Vec<(bool, u32)>, String> {
     let data = data.to_uppercase();
     let mut sum: u32 = 0;
     for ch in data.chars() {
-        sum += code39_value(ch).ok_or_else(|| format!("unsupported character: {ch}"))?;
+        let v = code39_value(ch).ok_or_else(|| format!("unsupported character: {ch}"))?;
+        sum = (sum + v) % 43;
     }
     let check = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%"
         .chars()
@@ -306,7 +307,7 @@ pub fn calibration_pdf_sized(width_mm: f64, height_mm: f64) -> Vec<u8> {
 /// Thermal calibration bitmap for a thermal receipt printer at 203 dpi
 /// (`width_dots`: 576 dots for 80 mm paper, 384 dots for 58 mm paper).
 pub fn calibration_thermal_for_width(width_dots: u32) -> MonoBitmap {
-    let width = width_dots.max(384);
+    let width = width_dots.clamp(384, 4096);
     let dpi = 203.0f64;
     let mm = |v: f64| (v * dpi / 25.4) as u32;
     let height = mm(80.0);

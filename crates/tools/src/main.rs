@@ -48,7 +48,7 @@ fn bench() {
     let mut w = Worker {
         queue: &mut q,
         backend: OkBackend {
-            printed: HashMap::new(),
+            printed: HashMap::with_capacity(1000),
         },
         cfg: WorkerConfig::default(),
         entropy: 0,
@@ -121,7 +121,7 @@ fn chaos() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("chaos.db").to_string_lossy().to_string();
     let total = 300usize;
-    let mut successes: HashMap<String, u32> = HashMap::new();
+    let mut successes: HashMap<String, u32> = HashMap::with_capacity(total);
     let mut crashes = 0u32;
     let mut guard = 0;
     loop {
@@ -144,7 +144,7 @@ fn chaos() {
             queue: &mut q,
             backend: FlakyBackend {
                 rng: Lcg(0xC0FFEE + guard),
-                success_prints: HashMap::new(),
+                success_prints: HashMap::with_capacity(37),
             },
             cfg: WorkerConfig {
                 max_attempts: 6,
@@ -165,10 +165,11 @@ fn chaos() {
                 _ => continue,
             }
         }
-        for (k, v) in &w.backend.success_prints {
-            *successes.entry(k.clone()).or_default() += v;
-        }
+        let prints = std::mem::take(&mut w.backend.success_prints);
         drop(w);
+        for (k, v) in prints {
+            *successes.entry(k).or_default() += v;
+        }
         let remaining = q.count_by_state(JobState::Queued).unwrap();
         let done = q.count_by_state(JobState::Done).unwrap();
         let dead = q.count_by_state(JobState::DeadLetter).unwrap();
@@ -179,9 +180,8 @@ fn chaos() {
             );
             // Invariants: every done job was successfully printed exactly
             // once; nothing lost (all jobs accounted for).
-            let done_ids: Vec<&String> = successes.keys().collect();
             assert_eq!(
-                done_ids.len() as u64,
+                successes.len() as u64,
                 done,
                 "successful prints must equal done jobs"
             );

@@ -1,0 +1,11 @@
+# Minimal non-root Odoo 19.0 image with the native_print addon pre-installed.
+FROM odoo:19.0
+
+COPY --chown=odoo:odoo odoo/native_print /mnt/extra-addons/native_print
+
+USER odoo
+
+EXPOSE 8069
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8069/web/health', timeout=3)" || exit 1

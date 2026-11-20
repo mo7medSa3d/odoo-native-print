@@ -1,5 +1,4 @@
 import { JSDOM } from "jsdom";
-import fs from "node:fs";
 import { extractBridge } from "./extract-bridge.mjs";
 const bridge = extractBridge();
 let pass = 0, fail = 0;

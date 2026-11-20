@@ -70,25 +70,27 @@ type FpdfDocument = *mut c_void;
 type FpdfPage = *mut c_void;
 type FpdfBitmap = *mut c_void;
 
-type FnInitLibrary = unsafe extern "C" fn();
-type FnDestroyLibrary = unsafe extern "C" fn();
-type FnLoadMemDocument = unsafe extern "C" fn(*const u8, c_int, *const c_char) -> FpdfDocument;
-type FnGetLastError = unsafe extern "C" fn() -> c_ulong;
-type FnGetPageCount = unsafe extern "C" fn(FpdfDocument) -> c_int;
-type FnCloseDocument = unsafe extern "C" fn(FpdfDocument);
-type FnLoadPage = unsafe extern "C" fn(FpdfDocument, c_int) -> FpdfPage;
-type FnClosePage = unsafe extern "C" fn(FpdfPage);
-type FnGetPageWidthF = unsafe extern "C" fn(FpdfPage) -> f32;
-type FnGetPageHeightF = unsafe extern "C" fn(FpdfPage) -> f32;
-type FnBitmapCreateEx = unsafe extern "C" fn(c_int, c_int, c_int, *mut c_void, c_int) -> FpdfBitmap;
-type FnBitmapFillRect = unsafe extern "C" fn(FpdfBitmap, c_int, c_int, c_int, c_int, c_ulong);
+// FPDF_CALLCONV is __stdcall on 32-bit Windows and C on x64/ARM64 Windows, Linux, and macOS.
+type FnInitLibrary = unsafe extern "system" fn();
+type FnDestroyLibrary = unsafe extern "system" fn();
+type FnLoadMemDocument = unsafe extern "system" fn(*const u8, c_int, *const c_char) -> FpdfDocument;
+type FnGetLastError = unsafe extern "system" fn() -> c_ulong;
+type FnGetPageCount = unsafe extern "system" fn(FpdfDocument) -> c_int;
+type FnCloseDocument = unsafe extern "system" fn(FpdfDocument);
+type FnLoadPage = unsafe extern "system" fn(FpdfDocument, c_int) -> FpdfPage;
+type FnClosePage = unsafe extern "system" fn(FpdfPage);
+type FnGetPageWidthF = unsafe extern "system" fn(FpdfPage) -> f32;
+type FnGetPageHeightF = unsafe extern "system" fn(FpdfPage) -> f32;
+type FnBitmapCreateEx =
+    unsafe extern "system" fn(c_int, c_int, c_int, *mut c_void, c_int) -> FpdfBitmap;
+type FnBitmapFillRect = unsafe extern "system" fn(FpdfBitmap, c_int, c_int, c_int, c_int, c_ulong);
 type FnRenderPageBitmap =
-    unsafe extern "C" fn(FpdfBitmap, FpdfPage, c_int, c_int, c_int, c_int, c_int, c_int);
-type FnBitmapGetBuffer = unsafe extern "C" fn(FpdfBitmap) -> *mut c_void;
-type FnBitmapGetWidth = unsafe extern "C" fn(FpdfBitmap) -> c_int;
-type FnBitmapGetHeight = unsafe extern "C" fn(FpdfBitmap) -> c_int;
-type FnBitmapGetStride = unsafe extern "C" fn(FpdfBitmap) -> c_int;
-type FnBitmapDestroy = unsafe extern "C" fn(FpdfBitmap);
+    unsafe extern "system" fn(FpdfBitmap, FpdfPage, c_int, c_int, c_int, c_int, c_int, c_int);
+type FnBitmapGetBuffer = unsafe extern "system" fn(FpdfBitmap) -> *mut c_void;
+type FnBitmapGetWidth = unsafe extern "system" fn(FpdfBitmap) -> c_int;
+type FnBitmapGetHeight = unsafe extern "system" fn(FpdfBitmap) -> c_int;
+type FnBitmapGetStride = unsafe extern "system" fn(FpdfBitmap) -> c_int;
+type FnBitmapDestroy = unsafe extern "system" fn(FpdfBitmap);
 
 /// FPDFBitmap_* format codes (fpdfview.h).
 const FORMAT_GRAY: c_int = 1;
@@ -227,6 +229,12 @@ impl Pdfium {
     /// must remain valid while the document is open, so this wrapper
     /// retains an owned copy inside [`PdfDocument`].
     pub fn load_document(self: &Arc<Self>, bytes: &[u8]) -> Result<PdfDocument, PdfiumError> {
+        if bytes.is_empty() {
+            return Err(PdfiumError::InvalidDocument {
+                code: 3,
+                detail: last_error_detail(3),
+            });
+        }
         let len = c_int::try_from(bytes.len()).map_err(|_| PdfiumError::InvalidDocument {
             code: 3,
             detail: "document exceeds 2 GiB FFI limit".into(),

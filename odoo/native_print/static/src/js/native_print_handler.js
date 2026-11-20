@@ -1,8 +1,9 @@
 /** @odoo-module **/
 import { registry } from "@web/core/registry";
 import { rpc } from "@web/core/network/rpc";
+import { user } from "@web/core/user";
 import { _t } from "@web/core/l10n/translation";
-import { JOB_TERMINAL_STATES as TERMINAL_STATES, notifyUser, resolveBridgeTarget } from "./native_print_client";
+import { JOB_TERMINAL_STATES as TERMINAL_STATES, notifyJobUpdated, notifyUser, resolveBridgeTarget } from "./native_print_client";
 
 /*
  * Native Print report handler (API contract v1, docs/api-contract.md).
@@ -79,7 +80,10 @@ export function nativePrintBridge() {
 export function buildReportUrl(action, converter = "pdf", env = null) {
     let url = `/report/${converter}/${action.report_name}`;
     const actionContext = action.context || {};
-    const userContext = (env && env.services && env.services.user && env.services.user.context) || {};
+    const userContext =
+        (env && env.services && env.services.user && env.services.user.context) ||
+        (user && user.context) ||
+        {};
     const mergedContext = Object.assign({}, userContext, actionContext);
     const hasWizardData =
         action.data &&
@@ -110,7 +114,10 @@ export function buildReportUrl(action, converter = "pdf", env = null) {
 // The source reference (model + record ids) a report is printed
 // for, posted with the job so the job log can offer a real Reprint.
 export function reportSource(action) {
-    const ctx = (action && action.context) || {};
+    if (!action) {
+        return { model: null, ids: "" };
+    }
+    const ctx = action.context || {};
     const ids =
         ctx.active_ids ||
         (ctx.active_id ? [ctx.active_id] : null) ||
@@ -127,7 +134,7 @@ export function reportSource(action) {
  * Render a plain-text report as a PNG document (A4 width at
  * 96 dpi, monospace, hard-wrapped) so it can print through GDI
  * on office, label and virtual printers, which cannot interpret
- * ESC/POS (2026-11-07). The desktop canvas path paginates a tall
+ * ESC/POS. The desktop canvas path paginates a tall
  * image across sheets, so one long PNG is the whole document.
  * Throws when the canvas is unavailable; the caller falls back
  * to Odoo's standard download.
@@ -184,7 +191,7 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
     // queued behind a busy desktop queue legitimately takes longer),
     // with a 30-minute absolute cap. The watcher is the only status
     // source for the server record: a fixed deadline silently left
-    // long jobs non-terminal on the server forever. (Audit F7.)
+    // long jobs non-terminal on the server forever.
     let lastProgressAt = Date.now();
     const absoluteDeadline = Date.now() + 30 * 60 * 1000;
     for (let i = 0; Date.now() < absoluteDeadline && Date.now() - lastProgressAt < 5 * 60 * 1000; i++) {
@@ -199,7 +206,7 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
                 const detail = await bridge.jobDetail(jobId);
                 if (detail) {
                     state = detail.state;
-                    errorCode = detail.errorCode || null;
+                    errorCode = detail.errorCode || detail.error_code || null;
                     pages = detail.pages || pages;
                     attempts = detail.attempts || attempts;
                 }
@@ -215,12 +222,12 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
             // one brief tick, resolve the recheck BEFORE posting `failed`
             // or flashing a sticky error toast so temporary retries stay
             // silent and the server log always receives the final state.
-            if (state === "failed" && typeof bridge.jobDetail === "function") {
+            if (state === "failed" && notifiedFailure !== state + ":" + attempts && typeof bridge.jobDetail === "function") {
                 await new Promise((resolve) => setTimeout(resolve, 900));
                 const recheck = await bridge.jobDetail(jobId).catch(() => null);
                 if (recheck && recheck.state) {
                     state = recheck.state;
-                    errorCode = recheck.errorCode || null;
+                    errorCode = recheck.errorCode || recheck.error_code || null;
                     pages = recheck.pages || pages;
                     attempts = recheck.attempts || attempts;
                 }
@@ -267,11 +274,13 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
                             "success",
                         );
                     }
+                    notifyJobUpdated();
                     return state;
                 }
                 const failureKey = state + ":" + attempts;
                 if (notifiedFailure !== failureKey) {
                     notifiedFailure = failureKey;
+                    notifyJobUpdated();
                     notifyUser(
                         env,
                         _t('Printing failed on "%s" (%s). Check the printer before reprinting.', printerLabel, errorCode || state),
@@ -317,8 +326,7 @@ async function handleCloseOnReportDownload(action, options, env) {
     } catch (err) {
         // The print already succeeded at this point: a failing
         // wizard close (stale dialog, finished action service) must
-        // not surface as a print error or an RPC traceback (audit
-        // L6). Log it and let the handler return success.
+        // not surface as a print error or an RPC traceback.
         console.warn("Native Print: closing the report wizard failed after a successful print", err);
     }
 }
@@ -333,11 +341,7 @@ async function handleReportSubmission(action, options, env, bridge) {
         preferPrinterName: (prefill && prefill.printer) || undefined,
     }).catch(() => null);
     if (!target) {
-        // Inside the app, falling back to a downloaded file with
-        // no word reads as "printing did nothing": say so first
-        // (2026-11-05). In a normal browser there is no bridge and
-        // this handler never runs, so the download stays silent
-        // there as it should.
+        // Notify inside the desktop app so falling back to download is explicit.
         notifyUser(
             env,
             _t("No printer is available on this device right now. The file was downloaded instead."),
@@ -367,26 +371,20 @@ async function handleReportSubmission(action, options, env, bridge) {
             // Network failure / server restart mid-click: the
             // fallback contract is "return undefined and Odoo
             // downloads as usual" — a rejected fetch must not escape
-            // the handler as an exception. (Audit F1.)
+            // the handler as an exception.
             return undefined;
         }
         // Byte size means UTF-8 bytes (what actually crosses the
         // bridge), not UTF-16 code units: text.length undercounts
         // Arabic/CJK content for the job log and the size guard.
         const textBytes = new TextEncoder().encode(text).length;
-        // ESC/POS is a thermal printer's language (external
-        // review, 2026-11-07): only a thermal target may receive
-        // the text as ESC/POS. An office, label or virtual target
-        // gets the same text rendered as a document image through
-        // GDI — readable output on its own paper — never raw
-        // bytes it cannot interpret. (The desktop worker refuses
-        // raw payloads to office/virtual targets as a second line
-        // of defence.)
+        // Only thermal targets accept ESC/POS; office/label/virtual targets
+        // receive a GDI-rendered PNG so they never get raw bytes.
         const textAsEscpos = rule.mode === "escpos";
         const maxTextBytes = textAsEscpos ? MAX_NATIVE_TEXT_BYTES : MAX_NATIVE_PAYLOAD_BYTES;
         if ((textAsEscpos && textBytes === 0) || textBytes > maxTextBytes) {
             // Empty or oversized for the desktop queue: keep Odoo's standard
-            // download rather than a doomed enqueue (audit L5).
+            // download rather than a doomed enqueue.
             return undefined;
         }
         const textKey = buildReportIdempotencyKey("odoo-txt", action);
@@ -458,9 +456,11 @@ async function handleReportSubmission(action, options, env, bridge) {
                 error_code: "BRIDGE_ERROR",
                 device: target.printer.name,
             }, { silent: true }).catch(() => {});
+            notifyJobUpdated();
+            console.warn("Native Print: text print bridge call failed.", error);
             notifyUser(
                 env,
-                _t('Native Print could not print on "%s": %s. The file was downloaded instead.', target.printer.name, error.message || error),
+                _t('Native Print could not print on "%s". The file was downloaded instead.', target.printer.name),
                 "warning",
             );
             return undefined; // Fall back to the standard download.
@@ -479,13 +479,11 @@ async function handleReportSubmission(action, options, env, bridge) {
         }
         rawBytes = new Uint8Array(buf);
     } catch (_fetchError) {
-        // Same fallback contract as the text branch. (Audit F1.)
+        // Same fallback contract as the text branch.
         return undefined;
     }
     if (rawBytes.length > MAX_NATIVE_PAYLOAD_BYTES) {
-        // Bigger than the desktop queue accepts: downloading keeps
-        // the document usable instead of failing at the bridge
-        // (audit L5). Check before converting to a JS Array.
+        // Above desktop queue limit: fall back to download before Array conversion.
         return undefined;
     }
     // A 200 response is not necessarily a PDF: an expired session
@@ -569,9 +567,11 @@ async function handleReportSubmission(action, options, env, bridge) {
             error_code: "BRIDGE_ERROR",
             device: target.printer.name,
         }, { silent: true }).catch(() => {});
+        notifyJobUpdated();
+        console.warn("Native Print: PDF print bridge call failed.", error);
         notifyUser(
             env,
-            _t('Native Print could not print on "%s": %s. The PDF was downloaded instead.', target.printer.name, error.message || error),
+            _t('Native Print could not print on "%s". The PDF was downloaded instead.', target.printer.name),
             "warning",
         );
         return undefined; // Fall back to the standard download.
@@ -587,7 +587,7 @@ registry.category("ir.actions.report handlers").add(
         if (!bridge) {
             return undefined; // Normal browser: unchanged behaviour.
         }
-        if (!["qweb-pdf", "qweb-text"].includes(action.report_type)) {
+        if (!action || !["qweb-pdf", "qweb-text"].includes(action.report_type)) {
             return undefined; // Other report types keep the default flow.
         }
         const dataFingerprint = (() => {
@@ -622,6 +622,13 @@ registry.category("ir.actions.report handlers").add(
         }
         const token = { startedAt: now };
         inFlightReports.set(guardKey, token);
+        if (inFlightReports.size > 20) {
+            for (const [k, entry] of inFlightReports) {
+                if (now - entry.startedAt >= IN_FLIGHT_STALE_MS) {
+                    inFlightReports.delete(k);
+                }
+            }
+        }
         try {
             return await handleReportSubmission(action, options, env, bridge);
         } finally {

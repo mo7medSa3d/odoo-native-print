@@ -160,10 +160,7 @@ impl<'a, B: PrintBackend> Worker<'a, B> {
                 Ok(Outcome::Retried(job.id))
             }
             Err(e) if e.retryable => {
-                self.queue
-                    .set_state(&job.id, JobState::Failed, Some(&e.code))?;
-                self.queue
-                    .set_state(&job.id, JobState::DeadLetter, Some(&e.code))?;
+                self.queue.fail_to_dead_letter(&job.id, &e.code)?;
                 // Payload is kept for a dead-letter job on purpose: the
                 // one-click retry needs the document. It is purged only
                 // when the retried job eventually finishes.

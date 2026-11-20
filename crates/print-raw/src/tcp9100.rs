@@ -88,7 +88,10 @@ pub fn send_raw_phased(
     if let Err(e) = stream.shutdown(std::net::Shutdown::Write) {
         if !matches!(
             e.kind(),
-            ErrorKind::NotConnected | ErrorKind::ConnectionReset | ErrorKind::BrokenPipe
+            ErrorKind::NotConnected
+                | ErrorKind::ConnectionReset
+                | ErrorKind::ConnectionAborted
+                | ErrorKind::BrokenPipe
         ) {
             return Err(SendPhaseError::Write(e));
         }

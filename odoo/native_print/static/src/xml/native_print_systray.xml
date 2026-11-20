@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <templates xml:space="preserve">
     <t t-name="native_print.SystrayItem">
-        <div class="o_mail_systray_item dropdown o_native_print_systray" t-att-class="{'show': state.isOpen}">
+        <div class="o_mail_systray_item dropdown o_native_print_systray" t-att-class="{'show': state.isOpen}" t-on-keydown="onKeyDown">
             <button type="button"
                     class="dropdown-toggle o-no-caret btn d-flex align-items-center px-2"
                     t-att-title="labels.title"
@@ -71,24 +71,26 @@
 
                 <!-- App mode: live printer picker -->
                 <div t-if="state.bridgeActive and state.discoveredPrinters.length" class="np-printer-list">
-                    <t t-foreach="state.discoveredPrinters" t-as="printer" t-key="printer.name">
+                    <t t-foreach="state.discoveredPrinters" t-as="printer" t-key="printer.name || printer_index">
                         <div class="np-printer-row">
                             <div class="np-printer-text">
-                                <span class="np-printer-name" dir="auto" t-esc="printer.name"/>
+                                <span class="np-printer-name" dir="auto" t-att-title="printer.name" t-esc="printer.name"/>
                                 <span t-if="printer.meta" class="np-printer-meta" dir="auto" t-esc="printer.meta"/>
                             </div>
                             <div class="d-flex align-items-center gap-1 flex-shrink-0">
                                 <span t-if="state.selectedPrinter === printer.name || (!state.selectedPrinter &amp;&amp; state.defaultPrinter === printer.name)" class="badge rounded-pill text-bg-primary np-inuse-pill">
                                     <i class="fa fa-star me-1" aria-hidden="true"/><t t-esc="labels.inUse"/>
                                 </span>
-                                <button t-else="" type="button" class="btn btn-sm btn-link np-use-btn p-0"
+                                <button t-else="" type="button" class="btn btn-sm btn-link np-use-btn"
+                                        t-att-aria-label="labels.usePrinter + ': ' + printer.name"
                                         t-on-click="() => this.selectPrinter(printer)">
                                     <t t-esc="labels.usePrinter"/>
                                 </button>
                                 <span t-if="state.selectedPosPrinter === printer.name" class="badge rounded-pill text-bg-info np-inuse-pill">
                                     <i class="fa fa-shopping-bag me-1" aria-hidden="true"/><t t-esc="labels.inUsePos"/>
                                 </span>
-                                <button t-elif="printer.printer_class === 'thermal' || printer.printer_class === 'label' || state.selectedPosPrinter" type="button" class="btn btn-sm btn-link np-use-btn p-0"
+                                <button t-elif="printer.printer_class === 'thermal' || printer.printer_class === 'label' || state.selectedPosPrinter" type="button" class="btn btn-sm btn-link np-use-btn"
+                                        t-att-aria-label="labels.usePosPrinter + ': ' + printer.name"
                                         t-on-click="() => this.selectPosPrinter(printer)">
                                     <t t-esc="labels.usePosPrinter"/>
                                 </button>
@@ -107,15 +109,15 @@
 
                 <!-- Job counters -->
                 <div class="np-stats">
-                    <div class="np-stat">
+                    <div class="np-stat np-stat-active">
                         <div class="np-stat-num"><span class="np-dot np-dot-active" aria-hidden="true"/><t t-esc="state.activeJobs"/></div>
                         <div class="np-stat-label" t-esc="labels.activeJobs"/>
                     </div>
-                    <div class="np-stat">
+                    <div class="np-stat np-stat-done">
                         <div class="np-stat-num"><span class="np-dot np-dot-done" aria-hidden="true"/><t t-esc="state.doneJobs"/></div>
                         <div class="np-stat-label" t-esc="labels.doneJobs"/>
                     </div>
-                    <div class="np-stat" t-att-class="{'np-stat-alert': state.failedJobs &gt; 0}">
+                    <div class="np-stat np-stat-failed" t-att-class="{'np-stat-alert': state.failedJobs &gt; 0}">
                         <div class="np-stat-num"><span class="np-dot np-dot-failed" aria-hidden="true"/><t t-esc="state.failedJobs"/></div>
                         <div class="np-stat-label" t-esc="labels.failedJobs"/>
                     </div>

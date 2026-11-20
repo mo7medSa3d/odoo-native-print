@@ -4,11 +4,15 @@ use std::fmt::Write as _;
 fn write_zpl_graphic_field(out: &mut String, bm: &MonoBitmap) {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let bpr = bm.bytes_per_row();
-    let expected = bpr.saturating_mul(bm.height_dots as usize);
-    let data = &bm.data[..expected.min(bm.data.len())];
-    let total = data.len();
-    out.reserve(total.saturating_mul(2).saturating_add(48));
-    let _ = write!(out, "^GFA,{total},{total},{bpr},");
+    let Some(expected) = bpr.checked_mul(bm.height_dots as usize) else {
+        return;
+    };
+    if expected == 0 || bm.data.len() < expected {
+        return;
+    }
+    let data = &bm.data[..expected];
+    out.reserve(expected.saturating_mul(2).saturating_add(48));
+    let _ = write!(out, "^GFA,{expected},{expected},{bpr},");
     for &b in data {
         out.push(HEX[(b >> 4) as usize] as char);
         out.push(HEX[(b & 0x0F) as usize] as char);
@@ -39,12 +43,16 @@ pub fn zpl_label_with_options(
     offset_y_dots: i32,
     copies: u16,
 ) -> String {
+    let Some(expected) = bm.bytes_per_row().checked_mul(bm.height_dots as usize) else {
+        return String::new();
+    };
+    if expected == 0 || bm.data.len() < expected {
+        return String::new();
+    }
     let copies = copies.max(1);
     let lh_x = offset_x_dots.max(0);
     let lh_y = offset_y_dots.max(0);
-    let expected = bm.bytes_per_row().saturating_mul(bm.height_dots as usize);
-    let data_len = expected.min(bm.data.len());
-    let mut out = String::with_capacity(data_len.saturating_mul(2).saturating_add(128));
+    let mut out = String::with_capacity(expected.saturating_mul(2).saturating_add(128));
     let _ = write!(
         out,
         "^XA^PW{}^LL{}^LH{lh_x},{lh_y}^FO0,0",
@@ -116,7 +124,8 @@ fn number(field: Option<&str>) -> Option<u32> {
 pub fn parse_host_status(response: &str) -> Option<ZplHostStatus> {
     let cleaned: String = response
         .chars()
-        .filter(|c| *c != '\u{2}' && *c != '\u{3}')
+        .filter(|c| *c != '\u{2}')
+        .map(|c| if c == '\u{3}' { '\n' } else { c })
         .collect();
     let lines: Vec<String> = cleaned
         .lines()
@@ -216,5 +225,22 @@ mod tests {
         let label = zpl_label_with_options(&bm, 12, 8, 3);
         assert!(label.contains("^PW16^LL4^LH12,8^FO0,0^GFA,8,8,2,"));
         assert!(label.ends_with("^FS^PQ3,0,1,Y^XZ"));
+    }
+
+    #[test]
+    fn truncated_bitmap_returns_empty_and_etx_without_newlines_splits_lines() {
+        let bad = MonoBitmap {
+            width_dots: 16,
+            height_dots: 4,
+            data: vec![0xFF; 2],
+        };
+        assert!(zpl_graphic_field(&bad).is_empty());
+        assert!(zpl_label(&bad).is_empty());
+
+        let compact = "\u{2}000,0,0,1200,000,0,0,0,000,0,0,0\u{3}\u{2}000,0,1,1,0,0,0,0,00000005,1,000\u{3}\u{2}0000,0\u{3}";
+        let st = parse_host_status(compact).unwrap();
+        assert!(st.head_up);
+        assert!(st.ribbon_out);
+        assert_eq!(st.labels_remaining, Some(5));
     }
 }

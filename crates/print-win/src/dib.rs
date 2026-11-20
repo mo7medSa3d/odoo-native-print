@@ -39,18 +39,24 @@ impl DibImage {
     }
 }
 
+fn checked_dib_row_bytes(width: u32, bit_count: u16) -> Option<usize> {
+    let bits = (width as u64).checked_mul(bit_count as u64)?;
+    usize::try_from(bits.div_ceil(32).checked_mul(4)?).ok()
+}
+
 /// Bytes per DIB row for a width and bit depth (4-byte aligned).
 pub fn dib_row_bytes(width: u32, bit_count: u16) -> usize {
-    let bits = (width as u64) * (bit_count as u64);
-    (bits.div_ceil(32) * 4) as usize
+    checked_dib_row_bytes(width, bit_count).unwrap_or(usize::MAX)
 }
 
 fn header(width: u32, height: u32, bit_count: u16, image_bytes: usize) -> [u8; 40] {
     let mut h = [0u8; 40];
+    let bi_width = i32::try_from(width).unwrap_or(0);
+    // Negative height: top-down DIB, rows in display order.
+    let bi_height = i32::try_from(height).map(|v| -v).unwrap_or(0);
     h[0..4].copy_from_slice(&40u32.to_le_bytes()); // biSize
-    h[4..8].copy_from_slice(&(width as i32).to_le_bytes()); // biWidth
-                                                            // Negative height: top-down DIB, rows in display order.
-    h[8..12].copy_from_slice(&(height as i32).wrapping_neg().to_le_bytes()); // biHeight
+    h[4..8].copy_from_slice(&bi_width.to_le_bytes()); // biWidth
+    h[8..12].copy_from_slice(&bi_height.to_le_bytes()); // biHeight
     h[12..14].copy_from_slice(&1u16.to_le_bytes()); // biPlanes
     h[14..16].copy_from_slice(&bit_count.to_le_bytes()); // biBitCount
                                                          // biCompression = 0 (BI_RGB) at offset 16: already zero.
@@ -59,7 +65,12 @@ fn header(width: u32, height: u32, bit_count: u16, image_bytes: usize) -> [u8; 4
 }
 
 fn repack_rows(src: &[u8], src_row_bytes: usize, w: u32, h: u32, bit_count: u16) -> Vec<u8> {
-    let dst_row = dib_row_bytes(w, bit_count);
+    if w == 0 || h == 0 || i32::try_from(w).is_err() || i32::try_from(h).is_err() {
+        return Vec::new();
+    }
+    let Some(dst_row) = checked_dib_row_bytes(w, bit_count) else {
+        return Vec::new();
+    };
     let Some(total) = dst_row.checked_mul(h as usize) else {
         return Vec::new();
     };
@@ -81,19 +92,30 @@ fn repack_rows(src: &[u8], src_row_bytes: usize, w: u32, h: u32, bit_count: u16)
     out
 }
 
+const fn grayscale_palette() -> [u8; 256 * 4] {
+    let mut pal = [0u8; 256 * 4];
+    let mut i = 0;
+    while i < 256 {
+        let base = i * 4;
+        pal[base] = i as u8;
+        pal[base + 1] = i as u8;
+        pal[base + 2] = i as u8;
+        i += 1;
+    }
+    pal
+}
+
+const GRAYSCALE_PALETTE: [u8; 256 * 4] = grayscale_palette();
+
 /// Build an 8-bpp grayscale DIB directly from a packed grayscale slice
 /// without wrapping it in a `RenderedPage`.
 pub fn build_grayscale_dib(width: u32, height: u32, pixels: &[u8]) -> DibImage {
-    let mut palette = Vec::with_capacity(256 * 4);
-    for i in 0..256u32 {
-        palette.extend_from_slice(&[i as u8, i as u8, i as u8, 0]);
-    }
     let bits = repack_rows(pixels, width as usize, width, height, 8);
     DibImage {
         width,
         height,
         header: header(width, height, 8, bits.len()),
-        palette,
+        palette: GRAYSCALE_PALETTE.to_vec(),
         bits,
         bit_count: 8,
     }
@@ -104,7 +126,10 @@ pub fn build_dib(page: &RenderedPage) -> DibImage {
     let (w, h) = (page.width_px, page.height_px);
     match page.mode {
         RenderMode::Color => {
-            let bits = repack_rows(&page.pixels, w as usize * 4, w, h, 32);
+            let bits = (w as usize)
+                .checked_mul(4)
+                .map(|src_row| repack_rows(&page.pixels, src_row, w, h, 32))
+                .unwrap_or_default();
             DibImage {
                 width: w,
                 height: h,
@@ -187,6 +212,9 @@ mod tests {
         let d = build_dib(&p);
         assert_eq!(d.bit_count, 8);
         assert_eq!(d.palette.len(), 1024);
+        assert_eq!(&d.palette[0..4], &[0, 0, 0, 0]);
+        assert_eq!(&d.palette[128 * 4..128 * 4 + 4], &[128, 128, 128, 0]);
+        assert_eq!(&d.palette[255 * 4..255 * 4 + 4], &[255, 255, 255, 0]);
         assert_eq!(d.bits.len(), 8 * 3);
         assert_eq!(d.bits[0], 200);
         assert_eq!(d.bits[5], 0, "padding is zeroed");
@@ -222,5 +250,15 @@ mod tests {
         assert_eq!(fit_to_page(100, 100, 100, 100), (0, 0, 100, 100));
         // Degenerate input is safe.
         assert_eq!(fit_to_page(0, 10, 100, 100), (0, 0, 0, 0));
+    }
+
+    #[test]
+    fn signed_dimension_overflow_never_flips_top_down_or_allocates() {
+        let d = build_grayscale_dib(1, (i32::MAX as u32) + 1, &[0u8; 4]);
+        assert!(d.bits.is_empty());
+        assert_eq!(i32::from_le_bytes(d.header[8..12].try_into().unwrap()), 0);
+        let d2 = build_grayscale_dib((i32::MAX as u32) + 1, 1, &[0u8; 4]);
+        assert!(d2.bits.is_empty());
+        assert_eq!(i32::from_le_bytes(d2.header[4..8].try_into().unwrap()), 0);
     }
 }

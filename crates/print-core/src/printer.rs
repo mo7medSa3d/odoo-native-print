@@ -322,12 +322,24 @@ impl PrinterCapabilities {
         const EPS: f64 = 0.1;
         let fits_orientation = |width: f64, height: f64| {
             if let Some((min_w, min_h)) = self.min_custom_mm {
-                if width + EPS < min_w || height + EPS < min_h {
+                if !min_w.is_finite()
+                    || !min_h.is_finite()
+                    || min_w < 0.0
+                    || min_h < 0.0
+                    || width + EPS < min_w
+                    || height + EPS < min_h
+                {
                     return false;
                 }
             }
             if let Some((max_w, max_h)) = self.max_custom_mm {
-                if width > max_w + EPS || height > max_h + EPS {
+                if !max_w.is_finite()
+                    || !max_h.is_finite()
+                    || max_w <= 0.0
+                    || max_h <= 0.0
+                    || width > max_w + EPS
+                    || height > max_h + EPS
+                {
                     return false;
                 }
             }
@@ -750,6 +762,16 @@ mod tests {
         assert!(!caps.custom_size_ok(crate::PageSize::new(10.0, 100.0)));
         assert!(!caps.custom_size_ok(crate::PageSize::new(f64::NAN, 100.0)));
         assert!(!caps.custom_size_ok(crate::PageSize::new(0.0, 100.0)));
+        let nan_bounds = PrinterCapabilities {
+            min_custom_mm: Some((f64::NAN, 20.0)),
+            ..caps.clone()
+        };
+        assert!(!nan_bounds.custom_size_ok(crate::PageSize::label_100x150()));
+        let bad_max = PrinterCapabilities {
+            max_custom_mm: Some((f64::INFINITY, 297.0)),
+            ..caps
+        };
+        assert!(!bad_max.custom_size_ok(crate::PageSize::label_100x150()));
     }
 
     #[test]

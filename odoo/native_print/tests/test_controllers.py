@@ -276,7 +276,7 @@ class TestNativePrintControllers(HttpCase):
     def test_sync_device_upserts_capabilities_without_duplicates(self):
         # The capability snapshot lands on the ONE registry row for
         # the printer (unique name+company): syncing twice updates,
-        # never duplicates (owner brief, 2026-11-05).
+        # never duplicates.
         Device = self.env["native.print.device"]
         first = self._rpc("/native_print/sync_device", {
             "name": "EPSON TM-T20",
@@ -322,11 +322,25 @@ class TestNativePrintControllers(HttpCase):
         self.assertFalse(job.device_id)
         self.assertFalse(job.report_name)
 
+    def test_job_status_normalizes_key_and_preserves_error_code_on_same_state(self):
+        key = "44444444-5555-4666-8777-888888888888"
+        self._rpc("/native_print/job_status", {
+            "idempotency_key": f"  {key}  ", "state": "failed",
+            "error_code": "PAPER_OUT",
+        })
+        res = self._rpc("/native_print/job_status", {
+            "idempotency_key": key, "state": "failed",
+        })
+        self.assertTrue(res["ok"], res)
+        job = self.env["native.print.job"].search([("name", "=", key)])
+        self.assertEqual(len(job), 1)
+        self.assertEqual(job.error_code, "PAPER_OUT")
+
 
 @tagged("post_install", "-at_install")
 class TestNativePrintMultiUser(HttpCase):
-    """The same guarantees for NON-admin users (audit L14), including
-    the audit H1 scenario: two cashiers in one company printing the
+    """The same guarantees for non-admin users, including
+    two cashiers in one company printing the
     same POS order must never collide, and users of another company
     stay fully isolated. The client now sends per-user keys; these
     tests pin the server-side guards that back that up."""
@@ -399,7 +413,7 @@ class TestNativePrintMultiUser(HttpCase):
         self.authenticate("np_cashier_b", "np-test-password")
         overview = self._rpc("/native_print/overview", {})
         self.assertTrue(overview["ok"])
-        # Company-wide counters (audit L1): B sees the company's
+        # Company-wide counters: B sees the company's
         # totals, matching the systray labels, not just his own jobs.
         self.assertEqual(overview["done_jobs"], 1)
 

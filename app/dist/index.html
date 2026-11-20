@@ -15,6 +15,38 @@
     flex-direction: column;
     line-height: 1.5;
   }
+  [dir="rtl"] body { line-height: 1.65; }
+  [dir="rtl"] .brand-title,
+  [dir="rtl"] .pane-title,
+  [dir="rtl"] .sidebar-section-label,
+  [dir="rtl"] .kpi-label,
+  [dir="rtl"] .kpi-value,
+  [dir="rtl"] .card-title,
+  [dir="rtl"] .nav-tab,
+  [dir="rtl"] .btn,
+  [dir="rtl"] .filter-pill,
+  [dir="rtl"] .printer-name,
+  [dir="rtl"] .modal-title,
+  [dir="rtl"] thead th {
+    letter-spacing: 0;
+  }
+  [dir="rtl"] .sidebar-section-label,
+  [dir="rtl"] thead th {
+    text-transform: none;
+  }
+  [dir="rtl"] .pane-title,
+  [dir="rtl"] .card-title,
+  [dir="rtl"] .printer-name,
+  [dir="rtl"] .modal-title {
+    line-height: 1.38;
+  }
+  [dir="rtl"] .pane-subtitle,
+  [dir="rtl"] .form-help,
+  [dir="rtl"] .guide-step-desc,
+  [dir="rtl"] .modal-message,
+  [dir="rtl"] .empty-state-desc {
+    line-height: 1.7;
+  }
 
   .hidden { display: none !important; }
   button, input, select, a, [tabindex], .tab-pane, .card { scroll-margin-top: 112px; }
@@ -233,8 +265,8 @@
   .btn-secondary:hover:not(:disabled) { background: var(--bg-subtle); }
   .btn-glass { background: var(--bg-subtle); border-color: var(--border); color: var(--text-primary); }
   .btn-glass:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-strong); }
-  .btn-danger { background: var(--err-fg); border-color: var(--err-fg); color: #fff; font-weight: 600; }
-  .btn-danger:hover:not(:disabled) { opacity: 0.9; }
+  .btn-danger { background: var(--danger); border-color: var(--danger); color: var(--danger-fg); font-weight: 600; }
+  .btn-danger:hover:not(:disabled) { background: var(--danger-hover); border-color: var(--danger-hover); }
   .btn.is-refreshing svg { animation: npSpin 0.8s linear infinite; }
   @keyframes npSpin { to { transform: rotate(360deg); } }
 
@@ -250,15 +282,17 @@
   .kpi-grid {
     display: grid;
     grid-template-columns: repeat(1, minmax(0, 1fr));
-    gap: 0.85rem;
+    gap: var(--space-3);
   }
-  @media (min-width: 600px) {
+  @media (min-width: 480px) {
     .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
   @media (min-width: 1120px) {
-    .kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-4); }
   }
   .kpi-card {
+    position: relative;
+    overflow: hidden;
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
@@ -267,13 +301,29 @@
     display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3);
     transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
   }
+  .kpi-card::before {
+    content: "";
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline: 0;
+    height: 2px;
+    background: var(--border);
+    opacity: 0.72;
+    transition: opacity var(--dur-fast) var(--ease-out);
+  }
+  .kpi-card.kpi-info::before { background: var(--info-fg); }
+  .kpi-card.kpi-warn::before { background: var(--warn-fg); }
+  .kpi-card.kpi-ok::before { background: var(--ok-fg); }
+  .kpi-card.kpi-err::before { background: var(--err-fg); }
   .kpi-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+  .kpi-card:hover::before { opacity: 1; }
   .kpi-body { min-width: 0; flex: 1 1 auto; }
   .kpi-label { font-size: var(--text-xs); color: var(--text-muted); font-weight: 600; letter-spacing: 0.01em; }
   .kpi-value {
     font-size: var(--text-xl); font-weight: 700; color: var(--text-primary);
-    font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
-    line-height: 1.2; margin: var(--space-1) 0;
+    font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1;
+    letter-spacing: -0.02em;
+    line-height: 1.15; margin: var(--space-1) 0;
   }
   .kpi-meta {
     font-size: 0.74rem; color: var(--text-secondary);
@@ -380,24 +430,27 @@
     padding: 0.62rem 1rem; border-bottom: 1px solid var(--border);
     color: var(--text-primary); vertical-align: middle;
   }
+  tbody tr { transition: background-color var(--dur-fast) var(--ease-out); }
   tbody tr:last-child td { border-bottom: 0; }
-  tbody tr:hover { background: var(--bg-subtle); }
+  tbody tr:not(.empty-row):hover,
+  tbody tr:not(.empty-row):focus-within { background: var(--bg-subtle); }
   td.mono, .mono { font-family: var(--font-mono); font-size: 0.76rem; }
 
-  /* ── Unboxed Semantic Status Indicators (Zero-Pill Discipline) ── */
-  .main-container.is-stale { opacity: 0.72; transition: opacity .2s ease; }
+  /* ── Semantic Status Pills ── */
+  .main-container.is-stale { opacity: 0.72; transition: opacity var(--dur-fast) var(--ease-out); }
   .badge {
     display: inline-flex; align-items: center; gap: 0.36rem;
-    font-size: 0.75rem; font-weight: 600;
-    padding: 0; border-radius: var(--radius-xs);
-    background: transparent; border: 0; white-space: nowrap;
+    font-size: var(--text-xs); font-weight: 600; line-height: 1.35;
+    padding: 0.16rem 0.56rem; border-radius: 999px;
+    background: var(--bg-subtle); border: 1px solid var(--border); white-space: nowrap;
+    transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
-  .badge-ok { color: var(--ok-fg); }
-  .badge-warn { color: var(--warn-fg); }
-  .badge-err { color: var(--err-fg); }
-  .badge-info { color: var(--info-fg); }
-  .badge-neutral { color: var(--text-secondary); }
+  .badge-ok { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-border); }
+  .badge-warn { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-border); }
+  .badge-err { background: var(--err-bg); color: var(--err-fg); border-color: var(--err-border); }
+  .badge-info { background: var(--info-bg); color: var(--info-fg); border-color: var(--info-border); }
+  .badge-neutral { background: var(--bg-subtle); color: var(--text-secondary); border-color: var(--border); }
 
   /* ── Forms & Calibration Matrix ── */
   .form-grid {
@@ -426,10 +479,11 @@
   /* ── Hardware Printer Cards ── */
   .printer-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
     gap: 0.95rem;
   }
   .printer-card {
+    position: relative;
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
@@ -438,14 +492,18 @@
     display: flex; flex-direction: column; gap: 0.7rem;
     transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
   }
+  .printer-card.is-default { border-color: var(--info-border); }
   .printer-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+  .printer-card:focus-within { border-color: var(--brand-text); box-shadow: var(--focus-ring); }
   .printer-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
   .printer-identity { display: flex; align-items: flex-start; gap: 0.65rem; min-width: 0; }
   .printer-type-icon {
     width: 34px; height: 34px; border-radius: var(--radius-md);
     background: var(--bg-subtle); border: 1px solid var(--border);
     color: var(--brand-text); display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
   }
+  .printer-card:hover .printer-type-icon { background: var(--info-bg); border-color: var(--info-border); }
   .printer-type-icon svg { width: 17px; height: 17px; }
   .printer-name { font-size: var(--text-md); font-weight: 700; color: var(--text-primary); word-break: break-word; }
   .printer-subline {
@@ -461,6 +519,45 @@
     padding: var(--space-8) var(--space-4);
     color: var(--text-muted);
     font-size: var(--text-sm);
+  }
+  .empty-state-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    max-width: 380px;
+    margin: 0 auto;
+  }
+  .empty-state-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-lg);
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: var(--space-1);
+  }
+  .empty-state-title {
+    color: var(--text-primary);
+    font-size: var(--text-base);
+    font-weight: 600;
+  }
+  .empty-state-desc {
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    line-height: 1.55;
+  }
+  .empty-state-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    flex-wrap: wrap;
   }
   .empty-state-card {
     grid-column: 1 / -1;
@@ -608,9 +705,12 @@
     .brand-subtitle { display: none; }
     .topbar-actions { gap: 0.32rem; }
     .topbar .btn { padding: 0.4rem 0.52rem; font-size: 0.75rem; }
-    .btn span { display: none; }
-    #btnOpenOdoo span, #btnLang span, #btnSaveOrigin span, #btnSaveAndOpen span, #btnCustomTestPrint span { display: inline; }
+    .topbar .btn span { display: none; }
+    #btnOpenOdoo span, #btnLang span { display: inline; }
     .nav-tab { padding: 0.44rem 0.68rem; font-size: 0.78rem; gap: 0.42rem; }
+    .kpi-card { padding: var(--space-3); gap: var(--space-2); }
+    .kpi-value { font-size: var(--text-lg); }
+    .kpi-icon { width: 30px; height: 30px; }
     .queue-search { width: 100%; }
     .queue-search:focus { width: 100%; }
   }
@@ -637,7 +737,7 @@
 
     <div class="topbar-actions">
       <button type="button" class="btn btn-primary" id="btnOpenOdoo" data-action="open-odoo">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
           <polyline points="15 3 21 3 21 9"></polyline>
           <line x1="10" y1="14" x2="21" y2="3"></line>
@@ -645,8 +745,8 @@
         <span data-i18n="btn_open_odoo">فتح Odoo</span>
       </button>
 
-      <button type="button" class="btn btn-glass" id="btnRefresh" data-action="manual-refresh" title="Refresh">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button type="button" class="btn btn-glass" id="btnRefresh" data-action="manual-refresh" title="تحديث" aria-label="تحديث">
+        <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="23 4 23 10 17 10"></polyline>
           <polyline points="1 20 1 14 7 14"></polyline>
           <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
@@ -654,8 +754,8 @@
         <span data-i18n="btn_refresh">تحديث</span>
       </button>
 
-      <button type="button" class="btn btn-glass" data-action="toggle-theme" id="btnTheme">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button type="button" class="btn btn-glass" data-action="toggle-theme" id="btnTheme" title="المظهر" aria-label="المظهر">
+        <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
         </svg>
         <span data-i18n="btn_theme">المظهر</span>
@@ -671,21 +771,21 @@
   <!-- Navigation Sidebar -->
   <aside class="tabsbar">
     <div class="sidebar-section-label" data-i18n="nav_section">مساحة العمل</div>
-    <nav class="nav-tabs" role="tablist">
-      <button type="button" class="nav-tab active" role="tab" aria-selected="true" aria-controls="tab-dashboard" data-tab="dashboard" data-action="switch-tab">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect></svg>
+    <nav class="nav-tabs" id="navTabs" role="tablist" aria-label="مساحة العمل">
+      <button type="button" class="nav-tab active" id="nav-tab-dashboard" role="tab" aria-selected="true" aria-controls="tab-dashboard" data-tab="dashboard" data-action="switch-tab">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect></svg>
         <span data-i18n="tab_dashboard">لوحة المراقبة</span>
       </button>
-      <button type="button" class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-printers" data-tab="printers" data-action="switch-tab">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+      <button type="button" class="nav-tab" id="nav-tab-printers" role="tab" aria-selected="false" aria-controls="tab-printers" data-tab="printers" data-action="switch-tab">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
         <span data-i18n="tab_printers">الطابعات والمعايرة</span>
       </button>
-      <button type="button" class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-settings" data-tab="settings" data-action="switch-tab">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      <button type="button" class="nav-tab" id="nav-tab-settings" role="tab" aria-selected="false" aria-controls="tab-settings" data-tab="settings" data-action="switch-tab">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         <span data-i18n="tab_settings">اتصال Odoo</span>
       </button>
-      <button type="button" class="nav-tab" role="tab" aria-selected="false" aria-controls="tab-diagnostics" data-tab="diagnostics" data-action="switch-tab">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+      <button type="button" class="nav-tab" id="nav-tab-diagnostics" role="tab" aria-selected="false" aria-controls="tab-diagnostics" data-tab="diagnostics" data-action="switch-tab">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
         <span data-i18n="tab_diagnostics">التشخيص</span>
       </button>
     </nav>
@@ -711,16 +811,16 @@
   <main class="main-container">
 
     <!-- Status Alert Banner -->
-    <div id="originAlertBanner" class="alert-banner hidden">
+    <div id="originAlertBanner" class="alert-banner hidden" role="status" aria-live="polite">
       <div style="display:flex;align-items:center;gap:0.65rem;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
         <span id="originAlertText" data-i18n="origin_not_configured">أدخل رابط خادم Odoo للبدء.</span>
       </div>
       <button type="button" class="btn btn-sm btn-primary" data-action="switch-tab" data-tab="settings" data-i18n="btn_configure_now">إعداد الرابط</button>
     </div>
 
     <!-- TAB 1: DASHBOARD & QUEUE -->
-    <section id="tab-dashboard" class="tab-pane" role="tabpanel">
+    <section id="tab-dashboard" class="tab-pane" role="tabpanel" aria-labelledby="nav-tab-dashboard">
       <div class="pane-header">
         <div>
           <h1 class="pane-title" data-i18n="pane_dash_title">لوحة المراقبة</h1>
@@ -729,47 +829,47 @@
       </div>
 
       <div class="kpi-grid">
-        <div class="kpi-card">
+        <div class="kpi-card kpi-info">
           <div class="kpi-body">
             <div class="kpi-label" data-i18n="kpi_printers">الطابعات</div>
-            <div class="kpi-value" id="kpiPrintersCount">0</div>
+            <div class="kpi-value tabular-nums" id="kpiPrintersCount">0</div>
             <div class="kpi-meta" id="kpiDefaultPrinter">—</div>
           </div>
           <div class="kpi-icon info">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
           </div>
         </div>
 
-        <div class="kpi-card">
+        <div class="kpi-card kpi-warn">
           <div class="kpi-body">
             <div class="kpi-label" data-i18n="kpi_active_jobs">قيد التنفيذ</div>
-            <div class="kpi-value" id="kpiActiveCount">0</div>
+            <div class="kpi-value tabular-nums" id="kpiActiveCount">0</div>
             <div class="kpi-meta" data-i18n="kpi_active_sub">حفظ تلقائي للطابور</div>
           </div>
           <div class="kpi-icon warn">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
           </div>
         </div>
 
-        <div class="kpi-card">
+        <div class="kpi-card kpi-ok">
           <div class="kpi-body">
             <div class="kpi-label" data-i18n="kpi_done_jobs">مكتملة</div>
-            <div class="kpi-value" id="kpiDoneCount">0</div>
+            <div class="kpi-value tabular-nums" id="kpiDoneCount">0</div>
             <div class="kpi-meta" id="kpiPdfiumStatus">PDFium: —</div>
           </div>
           <div class="kpi-icon ok">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
           </div>
         </div>
 
-        <div class="kpi-card">
+        <div class="kpi-card kpi-err">
           <div class="kpi-body">
             <div class="kpi-label" data-i18n="kpi_failed_jobs">متعثرة</div>
-            <div class="kpi-value" id="kpiFailedCount">0</div>
+            <div class="kpi-value tabular-nums" id="kpiFailedCount">0</div>
             <div class="kpi-meta" id="kpiOriginMeta">—</div>
           </div>
           <div class="kpi-icon err">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
           </div>
         </div>
       </div>
@@ -778,12 +878,12 @@
       <div class="card">
         <div class="card-header">
           <div class="card-title">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
             <span data-i18n="queue_title">سجل المهام</span>
           </div>
           <div class="queue-controls">
             <div class="search-input-wrap">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
               <input type="search" id="queueSearchInput" class="queue-search" placeholder="بحث…" aria-label="Search queue"/>
             </div>
             <div class="filter-pills">
@@ -793,7 +893,7 @@
               <button type="button" class="filter-pill" data-filter="done" aria-pressed="false" data-action="set-job-filter" data-i18n="filter_done">مكتملة</button>
             </div>
             <button type="button" class="btn btn-sm btn-secondary" id="btnClearFinished" data-action="clear-finished">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
               <span data-i18n="btn_clear_done">مسح المكتملة</span>
             </button>
           </div>
@@ -813,7 +913,7 @@
               </tr>
             </thead>
             <tbody id="jobsTableBody">
-              <tr><td colspan="8" class="empty-state" data-i18n="no_jobs">لا توجد مهام حالياً.</td></tr>
+              <tr class="empty-row"><td colspan="8" class="empty-state"><div class="empty-state-inner"><div class="empty-state-icon" aria-hidden="true"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg></div><div class="empty-state-title" data-i18n="no_jobs">لا توجد مهام مطابقة.</div><div class="empty-state-desc" data-i18n="no_jobs_hint">اطبع من Odoo أو أرسل صفحة معايرة سريعة للتأكد من جاهزية الطابعة.</div><div class="empty-state-actions"><button type="button" class="btn btn-sm btn-secondary" data-action="switch-tab" data-tab="printers" data-i18n="btn_run_cal_test">تشغيل اختبار معايرة</button></div></div></td></tr>
             </tbody>
           </table>
         </div>
@@ -821,7 +921,7 @@
     </section>
 
     <!-- TAB 2: PRINTERS & CALIBRATION LAB -->
-    <section id="tab-printers" class="tab-pane hidden" role="tabpanel">
+    <section id="tab-printers" class="tab-pane hidden" role="tabpanel" aria-labelledby="nav-tab-printers">
       <div class="pane-header">
         <div>
           <h1 class="pane-title" data-i18n="pane_printers_title">الطابعات والمعايرة</h1>
@@ -832,7 +932,7 @@
       <div class="card">
         <div class="card-header">
           <div class="card-title">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
             <span data-i18n="direct_test_title">اختبار سريع</span>
           </div>
         </div>
@@ -858,7 +958,7 @@
             </div>
             <div>
               <button type="button" class="btn btn-primary" id="btnCustomTestPrint" data-action="custom-test-print" style="width:100%;">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
                 <span data-i18n="btn_send_test">إرسال اختبار</span>
               </button>
             </div>
@@ -898,7 +998,7 @@
     </section>
 
     <!-- TAB 3: SETTINGS & SECURITY -->
-    <section id="tab-settings" class="tab-pane hidden" role="tabpanel">
+    <section id="tab-settings" class="tab-pane hidden" role="tabpanel" aria-labelledby="nav-tab-settings">
       <div class="pane-header">
         <div>
           <h1 class="pane-title" data-i18n="pane_settings_title">اتصال Odoo</h1>
@@ -909,7 +1009,7 @@
       <div class="card">
         <div class="card-header">
           <div class="card-title">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
             <span data-i18n="settings_title">إعدادات الخادم</span>
           </div>
           <span class="badge badge-info" id="policyStatusBadge"><span class="dot"></span>Local Config</span>
@@ -938,7 +1038,7 @@
 
           <div style="margin-top:1.25rem;display:flex;align-items:center;gap:0.65rem;flex-wrap:wrap;">
             <button type="button" class="btn btn-primary" id="btnSaveOrigin" data-action="save-origin">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+              <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
               <span data-i18n="btn_save_origin">حفظ</span>
             </button>
             <button type="button" class="btn btn-secondary" id="btnSaveAndOpen" data-action="save-and-open">
@@ -951,7 +1051,7 @@
       <div class="card">
         <div class="card-header">
           <div class="card-title">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
             <span data-i18n="guide_title">دليل البدء السريع</span>
           </div>
         </div>
@@ -978,7 +1078,7 @@
     </section>
 
     <!-- TAB 4: DIAGNOSTICS & SUPPORT -->
-    <section id="tab-diagnostics" class="tab-pane hidden" role="tabpanel">
+    <section id="tab-diagnostics" class="tab-pane hidden" role="tabpanel" aria-labelledby="nav-tab-diagnostics">
       <div class="pane-header">
         <div>
           <h1 class="pane-title" data-i18n="pane_diag_title">التشخيص</h1>
@@ -990,7 +1090,7 @@
         <div class="card">
           <div class="card-header">
             <div class="card-title">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+              <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
               <span data-i18n="env_title">بيئة التشغيل</span>
             </div>
             <button type="button" class="btn btn-sm btn-secondary" id="btnClearWebData" data-action="clear-web-data" data-i18n="btn_clear_web">مسح البيانات</button>
@@ -1006,7 +1106,7 @@
         <div class="card">
           <div class="card-header">
             <div class="card-title">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
               <span data-i18n="diag_title">حزمة التشخيص</span>
             </div>
             <div style="display:flex;gap:0.45rem;flex-wrap:wrap;justify-content:flex-end;">
@@ -1162,7 +1262,13 @@
       col_error: "الخطأ",
       col_actions: "إجراء",
       no_jobs: "لا توجد مهام مطابقة.",
+      no_jobs_hint: "اطبع من Odoo أو أرسل صفحة معايرة سريعة للتأكد من جاهزية الطابعة.",
+      no_jobs_filtered_hint: "لا توجد مهام تطابق الفلتر أو البحث الحالي.",
+      btn_run_cal_test: "تشغيل اختبار معايرة",
+      btn_reset_filter: "عرض كل المهام",
+      no_printers_title: "لم يتم اكتشاف طابعات محلية",
       no_printers: "لم يتم اكتشاف طابعات محلية بعد. استخدم الاختبار المباشر عبر TCP 9100 أو IPP.",
+      btn_rescan_printers: "إعادة فحص الطابعات",
       toast_close: "إغلاق",
       direct_test_title: "اختبار سريع",
       lbl_target_printer: "الطابعة",
@@ -1318,7 +1424,13 @@
       col_error: "Error",
       col_actions: "Action",
       no_jobs: "No print jobs yet.",
+      no_jobs_hint: "Print from Odoo or run a quick calibration test to verify your printer.",
+      no_jobs_filtered_hint: "No jobs match the current filter or search query.",
+      btn_run_cal_test: "Run calibration test",
+      btn_reset_filter: "Show all jobs",
+      no_printers_title: "No local printers detected",
       no_printers: "No local spooler printers detected. Test network printers directly via TCP 9100 or IPP above.",
+      btn_rescan_printers: "Rescan printers",
       toast_close: "Dismiss",
       direct_test_title: "Calibration Test",
       lbl_target_printer: "Printer",
@@ -1531,8 +1643,11 @@
   function printerStatusBadge(status) {
     const s = String(status || "unknown").toLowerCase();
     const label = I18N[currentLang]["ps_" + s] || s.replace(/_/g, " ").toUpperCase();
-    if (s === "ready" || s === "printing") {
+    if (s === "ready") {
       return `<span class="badge badge-ok"><span class="dot"></span>${escapeHtml(label)}</span>`;
+    }
+    if (s === "printing") {
+      return `<span class="badge badge-info"><span class="dot"></span>${escapeHtml(label)}</span>`;
     }
     if (["offline", "paper_out", "paper_jam", "door_open", "no_toner", "error"].includes(s)) {
       return `<span class="badge badge-err"><span class="dot"></span>${escapeHtml(label)}</span>`;
@@ -1566,10 +1681,15 @@
     html.setAttribute("lang", currentLang);
     html.setAttribute("dir", currentLang === "ar" ? "rtl" : "ltr");
     document.getElementById("btnLang").innerHTML = `<span>${currentLang === "ar" ? "English" : "العربية"}</span>`;
+    document.title = "Yaseir Print — " + (currentLang === "ar" ? "مركز التحكم" : "Control Center");
     const refreshBtn = document.getElementById("btnRefresh");
-    if (refreshBtn) refreshBtn.title = I18N[currentLang].btn_refresh;
+    if (refreshBtn) { refreshBtn.title = I18N[currentLang].btn_refresh; refreshBtn.setAttribute("aria-label", I18N[currentLang].btn_refresh); }
+    const themeBtn = document.getElementById("btnTheme");
+    if (themeBtn) { themeBtn.title = I18N[currentLang].btn_theme; themeBtn.setAttribute("aria-label", I18N[currentLang].btn_theme); }
+    const navTabsEl = document.getElementById("navTabs");
+    if (navTabsEl) navTabsEl.setAttribute("aria-label", I18N[currentLang].nav_section);
     const searchEl = document.getElementById("queueSearchInput");
-    if (searchEl) searchEl.placeholder = I18N[currentLang].search_queue_ph;
+    if (searchEl) { searchEl.placeholder = I18N[currentLang].search_queue_ph; searchEl.setAttribute("aria-label", I18N[currentLang].search_queue_ph); }
     const dict = I18N[currentLang];
     document.querySelectorAll("[data-i18n]").forEach((el) => {
       if (el.id === "diagnosticsOutput" && diagnosticsGenerated) return;
@@ -1587,7 +1707,9 @@
     applyLanguage();
   }
 
+  let queueSearchTimer = null;
   function setJobFilter(f) {
+    if (queueSearchTimer) { clearTimeout(queueSearchTimer); queueSearchTimer = null; }
     currentFilter = f;
     document.querySelectorAll(".filter-pill").forEach((b) => {
       const active = b.getAttribute("data-filter") === f;
@@ -1597,7 +1719,8 @@
     if (overviewState) renderJobsTable(overviewState.recentJobs || []);
   }
 
-  let refreshInFlight = false;
+  let refreshInFlight = null;
+  let refreshPending = null;
 
   let confirmResolver = null;
   let confirmReturnFocus = null;
@@ -1649,13 +1772,20 @@
   }
 
   async function refreshAll(options = {}) {
-    if (refreshInFlight) return false;
-    refreshInFlight = true;
-    try {
-      return await refreshAllInner(options);
-    } finally {
-      refreshInFlight = false;
+    if (refreshInFlight) {
+      if (options.silent && !options.force) return false;
+      if (!refreshPending) {
+        refreshPending = refreshInFlight.finally(() => {}).then(() => {
+          refreshPending = null;
+          return refreshAll({ silent: !!options.silent, force: true });
+        });
+      }
+      return refreshPending;
     }
+    refreshInFlight = refreshAllInner(options).finally(() => {
+      refreshInFlight = null;
+    });
+    return refreshInFlight;
   }
 
   async function refreshAllInner(options = {}) {
@@ -1819,7 +1949,13 @@
     const scrollY = window.scrollY;
 
     if (!filtered.length) {
-      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">${escapeHtml(I18N[currentLang].no_jobs)}</td></tr>`;
+      const d = I18N[currentLang];
+      const isFiltered = jobs.length > 0 && (currentFilter !== "all" || q.length > 0);
+      const hint = isFiltered ? d.no_jobs_filtered_hint : d.no_jobs_hint;
+      const actionBtn = isFiltered
+        ? (currentFilter !== "all" ? `<button type="button" class="btn btn-sm btn-secondary" data-action="set-job-filter" data-filter="all">${escapeHtml(d.btn_reset_filter)}</button>` : "")
+        : `<button type="button" class="btn btn-sm btn-secondary" data-action="switch-tab" data-tab="printers">${escapeHtml(d.btn_run_cal_test)}</button>`;
+      tbody.innerHTML = `<tr class="empty-row"><td colspan="8" class="empty-state"><div class="empty-state-inner"><div class="empty-state-icon" aria-hidden="true"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg></div><div class="empty-state-title">${escapeHtml(d.no_jobs)}</div><div class="empty-state-desc">${escapeHtml(hint)}</div>${actionBtn ? `<div class="empty-state-actions">${actionBtn}</div>` : ""}</div></td></tr>`;
       if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
       return;
     }
@@ -1877,7 +2013,7 @@
   function ccClassIcon(p) {
     const proto = ccProtocol(p);
     const cls = String((p && p.printer_class) || "").toLowerCase();
-    const stroke = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+    const stroke = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
     if (cls === "virtual" || (p && p.kind === "virtual")) {
       return `<svg viewBox="0 0 24 24" ${stroke}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>`;
     }
@@ -1942,9 +2078,9 @@
   const openSettingsPrinters = new Set();
   function loadPrinterSettings() {
     if (printerSettingsRequested) return;
-    printerSettingsRequested = true;
     const b = bridge();
     if (!b || typeof b.getPrinterSettings !== "function") return;
+    printerSettingsRequested = true;
     b.getPrinterSettings().then((map) => {
       printerSettings = map || {};
       printerSettingsVersion++;
@@ -2068,16 +2204,26 @@
     const scrollY = window.scrollY;
 
     if (!printers.length) {
+      const d = I18N[currentLang];
       grid.innerHTML = `
         <div class="empty-state-card">
-          ${escapeHtml(I18N[currentLang].no_printers)}
+          <div class="empty-state-inner">
+            <div class="empty-state-icon" aria-hidden="true">
+              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+            </div>
+            <div class="empty-state-title">${escapeHtml(d.no_printers_title)}</div>
+            <div class="empty-state-desc">${escapeHtml(d.no_printers)}</div>
+            <div class="empty-state-actions">
+              <button type="button" class="btn btn-sm btn-secondary" data-action="manual-refresh">${escapeHtml(d.btn_rescan_printers)}</button>
+            </div>
+          </div>
         </div>`;
       if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
       return;
     }
 
     grid.innerHTML = printers.map((p, idx) => `
-      <div class="printer-card">
+      <div class="printer-card${p.is_default ? " is-default" : ""}">
         <div class="printer-card-top">
           <div class="printer-identity">
             <div class="printer-type-icon">${ccClassIcon(p)}</div>
@@ -2175,7 +2321,11 @@
   document.getElementById("confirmOverlay").addEventListener("click", confirmOverlayClicked);
   document.getElementById("queueSearchInput").addEventListener("input", (ev) => {
     currentSearch = ev.target.value || "";
-    if (overviewState) renderJobsTable(overviewState.recentJobs || []);
+    if (queueSearchTimer) clearTimeout(queueSearchTimer);
+    queueSearchTimer = setTimeout(() => {
+      queueSearchTimer = null;
+      if (overviewState) renderJobsTable(overviewState.recentJobs || []);
+    }, 120);
   });
 
   function isRawTestKind(kind) {
@@ -2412,9 +2562,10 @@
         current.textContent = currentLang === "ar" ? "لا توجد نماذج ورق مسجلة من التعريف." : "No forms reported by driver.";
         return;
       }
-      current.innerHTML = `<div class="forms-list">` + forms.map((f) =>
-        `<div class="forms-item"><strong>${escapeHtml(f.name)}</strong><span>${Math.round(f.size.width_mm)}×${Math.round(f.size.height_mm)}mm${f.roll ? " · ROLL" : ""}</span></div>`
-      ).join("") + `</div>`;
+      current.innerHTML = `<div class="forms-list">` + forms.filter(Boolean).map((f) => {
+        const dim = f.size ? `${Math.round(Number(f.size.width_mm) || 0)}×${Math.round(Number(f.size.height_mm) || 0)}mm` : "—";
+        return `<div class="forms-item"><strong>${escapeHtml(f.name)}</strong><span>${dim}${f.roll ? " · ROLL" : ""}</span></div>`;
+      }).join("") + `</div>`;
     } catch (e) {
       console.error(e);
       const current = document.getElementById(`forms-box-${idx}`);
@@ -2524,7 +2675,9 @@
     if (!input || !error) return true;
     const value = input.value.trim();
     const valid = value.length > 0 && isAllowedOrigin(value);
-    input.classList.toggle("invalid", value.length > 0 && !valid);
+    const showInvalid = value.length > 0 && !valid;
+    input.classList.toggle("invalid", showInvalid);
+    input.setAttribute("aria-invalid", showInvalid ? "true" : "false");
     error.textContent = valid || !value ? "" : I18N[currentLang].origin_invalid;
     error.classList.toggle("hidden", valid || !value);
     if (warning) warning.classList.toggle("hidden", !(valid && value.toLowerCase().startsWith("http://")));
@@ -2546,12 +2699,14 @@
     if (help) help.classList.toggle("hidden", !custom);
     if (!custom) {
       input.classList.remove("invalid");
+      input.setAttribute("aria-invalid", "false");
       error.textContent = "";
       error.classList.add("hidden");
       return true;
     }
     const valid = isAllowedPrinterUri(input.value);
     input.classList.toggle("invalid", !valid);
+    input.setAttribute("aria-invalid", valid ? "false" : "true");
     error.textContent = valid ? "" : I18N[currentLang].custom_printer_uri_invalid;
     error.classList.toggle("hidden", valid);
     return valid;
@@ -2579,7 +2734,7 @@
       const saved = await api.saveOrigin(origin, autoReprint);
       formState.settingsDirty = false;
       showToast(currentLang === "ar" ? `تم حفظ العنوان: ${saved}` : `Saved address: ${saved}`);
-      await refreshAll({ silent: true });
+      await refreshAll({ silent: true, force: true });
       return true;
     } catch (error) {
       console.error(error); showToast(friendlyError(error), true);
@@ -2709,8 +2864,31 @@
   document.getElementById("inputAutoReprint").addEventListener("change", () => { formState.settingsDirty = true; });
   document.getElementById("customPrinterSelect").addEventListener("change", () => { formState.testDirty = true; });
   document.getElementById("customPrinterUri").addEventListener("input", () => { formState.testDirty = true; });
+  const navTabsContainer = document.getElementById("navTabs");
+  if (navTabsContainer) {
+    navTabsContainer.addEventListener("keydown", (ev) => {
+      const tabs = [...navTabsContainer.querySelectorAll(".nav-tab")];
+      const idx = tabs.indexOf(document.activeElement);
+      if (idx < 0) return;
+      const rtl = document.documentElement.dir === "rtl";
+      let next = null;
+      if (ev.key === "ArrowDown" || ev.key === (rtl ? "ArrowLeft" : "ArrowRight")) next = (idx + 1) % tabs.length;
+      else if (ev.key === "ArrowUp" || ev.key === (rtl ? "ArrowRight" : "ArrowLeft")) next = (idx - 1 + tabs.length) % tabs.length;
+      else if (ev.key === "Home") next = 0;
+      else if (ev.key === "End") next = tabs.length - 1;
+      if (next !== null) {
+        ev.preventDefault();
+        switchTab(tabs[next].getAttribute("data-tab"));
+        tabs[next].focus();
+      }
+    });
+  }
   if (currentLang !== "ar") applyLanguage();
-  document.getElementById("btnRefresh").title = I18N[currentLang].btn_refresh;
+  else {
+    document.title = "Yaseir Print — مركز التحكم";
+    const sEl = document.getElementById("queueSearchInput");
+    if (sEl) sEl.setAttribute("aria-label", I18N.ar.search_queue_ph);
+  }
   window.addEventListener("storage", (ev) => {
     if (ev.key === "np_cc_theme") {
       document.documentElement.setAttribute("data-theme", ev.newValue === "dark" ? "dark" : "light");

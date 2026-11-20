@@ -202,12 +202,15 @@ pub fn decode_png(bytes: &[u8]) -> Result<Canvas, ImageError> {
             px: buf,
         });
     }
+    if frame_len > buf.len() {
+        return Err(ImageError::BadFrame);
+    }
     let data = &buf[..frame_len];
     let mut px = vec![255u8; px_count];
     match frame.color_type {
         png::ColorType::Grayscale => unreachable!(),
         png::ColorType::GrayscaleAlpha => {
-            if data.len() < px_count * 2 {
+            if px_count.checked_mul(2).is_none_or(|n| data.len() < n) {
                 return Err(ImageError::BadFrame);
             }
             for i in 0..px_count {
@@ -215,7 +218,7 @@ pub fn decode_png(bytes: &[u8]) -> Result<Canvas, ImageError> {
             }
         }
         png::ColorType::Rgb => {
-            if data.len() < px_count * 3 {
+            if px_count.checked_mul(3).is_none_or(|n| data.len() < n) {
                 return Err(ImageError::BadFrame);
             }
             for i in 0..px_count {
@@ -223,7 +226,7 @@ pub fn decode_png(bytes: &[u8]) -> Result<Canvas, ImageError> {
             }
         }
         png::ColorType::Rgba => {
-            if data.len() < px_count * 4 {
+            if px_count.checked_mul(4).is_none_or(|n| data.len() < n) {
                 return Err(ImageError::BadFrame);
             }
             for i in 0..px_count {
@@ -267,13 +270,13 @@ pub fn scale_to_width(img: &Canvas, target_width: u32) -> Canvas {
     let src_w = img.width as usize;
     for oy in 0..out_height {
         let y0 = ((oy as f64 * ratio) as u32).min(img.height - 1);
-        let y1 = (((oy + 1) as f64 * ratio).ceil() as u32)
-            .max(y0 + 1)
+        let y1 = (((oy as f64 + 1.0) * ratio).ceil() as u32)
+            .max(y0.saturating_add(1))
             .min(img.height);
         for ox in 0..target_width {
             let x0 = ((ox as f64 * ratio) as u32).min(img.width - 1);
-            let x1 = (((ox + 1) as f64 * ratio).ceil() as u32)
-                .max(x0 + 1)
+            let x1 = (((ox as f64 + 1.0) * ratio).ceil() as u32)
+                .max(x0.saturating_add(1))
                 .min(img.width);
             let mut sum: u64 = 0;
             let mut count: u64 = 0;

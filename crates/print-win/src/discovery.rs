@@ -34,20 +34,44 @@ const PRINTER_STATUS_USER_INTERVENTION: u32 = 0x0010_0000;
 /// `PRINTER_STATUS_USER_INTERVENTION` even when the Windows Spooler accepts
 /// and prints jobs normally; real physical faults (paper out/jam, door open,
 /// offline, paused, error) are preserved.
+fn starts_with_ascii_ci(s: &str, prefix: &str) -> bool {
+    s.get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+}
+
+fn contains_ascii_ci(haystack: &str, needle: &[u8]) -> bool {
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|w| w.eq_ignore_ascii_case(needle))
+}
+
+/// True when a driver-reported paper name explicitly denotes continuous roll media.
+pub(crate) fn is_named_roll(name: &str) -> bool {
+    contains_ascii_ci(name, b"roll")
+        || contains_ascii_ci(name, b"receipt")
+        || contains_ascii_ci(name, b"continuous")
+}
+
 pub fn tolerant_spooler_flags(status: u32, kind: PrinterKind, port_name: &str) -> u32 {
-    let p = port_name.trim_start().to_ascii_uppercase();
-    let tolerant_port = p.starts_with("USB")
-        || p.starts_with("TMUSB")
-        || p.starts_with("COM")
-        || p.starts_with("LPT")
-        || p.starts_with("BTH")
-        || p.starts_with("TS")
-        || p.starts_with("NE");
+    if (status & PRINTER_STATUS_USER_INTERVENTION) == 0 {
+        return status;
+    }
     if matches!(
         kind,
         PrinterKind::Virtual | PrinterKind::Shared | PrinterKind::Network
-    ) || tolerant_port
-    {
+    ) {
+        return status & !PRINTER_STATUS_USER_INTERVENTION;
+    }
+    let p = port_name.trim_start();
+    let tolerant_port = starts_with_ascii_ci(p, "USB")
+        || starts_with_ascii_ci(p, "TMUSB")
+        || starts_with_ascii_ci(p, "COM")
+        || starts_with_ascii_ci(p, "LPT")
+        || starts_with_ascii_ci(p, "BTH")
+        || starts_with_ascii_ci(p, "TS")
+        || starts_with_ascii_ci(p, "NE");
+    if tolerant_port {
         status & !PRINTER_STATUS_USER_INTERVENTION
     } else {
         status
@@ -117,13 +141,10 @@ pub fn classify_form(raw_name: &str, width_mm: f64, height_mm: f64) -> Form {
     } else {
         trimmed.to_string()
     };
-    let lower = name.to_ascii_lowercase();
     let is_roll_width = (width_mm - 80.0).abs() <= 4.0
         || (width_mm - 72.0).abs() <= 4.0
         || (width_mm - 58.0).abs() <= 4.0;
-    let is_roll = lower.contains("roll")
-        || lower.contains("receipt")
-        || lower.contains("continuous")
+    let is_roll = is_named_roll(&name)
         || (is_roll_width && height_mm >= 200.0 && (height_mm - 297.0).abs() > 1.5);
     if is_roll {
         let canonical_w = if (width_mm - 72.0).abs() <= 4.0 {
@@ -138,7 +159,12 @@ pub fn classify_form(raw_name: &str, width_mm: f64, height_mm: f64) -> Form {
             paper_id: None,
         }
     } else {
-        Form::sheet(&name, PageSize::new(width_mm, height_mm))
+        Form {
+            name,
+            size: PageSize::new(width_mm, height_mm),
+            roll: false,
+            paper_id: None,
+        }
     }
 }
 
@@ -362,5 +388,28 @@ mod tests {
                 "port {port}"
             );
         }
+    }
+
+    #[test]
+    fn ascii_ci_helpers_handle_case_whitespace_and_utf8() {
+        assert!(is_named_roll("80mm RECEIPT Paper"));
+        assert!(is_named_roll("Continuous Form"));
+        assert!(!is_named_roll("A4 \u{0648}\u{0631}\u{0642}"));
+        assert_eq!(
+            tolerant_spooler_flags(
+                PRINTER_STATUS_USER_INTERVENTION,
+                PrinterKind::Local,
+                "  usb001",
+            ),
+            0
+        );
+        assert_eq!(
+            tolerant_spooler_flags(
+                PRINTER_STATUS_USER_INTERVENTION,
+                PrinterKind::Local,
+                "\u{0637}\u{0627}\u{0628}\u{0639}\u{0629}",
+            ),
+            PRINTER_STATUS_USER_INTERVENTION
+        );
     }
 }

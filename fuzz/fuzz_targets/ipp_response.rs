@@ -9,4 +9,5 @@ use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     let _ = print_ipp::parse_message(data);
+    let _ = print_ipp::client::parse_http_response(data);
 });

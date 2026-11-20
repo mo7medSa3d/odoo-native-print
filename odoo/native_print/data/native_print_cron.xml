@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo noupdate="1">
-    <!-- Job-log retention (audit M2): the log otherwise grows
-         forever. Ships INACTIVE on purpose: the log is an audit
+    <!-- Job-log retention: prevents unbounded log growth.
+         Ships INACTIVE by default because the log is an operational audit
          trail, so deleting history must be an explicit admin choice.
          To enable: Settings > Technical > Scheduled Actions >
          "Yaseir Print: prune old print jobs" > Activate. Terminal

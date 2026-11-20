@@ -6,12 +6,13 @@ use crate::mono::MonoBitmap;
 /// Long receipt safety: `GS v 0` (`1D 76 30 m xL xH yL yH`) takes a 16-bit height (`y`),
 /// and many thermal printer firmwares have a 4–64 KB receive/raster buffer limit per
 /// `GS v 0` command. `raster()` therefore emits horizontal slices of at most
-/// `MAX_RASTER_SLICE_HEIGHT` (512 dots, ~64 mm at 203 dpi) so arbitrarily long
-/// receipts print without buffer overflow or u16 truncation. 512 is a
-/// deliberately conservative band: cheap thermal clones have small
-/// receive buffers (a 1024-row band at 576 dots is ~74 KB in a single
-/// command), and halving the band costs nothing measurable.
-pub const MAX_RASTER_SLICE_HEIGHT: u32 = 512;
+/// `MAX_RASTER_SLICE_HEIGHT` (256 dots, ~32 mm at 203 dpi) so arbitrarily long
+/// receipts print without buffer overflow or u16 truncation. 256 is a
+/// deliberately conservative band: budget thermal clones often have 16–32 KB
+/// receive buffers (a 256-row band is 18 KB at 80 mm / 576 dots and ~50 KB
+/// even at 210 mm / 1608 dots), while small bitmaps (<= 256 rows) remain a
+/// single `GS v 0` command.
+pub const MAX_RASTER_SLICE_HEIGHT: u32 = 256;
 
 pub struct EscPos {
     buf: Vec<u8>,
@@ -220,5 +221,61 @@ mod tests {
         let bm = MonoBitmap::from_packed(576, 2, vec![0xFF; 72 * 2]).unwrap();
         let out = EscPos::new().raster(&bm);
         assert_eq!(&out.bytes()[2 + 4..2 + 6], &[72, 0]);
+    }
+
+    #[test]
+    fn banded_raster_respects_max_slice_height_and_preserves_small_bitmaps() {
+        fn band_heights(stream: &[u8]) -> Vec<u16> {
+            let mut heights = Vec::new();
+            let mut pos = 0usize;
+            while let Some(rel) = stream[pos..]
+                .windows(4)
+                .position(|w| w == [0x1D, 0x76, 0x30, 0x00])
+            {
+                let hpos = pos + rel;
+                let x = u16::from_le_bytes([stream[hpos + 4], stream[hpos + 5]]) as usize;
+                let y = u16::from_le_bytes([stream[hpos + 6], stream[hpos + 7]]);
+                heights.push(y);
+                pos = hpos + 8 + x * (y as usize);
+            }
+            heights
+        }
+
+        // Exactly MAX_RASTER_SLICE_HEIGHT rows stays a single GS v 0 command.
+        let exact = MonoBitmap::from_packed(
+            16,
+            MAX_RASTER_SLICE_HEIGHT,
+            vec![0x5A; 2 * MAX_RASTER_SLICE_HEIGHT as usize],
+        )
+        .unwrap();
+        let exact_out = EscPos::new().raster(&exact);
+        assert_eq!(
+            band_heights(exact_out.bytes()),
+            vec![MAX_RASTER_SLICE_HEIGHT as u16]
+        );
+        assert_eq!(decode_raster(exact_out.bytes()).data, exact.data);
+
+        // One row taller splits into two bands (256 + 1).
+        let over = MonoBitmap::from_packed(
+            16,
+            MAX_RASTER_SLICE_HEIGHT + 1,
+            vec![0xA5; 2 * (MAX_RASTER_SLICE_HEIGHT as usize + 1)],
+        )
+        .unwrap();
+        let over_out = EscPos::new().raster(&over);
+        assert_eq!(
+            band_heights(over_out.bytes()),
+            vec![MAX_RASTER_SLICE_HEIGHT as u16, 1]
+        );
+        assert_eq!(decode_raster(over_out.bytes()).data, over.data);
+
+        // 600 rows splits into 256 + 256 + 88 with exact byte round-trip.
+        let tall_data: Vec<u8> = (0..(2 * 600)).map(|i| (i % 251) as u8).collect();
+        let tall = MonoBitmap::from_packed(16, 600, tall_data).unwrap();
+        let tall_out = EscPos::new().raster(&tall).cut_partial();
+        assert_eq!(band_heights(tall_out.bytes()), vec![256, 256, 88]);
+        let decoded = decode_raster(tall_out.bytes());
+        assert_eq!(decoded.height_dots, 600);
+        assert_eq!(decoded.data, tall.data);
     }
 }

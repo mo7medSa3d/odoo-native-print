@@ -45,7 +45,12 @@ impl PageSize {
     /// Pixel dimensions when rendered at `dpi`, rounded (never truncated,
     /// so a page never loses its last row/column of dots).
     pub fn pixels_at(&self, dpi: u32) -> (u32, u32) {
-        let to_px = |mm: f64| ((mm / 25.4) * dpi as f64).round().max(1.0) as u32;
+        let to_px = |mm: f64| {
+            if !mm.is_finite() || mm <= 0.0 || dpi == 0 {
+                return 1;
+            }
+            ((mm / 25.4) * dpi as f64).round().max(1.0) as u32
+        };
         (to_px(self.width_mm), to_px(self.height_mm))
     }
 }
@@ -88,6 +93,11 @@ mod tests {
     #[test]
     fn a4_pixels_300dpi() {
         assert_eq!(PageSize::a4().pixels_at(300), (2480, 3508));
+        assert_eq!(
+            PageSize::new(f64::INFINITY, f64::NAN).pixels_at(300),
+            (1, 1)
+        );
+        assert_eq!(PageSize::a4().pixels_at(0), (1, 1));
     }
     #[test]
     fn rotation_swaps_size() {

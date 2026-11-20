@@ -53,7 +53,7 @@ class TestNativePrintJobLog(TransactionCase):
             "report_id": report.id,
             # The posted source_model is client data and may lie:
             # the reprint must still target the REPORT's model
-            # (audit L4).
+            # (client-reported source_model must never be trusted).
             "source_model": "res.users",
             "source_ids": ",".join(str(i) for i in partners.ids),
         })
@@ -141,12 +141,12 @@ class TestNativePrintJobLog(TransactionCase):
             "source_ids": str(partners.ids[0]),
         })
         # A plain user without the report's group is still refused
-        # (the audit-L4 rule survives the 2026-11-05 fix).
+        # (restricted reports stay restricted for non-admin users).
         with self.assertRaises(UserError):
             job.with_user(self._plain_print_user()).action_reprint()
 
     def test_action_reprint_allows_administrator(self):
-        # Field report, 2026-11-05: an Administrator was refused
+        # Administrators must be able to reprint restricted reports
         # with "You do not have access to the report used by this
         # job" because the old check used direct groups only.
         report, partners = self._report_on_partners()
@@ -191,6 +191,27 @@ class TestNativePrintJobLog(TransactionCase):
         with self.assertRaises(AccessError):
             job.with_user(portal_user).action_reprint()
 
+    def test_action_reprint_rejects_other_company_user(self):
+        other_company = self.env["res.company"].create({"name": "NP Isolated Co"})
+        outsider = self.env["res.users"].create({
+            "name": "NP Other Company User",
+            "login": "np_other_company_user",
+            "company_id": other_company.id,
+            "company_ids": [(6, 0, [other_company.id])],
+            "group_ids": [(6, 0, [
+                self.env.ref("base.group_user").id,
+                self.env.ref("native_print.group_native_print_user").id,
+            ])],
+        })
+        report, partners = self._report_on_partners()
+        job = self._job("job-key-cross-company")
+        job.with_context(native_print_status_sync=True).write({
+            "report_id": report.id,
+            "source_ids": str(partners.ids[0]),
+        })
+        with self.assertRaises(AccessError):
+            job.with_user(outsider).action_reprint()
+
     def test_action_reprint_without_source_fails_loudly(self):
         job = self._job()
         with self.assertRaises(UserError):
@@ -206,8 +227,7 @@ class TestNativePrintJobLog(TransactionCase):
         # rows by hand (creation happens only via the controller's
         # sudo() registration path). The ONE manual operation is a
         # manager deleting a stale row (renamed/retired printer) —
-        # before the deep-debug round nobody could unlink at all and
-        # stale rows accumulated forever (audit M2).
+        # only managers may unlink stale rows.
         access = self.env["ir.model.access"].search([
             ("model_id.model", "=", "native.print.device"),
         ])
@@ -240,6 +260,16 @@ class TestNativePrintJobLog(TransactionCase):
         self.assertNotIn("prune-old-done", remaining)
         self.assertIn("prune-old-active", remaining)
         self.assertIn("prune-recent-done", remaining)
+
+    def test_composite_indexes_exist(self):
+        self.env.cr.execute(
+            "SELECT indexname FROM pg_indexes "
+            "WHERE schemaname = current_schema() AND tablename = %s",
+            [self.Job._table],
+        )
+        indexes = {row[0] for row in self.env.cr.fetchall()}
+        self.assertIn(f"{self.Job._table}_company_state_idx", indexes)
+        self.assertIn(f"{self.Job._table}_state_create_date_idx", indexes)
 
 
 class TestTranslationFiles(TransactionCase):

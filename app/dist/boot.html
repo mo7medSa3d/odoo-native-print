@@ -8,73 +8,102 @@
 <style>
   body {
     min-height: 100vh;
-    display: flex; align-items: center; justify-content: center;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: var(--space-4);
     background: var(--bg-canvas);
     padding: var(--space-5);
   }
   .card {
-    width: min(92vw, 430px);
+    position: relative;
+    overflow: hidden;
+    width: min(92vw, 440px);
+    margin-block: auto;
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-md);
-    padding: var(--space-8) var(--space-6);
+    padding: calc(var(--space-8) + 3px) var(--space-6) var(--space-6);
     text-align: center;
     transition: border-color var(--dur-med) var(--ease-out), box-shadow var(--dur-med) var(--ease-out);
+  }
+  .card::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 3px;
+    background: var(--brand);
+    transition: background-color var(--dur-med) var(--ease-out);
   }
   .card[data-state="down"],
   .card[data-state="initFail"] {
     border-color: var(--err-border);
-    box-shadow: inset 0 3px 0 var(--err-fg), var(--shadow-md);
+  }
+  .card[data-state="down"]::before,
+  .card[data-state="initFail"]::before {
+    background: var(--err-fg);
   }
   .card[data-state="redirected"] {
     border-color: var(--warn-border);
-    box-shadow: inset 0 3px 0 var(--warn-fg), var(--shadow-md);
+  }
+  .card[data-state="redirected"]::before {
+    background: var(--warn-fg);
   }
   .logo-wrap {
-    width: 56px; height: 56px; margin: 0 auto var(--space-4);
-    border-radius: var(--radius-lg); padding: var(--space-1);
+    width: 60px; height: 60px; margin: 0 auto var(--space-5);
+    border-radius: var(--radius-lg); padding: 6px;
     background: var(--brand-soft); border: 1px solid var(--info-border);
+    box-shadow: 0 0 0 6px var(--brand-soft), var(--shadow-sm);
     display: flex; align-items: center; justify-content: center;
-    transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+    transition: background-color var(--dur-med) var(--ease-out), border-color var(--dur-med) var(--ease-out), box-shadow var(--dur-med) var(--ease-out);
   }
   .card[data-state="down"] .logo-wrap,
   .card[data-state="initFail"] .logo-wrap {
     background: var(--err-bg); border-color: var(--err-border);
+    box-shadow: 0 0 0 6px var(--err-bg), var(--shadow-sm);
   }
   .card[data-state="redirected"] .logo-wrap {
     background: var(--warn-bg); border-color: var(--warn-border);
+    box-shadow: 0 0 0 6px var(--warn-bg), var(--shadow-sm);
   }
-  .logo { width: 100%; height: 100%; border-radius: var(--radius-md); display: block; }
+  .logo { width: 100%; height: 100%; border-radius: var(--radius-sm); display: block; }
   .spinner {
-    width: 28px; height: 28px; margin: 0 auto var(--space-4); border-radius: 50%;
+    width: 26px; height: 26px; margin: 0 auto var(--space-4); border-radius: 50%;
     border: 2.5px solid var(--brand-soft); border-top-color: var(--brand-text);
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   h1 {
     font-size: var(--text-lg); font-weight: 700; margin: 0 0 var(--space-2);
-    color: var(--text-primary); letter-spacing: -0.01em;
+    color: var(--text-primary); letter-spacing: 0; line-height: 1.35;
     transition: color var(--dur-fast) var(--ease-out);
   }
+  [dir="ltr"] h1 { letter-spacing: -0.015em; }
   .card[data-state="down"] h1,
   .card[data-state="initFail"] h1 { color: var(--err-fg); }
   .card[data-state="redirected"] h1 { color: var(--warn-fg); }
-  p { color: var(--text-secondary); font-size: var(--text-sm); line-height: 1.65; margin: 0 0 var(--space-5); }
+  p {
+    color: var(--text-secondary); font-size: var(--text-sm); line-height: 1.65;
+    margin: 0 0 var(--space-5);
+  }
   .origin {
     display: inline-block; direction: ltr; unicode-bidi: isolate; font-family: var(--font-mono);
     font-size: var(--text-xs); font-weight: 600; color: var(--text-primary);
     background: var(--bg-subtle); border: 1px solid var(--border);
-    padding: 3px var(--space-2); border-radius: var(--radius-xs); word-break: break-all;
-    margin-top: var(--space-2);
+    padding: 2px var(--space-2); border-radius: var(--radius-xs); word-break: break-all;
+    margin: 2px var(--space-1);
   }
+  .card[data-state="connecting"] .origin { margin-top: var(--space-2); }
   .card[data-state="down"] .origin {
     background: var(--err-bg); border-color: var(--err-border); color: var(--err-fg);
   }
   .card[data-state="redirected"] .origin {
     background: var(--warn-bg); border-color: var(--warn-border); color: var(--warn-fg);
   }
-  .actions { display: none; flex-wrap: wrap; gap: var(--space-2); justify-content: center; }
+  .actions {
+    display: none; flex-wrap: wrap; gap: var(--space-2); justify-content: center;
+    padding-top: var(--space-1);
+  }
   .actions.show { display: flex; }
   button {
     min-height: 38px;
@@ -84,23 +113,33 @@
     transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
   }
   button:hover:not(:disabled) { background: var(--bg-subtle); border-color: var(--border-strong); }
+  button:active:not(:disabled) { background: var(--bg-hover); }
   button:focus-visible { box-shadow: var(--focus-ring); }
   button:disabled { opacity: 0.55; cursor: not-allowed; }
-  button.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); font-weight: 600; }
-  button.primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
-  .count { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--space-4); min-height: 1.2em; font-variant-numeric: tabular-nums; }
+  button.primary {
+    background: var(--brand); border-color: var(--brand); color: var(--brand-fg); font-weight: 600;
+    box-shadow: var(--shadow-sm);
+  }
+  button.primary:hover:not(:disabled),
+  button.primary:active:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
+  .count {
+    font-size: var(--text-xs); color: var(--text-muted);
+    margin-top: var(--space-4); min-height: 1.2em; font-variant-numeric: tabular-nums;
+  }
   .credit {
-    position: fixed; inset-inline: 0; bottom: var(--space-4); text-align: center;
+    text-align: center;
     color: var(--text-muted); font-size: var(--text-xs);
   }
 </style>
 </head>
 <body>
-  <main class="card" data-state="connecting" role="status" aria-live="polite">
+  <main class="card" data-state="connecting">
     <div class="logo-wrap"><img class="logo" src="app-icon.png" alt=""/></div>
     <div class="spinner" id="spinner" aria-hidden="true"></div>
-    <h1 id="title">جارٍ الاتصال بخادم Odoo</h1>
-    <p id="msg">تجهيز مساحة العمل… <br><span class="origin" id="origin"></span></p>
+    <div role="status" aria-live="polite">
+      <h1 id="title">جارٍ الاتصال بخادم Odoo</h1>
+      <p id="msg">تجهيز مساحة العمل… <br><span class="origin" id="origin"></span></p>
+    </div>
     <div class="actions" id="actions">
       <button type="button" class="primary" id="retry">إعادة المحاولة</button>
       <button type="button" id="anyway">الفتح على أي حال</button>
@@ -108,7 +147,7 @@
     </div>
     <div class="count" id="count" aria-live="off"></div>
   </main>
-  <div class="credit" id="credit">Yaseir Print © يسير</div>
+  <footer class="credit" id="credit">Yaseir Print © يسير</footer>
 <script>
   "use strict";
   function invoke(cmd, args) {
@@ -163,6 +202,12 @@
     viewState = state;
     if (cardEl) cardEl.setAttribute("data-state", state);
   }
+  function setPrimaryAction(id) {
+    ["retry", "anyway", "cc"].forEach(function (btnId) {
+      var el = document.getElementById(btnId);
+      if (el) el.classList.toggle("primary", btnId === id);
+    });
+  }
 
   function applyPrefs() {
     var savedLang = null, savedTheme = null;
@@ -175,6 +220,7 @@
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
     document.documentElement.setAttribute("data-theme", savedTheme === "dark" ? "dark" : "light");
+    document.title = "Yaseir Print — " + T.connecting;
     document.getElementById("retry").textContent = T.retryBtn;
     document.getElementById("anyway").textContent = T.anywayBtn;
     document.getElementById("cc").textContent = T.ccBtn;
@@ -208,27 +254,34 @@
 
   function showDown(keepTimer) {
     setCardState("down");
+    setPrimaryAction("retry");
     document.getElementById("spinner").style.display = "none";
     document.getElementById("title").textContent = T.downTitle;
     setMsgWithOrigin(T.downPre, T.downPost);
     document.getElementById("actions").classList.add("show");
+    document.getElementById("retry").style.display = "";
     document.getElementById("anyway").style.display = "";
     if (!keepTimer) startCountdown();
     else if (left > 0) document.getElementById("count").textContent = T.retryIn + left + T.secs;
   }
   function showRedirected() {
     setCardState("redirected");
+    setPrimaryAction("cc");
     disarmNavWatchdog();
     stopCountdown();
     document.getElementById("spinner").style.display = "none";
     document.getElementById("title").textContent = T.redirTitle;
     setMsgWithOrigin(T.redirPre, T.redirPost);
     document.getElementById("actions").classList.add("show");
+    document.getElementById("retry").style.display = "";
     document.getElementById("anyway").style.display = "none";
     document.getElementById("count").textContent = "";
   }
   function showInitFail() {
     setCardState("initFail");
+    setPrimaryAction("cc");
+    disarmNavWatchdog();
+    stopCountdown();
     document.getElementById("title").textContent = T.initFailTitle;
     document.getElementById("msg").textContent = T.initFailMsg;
     document.getElementById("spinner").style.display = "none";
@@ -257,7 +310,11 @@
   function disarmNavWatchdog() { if (navTimer) { window.clearTimeout(navTimer); navTimer = null; } }
 
   function isHttpOrigin(u) {
-    return typeof u === "string" && /^https?:\/\//i.test(u);
+    if (typeof u !== "string" || !/^https?:\/\//i.test(u)) return false;
+    try {
+      var parsed = new URL(u);
+      return (parsed.protocol === "https:" || parsed.protocol === "http:") && parsed.hostname.length > 0;
+    } catch (e) { return false; }
   }
   function tryProbe() {
     if (probing) return;
@@ -284,6 +341,7 @@
     if (isHttpOrigin(origin)) { stopCountdown(); document.getElementById("count").textContent = ""; armNavWatchdog(); window.location.replace(origin); }
   });
   document.getElementById("cc").addEventListener("click", function () {
+    disarmNavWatchdog(); stopCountdown();
     window.location.replace("index.html");
   });
 
@@ -292,7 +350,7 @@
 
   invoke("app_overview", {}).then(function (ov) {
     origin = ov && (ov.odooOrigin || ov.odoo_origin) ? (ov.odooOrigin || ov.odoo_origin) : null;
-    if (!origin) { window.location.replace("index.html"); return; }
+    if (!isHttpOrigin(origin)) { window.location.replace("index.html"); return; }
     document.getElementById("origin").textContent = origin;
     tryProbe();
   }).catch(showInitFail);

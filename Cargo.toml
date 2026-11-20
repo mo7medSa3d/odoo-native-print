@@ -12,3 +12,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 rusqlite = { version = "0.41", features = ["bundled"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+# Keep unwind: app/src-tauri/src/commands.rs::spawn_worker_loop uses std::panic::catch_unwind.
+panic = "unwind"

@@ -12,6 +12,9 @@ _logger = logging.getLogger(__name__)
 
 
 def migrate(cr, version):
+    cr.execute("SELECT to_regclass('native_print_job')")
+    if not cr.fetchone()[0]:
+        return
     cr.execute(
         """
         DELETE FROM native_print_job a

@@ -36,16 +36,18 @@ pub fn slice_canvas_rows(canvas: &Canvas, start_row: u32, rows: u32) -> Canvas {
     let width = canvas.width as usize;
     let start = (start_row.min(canvas.height)) as usize;
     let end = ((start_row.saturating_add(rows)).min(canvas.height)) as usize;
-    let px = if width == 0 || end <= start {
-        Vec::new()
+    let (height, px) = if width == 0 || end <= start {
+        (0, Vec::new())
     } else {
         let max_end = end.saturating_mul(width).min(canvas.px.len());
         let min_start = start.saturating_mul(width).min(max_end);
-        canvas.px[min_start..max_end].to_vec()
+        let avail_rows = (max_end - min_start) / width;
+        let slice_end = min_start + avail_rows * width;
+        (avail_rows as u32, canvas.px[min_start..slice_end].to_vec())
     };
     Canvas {
         width: canvas.width,
-        height: (end - start) as u32,
+        height,
         px,
     }
 }

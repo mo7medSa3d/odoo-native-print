@@ -4,10 +4,10 @@ import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
-import { formatFormsSummary, getSelectedPosPrinter, getSelectedPrinter, setSelectedPosPrinter, setSelectedPrinter } from "./native_print_client";
+import { formatFormsSummary, getSelectedPosPrinter, getSelectedPrinter, JOB_UPDATED_EVENT, setSelectedPosPrinter, setSelectedPrinter } from "./native_print_client";
 
-// One-line source description for a discovered printer (owner
-// brief, 2026-11-05): where it is attached and what it is, from the
+// One-line source description for a discovered printer:
+// where it is attached and what it is, from the
 // bridge's live discovery fields (kind/port/protocol/class) — e.g.
 // "USB · Thermal · ESC/POS", "Network · 192.168.1.50 · Office · GDI".
 // Windows cannot tell Wi-Fi from wired Ethernet for a queue, so a
@@ -39,7 +39,7 @@ function printerMeta(p) {
     } else {
         parts.push(_t("Local"));
     }
-    const cls = classes[String(p.printer_class || "")] || "";
+    const cls = classes[String(p.printer_class || p.printerClass || "")] || "";
     if (cls && parts[0] !== cls) parts.push(cls);
     const proto = String(p.protocol || "").toUpperCase();
     if (proto) parts.push(proto);
@@ -113,6 +113,11 @@ export class NativePrintSystray extends Component {
                 this.state.isOpen = false;
             }
         };
+        this._onJobUpdated = () => {
+            if (!this._unmounted) {
+                this.refreshStats();
+            }
+        };
 
         onWillStart(async () => {
             await this.refreshStats();
@@ -122,6 +127,7 @@ export class NativePrintSystray extends Component {
 
         onMounted(() => {
             window.addEventListener("click", this._onOutsideClick);
+            window.addEventListener(JOB_UPDATED_EVENT, this._onJobUpdated);
             // Keep workstation inventory and online/offline state current
             // without making every Odoo screen action trigger a full scan.
             this._printerRefreshTimer = window.setInterval(() => {
@@ -134,6 +140,7 @@ export class NativePrintSystray extends Component {
         onWillUnmount(() => {
             this._unmounted = true;
             window.removeEventListener("click", this._onOutsideClick);
+            window.removeEventListener(JOB_UPDATED_EVENT, this._onJobUpdated);
             if (this._printerRefreshTimer) {
                 window.clearInterval(this._printerRefreshTimer);
                 this._printerRefreshTimer = null;
@@ -170,9 +177,7 @@ export class NativePrintSystray extends Component {
                 { title: _t("Printers Refreshed"), type: "success" },
             );
         } catch (error) {
-            // Raw exception text stays in the console: users get a
-            // localized explanation, not an English stack message
-            // (audit JS-L3).
+            // Keep raw exception text in console; show localized notice to users.
             console.error(error);
             if (showNotice && !this._unmounted) this.notification.add(
                 _t("Could not read this PC's printers. Check the desktop app and try again."),
@@ -185,8 +190,7 @@ export class NativePrintSystray extends Component {
     }
 
     // Report the active printer's driver capabilities (paper forms
-    // + trays) to the device registry, so the printer is visible in
-    // Odoo with its full sizes and trays (owner brief, 2026-11-05).
+    // and trays) to the device registry for read-only display in Odoo.
     // Throttled per printer: re-sent only when the capability set
     // changes or after 6 hours; failures stay in the console — the
     // panel never blocks on bookkeeping.
@@ -198,7 +202,8 @@ export class NativePrintSystray extends Component {
         if (!target) return;
         let store = {};
         try {
-            store = JSON.parse(localStorage.getItem("npCapsSyncV1") || "{}");
+            const parsed = JSON.parse(localStorage.getItem("npCapsSyncV1") || "{}");
+            store = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
         } catch (_e) { store = {}; }
         const prev = store[target.name] || {};
         const now = Date.now();
@@ -225,7 +230,9 @@ export class NativePrintSystray extends Component {
             }, { silent: true });
             if (res && res.ok) {
                 store[target.name] = { at: now, hash, meta: metaKey };
-                localStorage.setItem("npCapsSyncV1", JSON.stringify(store));
+                try {
+                    localStorage.setItem("npCapsSyncV1", JSON.stringify(store));
+                } catch (_e) { /* ignore storage quota/privacy errors */ }
             }
         } catch (error) {
             console.error(error);
@@ -269,6 +276,13 @@ export class NativePrintSystray extends Component {
 
     closeMenu() {
         this.state.isOpen = false;
+    }
+
+    onKeyDown(ev) {
+        if (ev && ev.key === "Escape" && this.state.isOpen) {
+            if (typeof ev.stopPropagation === "function") ev.stopPropagation();
+            this.closeMenu();
+        }
     }
 
     async openControlCenter() {

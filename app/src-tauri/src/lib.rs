@@ -22,7 +22,12 @@ const BRIDGE_JS: &str = r#"
     if (ArrayBuffer.isView(b)) return Array.from(new Uint8Array(b.buffer, b.byteOffset, b.byteLength));
     return b;
   }
+  var __npTauriInternals = window.__TAURI_INTERNALS__;
+  var __npTauriInvoke = __npTauriInternals && typeof __npTauriInternals.invoke === "function"
+    ? __npTauriInternals.invoke.bind(__npTauriInternals)
+    : null;
   function invoke(cmd, args) {
+    if (__npTauriInvoke) return __npTauriInvoke(cmd, args || {});
     return window.__TAURI_INTERNALS__.invoke(cmd, args || {});
   }
   // Page error tap. This script runs before any page script, so a
@@ -181,6 +186,7 @@ const BRIDGE_JS: &str = r#"
   // fallback assignment covers a page that somehow pre-defined the
   // name as configurable. (Audit B-6.)
   if (__npIsTop) {
+    try { Object.freeze(__npFacade); } catch (e) { /* ignore */ }
     try {
       Object.defineProperty(window, "__NATIVE_PRINT__", {
         value: __npFacade,
@@ -201,7 +207,11 @@ const BRIDGE_JS: &str = r#"
   // panel with working recovery actions.
   // ------------------------------------------------------------------
   function npIsLocalPage() {
-    return (window.location.hostname === "tauri.localhost" && window.location.port === "") || window.location.protocol === "tauri:";
+    if (window.location.port !== "") return false;
+    var proto = window.location.protocol;
+    var host = window.location.hostname;
+    return (proto === "tauri:" && host === "localhost")
+      || ((proto === "http:" || proto === "https:") && host === "tauri.localhost");
   }
   // Unencrypted-origin warning: HTTP to an IP address is allowed by
   // the owner's policy (ADR-0002), but credentials and documents cross
@@ -509,7 +519,11 @@ pub fn layout_webviews(app: &tauri::AppHandle) {
     if size.width == 0 || size.height == 0 {
         return;
     }
-    let scale = window.scale_factor().unwrap_or(1.0);
+    let scale = window
+        .scale_factor()
+        .ok()
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .unwrap_or(1.0);
     let width = size.width as f64 / scale;
     let height = size.height as f64 / scale;
     if let Some(tabbar) = app.get_webview("tabbar") {
@@ -583,11 +597,14 @@ pub fn create_tab_webview(
         .data_directory(data_dir)
         .initialization_script(BRIDGE_JS.replace("__APP_VERSION__", env!("CARGO_PKG_VERSION")))
         .on_navigation(move |u| {
+            if !u.username().is_empty() || u.password().is_some() {
+                return false;
+            }
             if u.as_str() == "about:blank" || is_local_app_url(u) {
                 return true;
             }
             let state = nav_handle.state::<AppState>();
-            let allowed = state.configured_origin.read().ok().and_then(|g| g.clone());
+            let allowed = commands::read_lock(&state.configured_origin).clone();
             let verdict = match allowed {
                 Some(cfg_origin) => {
                     let o = u.origin().ascii_serialization();
@@ -607,20 +624,14 @@ pub fn create_tab_webview(
             // and runs its own session logic; the backend tab the
             // user was on stays untouched behind it).
             if commands::is_pos_url(u.as_str()) {
-                let tabs = state.tabs.read().ok();
-                let is_pos_tab = tabs
-                    .as_ref()
-                    .map(|t| t.is_pos_tab(&nav_label))
-                    .unwrap_or(false);
+                let tabs = commands::read_lock(&state.tabs);
+                let is_pos_tab = tabs.is_pos_tab(&nav_label);
                 let current_is_local = tabs
-                    .as_ref()
-                    .and_then(|t| t.url_of(&nav_label).map(|s| s.to_string()))
-                    .map(|s| {
-                        tauri::Url::parse(&s)
-                            .map(|cu| is_local_app_url(&cu))
-                            .unwrap_or(false)
-                    })
+                    .url_of(&nav_label)
+                    .and_then(|s| tauri::Url::parse(s).ok())
+                    .map(|cu| is_local_app_url(&cu))
                     .unwrap_or(false);
+                drop(tabs);
                 if !is_pos_tab && !current_is_local {
                     let spawn_handle = nav_handle.clone();
                     let target = u.clone();
@@ -636,14 +647,14 @@ pub fn create_tab_webview(
         .on_new_window(move |u, _features| {
             // On-origin popups become tabs; anything else is denied
             // (the origin policy leaves the app no other browser).
+            if !u.username().is_empty() || u.password().is_some() {
+                return tauri::webview::NewWindowResponse::Deny;
+            }
             let state = open_handle.state::<AppState>();
-            let allowed = state.configured_origin.read().ok().and_then(|g| g.clone());
-            let opener_is_local = state
-                .tabs
-                .read()
-                .ok()
-                .and_then(|t| t.url_of(&open_label).map(|s| s.to_string()))
-                .and_then(|s| tauri::Url::parse(&s).ok())
+            let allowed = commands::read_lock(&state.configured_origin).clone();
+            let opener_is_local = commands::read_lock(&state.tabs)
+                .url_of(&open_label)
+                .and_then(|s| tauri::Url::parse(s).ok())
                 .map(|cu| is_local_app_url(&cu))
                 .unwrap_or(false);
             let on_origin = (opener_is_local && is_local_app_url(&u))
@@ -667,10 +678,16 @@ pub fn create_tab_webview(
             }
         });
     let (width, height) = {
-        let scale = window.scale_factor().unwrap_or(1.0);
+        let scale = window
+            .scale_factor()
+            .ok()
+            .filter(|s| s.is_finite() && *s > 0.0)
+            .unwrap_or(1.0);
         match window.inner_size() {
-            Ok(size) => (size.width as f64 / scale, size.height as f64 / scale),
-            Err(_) => (1280.0, 820.0),
+            Ok(size) if size.width > 0 && size.height > 0 => {
+                (size.width as f64 / scale, size.height as f64 / scale)
+            }
+            _ => (1280.0, 820.0),
         }
     };
     window
@@ -766,16 +783,16 @@ pub fn run() {
             // the Control Center (nothing configured yet).
             {
                 let state = app.state::<AppState>();
-                let mut tabs = state
-                    .tabs
-                    .write()
-                    .map_err(|_| std::io::Error::other("tabs_lock_poisoned"))?;
+                let mut tabs = commands::write_lock(&state.tabs);
                 tabs.next_id = 1;
-                let first_url = match initial_origin.as_deref() {
-                    Some(_) => "tauri://localhost/boot.html",
-                    None => "tauri://localhost/index.html",
+                let first_file = match initial_origin.as_deref() {
+                    Some(_) => "boot.html",
+                    None => "index.html",
                 };
-                tabs.register("tab-1", first_url);
+                let first_url = commands::local_app_url(first_file)
+                    .map(|u| u.to_string())
+                    .unwrap_or_else(|_| format!("tauri://localhost/{first_file}"));
+                tabs.register("tab-1", &first_url);
                 tabs.active = Some("tab-1".to_string());
             }
             create_tab_webview(app.handle(), "tab-1", start_url)?;
@@ -784,7 +801,10 @@ pub fn run() {
             // window on every resize.
             let resize_handle = app.handle().clone();
             window.on_window_event(move |event| {
-                if matches!(event, tauri::WindowEvent::Resized(_)) {
+                if matches!(
+                    event,
+                    tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }
+                ) {
                     layout_webviews(&resize_handle);
                 }
             });

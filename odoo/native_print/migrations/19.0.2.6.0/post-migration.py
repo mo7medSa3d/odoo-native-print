@@ -21,16 +21,19 @@ def migrate(cr, version):
     printers = {}
     linked = 0
     for job in jobs:
-        key = (job.device, job.company_id.id)
+        device_name = (job.device or "").strip()[:256]
+        if not device_name or not job.company_id:
+            continue
+        key = (device_name, job.company_id.id)
         printer = printers.get(key)
         if printer is None:
             printer = Device.search([
-                ("name", "=", job.device),
+                ("name", "=", device_name),
                 ("company_id", "=", job.company_id.id),
             ], limit=1)
             if not printer:
                 printer = Device.create({
-                    "name": job.device,
+                    "name": device_name,
                     "company_id": job.company_id.id,
                 })
             printers[key] = printer

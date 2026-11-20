@@ -83,9 +83,9 @@
     align-items: center;
     gap: 6px;
     padding-inline: 10px 4px;
-    background: transparent;
+    background: var(--bg-subtle);
     color: var(--text-secondary);
-    border: 1px solid transparent;
+    border: 1px solid var(--border);
     border-block-end: 0;
     border-start-start-radius: var(--radius-md);
     border-start-end-radius: var(--radius-md);
@@ -118,6 +118,8 @@
     border-color: var(--border);
     font-weight: 600;
     box-shadow: var(--shadow-sm);
+    margin-bottom: -1px;
+    padding-bottom: 1px;
     z-index: 2;
   }
   .tab.active::before {
@@ -125,9 +127,9 @@
     position: absolute;
     inset-block-start: 0;
     inset-inline: 10px;
-    height: 2px;
-    border-end-start-radius: 2px;
-    border-end-end-radius: 2px;
+    height: 2.5px;
+    border-end-start-radius: var(--radius-pill);
+    border-end-end-radius: var(--radius-pill);
     background: var(--brand-text);
   }
   .tab .t-icon {
@@ -140,13 +142,16 @@
     justify-content: center;
     transition: color var(--dur-fast) var(--ease-out);
   }
+  .tab .t-icon-cc { color: var(--brand-text); }
+  .tab .t-icon-settings { color: var(--text-secondary); }
   .tab.active .t-icon { color: var(--brand-text); }
+  .tab.active .t-icon-settings { color: var(--text-secondary); }
   .tab .t-title {
     flex: 1 1 auto;
     overflow: hidden;
     text-overflow: ellipsis;
     font-size: var(--text-sm);
-    line-height: 1.2;
+    line-height: var(--leading-tight);
     letter-spacing: -0.005em;
   }
   .tab .t-pos {
@@ -155,7 +160,10 @@
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.04em;
+    background: var(--info-bg);
     color: var(--accent-cyan);
+    padding: 2px 5px;
+    border-radius: var(--radius-xs);
     line-height: 1;
   }
   .tab .t-close {
@@ -300,7 +308,7 @@
 
   <div class="divider" aria-hidden="true"></div>
 
-  <div class="tabs" id="tabs" role="tablist"></div>
+  <div class="tabs" id="tabs" role="tablist" aria-label="التبويبات"></div>
 
   <div class="divider" aria-hidden="true"></div>
 
@@ -326,11 +334,11 @@
   var STR = {
     ar: {
       new_tab: "تبويب جديد", cc: "مركز التحكم", settings: "الإعدادات",
-      back: "رجوع", forward: "تقدّم", reload: "تحديث", close_tab: "إغلاق"
+      back: "رجوع", forward: "تقدّم", reload: "تحديث", close_tab: "إغلاق", tabs_label: "التبويبات"
     },
     en: {
       new_tab: "New tab", cc: "Control Center", settings: "Settings",
-      back: "Back", forward: "Forward", reload: "Reload", close_tab: "Close"
+      back: "Back", forward: "Forward", reload: "Reload", close_tab: "Close", tabs_label: "Tabs"
     }
   };
   var lang = "";
@@ -361,6 +369,8 @@
         var b = document.getElementById(pair[0]);
         if (b) { b.title = pair[1]; b.setAttribute("aria-label", pair[1]); }
       });
+      var tabList = document.getElementById("tabs");
+      if (tabList) tabList.setAttribute("aria-label", STR[lang].tabs_label);
       if (currentTabs.length) render(currentTabs);
     }
     var nextTheme = savedTheme === "dark" ? "dark" : "light";
@@ -374,12 +384,18 @@
   var dragLabel = null;
   var refreshing = false;
 
-  function tabIconSvg(tab) {
+  function tabKind(tab) {
     var u = String(tab.url || "");
-    if (u.indexOf("index.html") >= 0) {
+    if (u.indexOf("index.html") >= 0 || (tab.is_local && /\/+$/.test(u))) return "cc";
+    if (u.indexOf("settings.html") >= 0) return "settings";
+    return "web";
+  }
+
+  function tabIconSvg(kind) {
+    if (kind === "cc") {
       return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>';
     }
-    if (u.indexOf("settings.html") >= 0) {
+    if (kind === "settings") {
       return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M2 12h3M19 12h3"/></svg>';
     }
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="3.6" y1="9" x2="20.4" y2="9"/><line x1="3.6" y1="15" x2="20.4" y2="15"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
@@ -401,14 +417,16 @@
     });
   }
   function render(tabs) {
-    if (!Array.isArray(tabs)) return;
+    if (!Array.isArray(tabs) || dragLabel) return;
     var sig = lang + "|" + tabs.map(function (t) {
-      return t.label + ":" + t.title + ":" + t.url + ":" + (t.active ? 1 : 0) + ":" + (t.is_pos ? 1 : 0);
+      return t.label + ":" + (t.title || "") + ":" + (t.url || "") + ":" + (t.active ? 1 : 0) + ":" + (t.is_pos ? 1 : 0);
     }).join("|");
     if (sig === lastSignature) return;
     lastSignature = sig;
     currentTabs = tabs;
     var strip = document.getElementById("tabs");
+    var activeEl = document.activeElement;
+    var focusedLabel = activeEl && strip.contains(activeEl) && activeEl.getAttribute ? activeEl.getAttribute("data-label") : null;
     strip.innerHTML = "";
     tabs.forEach(function (t, tabIndex) {
       var el = document.createElement("div");
@@ -451,13 +469,15 @@
         clearDropHints(strip);
         invoke("tab_move", { label: label, toIndex: idx }).then(refresh).catch(function () {});
       });
+      var kind = tabKind(t);
       var icon = document.createElement("span");
-      icon.className = "t-icon";
-      icon.innerHTML = tabIconSvg(t);
+      icon.className = "t-icon t-icon-" + kind;
+      icon.innerHTML = tabIconSvg(kind);
       el.appendChild(icon);
+      var safeTitle = (t.title != null && String(t.title).trim()) ? String(t.title) : (t.url || STR[lang].new_tab);
       var title = document.createElement("span");
       title.className = "t-title";
-      title.textContent = t.title;
+      title.textContent = safeTitle;
       el.appendChild(title);
       if (t.is_pos) {
         var tag = document.createElement("span");
@@ -470,7 +490,7 @@
       close.className = "t-close";
       close.textContent = "×";
       close.title = STR[lang].close_tab;
-      close.setAttribute("aria-label", STR[lang].close_tab + ": " + t.title);
+      close.setAttribute("aria-label", STR[lang].close_tab + ": " + safeTitle);
       close.addEventListener("click", function (ev) {
         ev.stopPropagation();
         invoke("tab_close", { label: t.label }).then(refresh).catch(function () {});
@@ -484,6 +504,19 @@
         if (ev.key === "Enter" || ev.key === " ") {
           ev.preventDefault();
           invoke("tab_switch", { label: t.label }).then(refresh).catch(function () {});
+          return;
+        }
+        var tabNodes = Array.prototype.slice.call(strip.querySelectorAll(".tab"));
+        if (!tabNodes.length) return;
+        var rtl = document.documentElement.dir === "rtl";
+        var nextIdx = null;
+        if (ev.key === (rtl ? "ArrowLeft" : "ArrowRight")) nextIdx = (tabIndex + 1) % tabNodes.length;
+        else if (ev.key === (rtl ? "ArrowRight" : "ArrowLeft")) nextIdx = (tabIndex - 1 + tabNodes.length) % tabNodes.length;
+        else if (ev.key === "Home") nextIdx = 0;
+        else if (ev.key === "End") nextIdx = tabNodes.length - 1;
+        if (nextIdx !== null) {
+          ev.preventDefault();
+          tabNodes[nextIdx].focus();
         }
       });
       strip.appendChild(el);
@@ -501,6 +534,10 @@
       });
     });
     strip.appendChild(add);
+    if (focusedLabel) {
+      var restore = strip.querySelector('.tab[data-label="' + focusedLabel.replace(/["\\]/g, "\\$&") + '"]');
+      if (restore && restore.focus) restore.focus();
+    }
     var active = strip.querySelector(".tab.active");
     if (active && active.scrollIntoView) {
       active.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -548,7 +585,8 @@
   window.addEventListener("storage", applyPrefs);
   applyPrefs();
   refresh();
-  window.setInterval(refresh, 650);
+  window.setInterval(function () { if (!document.hidden) refresh(); }, 650);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) refresh(); });
 </script>
 </body>
 </html>

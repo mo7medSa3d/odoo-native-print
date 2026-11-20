@@ -25,7 +25,9 @@ pub fn epl_label_copies(bm: &MonoBitmap, copies: u16) -> Vec<u8> {
 /// at 203 dpi.
 pub fn epl_label_copies_with_gap(bm: &MonoBitmap, copies: u16, gap_dots: u32) -> Vec<u8> {
     let bpr = bm.bytes_per_row();
-    let expected = bpr.saturating_mul(bm.height_dots as usize);
+    let Some(expected) = bpr.checked_mul(bm.height_dots as usize) else {
+        return Vec::new();
+    };
     if expected == 0 || bm.data.len() < expected {
         return Vec::new();
     }
