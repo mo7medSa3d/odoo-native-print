@@ -12,6 +12,13 @@ class NativePrintJob(models.Model):
     _description = "Native Print: job log"
     _order = "create_date desc, id desc"
 
+    # Created with the table on a fresh install; _register_hook below adds
+    # them to installs that predate these indexes.
+    _sql_constraints = [
+        ("company_state_idx", "index (company_id, state)", "company/state index"),
+        ("state_create_date_idx", "index (state, create_date)", "state/date index"),
+    ]
+
     @api.model
     def _register_hook(self):
         super()._register_hook()
