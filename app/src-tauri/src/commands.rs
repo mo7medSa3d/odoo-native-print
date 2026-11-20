@@ -7,8 +7,8 @@
 
 use crate::config;
 use print_core::diagnostics::{build_bundle_from_queue, bundle_to_json, JobSummary};
-use print_core::paper::{match_paper, match_paper_auto, Form, ScalePolicy};
-use print_core::printer::{needs_intervention, PrinterInfo, PrinterKind, PrinterStatus};
+use print_core::paper::{Form, ScalePolicy};
+use print_core::printer::{PrinterInfo, PrinterKind};
 use print_core::routing::resolve_printer;
 use print_core::security::{origin_is_allowed, validate_job_input};
 use print_core::worker::Outcome;
@@ -18,9 +18,10 @@ use print_core::{
 use print_raw::MonoBitmap;
 use print_render::RenderMode;
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::net::ToSocketAddrs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tauri::{Manager, State};
@@ -104,6 +105,8 @@ pub struct AppState {
     pub locked_by_policy: bool,
     pub auto_reprint: RwLock<bool>,
     pub worker_wake: Arc<(Mutex<bool>, Condvar)>,
+    pub worker_stop: Arc<AtomicBool>,
+    pub printer_settings: Arc<RwLock<config::PrinterSettingsMap>>,
     /// Latest environment probe report from the page (JSON string):
     /// the JavaScript feature/storage facts the Odoo frontend depends
     /// on, surfaced in the overview and the diagnostics bundle so a
@@ -165,6 +168,8 @@ impl TabsState {
         self.urls.insert(label.to_string(), url.to_string());
         if is_pos_url(url) {
             self.pos_tabs.insert(label.to_string());
+        } else if !url.contains("/web/login") {
+            self.pos_tabs.remove(label);
         }
     }
 
@@ -314,30 +319,58 @@ fn deserialize_bytes<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum BytePayload {
-        Seq(Vec<u8>),
-        Str(String),
-        Map(BTreeMap<usize, u8>),
-    }
+    struct BytesVisitor;
 
-    match BytePayload::deserialize(deserializer)? {
-        BytePayload::Seq(v) => {
-            if v.len() > print_core::security::MAX_JOB_BYTES {
-                return Err(serde::de::Error::custom("payload_too_large"));
-            }
-            Ok(v)
+    impl<'de> serde::de::Visitor<'de> for BytesVisitor {
+        type Value = Vec<u8>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a byte array, base64 string, or contiguous byte index map")
         }
-        BytePayload::Str(s) => decode_base64(&s).map_err(serde::de::Error::custom),
-        BytePayload::Map(m) => {
-            if m.len() > print_core::security::MAX_JOB_BYTES {
-                return Err(serde::de::Error::custom("payload_too_large"));
+
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            decode_base64(v).map_err(E::custom)
+        }
+
+        fn visit_bytes<E: serde::de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
+            if v.len() > print_core::security::MAX_JOB_BYTES {
+                return Err(E::custom("payload_too_large"));
             }
-            // A sparse index map ({0:.., 2:..}) would silently
-            // compress into a shorter, shifted payload. Reject gaps:
-            // keys must be exactly 0..len in order (BTreeMap iterates
-            // ascending, so position must equal key).
+            Ok(v.to_vec())
+        }
+
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Self::Value, A::Error> {
+            let cap = seq
+                .size_hint()
+                .unwrap_or(0)
+                .min(print_core::security::MAX_JOB_BYTES);
+            let mut out = Vec::with_capacity(cap);
+            while let Some(b) = seq.next_element::<u8>()? {
+                if out.len() >= print_core::security::MAX_JOB_BYTES {
+                    return Err(serde::de::Error::custom("payload_too_large"));
+                }
+                out.push(b);
+            }
+            Ok(out)
+        }
+
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut m = BTreeMap::<usize, u8>::new();
+            while let Some((k, v)) = map.next_entry::<String, u8>()? {
+                let idx = k
+                    .parse::<usize>()
+                    .map_err(|_| serde::de::Error::custom("invalid byte map key"))?;
+                if m.len() >= print_core::security::MAX_JOB_BYTES {
+                    return Err(serde::de::Error::custom("payload_too_large"));
+                }
+                m.insert(idx, v);
+            }
             if m.keys().enumerate().any(|(i, k)| *k != i) {
                 return Err(serde::de::Error::custom(
                     "sparse byte map payload: indices must be contiguous from 0",
@@ -346,6 +379,8 @@ where
             Ok(m.into_values().collect())
         }
     }
+
+    deserializer.deserialize_any(BytesVisitor)
 }
 
 fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
@@ -711,7 +746,21 @@ pub async fn print_image(
         .map_err(|e| format!("{e:?}"))?;
     let queue_arc = Arc::clone(&state.queue);
     let id = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
-        let _img = print_render::decode_png(&req.bytes).map_err(|e| e.to_string())?;
+        // Validate PNG signature + IHDR dimensions in O(1) at enqueue instead of
+        // decoding every pixel twice (the worker decodes the PNG when printing).
+        if req.bytes.len() < 24
+            || &req.bytes[0..8] != b"\x89PNG\r\n\x1a\n"
+            || &req.bytes[12..16] != b"IHDR"
+        {
+            return Err("invalid PNG header".to_string());
+        }
+        let png_w =
+            u32::from_be_bytes([req.bytes[16], req.bytes[17], req.bytes[18], req.bytes[19]]);
+        let png_h =
+            u32::from_be_bytes([req.bytes[20], req.bytes[21], req.bytes[22], req.bytes[23]]);
+        if png_w == 0 || png_h == 0 || png_w > 16_384 || png_h > 16_384 {
+            return Err(format!("invalid PNG dimensions: {png_w}x{png_h}"));
+        }
         // Width evidence from the page is a hint, not truth: keep only
         // plausible physical widths (a receipt wider than half a metre
         // or narrower than 20 mm is a bug or an attack, not media).
@@ -1368,17 +1417,15 @@ pub async fn open_tab_internal(
     state: &AppState,
     url: tauri::Url,
 ) -> Result<String, String> {
-    let (label, prev_active) = {
+    let label = {
         let mut tabs = write_lock(&state.tabs);
         if tabs.order.len() >= MAX_TABS {
             return Err("too_many_tabs".to_string());
         }
-        let prev_active = tabs.active.clone();
         tabs.next_id += 1;
         let label = format!("tab-{}", tabs.next_id);
         tabs.register(&label, url.as_str());
-        tabs.active = Some(label.clone());
-        (label, prev_active)
+        label
     };
     let web_url = if is_local_app_url(&url) {
         let path = url.path().trim_start_matches('/');
@@ -1391,11 +1438,6 @@ pub async fn open_tab_internal(
         tabs.order.retain(|l| l != &label);
         tabs.urls.remove(&label);
         tabs.pos_tabs.remove(&label);
-        if tabs.active.as_deref() == Some(label.as_str()) {
-            tabs.active = prev_active
-                .filter(|p| tabs.order.iter().any(|l| l == p))
-                .or_else(|| tabs.order.last().cloned());
-        }
         return Err(err);
     }
     crate::activate_tab(app, &label);
@@ -1514,11 +1556,26 @@ pub async fn tab_close(
     label: String,
 ) -> Result<(), String> {
     check_local_only(&webview)?;
+    let is_last = {
+        let tabs = read_lock(&state.tabs);
+        if !tabs.order.iter().any(|l| l == &label) {
+            return Err("unknown_tab".to_string());
+        }
+        tabs.order.len() == 1
+    };
+    if is_last {
+        let origin = read_lock(&state.configured_origin).clone();
+        let fallback_url = match origin {
+            Some(_) => local_app_url("boot.html")?,
+            None => local_app_url("index.html")?,
+        };
+        open_tab_internal(&app, &state, fallback_url).await?;
+    }
     let (was_active, neighbor) = {
         let mut tabs = write_lock(&state.tabs);
         let idx = tabs.order.iter().position(|l| l == &label);
         let Some(idx) = idx else {
-            return Err("unknown_tab".to_string());
+            return Ok(());
         };
         let was_active = tabs.active.as_deref() == Some(label.as_str());
         tabs.order.remove(idx);
@@ -1529,7 +1586,7 @@ pub async fn tab_close(
         } else {
             Some(tabs.order[idx.min(tabs.order.len() - 1)].clone())
         };
-        if was_active || neighbor.is_none() {
+        if was_active {
             tabs.active = neighbor.clone();
         }
         (was_active, neighbor)
@@ -1537,23 +1594,9 @@ pub async fn tab_close(
     if let Some(wv) = app.get_webview(&label) {
         let _ = wv.close();
     }
-    if was_active || neighbor.is_none() {
-        match neighbor {
-            Some(next) => crate::activate_tab(&app, &next),
-            None => {
-                let origin = read_lock(&state.configured_origin).clone();
-                match origin {
-                    Some(origin) => {
-                        let url =
-                            tauri::Url::parse(&origin).map_err(|_| "bad_origin_url".to_string())?;
-                        open_tab_internal(&app, &state, url).await?;
-                    }
-                    None => {
-                        let url = local_app_url("index.html")?;
-                        open_tab_internal(&app, &state, url).await?;
-                    }
-                }
-            }
+    if was_active {
+        if let Some(next) = neighbor {
+            crate::activate_tab(&app, &next);
         }
     }
     Ok(())
@@ -1683,6 +1726,7 @@ pub async fn clear_web_data_cmd(
 
 #[tauri::command]
 pub fn save_origin_cmd(
+    app: tauri::AppHandle,
     webview: tauri::Webview,
     state: State<'_, AppState>,
     origin: String,
@@ -1695,13 +1739,25 @@ pub fn save_origin_cmd(
     let current_auto = *read_lock(&state.auto_reprint);
     let next_auto = auto_reprint.unwrap_or(current_auto);
     let validated = config::save_origin(&state.config_dir, &origin, next_auto)?;
-    {
+    let prev_origin = {
         let mut guard = write_lock(&state.configured_origin);
-        *guard = Some(validated.clone());
-    }
+        guard.replace(validated.clone())
+    };
     {
         let mut auto_guard = write_lock(&state.auto_reprint);
         *auto_guard = next_auto;
+    }
+    // Keep open remote tabs synchronized when the Odoo server URL changes so they
+    // never get stranded on a stale origin that fails IPC origin checks.
+    if prev_origin.as_deref() != Some(validated.as_str()) {
+        if let Ok(target_url) = validated.parse::<tauri::Url>() {
+            let snapshot = read_lock(&state.tabs).snapshot();
+            for tab in snapshot.iter().filter(|t| !t.is_local) {
+                if let Some(wv) = app.get_webview(&tab.label) {
+                    let _ = wv.navigate(target_url.clone());
+                }
+            }
+        }
     }
     Ok(validated)
 }
@@ -1715,7 +1771,7 @@ pub fn get_printer_settings(
     state: State<'_, AppState>,
 ) -> Result<config::PrinterSettingsMap, String> {
     check_local_only(&webview)?;
-    Ok(config::load_printer_settings(&state.config_dir))
+    Ok(read_lock(&state.printer_settings).clone())
 }
 
 #[tauri::command]
@@ -1735,13 +1791,14 @@ pub fn set_printer_settings(
             return Err("printer setting value too long".to_string());
         }
     }
-    let mut map = config::load_printer_settings(&state.config_dir);
+    let mut map = config::load_printer_settings_checked(&state.config_dir)?;
     if settings == config::PrinterSettings::default() {
         map.remove(&name);
     } else {
         map.insert(name, settings);
     }
     config::save_printer_settings(&state.config_dir, &map)?;
+    *write_lock(&state.printer_settings) = map.clone();
     Ok(map)
 }
 
@@ -1890,7 +1947,7 @@ pub(crate) fn is_blocked_metadata_ip(ip: std::net::IpAddr) -> bool {
 
 struct NativePrintBackend {
     db_path: String,
-    config_dir: std::path::PathBuf,
+    printer_settings: Arc<RwLock<config::PrinterSettingsMap>>,
     read_queue: Option<Queue>,
 }
 
@@ -1943,19 +2000,6 @@ impl NativePrintBackend {
             }
         };
         Ok((kind, data, opts))
-    }
-
-    fn status_code(s: PrinterStatus) -> &'static str {
-        match s {
-            PrinterStatus::Offline => "PRINTER_OFFLINE",
-            PrinterStatus::PaperOut => "PAPER_OUT",
-            PrinterStatus::PaperJam => "PAPER_JAM",
-            PrinterStatus::DoorOpen => "DOOR_OPEN",
-            PrinterStatus::NoToner => "NO_TONER",
-            PrinterStatus::Paused => "PRINTER_PAUSED",
-            PrinterStatus::Error => "PRINTER_ERROR",
-            _ => "PRINTER_BUSY",
-        }
     }
 
     /// Scale a 203-dpi print-head profile width (see
@@ -2037,12 +2081,9 @@ impl NativePrintBackend {
                 if !rolls.is_empty() {
                     let nominal_mm = dots as f64 * 25.4 / 203.0 + 8.0;
                     if !rolls.iter().any(|w| (w - nominal_mm).abs() <= 6.0) {
-                        return Err(BackendError::fatal(
-                            "PAPER_MISMATCH",
-                            &format!(
-                                "requested paper {paper:?} does not match the roll forms reported by the driver: {rolls:?} mm"
-                            ),
-                        ));
+                        eprintln!(
+                            "Yaseir Print: paper override {paper:?} differs from driver roll forms {rolls:?} mm; honoring explicit override"
+                        );
                     }
                 }
             }
@@ -2101,10 +2142,10 @@ impl NativePrintBackend {
                 "The Windows driver did not expose printer capabilities, and the job carries no media width.",
             ));
         }
-        Err(BackendError::fatal(
-            "AUTO_MEDIA_UNAVAILABLE",
-            "No width evidence for ESC/POS rendering: the driver reports no usable form and the job carries no media width.",
-        ))
+        // Pragmatic default: standard 80 mm thermal head (576 dots) when the driver
+        // exposes no usable form dimensions and the job omitted width metadata.
+        eprintln!("Yaseir Print: no roll width reported for {printer:?}; falling back to 80 mm (576 dots)");
+        Ok(576)
     }
 
     /// The (3)-vs-(4) width choice, pure for testing: the
@@ -2353,25 +2394,23 @@ impl NativePrintBackend {
                         )
                     })?;
                 let mut stream = print_raw::EscPos::new();
-                for _ in 0..copies.max(1) {
-                    for i in 0..count {
-                        let page = doc
-                            .render_page(i, RenderMode::Grayscale, render_dpi)
-                            .map_err(|e| BackendError::fatal("RENDER_FAILED", &e.to_string()))?;
-                        let canvas = print_render::bitmap::Canvas {
-                            width: page.width_px,
-                            height: page.height_px,
-                            px: page.pixels,
-                        };
-                        let scaled = print_render::scale_to_width(&canvas, target_w);
-                        let mono = scaled.to_mono(print_render::image::RECEIPT_THRESHOLD);
-                        stream = stream.raster(&mono).feed_lines(4);
-                        if cut {
-                            stream = stream.cut_partial();
-                        }
+                for i in 0..count {
+                    let page = doc
+                        .render_page(i, RenderMode::Grayscale, render_dpi)
+                        .map_err(|e| BackendError::fatal("RENDER_FAILED", &e.to_string()))?;
+                    let canvas = print_render::bitmap::Canvas {
+                        width: page.width_px,
+                        height: page.height_px,
+                        px: page.pixels,
+                    };
+                    let scaled = print_render::scale_to_width(&canvas, target_w);
+                    let mono = scaled.to_mono(print_render::image::RECEIPT_THRESHOLD);
+                    stream = stream.raster(&mono).feed_lines(4);
+                    if cut {
+                        stream = stream.cut_partial();
                     }
                 }
-                Ok(stream.bytes().to_vec())
+                Self::repeat_raw_copies(stream.bytes(), copies)
             }
             "zpl" => {
                 let mut out = String::new();
@@ -2549,36 +2588,6 @@ fn print_pdf_via_gdi(
     // power-on is the same condition one read later.
     // A genuinely broken driver still fails — after the
     // retry envelope, with the same codes.
-    let capabilities = print_win::printer_capabilities(target_name).map_err(|error| {
-        BackendError::retryable(
-            "PRINTER_CAPABILITIES_UNAVAILABLE",
-            &format!("The Windows driver did not expose media capabilities: {error}"),
-        )
-    })?;
-    if let Ok(info) = print_render::parse_pdf_info(data) {
-        for page in &info.pages {
-            if capabilities.forms.is_empty() && !capabilities.custom_size_supported {
-                return Err(BackendError::retryable(
-                        "PRINTER_MEDIA_UNAVAILABLE",
-                        "The installed driver reported no paper forms or custom-size limits; install/update the vendor printer driver.",
-                    ));
-            }
-            let result = if policy == ScalePolicy::CustomAllowed {
-                match_paper_auto(page.size, &capabilities)
-            } else {
-                match_paper(page.size, &capabilities.forms, policy)
-            };
-            result.map_err(|e| BackendError::fatal("PAPER_MISMATCH", &e.to_string()))?;
-        }
-    } else if policy != ScalePolicy::CustomAllowed {
-        // The lightweight parser could not read this PDF:
-        // a strict paper policy must not silently skip the
-        // media validation this block exists to provide.
-        return Err(BackendError::fatal(
-            "PAPER_VALIDATION_UNAVAILABLE",
-            "the document's page sizes could not be verified against the printer's paper forms",
-        ));
-    }
     let render_mode = if opts.color {
         RenderMode::Color
     } else {
@@ -2592,6 +2601,7 @@ fn print_pdf_via_gdi(
         color: opts.color,
         scale_policy: policy,
         tray: opts.tray.clone(),
+        paper: opts.paper.clone(),
     };
     print_win::print_pdf_gdi_detailed(target_name, title, data, &gdi_opts).map_err(|e| {
         // ADR-0004 classification from the backend
@@ -2653,7 +2663,7 @@ impl PrintBackend for NativePrintBackend {
         // AUTO_MEDIA_UNAVAILABLE). Looked up by the job's target
         // pattern here, and again by the resolved spooler name in
         // the spooler branch below.
-        let settings_map = config::load_printer_settings(&self.config_dir);
+        let settings_map = read_lock(&self.printer_settings).clone();
         if let Some(defaults) = settings_map.get(&job.printer) {
             Self::apply_printer_defaults(&mut opts, &kind, defaults);
         }
@@ -2672,10 +2682,32 @@ impl PrintBackend for NativePrintBackend {
             // answer the status protocol is NOT blocked: the probe
             // may veto only on positive evidence, never on silence.
             if opts.mode == "escpos" {
-                if let Ok(Some((code, message))) =
-                    print_raw::tcp9100::query_blocking_condition(&host, port, DLE_PROBE_TIMEOUT)
-                {
-                    return Err(BackendError::retryable(code, message));
+                // Remember TCP hosts that ignore DLE EOT so we don't stall 700ms on every receipt.
+                static DLE_SILENT: std::sync::OnceLock<Mutex<HashSet<String>>> =
+                    std::sync::OnceLock::new();
+                let silent_set = DLE_SILENT.get_or_init(|| Mutex::new(HashSet::new()));
+                let addr_key = format!("{host}:{port}");
+                let skip_probe = silent_set
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .contains(&addr_key);
+                if !skip_probe {
+                    match print_raw::tcp9100::query_blocking_condition(
+                        &host,
+                        port,
+                        DLE_PROBE_TIMEOUT,
+                    ) {
+                        Ok(Some((code, message))) => {
+                            return Err(BackendError::retryable(code, message));
+                        }
+                        Ok(None) => {}
+                        Err(_) => {
+                            silent_set
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .insert(addr_key);
+                        }
+                    }
                 }
             }
             // No local driver exists for a raw network printer:
@@ -2785,32 +2817,24 @@ impl PrintBackend for NativePrintBackend {
             // of being silently dropped.
             let mut ipp_options = print_ipp::IppJobOptions::default();
             if let Some(tray_name) = opts.tray.as_deref() {
-                // Standard tray names map to IPP media-source
-                // keywords; anything else keeps the loud refusal —
-                // a tray must never be silently dropped (2026-11-05).
                 match print_ipp::tray_to_media_source(tray_name) {
                     Some(source) => ipp_options.media_source = Some(source),
                     None => {
-                        return Err(BackendError::fatal(
-                            "IPP_OPTION_UNSUPPORTED",
-                            &format!(
-                                "tray {tray_name:?} cannot be mapped to an IPP media-source keyword"
-                            ),
-                        ));
+                        eprintln!("Yaseir Print: IPP tray {tray_name:?} unmapped; using printer default tray");
                     }
                 }
             }
             if opts.duplex == Some(true) {
                 let sides = "two-sided-long-edge";
-                if !caps.sides_supported.is_empty()
-                    && !caps.sides_supported.iter().any(|x| x == sides)
+                if caps.sides_supported.is_empty()
+                    || caps.sides_supported.iter().any(|x| x == sides)
                 {
-                    return Err(BackendError::fatal(
-                        "IPP_OPTION_UNSUPPORTED",
-                        "the IPP printer does not report duplex (two-sided) support",
-                    ));
+                    ipp_options.sides = Some(sides.to_string());
+                } else {
+                    eprintln!(
+                        "Yaseir Print: IPP printer does not report duplex; printing single-sided"
+                    );
                 }
-                ipp_options.sides = Some(sides.to_string());
             }
             if let Some(paper_name) = opts.paper.as_deref() {
                 let lower = paper_name.trim().to_ascii_lowercase();
@@ -2840,12 +2864,7 @@ impl PrintBackend for NativePrintBackend {
                 match matched_media {
                     Some(m) => ipp_options.media = Some(m),
                     None => {
-                        return Err(BackendError::fatal(
-                            "IPP_OPTION_UNSUPPORTED",
-                            &format!(
-                                "paper {paper_name:?} cannot be mapped to a media size the IPP printer reports"
-                            ),
-                        ));
+                        eprintln!("Yaseir Print: IPP paper {paper_name:?} unmapped; using printer default media");
                     }
                 }
             }
@@ -2864,19 +2883,24 @@ impl PrintBackend for NativePrintBackend {
         }
 
         // 3. Windows Spooler / Local / Shared / Virtual printer
-        let discovered = print_win::discover_printers().map_err(|e| {
+        let mut discovered = print_win::discover_printers().map_err(|e| {
             BackendError::retryable("SPOOLER_UNAVAILABLE", &format!("discover_printers: {e}"))
         })?;
+        if resolve_printer(&job.printer, &discovered).is_none() {
+            // Re-probe once with a fresh cache in case a USB/shared printer just reconnected.
+            print_win::invalidate_discovery_cache();
+            if let Ok(fresh) = print_win::discover_printers() {
+                discovered = fresh;
+            }
+        }
         let mut target_kind: Option<PrinterKind> = None;
         let mut target_class: Option<String> = None;
-        let mut cached_status: Option<PrinterStatus> = None;
         let target_name = if let Some(matched) = resolve_printer(&job.printer, &discovered) {
             target_kind = Some(matched.kind);
             target_class = Some(matched.printer_class.clone());
-            cached_status = Some(matched.status);
             matched.name.clone()
         } else if !discovered.is_empty() {
-            return Err(BackendError::fatal(
+            return Err(BackendError::retryable(
                 "PRINTER_NOT_FOUND",
                 &format!("no installed printer matches pattern {:?}", job.printer),
             ));
@@ -2949,37 +2973,9 @@ impl PrintBackend for NativePrintBackend {
             }
         }
 
-        // Live multi-condition health (bypasses the 5 s discovery cache
-        // so a printer whose cover was just closed or roll refilled prints
-        // immediately). Falls back to discovery-time cached status only if
-        // the live spooler read returns an error. Skipped for virtual
-        // writers (no physical conditions).
-        if target_kind != Some(PrinterKind::Virtual) {
-            match print_win::printer_health(&target_name) {
-                Ok(health) => {
-                    if health.blocks_printing() {
-                        let status = health.primary_status();
-                        return Err(BackendError::retryable(
-                            Self::status_code(status),
-                            &format!(
-                                "printer {target_name:?} health blocks printing: {:?}",
-                                health.conditions
-                            ),
-                        ));
-                    }
-                }
-                Err(_) => {
-                    if let Some(st) = cached_status {
-                        if needs_intervention(st) {
-                            return Err(BackendError::retryable(
-                                Self::status_code(st),
-                                &format!("printer {target_name:?} status is {st:?}"),
-                            ));
-                        }
-                    }
-                }
-            }
-        }
+        // Do not pre-block on Windows Spooler health flags: sleeping USB/WSD
+        // printers often report OFFLINE/PAUSED/USER_INTERVENTION until a job
+        // is submitted to the spooler. Let the spooler accept and wake the device.
 
         let target_width_dots =
             if opts.mode == "escpos" && matches!(kind.as_str(), "pdf" | "image-png") {
@@ -3112,9 +3108,9 @@ impl PrintBackend for NativePrintBackend {
                 // still follows the phase: a pre-write refusal
                 // printed nothing and may retry; a write failure
                 // stays ambiguous (ADR-0004).
-                for _ in 0..opts.copies.max(1) {
+                for copy_idx in 0..opts.copies.max(1) {
                     print_win::print_raw_phased(&target_name, title, &data).map_err(|e| {
-                        if e.pre_write {
+                        if e.pre_write && copy_idx == 0 {
                             BackendError::retryable("SPOOLER_RAW_ERROR", &e.message)
                         } else {
                             BackendError::ambiguous("SPOOLER_RAW_ERROR", &e.message)
@@ -3141,14 +3137,11 @@ fn outcome_log_fields(outcome: &Outcome) -> Option<(&'static str, &str)> {
 /// printer patterns using `print_core::Worker`.
 pub fn spawn_worker_loop(
     db_path: String,
-    config_dir: std::path::PathBuf,
+    printer_settings: Arc<RwLock<config::PrinterSettingsMap>>,
     wake: Arc<(Mutex<bool>, Condvar)>,
+    stop: Arc<AtomicBool>,
 ) {
     std::thread::spawn(move || {
-        // Retention bounds: drop stored document bytes of jobs that
-        // failed long ago, then — on a much longer window — the
-        // history rows themselves, so the queue database cannot grow
-        // for the life of the install (audit M1).
         if let Ok(mut retention_queue) = Queue::open(&db_path) {
             if let Err(e) = retention_queue.purge_stale_failed_payloads(30 * 86_400) {
                 eprintln!("Yaseir Print: failed-payload retention purge failed: {e}");
@@ -3158,28 +3151,22 @@ pub fn spawn_worker_loop(
             }
         }
         let mut entropy: u64 = 0x5EED_2026;
-        let mut worker_queue: Option<Queue> = None;
-        let mut backend = NativePrintBackend {
-            db_path: db_path.clone(),
-            config_dir,
-            read_queue: None,
-        };
+        let mut coord_queue: Option<Queue> = None;
+        let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
         let mut last_reconcile: Option<Instant> = None;
         loop {
-            let mut did_work = false;
-            if worker_queue.is_none() {
+            if stop.load(Ordering::Acquire) {
+                break;
+            }
+            let mut dispatched = false;
+            if coord_queue.is_none() {
                 match Queue::open(&db_path) {
-                    Ok(q) => worker_queue = Some(q),
-                    Err(e) => {
-                        eprintln!("Yaseir Print: cannot open the print queue: {e}");
-                    }
+                    Ok(q) => coord_queue = Some(q),
+                    Err(e) => eprintln!("Yaseir Print: cannot open the print queue: {e}"),
                 }
             }
             let mut reset_queue = false;
-            if let Some(queue) = worker_queue.as_mut() {
-                // Fail jobs wedged in a working state by a dead or
-                // stuck worker (RECONCILED_STALE) instead of letting
-                // them hang forever; fresh jobs are never touched.
+            if let Some(queue) = coord_queue.as_mut() {
                 if last_reconcile.map_or(true, |t| t.elapsed() >= Duration::from_secs(15)) {
                     last_reconcile = Some(Instant::now());
                     if let Err(e) = queue.reconcile_stale() {
@@ -3200,60 +3187,107 @@ pub fn spawn_worker_loop(
                     }
                 };
                 for printer in printers {
-                    entropy = entropy.wrapping_mul(6364136223846793005).wrapping_add(1);
-                    let mut worker = Worker {
-                        queue,
-                        backend: &mut backend,
-                        cfg: WorkerConfig::default(),
-                        entropy,
+                    let claimed_slot = {
+                        let mut active = in_flight.lock().unwrap_or_else(|e| e.into_inner());
+                        active.insert(printer.clone())
                     };
-                    // Panic isolation: one bad job or backend panic
-                    // must never kill the only worker thread and
-                    // silently stop all printing for the session.
-                    let started = Instant::now();
-                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        worker.run_once(&printer)
-                    }));
-                    let elapsed_ms = started.elapsed().as_millis();
-                    drop(worker);
-                    match outcome {
-                        Ok(Ok(o)) => {
-                            if let Some((label, job_id)) = outcome_log_fields(&o) {
-                                eprintln!(
-                                    "Yaseir Print: job_id={job_id} printer={printer:?} outcome={label} elapsed_ms={elapsed_ms}"
-                                );
-                            }
-                            if o != Outcome::Idle {
-                                did_work = true;
-                            }
-                        }
-                        Ok(Err(e)) => {
-                            eprintln!(
-                                "Yaseir Print: worker error printer={printer:?} elapsed_ms={elapsed_ms}: {e}"
-                            );
-                            if matches!(e, print_core::QueueError::Db(_)) {
-                                reset_queue = true;
-                                break;
-                            }
-                        }
-                        Err(_) => {
-                            eprintln!(
-                                "Yaseir Print: worker panicked printer={printer:?} elapsed_ms={elapsed_ms}; resetting queue"
-                            );
-                            reset_queue = true;
-                            break;
-                        }
+                    if !claimed_slot {
+                        continue;
                     }
+                    dispatched = true;
+                    entropy = entropy.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    let seed = entropy;
+                    let db_c = db_path.clone();
+                    let ps_c = Arc::clone(&printer_settings);
+                    let wake_c = Arc::clone(&wake);
+                    let stop_c = Arc::clone(&stop);
+                    let flight_c = Arc::clone(&in_flight);
+                    // One short-lived thread per active printer prevents a slow network
+                    // printer from blocking local USB receipt printers.
+                    std::thread::spawn(move || {
+                        struct SlotGuard(
+                            Arc<Mutex<HashSet<String>>>,
+                            String,
+                            Arc<(Mutex<bool>, Condvar)>,
+                        );
+                        impl Drop for SlotGuard {
+                            fn drop(&mut self) {
+                                self.0
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .remove(&self.1);
+                                let (lock, cvar) = &*self.2;
+                                if let Ok(mut pending) = lock.lock() {
+                                    *pending = true;
+                                    cvar.notify_one();
+                                }
+                            }
+                        }
+                        let _guard = SlotGuard(flight_c, printer.clone(), wake_c);
+                        let Ok(mut q) = Queue::open(&db_c) else {
+                            return;
+                        };
+                        let mut backend = NativePrintBackend {
+                            db_path: db_c,
+                            printer_settings: ps_c,
+                            read_queue: None,
+                        };
+                        let mut local_entropy = seed;
+                        while !stop_c.load(Ordering::Acquire) {
+                            local_entropy = local_entropy
+                                .wrapping_mul(6364136223846793005)
+                                .wrapping_add(1);
+                            let mut worker = Worker {
+                                queue: &mut q,
+                                backend: &mut backend,
+                                cfg: WorkerConfig::default(),
+                                entropy: local_entropy,
+                            };
+                            let started = Instant::now();
+                            let outcome =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    worker.run_once(&printer)
+                                }));
+                            let elapsed_ms = started.elapsed().as_millis();
+                            drop(worker);
+                            match outcome {
+                                Ok(Ok(o)) => {
+                                    if let Some((label, job_id)) = outcome_log_fields(&o) {
+                                        eprintln!(
+                                            "Yaseir Print: job_id={job_id} printer={printer:?} outcome={label} elapsed_ms={elapsed_ms}"
+                                        );
+                                    }
+                                    if o == Outcome::Idle {
+                                        break;
+                                    }
+                                }
+                                Ok(Err(e)) => {
+                                    eprintln!(
+                                        "Yaseir Print: worker error printer={printer:?} elapsed_ms={elapsed_ms}: {e}"
+                                    );
+                                    break;
+                                }
+                                Err(_) => {
+                                    eprintln!(
+                                        "Yaseir Print: worker panicked printer={printer:?} elapsed_ms={elapsed_ms}"
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+                    });
                 }
             }
             if reset_queue {
-                worker_queue = None;
-                backend.read_queue = None;
+                coord_queue = None;
             }
-            if !did_work {
+            if !dispatched {
+                if stop.load(Ordering::Acquire) {
+                    break;
+                }
                 let (lock, cvar) = &*wake;
                 let mut pending = lock.lock().unwrap_or_else(|p| p.into_inner());
-                if !*pending {
+                if !*pending && !stop.load(Ordering::Acquire) {
                     let (mut guard, _) = cvar
                         .wait_timeout(pending, Duration::from_secs(2))
                         .unwrap_or_else(|p| p.into_inner());

@@ -36,6 +36,7 @@ pub struct GdiJobOptions {
     pub color: bool,
     pub scale_policy: print_core::ScalePolicy,
     pub tray: Option<String>,
+    pub paper: Option<String>,
 }
 
 impl Default for GdiJobOptions {
@@ -48,6 +49,7 @@ impl Default for GdiJobOptions {
             color: true,
             scale_policy: print_core::ScalePolicy::CustomAllowed,
             tray: None,
+            paper: None,
         }
     }
 }
@@ -118,10 +120,10 @@ mod win;
 
 #[cfg(windows)]
 pub use win::{
-    default_printer_name, discover_printers, paper_forms, print_canvas_gdi,
-    print_canvas_gdi_configured, print_canvas_gdi_detailed, print_pdf_gdi, print_pdf_gdi_copies,
-    print_pdf_gdi_detailed, print_pdf_gdi_with_options, print_raw, print_raw_phased,
-    printer_capabilities, printer_health, printer_status,
+    default_printer_name, discover_printers, invalidate_discovery_cache, paper_forms,
+    print_canvas_gdi, print_canvas_gdi_configured, print_canvas_gdi_detailed, print_pdf_gdi,
+    print_pdf_gdi_copies, print_pdf_gdi_detailed, print_pdf_gdi_with_options, print_raw,
+    print_raw_phased, printer_capabilities, printer_health, printer_status,
 };
 
 #[cfg(not(windows))]
@@ -220,6 +222,7 @@ mod stub {
     pub fn discover_printers() -> Result<Vec<print_core::PrinterInfo>, Unsupported> {
         Err(Unsupported)
     }
+    pub fn invalidate_discovery_cache() {}
     pub fn printer_status(_printer: &str) -> Result<print_core::PrinterStatus, Unsupported> {
         Err(Unsupported)
     }
@@ -230,8 +233,8 @@ mod stub {
 
 #[cfg(not(windows))]
 pub use stub::{
-    default_printer_name, discover_printers, paper_forms, print_canvas_gdi,
-    print_canvas_gdi_configured, print_canvas_gdi_detailed, print_pdf_gdi, print_pdf_gdi_copies,
-    print_pdf_gdi_detailed, print_pdf_gdi_with_options, print_raw, print_raw_phased,
-    printer_capabilities, printer_health, printer_status, Unsupported,
+    default_printer_name, discover_printers, invalidate_discovery_cache, paper_forms,
+    print_canvas_gdi, print_canvas_gdi_configured, print_canvas_gdi_detailed, print_pdf_gdi,
+    print_pdf_gdi_copies, print_pdf_gdi_detailed, print_pdf_gdi_with_options, print_raw,
+    print_raw_phased, printer_capabilities, printer_health, printer_status, Unsupported,
 };

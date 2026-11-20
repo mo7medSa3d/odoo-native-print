@@ -4,6 +4,7 @@ mod config;
 use commands::{is_local_app_url, spawn_worker_loop, AppState, TabsState};
 use print_core::security::origin_is_allowed;
 use print_core::Queue;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use tauri::{Manager, WebviewUrl};
 
@@ -28,7 +29,10 @@ const BRIDGE_JS: &str = r#"
     : null;
   function invoke(cmd, args) {
     if (__npTauriInvoke) return __npTauriInvoke(cmd, args || {});
-    return window.__TAURI_INTERNALS__.invoke(cmd, args || {});
+    if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === "function") {
+      return window.__TAURI_INTERNALS__.invoke(cmd, args || {});
+    }
+    return Promise.reject(new Error("tauri_internals_unavailable"));
   }
   // Page error tap. This script runs before any page script, so a
   // bundle that dies on load (a frozen-prototype TypeError, a syntax
@@ -509,23 +513,10 @@ pub const TABBAR_HEIGHT: f64 = 46.0;
 
 /// Fit the tab bar and the ACTIVE content webview to the window's
 /// current client size. Called at startup and on every resize.
-pub fn layout_webviews(app: &tauri::AppHandle) {
-    let Some(window) = app.get_window("main") else {
-        return;
-    };
-    let Ok(size) = window.inner_size() else {
-        return;
-    };
-    if size.width == 0 || size.height == 0 {
+pub fn layout_webviews_with_size(app: &tauri::AppHandle, width: f64, height: f64) {
+    if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
         return;
     }
-    let scale = window
-        .scale_factor()
-        .ok()
-        .filter(|s| s.is_finite() && *s > 0.0)
-        .unwrap_or(1.0);
-    let width = size.width as f64 / scale;
-    let height = size.height as f64 / scale;
     if let Some(tabbar) = app.get_webview("tabbar") {
         let _ = tabbar.set_position(tauri::LogicalPosition::new(0.0, 0.0));
         let _ = tabbar.set_size(tauri::LogicalSize::new(width, TABBAR_HEIGHT));
@@ -546,6 +537,24 @@ pub fn layout_webviews(app: &tauri::AppHandle) {
     }
 }
 
+pub fn layout_webviews(app: &tauri::AppHandle) {
+    let Some(window) = app.get_window("main") else {
+        return;
+    };
+    let Ok(size) = window.inner_size() else {
+        return;
+    };
+    if size.width == 0 || size.height == 0 {
+        return;
+    }
+    let scale = window
+        .scale_factor()
+        .ok()
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .unwrap_or(1.0);
+    layout_webviews_with_size(app, size.width as f64 / scale, size.height as f64 / scale);
+}
+
 /// Make `label` the visible tab: hide every other content webview,
 /// show this one, refit it to the window.
 pub fn activate_tab(app: &tauri::AppHandle, label: &str) {
@@ -558,6 +567,7 @@ pub fn activate_tab(app: &tauri::AppHandle, label: &str) {
         tabs.active = Some(label.to_string());
         tabs.order.clone()
     };
+    layout_webviews(app);
     for other in &labels {
         if let Some(wv) = app.get_webview(other) {
             if other == label {
@@ -567,7 +577,6 @@ pub fn activate_tab(app: &tauri::AppHandle, label: &str) {
             }
         }
     }
-    layout_webviews(app);
 }
 
 /// Create one content webview (a tab) in the main window. All tabs
@@ -699,8 +708,39 @@ pub fn create_tab_webview(
         .map_err(|e| e.to_string())
 }
 
+#[cfg(windows)]
+fn acquire_single_instance_guard() -> bool {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateMutexW(
+            attrs: *mut std::ffi::c_void,
+            initial_owner: i32,
+            name: *const u16,
+        ) -> *mut std::ffi::c_void;
+        fn GetLastError() -> u32;
+    }
+    const ERROR_ALREADY_EXISTS: u32 = 183;
+    let wide_name: Vec<u16> = "Local\\YaseirPrintSingleInstance\0"
+        .encode_utf16()
+        .collect();
+    let handle = unsafe { CreateMutexW(std::ptr::null_mut(), 0, wide_name.as_ptr()) };
+    if handle.is_null() {
+        return true;
+    }
+    unsafe { GetLastError() != ERROR_ALREADY_EXISTS }
+}
+
+#[cfg(not(windows))]
+fn acquire_single_instance_guard() -> bool {
+    true
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if !acquire_single_instance_guard() {
+        eprintln!("Yaseir Print: another instance is already running; exiting.");
+        return;
+    }
     tauri::Builder::default()
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
@@ -724,11 +764,15 @@ pub fn run() {
 
             let queue_arc = Arc::new(Mutex::new(queue));
             let environment = RwLock::new(None);
+            let printer_settings =
+                Arc::new(RwLock::new(config::load_printer_settings(&config_dir)));
             let worker_wake = Arc::new((Mutex::new(true), Condvar::new()));
+            let worker_stop = Arc::new(AtomicBool::new(false));
             spawn_worker_loop(
                 db_path.clone(),
-                config_dir.clone(),
+                Arc::clone(&printer_settings),
                 Arc::clone(&worker_wake),
+                Arc::clone(&worker_stop),
             );
 
             let initial_origin = resolved.odoo_origin.clone();
@@ -742,6 +786,8 @@ pub fn run() {
                 locked_by_policy: resolved.locked_by_policy,
                 auto_reprint: RwLock::new(resolved.auto_reprint),
                 worker_wake,
+                worker_stop,
+                printer_settings,
             });
 
             // With an origin configured, start on the local boot page:
@@ -800,13 +846,22 @@ pub fn run() {
             // Keep the tab bar and the active tab fitted to the
             // window on every resize.
             let resize_handle = app.handle().clone();
-            window.on_window_event(move |event| {
-                if matches!(
-                    event,
-                    tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }
-                ) {
+            window.on_window_event(move |event| match event {
+                tauri::WindowEvent::ScaleFactorChanged {
+                    scale_factor,
+                    new_inner_size,
+                    ..
+                } if scale_factor.is_finite() && *scale_factor > 0.0 => {
+                    layout_webviews_with_size(
+                        &resize_handle,
+                        new_inner_size.width as f64 / *scale_factor,
+                        new_inner_size.height as f64 / *scale_factor,
+                    );
+                }
+                tauri::WindowEvent::Resized(_) => {
                     layout_webviews(&resize_handle);
                 }
+                _ => {}
             });
             layout_webviews(app.handle());
             Ok(())
@@ -845,6 +900,21 @@ pub fn run() {
             commands::nav_forward,
             commands::nav_reload
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Yaseir Print");
+        .build(tauri::generate_context!())
+        .expect("error while building Yaseir Print")
+        .run(|app_handle, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    state.worker_stop.store(true, Ordering::Release);
+                    let (lock, cvar) = &*state.worker_wake;
+                    if let Ok(mut pending) = lock.lock() {
+                        *pending = true;
+                        cvar.notify_all();
+                    }
+                }
+            }
+        });
 }

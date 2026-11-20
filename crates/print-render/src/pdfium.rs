@@ -175,7 +175,23 @@ impl Pdfium {
     ///    tauri.conf.json drops `pdfium.dll` in the resource dir)
     /// 4. the bare library name (OS loader search: PATH / system dirs)
     pub fn load() -> Result<Arc<Self>, PdfiumError> {
-        Self::load_from(None)
+        // Keep the default PDFium library mapped across jobs so we do not
+        // reload/re-init a ~7.5 MB DLL and flush font caches on every PDF.
+        static DEFAULT_INSTANCE: OnceLock<Mutex<Option<Arc<Pdfium>>>> = OnceLock::new();
+        let slot = DEFAULT_INSTANCE.get_or_init(|| Mutex::new(None));
+        {
+            let guard = slot.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(cached) = guard.as_ref() {
+                return Ok(Arc::clone(cached));
+            }
+        }
+        let loaded = Self::load_from(None)?;
+        let mut guard = slot.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cached) = guard.as_ref() {
+            return Ok(Arc::clone(cached));
+        }
+        *guard = Some(Arc::clone(&loaded));
+        Ok(loaded)
     }
 
     /// Like [`Pdfium::load`], with an explicit first candidate.

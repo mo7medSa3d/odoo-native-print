@@ -487,6 +487,7 @@ pub fn print_pdf_gdi_copies(
         color: mode == print_render::RenderMode::Color,
         scale_policy: ScalePolicy::CustomAllowed,
         tray: None,
+        paper: None,
     };
     print_pdf_gdi_with_options(printer, title, pdf_bytes, &opts)
 }
@@ -544,50 +545,79 @@ pub fn print_pdf_gdi_detailed(
     let name = wide(printer);
     let mut total_sent = 0usize;
 
+    // Precompute paper match and DEVMODE once per sub-job instead of repeating
+    // OpenPrinterW + 3x DocumentPropertiesW on every copy.
+    let mut prepared_subjobs = Vec::with_capacity(subjobs.len());
+    for sub in &subjobs {
+        let explicit_paper = opts
+            .paper
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let matched = match (&capabilities, explicit_paper) {
+            (Some(caps), Some(wanted)) => {
+                if let Some(form) = caps
+                    .forms
+                    .iter()
+                    .find(|f| f.name.eq_ignore_ascii_case(wanted))
+                {
+                    Some(print_core::PaperMatch {
+                        form: form.clone(),
+                        kind: MatchKind::Exact,
+                    })
+                } else if opts.scale_policy == ScalePolicy::CustomAllowed {
+                    match_paper_auto(sub.size, caps).ok()
+                } else {
+                    match_paper(sub.size, &caps.forms, opts.scale_policy).ok()
+                }
+            }
+            (None, _) => None,
+            (Some(caps), None) if caps.forms.is_empty() && !caps.custom_size_supported => None,
+            (Some(caps), None) if opts.scale_policy == ScalePolicy::CustomAllowed => {
+                match match_paper_auto(sub.size, caps) {
+                    Ok(m) => Some(m),
+                    Err(e) => {
+                        eprintln!("Yaseir Print: paper match fallback for {printer:?} ({e})");
+                        None
+                    }
+                }
+            }
+            (Some(caps), None) => match match_paper(sub.size, &caps.forms, opts.scale_policy) {
+                Ok(m) => Some(m),
+                Err(e) => {
+                    if opts.scale_policy == ScalePolicy::Strict {
+                        return Err(GdiPrintError::setup(e.to_string()));
+                    }
+                    eprintln!("Yaseir Print: paper match fallback for {printer:?} ({e})");
+                    None
+                }
+            },
+        };
+        let match_ref = matched.as_ref().map(|m| (&m.form, m.kind));
+        let match_kind = matched
+            .as_ref()
+            .map(|m| m.kind)
+            .unwrap_or(MatchKind::NearestLargerFit);
+        let devmode = build_printer_devmode(
+            printer,
+            sub.size,
+            match_ref,
+            opts.duplex,
+            opts.color,
+            opts.tray.as_deref(),
+        );
+        prepared_subjobs.push((sub, match_kind, devmode));
+    }
+
     for _copy in 0..opts.copies.max(1) {
-        for sub in &subjobs {
+        for (sub, base_match_kind, devmode) in &prepared_subjobs {
             // A failure inside the copies loop is a setup failure
             // only when no earlier copy/sub-job reached paper yet.
             let stage_err = |message: String, sent: usize| GdiPrintError {
                 message,
                 ambiguous: sent > 0,
             };
-            let matched = match &capabilities {
-                None => None,
-                Some(caps) if caps.forms.is_empty() && !caps.custom_size_supported => None,
-                Some(caps) if opts.scale_policy == ScalePolicy::CustomAllowed => {
-                    match match_paper_auto(sub.size, caps) {
-                        Ok(m) => Some(m),
-                        Err(e) => {
-                            eprintln!("Yaseir Print: paper match fallback for {printer:?} ({e})");
-                            None
-                        }
-                    }
-                }
-                Some(caps) => match match_paper(sub.size, &caps.forms, opts.scale_policy) {
-                    Ok(m) => Some(m),
-                    Err(e) => {
-                        if opts.scale_policy == ScalePolicy::Strict {
-                            return Err(stage_err(e.to_string(), total_sent));
-                        }
-                        eprintln!("Yaseir Print: paper match fallback for {printer:?} ({e})");
-                        None
-                    }
-                },
-            };
-            let match_ref = matched.as_ref().map(|m| (&m.form, m.kind));
-            let mut match_kind = matched
-                .as_ref()
-                .map(|m| m.kind)
-                .unwrap_or(MatchKind::NearestLargerFit);
-            let devmode = build_printer_devmode(
-                printer,
-                sub.size,
-                match_ref,
-                opts.duplex,
-                opts.color,
-                opts.tray.as_deref(),
-            );
+            let mut match_kind = *base_match_kind;
             let init_ptr = devmode
                 .as_ref()
                 .map(|b| b.as_ptr() as *const c_void)
@@ -1197,8 +1227,23 @@ unsafe fn convert_info2(info: &PrinterInfo2W) -> crate::discovery::RawPrinterInf
 /// worker path resolves a printer per job; 5 s keeps bursts cheap
 /// while a (dis)appearing printer is noticed quickly. UI callers
 /// layer their own longer cache on top.
-const DISCOVERY_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+const DISCOVERY_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+const CAPABILITIES_TTL: std::time::Duration = std::time::Duration::from_secs(60);
 static DISCOVERY_CACHE: crate::discovery::DiscoveryCache = crate::discovery::DiscoveryCache::new();
+static CAPS_CACHE: std::sync::Mutex<
+    Option<
+        std::collections::HashMap<String, (std::time::Instant, print_core::PrinterCapabilities)>,
+    >,
+> = std::sync::Mutex::new(None);
+
+pub fn invalidate_discovery_cache() {
+    DISCOVERY_CACHE.invalidate();
+    if let Ok(mut guard) = CAPS_CACHE.lock() {
+        if let Some(map) = guard.as_mut() {
+            map.clear();
+        }
+    }
+}
 
 pub fn discover_printers() -> Result<Vec<print_core::PrinterInfo>, String> {
     DISCOVERY_CACHE.get_or_discover(DISCOVERY_TTL, discover_printers_uncached)
@@ -1515,8 +1560,31 @@ pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
     Ok(forms)
 }
 
-/// Query capabilities reported by the installed Windows printer driver.
+/// Query capabilities reported by the installed Windows printer driver
+/// (cached per printer for 60s to avoid ~15 synchronous DeviceCapabilitiesW
+/// RPCs on every print job).
 pub fn printer_capabilities(printer: &str) -> Result<print_core::PrinterCapabilities, String> {
+    {
+        let guard = CAPS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, caps)) = guard.as_ref().and_then(|m| m.get(printer)) {
+            if at.elapsed() < CAPABILITIES_TTL {
+                return Ok(caps.clone());
+            }
+        }
+    }
+    let caps = printer_capabilities_uncached(printer)?;
+    {
+        let mut guard = CAPS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        let map = guard.get_or_insert_with(std::collections::HashMap::new);
+        map.insert(
+            printer.to_string(),
+            (std::time::Instant::now(), caps.clone()),
+        );
+    }
+    Ok(caps)
+}
+
+fn printer_capabilities_uncached(printer: &str) -> Result<print_core::PrinterCapabilities, String> {
     let name = wide(printer);
     let forms = paper_forms(printer)?;
     let count = |capability: u16| unsafe {

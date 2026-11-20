@@ -576,7 +576,7 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
 
     for (let i = 0; Date.now() < absoluteDeadline && Date.now() - lastProgressAt < 5 * 60 * 1000; i++) {
         await new Promise((resolve) =>
-            setTimeout(resolve, i < 10 ? 600 : 2000));
+            setTimeout(resolve, i === 0 ? 120 : (i < 10 ? 450 : 2000)));
         try {
             let state = null;
             let errorCode = null;
@@ -661,7 +661,7 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
                     _t('Receipt printing failed on "%s" (%s). Check the printer before reprinting.', printerName || rule.printer_pattern, errorCode || state),
                     "danger",
                 );
-                continue;
+                break;
             }
             break;
         } catch (_err) {
@@ -733,7 +733,7 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
         null;
     const keyRef =
         (order && (order.uuid || order.uid || order.name || order.pos_reference)) ||
-        "pos-order";
+        `pos-html-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const safeRef = String(keyRef).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40);
     // Include cashier user id in the job key because the server log scopes jobs per user.
     const posStore = (contextObj && contextObj.pos) || contextObj || null;
@@ -926,6 +926,22 @@ function wrapPosStorePrintReceipt(posStore) {
         // Inside the desktop app, never fall back to the browser print dialog;
         // report the reason and leave the receipt on screen for retry.
         try {
+            // Skip the 2s DOM poll on offscreen reprints (e.g. TicketScreen) when
+            // no .pos-receipt is currently mounted and printHtml is already wrapped.
+            if (
+                opts &&
+                opts.order &&
+                !findReceiptElement() &&
+                posStore.printer &&
+                posStore.printer.__nativePrintHtmlWrapped
+            ) {
+                posStore.__pendingNativePrintOrder = opts.order;
+                try {
+                    return await originalPrintReceipt(opts);
+                } finally {
+                    posStore.__pendingNativePrintOrder = null;
+                }
+            }
             const failure = await printPosReceiptNatively(posStore, opts && opts.order);
             if (!failure) {
                 return true;

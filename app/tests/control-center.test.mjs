@@ -13,6 +13,7 @@ test("embedded Control Center JavaScript parses", () => {
 });
 
 test("no inline event handlers remain and all data-action bindings resolve", () => {
+  assert.equal(html.match(/\sstyle\s*=\s*"/gi), null, "no inline style= attributes allowed in index.html (Tauri v2 CSP auto-hashing drops unsafe-inline)");
   const inlineHandlers = [...html.matchAll(/\bon(?:click|change|input|submit)=["']([^"']+)["']/gi)];
   assert.equal(inlineHandlers.length, 0, "inline event handlers must be removed for strict CSP");
   const actions = [...html.matchAll(/data-action=["']([^"']+)["']/g)].map(m => m[1]);
@@ -750,7 +751,7 @@ test("boot.html flows: strict origin check, probe success redirect, probe failur
     const { windowObj, replacedUrls } = createMiniDom(bootHtml);
     windowObj.__TAURI_INTERNALS__ = {
       async invoke(cmd) {
-        if (cmd === "app_overview") return { odooOrigin: "https://odoo.example.com" };
+        if (cmd === "app_identity") return { odooOrigin: "https://odoo.example.com" };
         if (cmd === "probe_origin") return true;
       },
     };
@@ -770,7 +771,7 @@ test("boot.html flows: strict origin check, probe success redirect, probe failur
     let probes = 0;
     windowObj.__TAURI_INTERNALS__ = {
       async invoke(cmd) {
-        if (cmd === "app_overview") return { odooOrigin: "http://192.168.1.20:8069" };
+        if (cmd === "app_identity") return { odooOrigin: "http://192.168.1.20:8069" };
         if (cmd === "probe_origin") { probes++; return false; }
       },
     };
@@ -785,7 +786,7 @@ test("boot.html flows: strict origin check, probe success redirect, probe failur
     assert.equal(probes, 2);
   }
 
-  // Case 3: app_overview rejects -> initFail state
+  // Case 3: app_identity rejects -> initFail state
   {
     const { windowObj, document } = createMiniDom(bootHtml);
     windowObj.__TAURI_INTERNALS__ = {

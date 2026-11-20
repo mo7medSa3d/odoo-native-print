@@ -994,44 +994,42 @@ impl Queue {
         next: JobState,
         error_code: Option<&str>,
     ) -> Result<(), QueueError> {
-        let job = self.get(id)?;
-        job.state.transition_to(next)?;
-        // Guarded write: the UPDATE only lands if the stored state is
-        // still the state we validated against. Two connections (worker
-        // + reconciler, app + probe tool) can no longer interleave a
-        // read-check-update into a transition the machine forbids; the
-        // loser sees 0 rows changed and gets the transition error.
+        let now = now_unix();
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let current_state: JobState = tx
+            .query_row("SELECT state FROM jobs WHERE id=?1", params![id], |r| {
+                let s: String = r.get(0)?;
+                parse_job_state(0, &s)
+            })
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => QueueError::NotFound(id.to_string()),
+                other => QueueError::Db(other),
+            })?;
+        current_state.transition_to(next)?;
         let changed = if next == JobState::Queued {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE jobs SET state=?1, error_code=?2, available_at=0, updated_at=?3 WHERE id=?4 AND state=?5",
-                params![
-                    next.as_str(),
-                    error_code,
-                    now_unix(),
-                    id,
-                    job.state.as_str()
-                ],
+                params![next.as_str(), error_code, now, id, current_state.as_str()],
             )?
         } else {
-            self.conn.execute(
+            tx.execute(
                 "UPDATE jobs SET state=?1, error_code=?2, updated_at=?3 WHERE id=?4 AND state=?5",
-                params![
-                    next.as_str(),
-                    error_code,
-                    now_unix(),
-                    id,
-                    job.state.as_str()
-                ],
+                params![next.as_str(), error_code, now, id, current_state.as_str()],
             )?
         };
         if changed == 0 {
-            let current = self.get(id)?.state;
             return Err(QueueError::Transition(crate::state::TransitionError {
-                from: current,
+                from: current_state,
                 to: next,
             }));
         }
-        self.record_event_best_effort(id, &format!("state:{}", next.as_str()), error_code);
+        let _ = tx.execute(
+            "INSERT INTO job_events(job_id, at_unix, event, detail) VALUES(?1,?2,?3,?4)",
+            params![id, now, format!("state:{}", next.as_str()), error_code],
+        );
+        tx.commit()?;
         Ok(())
     }
 

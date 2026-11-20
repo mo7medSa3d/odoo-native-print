@@ -10,13 +10,24 @@
   body {
     background: var(--bg-chrome);
     color: var(--text-primary);
-    border-block-end: 1px solid var(--border);
     display: flex;
-    align-items: center;
+    align-items: stretch;
     gap: 6px;
-    padding-inline: 10px;
+    padding-inline: 8px;
+    position: relative;
     user-select: none;
     -webkit-user-select: none;
+  }
+  /* Continuous bottom chrome seam sits behind the active tab so the active tab merges cleanly into the page */
+  body::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    inset-block-end: 0;
+    height: 1px;
+    background: var(--border);
+    z-index: 1;
+    pointer-events: none;
   }
 
   .nav-group {
@@ -24,6 +35,7 @@
     align-items: center;
     gap: 2px;
     flex: 0 0 auto;
+    z-index: 2;
   }
   .tb-btn {
     width: 28px;
@@ -37,100 +49,105 @@
     align-items: center;
     justify-content: center;
     font-family: inherit;
-    transition:
-      background-color var(--dur-fast) var(--ease-out),
-      color var(--dur-fast) var(--ease-out),
-      border-color var(--dur-fast) var(--ease-out);
+    transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .tb-btn:hover {
     background: var(--bg-hover);
     color: var(--text-primary);
-    border-color: var(--border);
   }
-  .tb-btn:active {
-    background: var(--bg-subtle);
-  }
+  .tb-btn:active { background: var(--bg-subtle); }
   .tb-btn svg { width: 15px; height: 15px; }
 
   .divider {
     width: 1px;
     height: 18px;
+    align-self: center;
     background: var(--border-strong);
     flex: 0 0 auto;
     margin-inline: 2px;
-    opacity: 0.55;
+    opacity: 0.45;
   }
 
   .tabs {
     flex: 1 1 auto;
     display: flex;
     align-items: flex-end;
-    gap: var(--space-1);
+    gap: 2px;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
     height: 100%;
-    padding-block-start: var(--space-1);
+    padding-block-start: 6px;
+    position: relative;
+    z-index: 2;
   }
   .tabs::-webkit-scrollbar { display: none; }
 
+  /* Browser-native borderless inactive tabs with subtle vertical separators */
   .tab {
-    flex: 0 1 206px;
-    min-width: 108px;
-    max-width: 206px;
-    height: 34px;
+    flex: 0 1 220px;
+    min-width: 84px;
+    max-width: 220px;
+    height: 36px;
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding-inline: 10px 4px;
-    background: var(--bg-subtle);
+    gap: 7px;
+    padding-inline: 11px 6px;
+    background: transparent;
     color: var(--text-secondary);
-    border: 1px solid var(--border);
+    border: 1px solid transparent;
     border-block-end: 0;
     border-start-start-radius: var(--radius-md);
     border-start-end-radius: var(--radius-md);
-    cursor: grab;
+    cursor: pointer;
     white-space: nowrap;
     position: relative;
     transition:
       background-color var(--dur-fast) var(--ease-out),
-      color var(--dur-fast) var(--ease-out),
-      border-color var(--dur-fast) var(--ease-out),
-      box-shadow var(--dur-fast) var(--ease-out);
+      color var(--dur-fast) var(--ease-out);
   }
-  .tab:hover {
+  .tab:not(.active):not(:hover)::after {
+    content: "";
+    position: absolute;
+    inset-inline-end: -2px;
+    top: 9px;
+    bottom: 9px;
+    width: 1px;
+    background: var(--border-strong);
+    opacity: 0.32;
+    pointer-events: none;
+  }
+  .tab:has(+ .tab.active)::after,
+  .tab:has(+ .tab:hover)::after,
+  .tab:last-of-type::after { opacity: 0; }
+  .tab:not(.active):hover {
     background: var(--bg-hover);
     color: var(--text-primary);
-  }
-  .tab:active {
-    background: var(--bg-subtle);
   }
   .tab.dragging { opacity: 0.45; cursor: grabbing; }
   .tab.drop-hint {
     background: var(--brand-soft);
     color: var(--text-primary);
     border-color: var(--brand-text);
-    box-shadow: inset 0 0 0 1px var(--brand-text);
   }
   .tab.active {
+    height: 38px;
     background: var(--bg-surface);
     color: var(--text-primary);
     border-color: var(--border);
     font-weight: 600;
     box-shadow: var(--shadow-sm);
-    margin-bottom: -1px;
-    padding-bottom: 1px;
-    z-index: 2;
+    z-index: 3;
   }
   .tab.active::before {
     content: "";
     position: absolute;
-    inset-block-start: 0;
-    inset-inline: 10px;
+    inset-block-start: -1px;
+    inset-inline: 8px;
     height: 2.5px;
     border-end-start-radius: var(--radius-pill);
     border-end-end-radius: var(--radius-pill);
-    background: var(--brand-text);
+    background: var(--brand);
   }
   .tab .t-icon {
     flex: 0 0 auto;
@@ -140,19 +157,17 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: color var(--dur-fast) var(--ease-out);
   }
   .tab .t-icon-cc { color: var(--brand-text); }
   .tab .t-icon-settings { color: var(--text-secondary); }
   .tab.active .t-icon { color: var(--brand-text); }
-  .tab.active .t-icon-settings { color: var(--text-secondary); }
+  .tab.active .t-icon-settings { color: var(--text-primary); }
   .tab .t-title {
     flex: 1 1 auto;
     overflow: hidden;
     text-overflow: ellipsis;
     font-size: var(--text-sm);
     line-height: var(--leading-tight);
-    letter-spacing: -0.005em;
   }
   .tab .t-pos {
     flex: 0 0 auto;
@@ -161,15 +176,16 @@
     font-weight: 700;
     letter-spacing: 0.04em;
     background: var(--info-bg);
-    color: var(--accent-cyan);
-    padding: 2px 5px;
+    color: var(--info-fg);
+    border: 1px solid var(--info-border);
+    padding: 1px 5px;
     border-radius: var(--radius-xs);
-    line-height: 1;
+    line-height: 1.2;
   }
   .tab .t-close {
     flex: 0 0 auto;
-    width: 24px;
-    height: 24px;
+    width: 22px;
+    height: 22px;
     border: 0;
     border-radius: var(--radius-xs);
     background: transparent;
@@ -180,17 +196,13 @@
     align-items: center;
     justify-content: center;
     line-height: 1;
-    opacity: 0.72;
-    transition:
-      background-color var(--dur-fast) var(--ease-out),
-      color var(--dur-fast) var(--ease-out),
-      opacity var(--dur-fast) var(--ease-out);
+    opacity: 0.45;
+    transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
   }
   .tab:hover .t-close,
   .tab.active .t-close,
   .tab .t-close:focus-visible { opacity: 1; }
   .tab .t-close:hover { background: var(--err-bg); color: var(--err-fg); }
-  .tab .t-close:active { opacity: 0.85; }
 
   .tab-add {
     flex: 0 0 auto;
@@ -205,34 +217,29 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-inline: 2px;
-    transition:
-      background-color var(--dur-fast) var(--ease-out),
-      color var(--dur-fast) var(--ease-out),
-      border-color var(--dur-fast) var(--ease-out);
+    margin-inline: 4px;
+    margin-block-end: 2px;
+    transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .tab-add:hover {
     background: var(--bg-hover);
-    border-color: var(--border);
-    color: var(--brand-text);
-  }
-  .tab-add:active {
-    background: var(--bg-subtle);
+    color: var(--text-primary);
   }
   .tab-add svg { width: 14px; height: 14px; }
 
   .tb-utilities {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     flex: 0 0 auto;
+    z-index: 2;
   }
 
   .tb-action {
     flex: 0 0 auto;
     min-width: 28px;
     height: 28px;
-    border: 1px solid var(--border);
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
     cursor: pointer;
     display: flex;
@@ -240,40 +247,30 @@
     justify-content: center;
     gap: 6px;
     padding-inline: 9px;
-    background: var(--bg-surface);
+    background: transparent;
     color: var(--text-primary);
     font-size: var(--text-xs);
-    font-weight: 500;
+    font-weight: 600;
     font-family: inherit;
-    transition:
-      background-color var(--dur-fast) var(--ease-out),
-      border-color var(--dur-fast) var(--ease-out),
-      color var(--dur-fast) var(--ease-out);
+    transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
   .tb-action:hover {
     background: var(--bg-hover);
-    border-color: var(--border-strong);
+    border-color: var(--border);
   }
-  .tb-action:active {
-    background: var(--bg-subtle);
-  }
+  .tb-action:active { background: var(--bg-subtle); }
   .tb-action.brand {
-    background: var(--brand);
-    border-color: var(--brand);
-    color: var(--brand-fg);
-    font-weight: 600;
+    background: var(--bg-surface);
+    border-color: var(--border);
+    color: var(--brand-text);
   }
   .tb-action.brand:hover {
-    background: var(--brand-hover);
-    border-color: var(--brand-hover);
-  }
-  .tb-action.brand:active {
-    filter: brightness(0.95);
+    background: var(--brand-soft);
+    border-color: var(--brand-text);
   }
   .tb-action img { width: 14px; height: 14px; border-radius: 3px; }
-  .tb-action svg { width: 13px; height: 13px; }
+  .tb-action svg { width: 14px; height: 14px; }
 
-  /* Keep focus rings inside overflow:hidden tabbar bounds */
   .tb-btn:focus-visible,
   .tab-add:focus-visible,
   .tb-action:focus-visible,
@@ -282,9 +279,6 @@
     outline: 2px solid var(--brand-text);
     outline-offset: -2px;
     box-shadow: var(--focus-ring);
-  }
-  .tab.active:focus-visible {
-    box-shadow: var(--shadow-sm), var(--focus-ring);
   }
 
   @media (max-width: 640px) {
@@ -301,7 +295,7 @@
     <button type="button" class="tb-btn" id="btnForward" title="تقدّم" aria-label="تقدّم">
       <svg class="flip-rtl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
     </button>
-    <button type="button" class="tb-btn" id="btnReload" title="إعادة تحميل" aria-label="إعادة تحميل">
+    <button type="button" class="tb-btn" id="btnReload" title="تحديث" aria-label="تحديث">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>
     </button>
   </div>
@@ -396,7 +390,7 @@
       return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>';
     }
     if (kind === "settings") {
-      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.93 4.93l2.12 2.12M16.95 16.95l2.12 2.12M2 12h3M19 12h3"/></svg>';
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
     }
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="3.6" y1="9" x2="20.4" y2="9"/><line x1="3.6" y1="15" x2="20.4" y2="15"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
   }
@@ -567,6 +561,15 @@
     invoke("tab_move", { label: label, toIndex: currentTabs.length })
       .then(refresh).catch(function () {});
   });
+  // Recover if drag ends outside the WebView2 tabbar bounds without firing dragend
+  function resetDragState() {
+    if (!dragLabel) return;
+    dragLabel = null;
+    stripEl.querySelectorAll(".tab.dragging").forEach(function (n) { n.classList.remove("dragging"); });
+    clearDropHints(stripEl);
+  }
+  window.addEventListener("blur", resetDragState);
+  window.addEventListener("pointerup", resetDragState);
   document.getElementById("btnBack").addEventListener("click", function () {
     invoke("nav_back", {}).catch(function () {});
   });

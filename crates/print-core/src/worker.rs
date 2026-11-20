@@ -150,12 +150,16 @@ impl<'a, B: PrintBackend> Worker<'a, B> {
                 }
                 Ok(Outcome::Done(job.id))
             }
-            Err(e) if e.retryable && job.attempts < self.cfg.max_attempts => {
-                // Failed, then re-queued after a durable backoff: the
-                // audit trail shows both transitions, and the worker
-                // thread is free to serve other printers meanwhile.
-                let delay =
-                    backoff_delay_ms(&self.cfg, job.attempts.saturating_sub(1), self.entropy);
+            Err(e)
+                if e.retryable
+                    && self.cfg.max_attempts > 0
+                    && job.attempts % self.cfg.max_attempts != 0 =>
+            {
+                // Failed, then re-queued after a durable backoff. Using modulo
+                // gives a manually retried DeadLetter job a fresh retry window
+                // while keeping `attempts` strictly monotonic for audit logs.
+                let window_attempt = job.attempts.saturating_sub(1) % self.cfg.max_attempts;
+                let delay = backoff_delay_ms(&self.cfg, window_attempt, self.entropy);
                 self.queue.requeue_with_delay(&job.id, delay, &e.code)?;
                 Ok(Outcome::Retried(job.id))
             }
@@ -325,5 +329,34 @@ mod tests {
         drop(w);
         let j = q.get("1").unwrap();
         assert_eq!(j.error_code.as_deref(), Some("PAPER_MISMATCH"));
+    }
+
+    #[test]
+    fn manual_retry_after_dead_letter_gets_fresh_window() {
+        let mut q = Queue::in_memory().unwrap();
+        q.enqueue(&job("dl1")).unwrap();
+        let mut w = Worker {
+            queue: &mut q,
+            backend: ScriptedBackend {
+                results: VecDeque::from([
+                    Err(BackendError::retryable("BUSY", "busy")),
+                    Err(BackendError::retryable("BUSY", "busy")),
+                    Err(BackendError::retryable("BUSY", "busy")),
+                    Ok(()),
+                ]),
+            },
+            cfg: WorkerConfig {
+                max_attempts: 2,
+                backoff_base_ms: 0,
+                backoff_max_ms: 0,
+            },
+            entropy: 1,
+        };
+        assert_eq!(w.run_once("p1").unwrap(), Outcome::Retried("dl1".into()));
+        assert_eq!(w.run_once("p1").unwrap(), Outcome::DeadLetter("dl1".into()));
+        w.queue.retry_job("dl1").unwrap();
+        // First transient error after manual retry must retry, not instantly dead-letter.
+        assert_eq!(w.run_once("p1").unwrap(), Outcome::Retried("dl1".into()));
+        assert_eq!(w.run_once("p1").unwrap(), Outcome::Done("dl1".into()));
     }
 }

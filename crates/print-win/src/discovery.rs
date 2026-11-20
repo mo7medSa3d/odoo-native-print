@@ -187,6 +187,11 @@ impl DiscoveryCache {
         }
     }
 
+    pub fn invalidate(&self) {
+        let mut guard = self.snapshot.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = None;
+    }
+
     pub fn get_or_discover<E>(
         &self,
         ttl: std::time::Duration,

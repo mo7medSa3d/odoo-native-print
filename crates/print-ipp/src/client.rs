@@ -78,13 +78,15 @@ impl PrinterCaps {
         ];
         self.state_reasons
             .iter()
-            .map(|r| {
-                r.trim()
-                    .trim_end_matches("-error")
-                    .trim_end_matches("-warning")
-                    .trim_end_matches("-report")
+            .filter_map(|r| {
+                let t = r.trim();
+                // RFC 8011: -warning and -report severities are advisory, never hard blockers.
+                if t.ends_with("-warning") || t.ends_with("-report") {
+                    return None;
+                }
+                let base = t.trim_end_matches("-error");
+                BLOCKING.contains(&base).then_some(base)
             })
-            .filter(|r| BLOCKING.contains(r))
             .collect()
     }
     /// True when submission would go to a device that cannot print:

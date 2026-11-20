@@ -52,10 +52,23 @@ async function fetchReportBody(url, readBody, timeoutMs = REPORT_FETCH_TIMEOUT_M
     const controller = typeof AbortController === "function" ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
     try {
+        let fetchUrl = url;
         const opts = controller
             ? { credentials: "same-origin", signal: controller.signal }
             : { credentials: "same-origin" };
-        const resp = await fetch(url, opts);
+        // Avoid HTTP 414 URI Too Long on large batch/wizard reports by using Odoo's POST /report/download.
+        if (url.length > 2000 && typeof FormData === "function") {
+            const reportType = url.startsWith("/report/text/") ? "qweb-text" : "qweb-pdf";
+            const form = new FormData();
+            form.append("data", JSON.stringify([url, reportType]));
+            if (typeof window !== "undefined" && window.odoo && window.odoo.csrf_token) {
+                form.append("csrf_token", window.odoo.csrf_token);
+            }
+            fetchUrl = "/report/download";
+            opts.method = "POST";
+            opts.body = form;
+        }
+        const resp = await fetch(fetchUrl, opts);
         if (!resp.ok) {
             return null;
         }
@@ -196,7 +209,7 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
     const absoluteDeadline = Date.now() + 30 * 60 * 1000;
     for (let i = 0; Date.now() < absoluteDeadline && Date.now() - lastProgressAt < 5 * 60 * 1000; i++) {
         await new Promise((resolve) =>
-            setTimeout(resolve, i < 10 ? 600 : 2000));
+            setTimeout(resolve, i === 0 ? 120 : (i < 10 ? 450 : 2000)));
         try {
             let state = null;
             let errorCode = null;
@@ -287,6 +300,7 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
                         "danger",
                     );
                 }
+                return state;
             }
         } catch (_err) {
             // One flaky poll must not orphan the job: the user would
@@ -389,21 +403,6 @@ async function handleReportSubmission(action, options, env, bridge) {
         }
         const textKey = buildReportIdempotencyKey("odoo-txt", action);
         const textSource = reportSource(action);
-        await rpc("/native_print/job_status", {
-            idempotency_key: textKey,
-            state: "queued",
-            device: target.printer.name,
-            report_name: action.report_name,
-            source_type: "report",
-            source_model: textSource.model,
-            source_ids: textSource.ids || undefined,
-            copies: rule.copies || 1,
-            paper: rule.paper || undefined,
-            color: rule.color !== false,
-            mode: textAsEscpos ? "escpos" : "gdi",
-            pages: 1,
-            byte_size: textBytes,
-        }, { silent: true }).catch(() => {});
         try {
             if (textAsEscpos) {
                 await bridge.printText({
@@ -426,6 +425,22 @@ async function handleReportSubmission(action, options, env, bridge) {
                     bytes: pngBytes,
                 });
             }
+            // Log queued state to Odoo asynchronously AFTER local enqueue so WAN RTT never delays printing.
+            rpc("/native_print/job_status", {
+                idempotency_key: textKey,
+                state: "queued",
+                device: target.printer.name,
+                report_name: action.report_name,
+                source_type: "report",
+                source_model: textSource.model,
+                source_ids: textSource.ids || undefined,
+                copies: rule.copies || 1,
+                paper: rule.paper || undefined,
+                color: rule.color !== false,
+                mode: textAsEscpos ? "escpos" : "gdi",
+                pages: 1,
+                byte_size: textBytes,
+            }, { silent: true }).catch(() => {});
             watchJobToCompletion(
                 bridge,
                 textKey,
@@ -504,21 +519,6 @@ async function handleReportSubmission(action, options, env, bridge) {
     const bytes = Array.from(rawBytes);
     const idempotencyKey = buildReportIdempotencyKey("odoo", action);
     const pdfSource = reportSource(action);
-    await rpc("/native_print/job_status", {
-        idempotency_key: idempotencyKey,
-        state: "queued",
-        device: target.printer.name,
-        report_name: action.report_name,
-        source_type: "report",
-        source_model: pdfSource.model,
-        source_ids: pdfSource.ids || undefined,
-        copies: rule.copies || 1,
-        paper: rule.paper || undefined,
-        duplex: typeof rule.duplex === "boolean" ? rule.duplex : null,
-        color: rule.color !== false,
-        mode: rule.mode || undefined,
-        byte_size: bytes.length,
-    }, { silent: true }).catch(() => {});
     try {
         await bridge.printPdf({
             idempotencyKey,
@@ -538,6 +538,22 @@ async function handleReportSubmission(action, options, env, bridge) {
                 (rule.media && rule.media.roll_width_mm) || undefined,
             bytes,
         });
+        // Log queued state to Odoo asynchronously AFTER local enqueue so WAN RTT never delays printing.
+        rpc("/native_print/job_status", {
+            idempotency_key: idempotencyKey,
+            state: "queued",
+            device: target.printer.name,
+            report_name: action.report_name,
+            source_type: "report",
+            source_model: pdfSource.model,
+            source_ids: pdfSource.ids || undefined,
+            copies: rule.copies || 1,
+            paper: rule.paper || undefined,
+            duplex: typeof rule.duplex === "boolean" ? rule.duplex : null,
+            color: rule.color !== false,
+            mode: rule.mode || undefined,
+            byte_size: bytes.length,
+        }, { silent: true }).catch(() => {});
         watchJobToCompletion(
             bridge,
             idempotencyKey,

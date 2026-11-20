@@ -1,5 +1,5 @@
 /** @odoo-module **/
-import { Component, onMounted, onWillStart, onWillUnmount, useState } from "@odoo/owl";
+import { Component, onMounted, onWillUnmount, useState } from "@odoo/owl";
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { rpc } from "@web/core/network/rpc";
@@ -119,13 +119,10 @@ export class NativePrintSystray extends Component {
             }
         };
 
-        onWillStart(async () => {
-            await this.refreshStats();
-        });
-
         this._unmounted = false;
 
         onMounted(() => {
+            this.refreshStats().catch(() => {});
             window.addEventListener("click", this._onOutsideClick);
             window.addEventListener(JOB_UPDATED_EVENT, this._onJobUpdated);
             // Keep workstation inventory and online/offline state current

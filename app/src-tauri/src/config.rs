@@ -302,14 +302,18 @@ pub struct PrinterSettings {
 
 pub type PrinterSettingsMap = std::collections::BTreeMap<String, PrinterSettings>;
 
-pub fn load_printer_settings(config_dir: &Path) -> PrinterSettingsMap {
+pub fn load_printer_settings_checked(config_dir: &Path) -> Result<PrinterSettingsMap, String> {
     let file = config_dir.join("printer_settings.json");
-    if let Ok(raw) = std::fs::read_to_string(&file) {
-        if let Ok(parsed) = serde_json::from_str::<PrinterSettingsMap>(&raw) {
-            return parsed;
-        }
+    match std::fs::read_to_string(&file) {
+        Ok(raw) => serde_json::from_str::<PrinterSettingsMap>(&raw)
+            .map_err(|e| format!("printer_settings.json is unreadable: {e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(PrinterSettingsMap::new()),
+        Err(e) => Err(format!("cannot read printer_settings.json: {e}")),
     }
-    PrinterSettingsMap::new()
+}
+
+pub fn load_printer_settings(config_dir: &Path) -> PrinterSettingsMap {
+    load_printer_settings_checked(config_dir).unwrap_or_default()
 }
 
 pub fn save_printer_settings(
@@ -338,6 +342,17 @@ mod tests {
         assert!(validate_origin("http://odoo.company.local:8069").is_err());
         assert!(validate_origin("http://999.999.999.999:8069").is_err());
         assert!(validate_origin("not a url").is_err());
+    }
+
+    #[test]
+    fn printer_settings_checked_rejects_corrupt_json() {
+        let dir = std::env::temp_dir().join(format!("np-pset-corrupt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(load_printer_settings_checked(&dir).unwrap().is_empty());
+        std::fs::write(dir.join("printer_settings.json"), "{not-valid-json").unwrap();
+        assert!(load_printer_settings_checked(&dir).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
