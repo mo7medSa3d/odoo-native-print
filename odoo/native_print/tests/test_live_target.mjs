@@ -369,8 +369,8 @@ try {
         const steadyFailBridge = {
             jobDetail: async () => {
                 failedPolls++;
-                // Poll 1 + its single 900ms quiet recheck -> 2 calls, then the
-                // terminal state is returned immediately (no duplicate poll).
+                // Poll 1 + its single 900ms recheck -> 2 calls; Poll 2 must NOT recheck (3rd call total),
+                // then advance past 5-minute progress cap to exit cleanly.
                 if (failedPolls >= 3) fakeRetryNow += 6 * 60 * 1000;
                 return { state: "failed", errorCode: "OFFLINE", pages: 1, attempts: 1 };
             },
@@ -381,7 +381,7 @@ try {
             { reportName: "account.report_invoice", printerName: "HP", printerPattern: "HP", byteSize: 100 },
             testEnv,
         );
-        eq(failedPolls, 2, "terminal failure returns after one quiet recheck, no duplicate poll");
+        eq(failedPolls, 3, "already-notified failure skips duplicate recheck IPC");
         eq(notices.length, 1, "steady failure notifies user only once");
     } finally {
         Date.now = origDateNowRetry;

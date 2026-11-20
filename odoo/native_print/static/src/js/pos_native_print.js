@@ -661,7 +661,10 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
                     _t('Receipt printing failed on "%s" (%s). Check the printer before reprinting.', printerName || rule.printer_pattern, errorCode || state),
                     "danger",
                 );
-                break;
+                if (state === "dead_letter") {
+                    break;
+                }
+                continue;
             }
             break;
         } catch (_err) {

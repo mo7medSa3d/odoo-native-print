@@ -300,7 +300,9 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
                         "danger",
                     );
                 }
-                return state;
+                if (state === "dead_letter") {
+                    return state;
+                }
             }
         } catch (_err) {
             // One flaky poll must not orphan the job: the user would

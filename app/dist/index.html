@@ -610,16 +610,18 @@
   .forms-box {
     background: var(--bg-subtle);
     border: 1px solid var(--border);
-    padding: 0.6rem 0.75rem;
+    padding: 0.5rem 0.7rem;
     border-radius: var(--radius-md);
-    max-height: 170px;
+    max-height: 168px;
     overflow-y: auto;
+    overflow-x: hidden;
     overscroll-behavior: contain;
+    scrollbar-width: thin;
   }
   .forms-list {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
-    gap: 0.3rem 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
     font-size: 0.74rem;
   }
   .forms-item {
