@@ -508,7 +508,12 @@ try {
                         new TextEncoder().encode("<html>no PDF engine on this system</html>").buffer,
                 };
             }
-            return { ok: true, text: async () => "INVOICE INV/2026/0006\nTOTAL 100.00 SR" };
+            // Odoo's text converter actually renders the QWeb template.
+            return {
+                ok: true,
+                text: async () =>
+                    "<html><body><div>INVOICE INV/2026/0006</div><div>TOTAL 100.00 SR</div></body></html>",
+            };
         };
         const noPdfRes = await registeredHandler(
             {
@@ -533,6 +538,28 @@ try {
             notices.some((n) => /no PDF engine/i.test(n.msg)),
             true,
             "the user is told why the text version was printed",
+        );
+
+        // Odoo may already have converted the action to qweb-html: that
+        // must still print natively, without the HTML report ever opening.
+        notices.length = 0;
+        textFallbackPrint = null;
+        const htmlActionRes = await registeredHandler(
+            {
+                type: "ir.actions.report",
+                report_type: "qweb-html",
+                report_name: "account.report_invoice",
+                context: { active_ids: [7] },
+            },
+            {},
+            testEnv,
+        );
+        eq(htmlActionRes, true, "qweb-html report is handled natively");
+        eq(textFallbackPrint !== null, true, "qweb-html report reaches the printer");
+        eq(
+            h.reportHtmlToPlainText("<div>A</div><div>B<br>C</div>"),
+            "A\nB\nC",
+            "QWeb HTML becomes printable lines",
         );
     } finally {
         globalThis.document = prevDoc;

@@ -91,7 +91,14 @@ export function nativePrintBridge() {
 }
 
 export function buildReportUrl(action, converter = "pdf", env = null) {
-    let url = `/report/${converter}/${action.report_name}`;
+    // qweb-html actions can arrive with only report_url (the HTML client
+    // action); recover the technical name from it instead of building
+    // a /report/text/undefined URL.
+    const fromUrl =
+        String((action && action.report_url) || "").match(/\/report\/(?:html|pdf|text)\/([^/?]+)/) ||
+        [];
+    const reportName = (action && action.report_name) || fromUrl[1] || "report";
+    let url = `/report/${converter}/${reportName}`;
     const actionContext = action.context || {};
     const userContext =
         (env && env.services && env.services.user && env.services.user.context) ||
@@ -152,6 +159,57 @@ export function reportSource(action) {
  * Throws when the canvas is unavailable; the caller falls back
  * to Odoo's standard download.
  */
+// Odoo's "text" report converter still renders the QWeb template, so the
+// response is usually HTML, not plain text. Turn it into printable lines
+// without a PDF engine: block boundaries and <br> become newlines, tags
+// are dropped, and the result is normalised for the canvas renderer.
+export function reportHtmlToPlainText(markup) {
+    const raw = String(markup || "");
+    const normalise = (text) =>
+        text
+            .replace(/\r\n?/g, "\n")
+            .replace(/[ \t\u00a0]+/g, " ")
+            .split("\n")
+            .map((line) => line.trim())
+            .join("\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+    if (!/<\s*[a-z!/]/i.test(raw)) {
+        return normalise(raw);
+    }
+    // Minimal-DOM environments (and very restricted webviews) get a
+    // regex conversion; real browsers use the parsed DOM for correct
+    // block boundaries and entity decoding.
+    const stripWithRegex = () =>
+        raw
+            .replace(/<\s*br\s*\/?\s*>/gi, "\n")
+            .replace(/<\/(?:p|div|tr|li|h[1-5]|table|section)\s*>/gi, "\n")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&nbsp;/gi, " ")
+            .replace(/&amp;/gi, "&")
+            .replace(/&lt;/gi, "<")
+            .replace(/&gt;/gi, ">");
+    let root = null;
+    if (typeof DOMParser === "function") {
+        root = new DOMParser().parseFromString(raw, "text/html").body;
+    } else if (typeof document !== "undefined" && document.createElement) {
+        const probe = document.createElement("div");
+        if (typeof probe.querySelectorAll === "function" && typeof probe.insertAdjacentText === "function") {
+            probe.innerHTML = raw;
+            root = probe;
+        }
+    }
+    if (!root) {
+        return normalise(stripWithRegex());
+    }
+    const clone = root.cloneNode(true);
+    clone.querySelectorAll("br").forEach((el) => el.replaceWith("\n"));
+    ["p", "div", "tr", "li", "h1", "h2", "h3", "h4", "h5", "table", "section"].forEach((tag) => {
+        clone.querySelectorAll(tag).forEach((el) => el.insertAdjacentText("afterend", "\n"));
+    });
+    return normalise(clone.textContent || "");
+}
+
 export async function textReportToPngBytes(text) {
     const FONT_PX = 13;
     const LINE_H = 17;
@@ -369,11 +427,12 @@ async function printReportTextWhenPdfEngineMissing(action, options, env, bridge,
     if (text === null) {
         return undefined;
     }
-    const trimmed = text.trimStart();
-    // The text route can itself answer with an HTML error page.
-    if (!trimmed || trimmed.startsWith("<")) {
+    // Odoo's text converter renders QWeb, so the body is normally HTML.
+    const plain = reportHtmlToPlainText(text);
+    if (!plain || /^\s*</.test(plain)) {
         return undefined;
     }
+    text = plain;
     const textBytes = new TextEncoder().encode(text).length;
     const asEscpos = rule.mode === "escpos";
     const limit = asEscpos ? MAX_NATIVE_TEXT_BYTES : MAX_NATIVE_PAYLOAD_BYTES;
@@ -482,6 +541,12 @@ async function handleReportSubmission(action, options, env, bridge) {
         if (typeof st.paper === "string" && st.paper) rule.paper = st.paper;
         if (typeof st.duplex === "boolean") rule.duplex = st.duplex;
         if (typeof st.color === "boolean") rule.color = st.color;
+    }
+
+    if (action.report_type === "qweb-html") {
+        // Odoo already converted the action to HTML because the server has
+        // no PDF engine: print it natively from its text rendering.
+        return await printReportTextWhenPdfEngineMissing(action, options, env, bridge, target, rule);
     }
 
     if (action.report_type === "qweb-text") {
@@ -742,7 +807,15 @@ registry.category("ir.actions.report handlers").add(
         if (!bridge) {
             return undefined; // Normal browser: unchanged behaviour.
         }
-        if (!action || !["qweb-pdf", "qweb-text"].includes(action.report_type)) {
+        const reportType = String((action && action.report_type) || "");
+        // Odoo can hand us an engine-specific qweb-pdf-* type, or an
+        // already-converted qweb-html action when no PDF engine exists.
+        // All of them must stay inside the native print path.
+        const supported =
+            reportType === "qweb-text" ||
+            reportType === "qweb-html" ||
+            reportType.startsWith("qweb-pdf");
+        if (!action || !supported) {
             return undefined; // Other report types keep the default flow.
         }
         const dataFingerprint = (() => {
