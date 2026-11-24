@@ -9,14 +9,14 @@ on:
   push:
     branches: ["main"]
     paths:
-      - "odoo/**"
+      - "odoo19/**"
       - "odoo20/**"
       - ".github/workflows/odoo.yml"
     tags:
       - "v*"
   pull_request:
     paths:
-      - "odoo/**"
+      - "odoo19/**"
       - "odoo20/**"
       - ".github/workflows/odoo.yml"
 
@@ -37,7 +37,7 @@ jobs:
       matrix:
         include:
           - odoo_version: "19.0"
-            addon_dir: "odoo"
+            addon_dir: "odoo19"
           - odoo_version: "20.0"
             addon_dir: "odoo20"
     steps:

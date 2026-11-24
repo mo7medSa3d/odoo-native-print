@@ -50,17 +50,17 @@ jobs:
           cargo test --locked -p print-render --test pdfium_render
       - name: Addon static checks (Odoo 19 & 20 - Python compiles, XML parses, JS parses)
         run: |
-          python3 -m compileall -q odoo/native_print odoo20/native_print
+          python3 -m compileall -q odoo19/native_print odoo20/native_print
           python3 - <<'PY'
           import pathlib, xml.dom.minidom
-          for root in ("odoo/native_print", "odoo20/native_print"):
+          for root in ("odoo19/native_print", "odoo20/native_print"):
               for p in sorted(pathlib.Path(root).rglob("*.xml")):
                   xml.dom.minidom.parse(str(p))
           print("addon XML OK")
           PY
           tmp_mjs="$(mktemp --suffix=.mjs)"
           trap 'rm -f "$tmp_mjs"' EXIT
-          for f in odoo/native_print/static/src/js/*.js odoo20/native_print/static/src/js/*.js; do
+          for f in odoo19/native_print/static/src/js/*.js odoo20/native_print/static/src/js/*.js; do
             cp "$f" "$tmp_mjs" && node --check "$tmp_mjs"
           done
           echo "addon JS OK"
@@ -69,8 +69,8 @@ jobs:
           python3 tools/check_command_surface.py
           python3 tools/check_versions.py
           node --test app/tests/control-center.test.mjs
-          node --test odoo/native_print/tests/test_live_target.mjs
-          node --test odoo/native_print/tests/test_pos_keys.mjs
+          node --test odoo19/native_print/tests/test_live_target.mjs
+          node --test odoo19/native_print/tests/test_pos_keys.mjs
           node --test odoo20/native_print/tests/test_live_target.mjs
           node --test odoo20/native_print/tests/test_pos_keys.mjs
       - name: Bench, chaos, calibration (measured evidence)

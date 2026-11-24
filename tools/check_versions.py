@@ -7,7 +7,7 @@ installed app, its crate and its npm shell drift apart:
   - app/src-tauri/Cargo.toml        version
   - app/package.json                "version"
   - app/package-lock.json           "version" (root + packages[""])
-The Odoo addon versions (odoo/native_print/__manifest__.py and
+The Odoo addon versions (odoo19/native_print/__manifest__.py and
 odoo20/native_print/__manifest__.py) are independent 19.0.x.y.z /
 20.0.x.y.z lines; they are reported, not compared — but an unparseable
 manifest is a hard failure, not a silent "?" (audit CI-L: the old gate
@@ -37,7 +37,7 @@ def main():
         "Cargo.toml": (cargo.get("package") or {}).get("version"),
     }
     for label, rel, prefix in (
-        ("odoo19", "odoo/native_print/__manifest__.py", "19.0."),
+        ("odoo19", "odoo19/native_print/__manifest__.py", "19.0."),
         ("odoo20", "odoo20/native_print/__manifest__.py", "20.0."),
     ):
         manifest_path = ROOT / rel

@@ -253,6 +253,32 @@ function findPrinterByName(printers, wantedName) {
  * else the first healthy printer. Returns null when this PC has
  * no printer at the moment — callers then keep Odoo's normal flow.
  */
+const CAPABILITIES_MEMO_TTL_MS = 10_000;
+const capabilitiesMemo = new WeakMap();
+
+async function cachedPrinterCapabilities(bridge, printerName) {
+    if (!bridge || typeof bridge.printerCapabilities !== "function") {
+        return null;
+    }
+    let map = capabilitiesMemo.get(bridge);
+    if (!map) {
+        map = new Map();
+        capabilitiesMemo.set(bridge, map);
+    }
+    const now = Date.now();
+    const cached = map.get(printerName);
+    if (cached && now - cached.ts < CAPABILITIES_MEMO_TTL_MS) {
+        return cached.value;
+    }
+    try {
+        const caps = await bridge.printerCapabilities(printerName);
+        map.set(printerName, { ts: now, value: caps });
+        return caps;
+    } catch (_error) {
+        return null;
+    }
+}
+
 export async function resolveBridgeTarget(bridge, options = {}) {
     if (!bridge || typeof bridge.listPrinters !== "function") return null;
     const printers = await bridge.listPrinters();
@@ -299,14 +325,7 @@ export async function resolveBridgeTarget(bridge, options = {}) {
             printers.find((p) => isDefault(p)) ||
             printers[0];
     }
-    let capabilities = null;
-    if (typeof bridge.printerCapabilities === "function") {
-        try {
-            capabilities = await bridge.printerCapabilities(printer.name);
-        } catch (_error) {
-            capabilities = null;
-        }
-    }
+    const capabilities = await cachedPrinterCapabilities(bridge, printer.name);
     const detection = detectPrinterType(printer);
     return {
         printer,

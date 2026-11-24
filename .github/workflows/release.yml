@@ -43,8 +43,8 @@ jobs:
           python3 tools/check_command_surface.py
           python3 tools/check_versions.py
           node --test app/tests/control-center.test.mjs
-          node --test odoo/native_print/tests/test_live_target.mjs
-          node --test odoo/native_print/tests/test_pos_keys.mjs
+          node --test odoo19/native_print/tests/test_live_target.mjs
+          node --test odoo19/native_print/tests/test_pos_keys.mjs
           node --test odoo20/native_print/tests/test_live_target.mjs
           node --test odoo20/native_print/tests/test_pos_keys.mjs
       - name: Source tarball

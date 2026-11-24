@@ -11,6 +11,7 @@ import ast
 import json
 import os
 import py_compile
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -46,7 +47,7 @@ def _run_cmd(cmd, env=None):
 
 def _check_py_compile():
     files = (
-        sorted(ROOT.glob("odoo/native_print/**/*.py"))
+        sorted(ROOT.glob("odoo19/native_print/**/*.py"))
         + sorted(ROOT.glob("odoo20/native_print/**/*.py"))
         + sorted(ROOT.glob("tools/*.py"))
     )
@@ -92,7 +93,7 @@ def check_js_esm(text, label="<stdin>"):
 
 
 def _check_odoo_esm_syntax():
-    files = sorted(ROOT.glob("odoo/native_print/static/src/js/*.js")) + sorted(
+    files = sorted(ROOT.glob("odoo19/native_print/static/src/js/*.js")) + sorted(
         ROOT.glob("odoo20/native_print/static/src/js/*.js")
     )
     if not files:
@@ -191,7 +192,7 @@ def check_po_text(text):
     return len(entries), errors
 
 
-def _check_ar_po(rel="odoo/native_print/i18n/ar.po"):
+def _check_ar_po(rel="odoo19/native_print/i18n/ar.po"):
     po_path = ROOT / rel
     count, errors = check_po_text(po_path.read_text(encoding="utf-8"))
     if errors:
@@ -251,6 +252,20 @@ def _self_test():
     return 0
 
 
+def _find_bash():
+    """Return a working bash executable path, preferring Git Bash on Windows."""
+    if sys.platform == "win32":
+        for env_var in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)", "LocalAppData"):
+            base = os.environ.get(env_var)
+            if not base:
+                continue
+            for rel in ("Git/bin/bash.exe", "Git/usr/bin/bash.exe", "Programs/Git/bin/bash.exe"):
+                candidate = Path(base) / rel
+                if candidate.is_file():
+                    return str(candidate)
+    return shutil.which("bash") or "bash"
+
+
 def main():
     if "--self-test" in sys.argv[1:]:
         return _self_test()
@@ -265,10 +280,10 @@ def main():
         steps = [
             ("versions", lambda: _run_cmd([sys.executable, "tools/check_versions.py"], sub_env)),
             ("command_surface", lambda: _run_cmd([sys.executable, "tools/check_command_surface.py"], sub_env)),
-            ("bash_syntax:fetch-pdfium", lambda: _run_cmd(["bash", "-n", "tools/fetch-pdfium.sh"], sub_env)),
+            ("bash_syntax:fetch-pdfium", lambda: _run_cmd([_find_bash(), "-n", "tools/fetch-pdfium.sh"], sub_env)),
             ("node:control-center", lambda: _run_cmd(["node", "--test", "app/tests/control-center.test.mjs"], sub_env)),
-            ("node:pos_keys", lambda: _run_cmd(["node", "--test", "odoo/native_print/tests/test_pos_keys.mjs"], sub_env)),
-            ("node:live_target", lambda: _run_cmd(["node", "--test", "odoo/native_print/tests/test_live_target.mjs"], sub_env)),
+            ("node:pos_keys", lambda: _run_cmd(["node", "--test", "odoo19/native_print/tests/test_pos_keys.mjs"], sub_env)),
+            ("node:live_target", lambda: _run_cmd(["node", "--test", "odoo19/native_print/tests/test_live_target.mjs"], sub_env)),
             ("node:odoo20_pos_keys", lambda: _run_cmd(["node", "--test", "odoo20/native_print/tests/test_pos_keys.mjs"], sub_env)),
             ("node:odoo20_live_target", lambda: _run_cmd(["node", "--test", "odoo20/native_print/tests/test_live_target.mjs"], sub_env)),
             ("node:odoo_esm_syntax", _check_odoo_esm_syntax),

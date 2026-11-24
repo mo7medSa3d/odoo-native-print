@@ -1128,7 +1128,7 @@ fn print_one_page(
     let page = doc
         .render_page(index, mode, dpi)
         .map_err(|e| e.to_string())?;
-    let dib = crate::dib::build_dib(&page);
+    let dib = crate::dib::build_dib_owned(page);
     blit_dib_page(dc, &dib, Some(page_size), match_kind)
 }
 

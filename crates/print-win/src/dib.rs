@@ -160,6 +160,32 @@ pub fn build_dib(page: &RenderedPage) -> DibImage {
     }
 }
 
+/// Build the DIB taking ownership of `page.pixels` so 32-bpp pages avoid
+/// cloning ~35 MB per A4 page when the stride already matches DIB layout.
+pub fn build_dib_owned(mut page: RenderedPage) -> DibImage {
+    if page.mode == RenderMode::Color {
+        let (w, h) = (page.width_px, page.height_px);
+        let dst_row = dib_row_bytes(w, 32);
+        if let (Some(src_row), Some(total)) = (
+            (w as usize).checked_mul(4),
+            dst_row.checked_mul(h as usize),
+        ) {
+            if src_row == dst_row && dst_row > 0 && page.pixels.len() >= total {
+                page.pixels.truncate(total);
+                return DibImage {
+                    width: w,
+                    height: h,
+                    header: header(w, h, 32, total),
+                    palette: Vec::new(),
+                    bits: page.pixels,
+                    bit_count: 32,
+                };
+            }
+        }
+    }
+    build_dib(&page)
+}
+
 /// Fit an image into a printable area (device px), preserving aspect
 /// ratio, centred. Returns (x, y, width, height) in device pixels.
 /// Used for the StretchDIBits destination rectangle.
@@ -260,5 +286,16 @@ mod tests {
         let d2 = build_grayscale_dib((i32::MAX as u32) + 1, 1, &[0u8; 4]);
         assert!(d2.bits.is_empty());
         assert_eq!(i32::from_le_bytes(d2.header[4..8].try_into().unwrap()), 0);
+    }
+
+    #[test]
+    fn owned_color_dib_moves_buffer_without_copy() {
+        let pixels = vec![42u8; 4 * 3 * 4];
+        let ptr = pixels.as_ptr();
+        let p = page(RenderMode::Color, 4, 3, pixels);
+        let d = build_dib_owned(p);
+        assert_eq!(d.bit_count, 32);
+        assert_eq!(d.bits.len(), 48);
+        assert_eq!(d.bits.as_ptr(), ptr);
     }
 }

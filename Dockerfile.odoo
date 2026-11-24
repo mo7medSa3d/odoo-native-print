@@ -6,7 +6,7 @@
 ARG ODOO_VERSION=19.0
 FROM odoo:${ODOO_VERSION}
 
-ARG ADDON_SRC=odoo/native_print
+ARG ADDON_SRC=odoo19/native_print
 COPY --chown=odoo:odoo ${ADDON_SRC} /mnt/extra-addons/native_print
 
 USER odoo

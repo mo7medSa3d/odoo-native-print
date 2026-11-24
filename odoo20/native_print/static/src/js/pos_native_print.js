@@ -177,7 +177,7 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
 
     for (let i = 0; Date.now() < absoluteDeadline && Date.now() - lastProgressAt < 5 * 60 * 1000; i++) {
         await new Promise((resolve) =>
-            setTimeout(resolve, i === 0 ? 120 : (i < 10 ? 450 : 2000)));
+            setTimeout(resolve, i === 0 ? 50 : (i < 4 ? 150 : (i < 12 ? 400 : 1500))));
         try {
             let state = null;
             let errorCode = null;

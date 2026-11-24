@@ -267,7 +267,7 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
     const absoluteDeadline = Date.now() + 30 * 60 * 1000;
     for (let i = 0; Date.now() < absoluteDeadline && Date.now() - lastProgressAt < 5 * 60 * 1000; i++) {
         await new Promise((resolve) =>
-            setTimeout(resolve, i === 0 ? 120 : (i < 10 ? 450 : 2000)));
+            setTimeout(resolve, i === 0 ? 50 : (i < 4 ? 150 : (i < 12 ? 400 : 1500))));
         try {
             let state = null;
             let errorCode = null;
@@ -520,40 +520,49 @@ async function handleReportSubmission(action, options, env, bridge) {
     // is preferred when it is connected to this PC; the settings
     // override today's defaults for this print only.
     const prefill = (action.context && action.context.native_print_prefill) || null;
-    const target = await resolveBridgeTarget(bridge, {
+    const targetPromise = resolveBridgeTarget(bridge, {
         preferPrinterName: (prefill && prefill.printer) || undefined,
     }).catch(() => null);
-    if (!target) {
-        // Notify inside the desktop app so falling back to download is explicit.
-        notifyUser(
-            env,
-            _t("No printer is available on this device right now. The file was downloaded instead."),
-            "warning",
-            undefined,
-            recoveryButtons(),
-        );
-        return undefined; // No printer on this PC right now.
-    }
-    const rule = target.rule;
-    if (prefill && prefill.settings) {
-        const st = prefill.settings;
-        if (Number.isInteger(st.copies) && st.copies > 0) rule.copies = st.copies;
-        if (typeof st.paper === "string" && st.paper) rule.paper = st.paper;
-        if (typeof st.duplex === "boolean") rule.duplex = st.duplex;
-        if (typeof st.color === "boolean") rule.color = st.color;
-    }
+
+    const applyPrefillAndFinishTarget = (target) => {
+        if (!target) {
+            // Notify inside the desktop app so falling back to download is explicit.
+            notifyUser(
+                env,
+                _t("No printer is available on this device right now. The file was downloaded instead."),
+                "warning",
+                undefined,
+                recoveryButtons(),
+            );
+            return null;
+        }
+        const rule = target.rule;
+        if (prefill && prefill.settings) {
+            const st = prefill.settings;
+            if (Number.isInteger(st.copies) && st.copies > 0) rule.copies = st.copies;
+            if (typeof st.paper === "string" && st.paper) rule.paper = st.paper;
+            if (typeof st.duplex === "boolean") rule.duplex = st.duplex;
+            if (typeof st.color === "boolean") rule.color = st.color;
+        }
+        return { target, rule };
+    };
 
     if (action.report_type === "qweb-html") {
         // Odoo already converted the action to HTML because the server has
         // no PDF engine: print it natively from its text rendering.
-        return await printReportTextWhenPdfEngineMissing(action, options, env, bridge, target, rule);
+        const resolved = applyPrefillAndFinishTarget(await targetPromise);
+        if (!resolved) return undefined;
+        return await printReportTextWhenPdfEngineMissing(action, options, env, bridge, resolved.target, resolved.rule);
     }
 
     if (action.report_type === "qweb-text") {
         const textUrl = buildReportUrl(action, "text", env);
-        let text;
+        const textPromise = fetchReportBody(textUrl, (resp) => resp.text());
+        const [rawTarget, text] = await Promise.all([targetPromise, textPromise]);
+        const resolved = applyPrefillAndFinishTarget(rawTarget);
+        if (!resolved) return undefined;
+        const { target, rule } = resolved;
         try {
-            text = await fetchReportBody(textUrl, (resp) => resp.text());
             if (text === null) {
                 // Let Odoo's default flow handle (and report) it.
                 return undefined;
@@ -674,20 +683,22 @@ async function handleReportSubmission(action, options, env, bridge) {
     }
 
     const url = buildReportUrl(action, "pdf", env);
-    let rawBytes;
-    try {
-        const buf = await fetchReportBody(url, (resp) => resp.arrayBuffer());
-        if (buf === null) {
-            // Let Odoo's default flow handle (and report) it.
-            return undefined;
-        }
-        rawBytes = new Uint8Array(buf);
-    } catch (_fetchError) {
-        // Same fallback contract as the text branch.
+    const pdfPromise = fetchReportBody(url, (resp) => resp.arrayBuffer())
+        .then((buf) => ({ ok: true, buf }))
+        .catch(() => ({ ok: false, buf: null }));
+    const [rawTarget, fetchOutcome] = await Promise.all([targetPromise, pdfPromise]);
+    const resolved = applyPrefillAndFinishTarget(rawTarget);
+    if (!resolved) {
         return undefined;
     }
+    const { target, rule } = resolved;
+    if (!fetchOutcome.ok || fetchOutcome.buf === null) {
+        // Let Odoo's default flow handle (and report) it.
+        return undefined;
+    }
+    const rawBytes = new Uint8Array(fetchOutcome.buf);
     if (rawBytes.length > MAX_NATIVE_PAYLOAD_BYTES) {
-        // Above desktop queue limit: fall back to download before Array conversion.
+        // Above desktop queue limit: fall back to download.
         return undefined;
     }
     // A 200 response is not necessarily a PDF: an expired session
@@ -708,7 +719,9 @@ async function handleReportSubmission(action, options, env, bridge) {
         // Odoo open the HTML fallback in the browser.
         return await printReportTextWhenPdfEngineMissing(action, options, env, bridge, target, rule);
     }
-    const bytes = Array.from(rawBytes);
+    // Pass Uint8Array directly so BRIDGE_JS encodes it as base64 rather than
+    // expanding every byte into a huge JSON integer array.
+    const bytes = rawBytes;
     const idempotencyKey = buildReportIdempotencyKey("odoo", action);
     const pdfSource = reportSource(action);
     try {

@@ -817,6 +817,14 @@ pub fn run() {
                 Arc::clone(&worker_wake),
                 Arc::clone(&worker_stop),
             );
+            // Warm up PDFium and printer discovery in the background so the
+            // first user print job does not pay DLL load or spooler cold start.
+            let _ = std::thread::Builder::new()
+                .name("native-print-warmup".into())
+                .spawn(|| {
+                    let _ = commands::pdfium_ready();
+                    let _ = print_win::list_printers();
+                });
 
             let initial_origin = resolved.odoo_origin.clone();
             app.manage(AppState {
