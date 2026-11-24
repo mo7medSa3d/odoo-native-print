@@ -732,6 +732,12 @@ msgstr "السبب: تعذر التقاط صورة الإيصال."
 #. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/pos_native_print.js:0
+msgid "Reason: the receipt could not be captured; the standard print dialog was used."
+msgstr "السبب: تعذر التقاط صورة الإيصال، تم استخدام نافذة الطباعة العادية."
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/pos_native_print.js:0
 msgid "Reason: the print job could not be queued."
 msgstr "السبب: تعذر وضع مهمة الطباعة في الانتظار."
 

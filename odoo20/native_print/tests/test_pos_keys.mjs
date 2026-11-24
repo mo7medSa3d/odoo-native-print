@@ -606,3 +606,84 @@ test("PosTicketPrinterPlugin.printOrderReceipt cleans up late iframe on generate
         Date.now = prevDateNow;
     }
 });
+
+test("OneNote-style GDI printer: failed image capture prints text, total capture failure uses Odoo's standard print", async () => {
+    const prevWindow = globalThis.window;
+    const prevStorage = globalThis.sessionStorage;
+    const prevSetTimeout = globalThis.setTimeout;
+    const prevSuperCount = globalThis.__superCalls.length;
+    const store = new Map();
+    const printTextCalls = [];
+    const notices = [];
+
+    globalThis.sessionStorage = {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)),
+        removeItem: (k) => store.delete(k),
+    };
+    globalThis.setTimeout = (fn, ms) => (ms <= 2000 ? (fn(), 0) : prevSetTimeout(fn, ms));
+    globalThis.window = {
+        localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+        dispatchEvent: () => true,
+        __NATIVE_PRINT__: {
+            listPrinters: async () => [
+                { name: "OneNote (Desktop)", printer_class: "office", protocol: "gdi", online: true },
+            ],
+            printerCapabilities: async () => ({ forms: [], color: true }),
+            printImage: async () => { throw new Error("must not print an image"); },
+            printText: async (req) => { printTextCalls.push(req); return req.idempotencyKey; },
+            jobDetail: async () => ({ state: "done", attempts: 1 }),
+        },
+    };
+
+    try {
+        // 1) A GDI printer must still get the receipt text when the image
+        //    capture path fails (previously only ESC/POS had this fallback).
+        const plugin = new StubPosTicketPrinterPlugin();
+        plugin.pos = { getCashier: () => ({ id: 31 }) };
+        plugin.notification = { add: (msg, opts) => notices.push({ msg, opts }) };
+        plugin.generateIframe = async () => ({
+            contentDocument: {
+                getElementById: () => ({ innerText: "TOTAL 10.00", offsetWidth: 300 }),
+            },
+            remove() {},
+        });
+        plugin.generateImage = async () => { throw new Error("GDI capture failed"); };
+
+        assert.strictEqual(
+            await plugin.printOrderReceipt({ order: { uuid: "ord-20-onenote" } }),
+            true,
+        );
+        assert.strictEqual(printTextCalls.length, 1, "GDI capture failure must fall back to printText");
+        assert.strictEqual(printTextCalls[0].text, "TOTAL 10.00");
+        assert.strictEqual(globalThis.__superCalls.length, prevSuperCount, "text fallback must not use the browser");
+
+        // 2) If neither image nor text can be produced, the receipt still
+        //    prints through Odoo's own path instead of dying with a toast.
+        const plugin2 = new StubPosTicketPrinterPlugin();
+        plugin2.pos = { getCashier: () => ({ id: 32 }) };
+        plugin2.notification = { add: (msg, opts) => notices.push({ msg, opts }) };
+        plugin2.generateIframe = async () => { throw new Error("template unavailable"); };
+        plugin2.generateImage = async () => { throw new Error("should not run"); };
+
+        assert.strictEqual(
+            await plugin2.printOrderReceipt({ order: { uuid: "ord-20-onenote-2" } }),
+            true,
+        );
+        assert.strictEqual(
+            globalThis.__superCalls.length,
+            prevSuperCount + 1,
+            "total capture failure must call super.printOrderReceipt",
+        );
+        assert.ok(
+            globalThis.__rpcCalls.some(
+                (c) => c.url === "/native_print/job_status" && c.params.error_code === "POS_CAPTURE_FAILED",
+            ),
+            "the native failure is still recorded for diagnostics",
+        );
+    } finally {
+        globalThis.window = prevWindow;
+        globalThis.sessionStorage = prevStorage;
+        globalThis.setTimeout = prevSetTimeout;
+    }
+});

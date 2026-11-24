@@ -354,14 +354,186 @@ function withTimeout(promise, ms, label, onLateResolve = null) {
     });
 }
 
+const RECEIPT_TEMPLATE = "point_of_sale.pos_order_receipt";
+
+function isIframeLike(value) {
+    return Boolean(
+        value &&
+        (String(value.tagName || "").toUpperCase() === "IFRAME" ||
+            value.contentDocument ||
+            typeof value.querySelector === "function"),
+    );
+}
+
+// Only retry the other call shape when the failure looks like an API
+// mismatch. A genuine rendering/runtime error must not call the plugin
+// twice (it may already have mutated the POS state).
+function isSignatureError(error) {
+    if (error instanceof TypeError) {
+        return true;
+    }
+    return /not a function|not iterable|cannot read|undefined|argument|arity|template|props/i.test(
+        String(error?.message || error || ""),
+    );
+}
+
 async function renderReceiptIframe(plugin, receiptProps) {
     if (typeof plugin?.generateIframe !== "function") {
         throw new Error("generateIframe unavailable");
     }
-    if (plugin.generateIframe.length === 1) {
-        return plugin.generateIframe(receiptProps);
+    // Odoo 20 point releases disagree on this signature: some take
+    // (template, props), others just (props). Try the shape implied by
+    // the declared arity first, then the other one on an API mismatch.
+    const propsFirst = plugin.generateIframe.length === 1;
+    const shapes = propsFirst
+        ? [
+              () => plugin.generateIframe(receiptProps),
+              () => plugin.generateIframe(RECEIPT_TEMPLATE, receiptProps),
+          ]
+        : [
+              () => plugin.generateIframe(RECEIPT_TEMPLATE, receiptProps),
+              () => plugin.generateIframe(receiptProps),
+          ];
+    let lastError = null;
+    for (let i = 0; i < shapes.length; i++) {
+        try {
+            const result = await Promise.resolve(shapes[i]());
+            const iframe = result?.el || result?.iframe || result;
+            if (isIframeLike(iframe)) {
+                return iframe;
+            }
+            removeIframe(iframe);
+            lastError = new Error("generateIframe returned no iframe");
+        } catch (error) {
+            lastError = error;
+            if (i === 0 && !isSignatureError(error)) {
+                throw error;
+            }
+        }
     }
-    return plugin.generateIframe("point_of_sale.pos_order_receipt", receiptProps);
+    throw lastError || new Error("generateIframe failed");
+}
+
+async function generateReceiptCanvas(plugin, iframe, receiptEl) {
+    if (typeof plugin?.generateImage !== "function") {
+        throw new Error("generateImage unavailable");
+    }
+    const shapes = [
+        () => plugin.generateImage(iframe),
+        () => plugin.generateImage(iframe, receiptEl),
+    ];
+    let lastError = null;
+    for (let i = 0; i < shapes.length; i++) {
+        try {
+            const result = await Promise.resolve(shapes[i]());
+            const canvas = result?.canvas || result;
+            if (
+                canvas &&
+                (typeof canvas.toBlob === "function" ||
+                    typeof canvas.toDataURL === "function" ||
+                    (canvas.width || 0) > 0)
+            ) {
+                return canvas;
+            }
+            lastError = new Error("generateImage returned an empty canvas");
+        } catch (error) {
+            lastError = error;
+            if (i === 0 && !isSignatureError(error)) {
+                throw error;
+            }
+        }
+    }
+    throw lastError || new Error("generateImage failed");
+}
+
+function findVisibleReceiptElement() {
+    if (typeof document === "undefined" || typeof document.querySelector !== "function") {
+        return null;
+    }
+    for (const selector of ["#pos-receipt", ".pos-receipt-container .pos-receipt", ".pos-receipt"]) {
+        try {
+            const el = document.querySelector(selector);
+            if (el && (el.offsetWidth || el.offsetHeight || el.getBoundingClientRect?.().width)) {
+                return el;
+            }
+        } catch (_err) {
+            /* keep trying the next selector */
+        }
+    }
+    return null;
+}
+
+// Last-resort capture of the receipt Odoo already rendered on screen.
+// The clone carries inlined computed styles; external url() references
+// are stripped so the SVG cannot taint the canvas in WebView2.
+async function visibleReceiptToPngBytes(element) {
+    const width = element.offsetWidth || element.getBoundingClientRect?.().width || 300;
+    const height =
+        element.offsetHeight ||
+        element.scrollHeight ||
+        element.getBoundingClientRect?.().height ||
+        400;
+    if (!width || !height) {
+        throw new Error("visible receipt has no size");
+    }
+    const clone = element.cloneNode(true);
+    const inlineStyles = (source, target) => {
+        try {
+            const computed = window.getComputedStyle(source);
+            let css = "";
+            for (let i = 0; i < computed.length; i++) {
+                const prop = computed[i];
+                css += `${prop}:${computed.getPropertyValue(prop)};`;
+            }
+            target.setAttribute(
+                "style",
+                css.replace(
+                    /url\(\s*(?:"(?!data:)[^"]*"|'(?!data:)[^']*'|(?![\s"']*data:)[^)]+)\s*\)/gi,
+                    "none",
+                ),
+            );
+        } catch (_err) {
+            /* keep the clone's original classes/styles */
+        }
+        const sourceKids = source.children || [];
+        const targetKids = target.children || [];
+        for (let i = 0; i < sourceKids.length && i < targetKids.length; i++) {
+            inlineStyles(sourceKids[i], targetKids[i]);
+        }
+    };
+    inlineStyles(element, clone);
+    clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+    const serialized = new XMLSerializer()
+        .serializeToString(clone)
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+    const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
+        `<foreignObject width="100%" height="100%">${serialized}</foreignObject></svg>`;
+    const image = new Image();
+    const loaded = new Promise((resolve, reject) => {
+        const timer = setTimeout(
+            () => reject(new Error("visible receipt SVG timed out")),
+            POS_CAPTURE_TIMEOUT_MS,
+        );
+        image.onload = () => {
+            clearTimeout(timer);
+            resolve();
+        };
+        image.onerror = () => {
+            clearTimeout(timer);
+            reject(new Error("visible receipt SVG failed to load"));
+        };
+    });
+    image.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    await loaded;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(image, 0, 0);
+    return canvasToPngBytes(canvas);
 }
 
 async function printPosReceiptNatively(plugin, { order, basic = false, simplified = false }) {
@@ -397,6 +569,7 @@ async function printPosReceiptNatively(plugin, { order, basic = false, simplifie
         let fallbackText = null;
         let sourceWidthMm;
         let iframe = null;
+        let receiptEl = null;
         try {
             iframe = await withTimeout(
                 renderReceiptIframe(plugin, { order, basic, simplified }),
@@ -404,13 +577,13 @@ async function printPosReceiptNatively(plugin, { order, basic = false, simplifie
                 "generateIframe",
                 removeIframe,
             );
-            const receiptEl =
+            receiptEl =
                 iframe?.contentDocument?.getElementById?.("pos-receipt") ||
                 iframe?.contentDocument?.body ||
                 null;
             try {
                 const canvas = await withTimeout(
-                    plugin.generateImage(iframe),
+                    generateReceiptCanvas(plugin, iframe, receiptEl),
                     POS_CAPTURE_TIMEOUT_MS,
                     "generateImage",
                 );
@@ -419,24 +592,54 @@ async function printPosReceiptNatively(plugin, { order, basic = false, simplifie
                     POS_CAPTURE_TIMEOUT_MS,
                     "canvasToPngBytes",
                 );
+                if (!bytes?.length) {
+                    throw new Error("receipt PNG is empty");
+                }
                 const widthPx = receiptEl?.offsetWidth || canvas?.width || 0;
                 if (widthPx) {
                     sourceWidthMm = Math.round(((widthPx * 25.4) / 96) * 10) / 10;
                 }
             } catch (captureError) {
                 console.warn("Native Print: Odoo 20 receipt image capture failed.", captureError);
-                if (effectiveMode === "escpos" && typeof bridge.printText === "function") {
-                    const extracted = extractReceiptText(receiptEl);
-                    if (extracted) {
-                        fallbackText = extracted;
-                    }
+                // GDI/virtual printers (e.g. OneNote) still need a useful
+                // receipt when the image path fails: plain text is valid
+                // for every mode, not only ESC/POS.
+                if (typeof bridge.printText === "function") {
+                    fallbackText = extractReceiptText(receiptEl);
                 }
             }
         } catch (iframeError) {
             console.warn("Native Print: Odoo 20 receipt iframe generation failed.", iframeError);
+            if (typeof bridge.printText === "function") {
+                fallbackText = extractReceiptText(findVisibleReceiptElement());
+            }
         } finally {
             removeIframe(iframe);
             iframe = null;
+        }
+
+        // The plugin API can be missing or incompatible in staging builds:
+        // fall back to the receipt Odoo has already rendered on screen.
+        if (!bytes && !fallbackText) {
+            const visible = findVisibleReceiptElement();
+            if (visible) {
+                if (typeof bridge.printText === "function") {
+                    fallbackText = extractReceiptText(visible);
+                }
+                if (!fallbackText) {
+                    try {
+                        bytes = await withTimeout(
+                            visibleReceiptToPngBytes(visible),
+                            POS_CAPTURE_TIMEOUT_MS,
+                            "visibleReceiptToPngBytes",
+                        );
+                        const widthPx = visible.offsetWidth || 300;
+                        sourceWidthMm = Math.round(((widthPx * 25.4) / 96) * 10) / 10;
+                    } catch (visibleError) {
+                        console.warn("Native Print: on-screen receipt capture failed.", visibleError);
+                    }
+                }
+            }
         }
         if (!bytes && !fallbackText) {
             return {
@@ -546,6 +749,21 @@ patch(PosTicketPrinterPlugin.prototype, {
                 return true;
             }
             postPosDeclined(failure.key, failure.code, failure.safeRef, failure.userId, failure.device, failure.mode);
+            if (failure.code === "POS_CAPTURE_FAILED") {
+                // Never strand the cashier: if Odoo's receipt image cannot
+                // be captured in this build, use Odoo's own print path.
+                console.warn("Native Print: falling back to Odoo's standard receipt printing.");
+                try {
+                    await super.printOrderReceipt(...arguments);
+                } catch (fallbackError) {
+                    console.warn("Native Print: standard receipt printing failed.", fallbackError);
+                }
+                notifyPosNativeFailure(
+                    this,
+                    _t("Reason: the receipt could not be captured; the standard print dialog was used."),
+                );
+                return true;
+            }
             notifyPosNativeFailure(this, failure.reason);
         } catch (error) {
             console.warn("Native Print: POS receipt print failed.", error);
