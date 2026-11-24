@@ -823,7 +823,7 @@ pub fn run() {
                 .name("native-print-warmup".into())
                 .spawn(|| {
                     let _ = commands::pdfium_ready();
-                    let _ = print_win::list_printers();
+                    let _ = print_win::discover_printers();
                 });
 
             let initial_origin = resolved.odoo_origin.clone();
