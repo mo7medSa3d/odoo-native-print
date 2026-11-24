@@ -275,7 +275,7 @@ static PDFIUM_READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
 /// PDFium availability is a process-lifetime fact; probing it used to
 /// load the 7.5 MB DLL on every overview call.
-fn pdfium_ready() -> bool {
+pub(crate) fn pdfium_ready() -> bool {
     *PDFIUM_READY.get_or_init(|| print_render::Pdfium::load().is_ok())
 }
 

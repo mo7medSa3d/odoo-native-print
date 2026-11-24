@@ -166,10 +166,9 @@ pub fn build_dib_owned(mut page: RenderedPage) -> DibImage {
     if page.mode == RenderMode::Color {
         let (w, h) = (page.width_px, page.height_px);
         let dst_row = dib_row_bytes(w, 32);
-        if let (Some(src_row), Some(total)) = (
-            (w as usize).checked_mul(4),
-            dst_row.checked_mul(h as usize),
-        ) {
+        if let (Some(src_row), Some(total)) =
+            ((w as usize).checked_mul(4), dst_row.checked_mul(h as usize))
+        {
             if src_row == dst_row && dst_row > 0 && page.pixels.len() >= total {
                 page.pixels.truncate(total);
                 return DibImage {
