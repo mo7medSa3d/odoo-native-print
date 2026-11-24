@@ -328,6 +328,12 @@ msgstr "لا توجد طابعة متاحة على هذا الجهاز الآن.
 
 #. module: native_print
 #. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_handler.js:0
+msgid "The Odoo server has no PDF engine. The report was printed from its text version instead."
+msgstr "خادم Odoo لا يحتوي على محرك PDF. تمت طباعة التقرير من نسخته النصية بدلاً من ذلك."
+
+#. module: native_print
+#. odoo-javascript
 #: code:addons/native_print/static/src/js/pos_native_print.js:0
 msgid "Receipt did not print. Check the printer and try again."
 msgstr "لم يُطبع الإيصال. تحقق من الطابعة وحاول مرة أخرى."

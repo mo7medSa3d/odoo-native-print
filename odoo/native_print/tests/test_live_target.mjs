@@ -457,6 +457,76 @@ try {
     globalThis.window.__NATIVE_PRINT__.printPdf = async () => { throw null; };
     const nullErrRes = await registeredHandler({ report_type: "qweb-pdf", report_name: "r.nullerr" }, {}, testEnv);
     eq(nullErrRes, undefined, "null bridge rejection falls back cleanly without TypeError");
+
+    // 4c. A server without wkhtmltopdf answers /report/pdf with HTML.
+    // The native handler must print the text version instead of letting
+    // Odoo show the HTML fallback and its "no PDF engine" warning.
+    notices.length = 0;
+    rpcCalls.length = 0;
+    let textFallbackPrint = null;
+    const prevDoc = globalThis.document;
+    globalThis.document = {
+        createElement: () => ({
+            width: 0,
+            height: 0,
+            getContext: () => ({
+                measureText: () => ({ width: 7.8 }),
+                fillRect() {},
+                fillText() {},
+            }),
+            toBlob(cb) {
+                cb({ arrayBuffer: async () => new Uint8Array([137, 80, 78, 71]).buffer });
+            },
+        }),
+    };
+    try {
+        globalThis.window.__NATIVE_PRINT__ = {
+            listPrinters: async () => [
+                { name: "OneNote (Desktop)", driver: "Microsoft", kind: "local", is_default: true },
+            ],
+            printerCapabilities: async () => ({ forms: [], color: true }),
+            printImage: async (req) => { textFallbackPrint = req; return req.idempotencyKey; },
+            jobDetail: async () => ({ state: "done", pages: 1, attempts: 1 }),
+        };
+        let fetchCount = 0;
+        globalThis.fetch = async (url) => {
+            fetchCount++;
+            if (String(url).includes("/report/pdf/")) {
+                return {
+                    ok: true,
+                    arrayBuffer: async () =>
+                        new TextEncoder().encode("<html>no PDF engine on this system</html>").buffer,
+                };
+            }
+            return { ok: true, text: async () => "INVOICE INV/2026/0006\nTOTAL 100.00 SR" };
+        };
+        const noPdfRes = await registeredHandler(
+            {
+                report_type: "qweb-pdf",
+                report_name: "account.report_invoice",
+                context: { active_ids: [6] },
+            },
+            {},
+            testEnv,
+        );
+        eq(noPdfRes, true, "missing PDF engine still prints natively");
+        eq(fetchCount, 2, "PDF and text converter are both fetched");
+        eq(textFallbackPrint !== null, true, "text version is sent to the printer");
+        eq(textFallbackPrint.mode, "gdi", "text version is rendered as a GDI image");
+        eq(textFallbackPrint.bytes.length > 0, true, "PNG bytes are produced locally");
+        eq(
+            rpcCalls.some((c) => c.params.state === "queued"),
+            true,
+            "the fallback job is logged to Odoo",
+        );
+        eq(
+            notices.some((n) => /no PDF engine/i.test(n.msg)),
+            true,
+            "the user is told why the text version was printed",
+        );
+    } finally {
+        globalThis.document = prevDoc;
+    }
 } finally {
     globalThis.fetch = origFetch;
     delete globalThis.window.__NATIVE_PRINT__;

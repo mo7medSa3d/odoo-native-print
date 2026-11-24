@@ -351,6 +351,110 @@ async function handleCloseOnReportDownload(action, options, env) {
     }
 }
 
+/*
+ * Odoo's PDF engine (wkhtmltopdf) is optional on the server. When it is
+ * absent, /report/pdf/<name> answers with the HTML report — Odoo shows the
+ * "Unable to find the PDF engine" warning and falls back to HTML. Sending
+ * that HTML to the printer would print markup, so render the SAME report
+ * through Odoo's text converter and print it natively instead. No server
+ * PDF engine and no browser print dialog are ever involved.
+ */
+async function printReportTextWhenPdfEngineMissing(action, options, env, bridge, target, rule) {
+    let text;
+    try {
+        text = await fetchReportBody(buildReportUrl(action, "text", env), (resp) => resp.text());
+    } catch (_fetchError) {
+        return undefined;
+    }
+    if (text === null) {
+        return undefined;
+    }
+    const trimmed = text.trimStart();
+    // The text route can itself answer with an HTML error page.
+    if (!trimmed || trimmed.startsWith("<")) {
+        return undefined;
+    }
+    const textBytes = new TextEncoder().encode(text).length;
+    const asEscpos = rule.mode === "escpos";
+    const limit = asEscpos ? MAX_NATIVE_TEXT_BYTES : MAX_NATIVE_PAYLOAD_BYTES;
+    if (!textBytes || textBytes > limit) {
+        return undefined;
+    }
+
+    const key = buildReportIdempotencyKey("odoo-no-pdf", action);
+    const source = reportSource(action);
+    const meta = {
+        reportName: action.report_name,
+        printerPattern: rule.printer_pattern,
+        printerName: target.printer.name,
+        sourceType: "report",
+        sourceModel: source.model,
+        sourceIds: source.ids || undefined,
+        copies: rule.copies || 1,
+        paper: rule.paper || undefined,
+        color: rule.color !== false,
+        mode: asEscpos ? "escpos" : "gdi",
+        pages: 1,
+    };
+    try {
+        if (asEscpos) {
+            await bridge.printText({
+                idempotencyKey: key,
+                reportName: action.report_name,
+                printerPattern: rule.printer_pattern,
+                text,
+                cut: true,
+                copies: rule.copies || 1,
+            });
+        } else {
+            const pngBytes = await textReportToPngBytes(text);
+            await bridge.printImage({
+                idempotencyKey: key,
+                reportName: action.report_name,
+                printerPattern: rule.printer_pattern,
+                mode: "gdi",
+                sourceWidthMm: 210,
+                copies: rule.copies || 1,
+                bytes: pngBytes,
+            });
+        }
+        rpc("/native_print/job_status", Object.assign({
+            idempotency_key: key,
+            state: "queued",
+            device: target.printer.name,
+            report_name: action.report_name,
+            byte_size: textBytes,
+        }, source.model ? { source_model: source.model } : {}), { silent: true }).catch(() => {});
+        watchJobToCompletion(
+            bridge,
+            key,
+            Object.assign({}, meta, { byteSize: textBytes }),
+            env,
+        ).catch(() => {});
+    } catch (error) {
+        await rpc("/native_print/job_status", Object.assign({
+            idempotency_key: key,
+            state: "failed",
+            error_code: "BRIDGE_ERROR",
+            device: target.printer.name,
+            report_name: action.report_name,
+            byte_size: textBytes,
+        }, source.model ? { source_model: source.model } : {}), { silent: true }).catch(() => {});
+        notifyJobUpdated();
+        console.warn("Native Print: text fallback for a report without a PDF engine failed.", error);
+        return undefined;
+    }
+    notifyUser(
+        env,
+        _t("The Odoo server has no PDF engine. The report was printed from its text version instead."),
+        "warning",
+        undefined,
+        recoveryButtons(),
+    );
+    await handleCloseOnReportDownload(action, options, env);
+    return true;
+}
+
 async function handleReportSubmission(action, options, env, bridge) {
     // A reprint launched from the job log carries a prefill: the
     // original printer and the original print settings. The printer
@@ -534,7 +638,10 @@ async function handleReportSubmission(action, options, env, bridge) {
         return false;
     })();
     if (!hasPdfMagic) {
-        return undefined;
+        // Odoo returned HTML because its PDF engine is missing. Print the
+        // same report natively from the text converter instead of letting
+        // Odoo open the HTML fallback in the browser.
+        return await printReportTextWhenPdfEngineMissing(action, options, env, bridge, target, rule);
     }
     const bytes = Array.from(rawBytes);
     const idempotencyKey = buildReportIdempotencyKey("odoo", action);
