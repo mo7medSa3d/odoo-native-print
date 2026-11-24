@@ -607,7 +607,7 @@ test("PosTicketPrinterPlugin.printOrderReceipt cleans up late iframe on generate
     }
 });
 
-test("OneNote-style GDI printer: failed image capture prints text, total capture failure uses Odoo's standard print", async () => {
+test("OneNote-style GDI printer: failed image capture prints text, total capture failure reports natively (no print dialog)", async () => {
     const prevWindow = globalThis.window;
     const prevStorage = globalThis.sessionStorage;
     const prevSetTimeout = globalThis.setTimeout;
@@ -658,8 +658,8 @@ test("OneNote-style GDI printer: failed image capture prints text, total capture
         assert.strictEqual(printTextCalls[0].text, "TOTAL 10.00");
         assert.strictEqual(globalThis.__superCalls.length, prevSuperCount, "text fallback must not use the browser");
 
-        // 2) If neither image nor text can be produced, the receipt still
-        //    prints through Odoo's own path instead of dying with a toast.
+        // 2) If neither image nor text can be produced, fail loudly but
+        //    never open Odoo's browser print dialog.
         const plugin2 = new StubPosTicketPrinterPlugin();
         plugin2.pos = { getCashier: () => ({ id: 32 }) };
         plugin2.notification = { add: (msg, opts) => notices.push({ msg, opts }) };
@@ -672,8 +672,8 @@ test("OneNote-style GDI printer: failed image capture prints text, total capture
         );
         assert.strictEqual(
             globalThis.__superCalls.length,
-            prevSuperCount + 1,
-            "total capture failure must call super.printOrderReceipt",
+            prevSuperCount,
+            "capture failure must never open Odoo's browser print dialog",
         );
         assert.ok(
             globalThis.__rpcCalls.some(
@@ -681,6 +681,83 @@ test("OneNote-style GDI printer: failed image capture prints text, total capture
             ),
             "the native failure is still recorded for diagnostics",
         );
+    } finally {
+        globalThis.window = prevWindow;
+        globalThis.sessionStorage = prevStorage;
+        globalThis.setTimeout = prevSetTimeout;
+    }
+});
+
+test("Odoo 20 builds POS receipt data before rendering the QWeb template", async () => {
+    const prevWindow = globalThis.window;
+    const prevStorage = globalThis.sessionStorage;
+    const prevSetTimeout = globalThis.setTimeout;
+    const store = new Map();
+    const printImageCalls = [];
+    const generatedData = { company: { name: "Test" }, order: {}, lines: [] };
+    let dataArgs = null;
+    let iframeArgs = null;
+
+    globalThis.sessionStorage = {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)),
+        removeItem: (k) => store.delete(k),
+    };
+    globalThis.setTimeout = (fn, ms) => (ms <= 2000 ? (fn(), 0) : prevSetTimeout(fn, ms));
+    globalThis.window = {
+        localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+        dispatchEvent: () => true,
+        __NATIVE_PRINT__: {
+            listPrinters: async () => [
+                { name: "OneNote (Desktop)", printer_class: "office", protocol: "gdi", online: true },
+            ],
+            printerCapabilities: async () => ({ forms: [], color: true }),
+            printImage: async (req) => { printImageCalls.push(req); return req.idempotencyKey; },
+            printText: async () => { throw new Error("should not print text"); },
+            jobDetail: async () => ({ state: "done", attempts: 1 }),
+        },
+    };
+
+    try {
+        const order = { uuid: "ord-20-data" };
+        const plugin = new StubPosTicketPrinterPlugin();
+        plugin.pos = { getCashier: () => ({ id: 41 }) };
+        plugin.notification = { add() {} };
+        plugin.getOrderReceiptData = async (o, opts) => {
+            dataArgs = { o, opts };
+            return generatedData;
+        };
+        plugin.generateIframe = async (...args) => {
+            iframeArgs = args;
+            return {
+                contentDocument: { getElementById: () => ({ offsetWidth: 300 }) },
+                remove() {},
+            };
+        };
+        plugin.generateImage = async () => ({
+            width: 300,
+            toBlob(cb) {
+                cb({ arrayBuffer: async () => new Uint8Array([137, 80, 78, 71]).buffer });
+            },
+        });
+
+        assert.strictEqual(
+            await plugin.printOrderReceipt({ order, basic: true, simplified: false }),
+            true,
+        );
+        assert.strictEqual(dataArgs.o, order, "POS models must receive the active order");
+        assert.deepStrictEqual(
+            dataArgs.opts,
+            { basic: true, simplified: false },
+            "basic/simplified flags must be forwarded",
+        );
+        assert.strictEqual(iframeArgs[0], "point_of_sale.pos_order_receipt");
+        assert.strictEqual(
+            iframeArgs[1],
+            generatedData,
+            "the generated data, not raw props, must render the template",
+        );
+        assert.strictEqual(printImageCalls.length, 1, "the captured PNG must be sent to the printer");
     } finally {
         globalThis.window = prevWindow;
         globalThis.sessionStorage = prevStorage;

@@ -402,6 +402,80 @@
   function writeJson(key, val) {
     try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
   }
+
+  // --- Browser-like session restore -------------------------------------
+  // render() mirrors the live strip into localStorage on every change,
+  // so the last session is always available here before the first render
+  // replaces it with the single boot tab.
+  function isLocalTabUrl(u) {
+    try {
+      var parsed = new URL(u);
+      return (
+        (parsed.protocol === "tauri:" && parsed.hostname === "localhost") ||
+        ((parsed.protocol === "http:" || parsed.protocol === "https:") &&
+          parsed.hostname === "tauri.localhost")
+      );
+    } catch (e) { return false; }
+  }
+  function isRestorableTabUrl(u) {
+    if (typeof u !== "string" || !u || u.length > 8192) return false;
+    try {
+      var parsed = new URL(u);
+      if (parsed.username || parsed.password) return false;
+      if (isLocalTabUrl(u)) return true;
+      return parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch (e) { return false; }
+  }
+  function isInitialTabUrl(u) {
+    if (!isRestorableTabUrl(u)) return false;
+    if (isLocalTabUrl(u)) {
+      return /\/boot\.html$/i.test(u) || /\/index\.html$/i.test(u) || /\/$/.test(u);
+    }
+    try {
+      var parsed = new URL(u);
+      // boot.html redirects the first tab to the configured Odoo root;
+      // do not restore a duplicate of it. POS tabs are never skipped.
+      return (
+        !/\/pos(\/|$)/i.test(u) &&
+        (parsed.pathname === "/" || parsed.pathname === "/web" || parsed.pathname === "/web/login")
+      );
+    } catch (e) { return false; }
+  }
+  function restoreSavedSession() {
+    var saved = readJson("np_open_tabs", []);
+    if (!Array.isArray(saved) || saved.length < 2) return;
+    var activeIdx = 0;
+    saved.forEach(function (tab, i) { if (tab && tab.active) activeIdx = i; });
+    var skipFirst = isInitialTabUrl(String((saved[0] && saved[0].url) || ""));
+    var queue = saved.slice(skipFirst ? 1 : 0).map(function (tab) {
+      return String((tab && tab.url) || "");
+    }).filter(isRestorableTabUrl);
+    var targetUrl = skipFirst && activeIdx === 0
+      ? null
+      : (saved[activeIdx] && saved[activeIdx].url) || null;
+    if (!queue.length && !targetUrl) return;
+    var openNext = function () {
+      if (queue.length) {
+        var url = queue.shift();
+        invoke("tab_open", { url: url })
+          .catch(function () {})
+          .finally(function () { openNext(); });
+        return;
+      }
+      invoke("tab_list", {}).then(function (tabs) {
+        if (targetUrl && Array.isArray(tabs)) {
+          var match = tabs.find(function (tab) { return tab.url === targetUrl; });
+          if (match) {
+            invoke("tab_switch", { label: match.label }).catch(function () {}).finally(refresh);
+            return;
+          }
+        }
+        refresh();
+      }).catch(function () { refresh(); });
+    };
+    openNext();
+  }
+
   function applyPrefs() {
     var savedLang = null, savedTheme = null;
     try {
@@ -866,6 +940,7 @@
     else if (ev.key === "np_pinned_tabs" || ev.key === "np_tab_groups") render(currentTabs);
   });
   applyPrefs();
+  restoreSavedSession();
   refresh();
   window.setInterval(function () { if (!document.hidden) refresh(); }, 650);
   document.addEventListener("visibilitychange", function () { if (!document.hidden) refresh(); });

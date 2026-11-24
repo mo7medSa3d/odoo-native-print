@@ -381,19 +381,25 @@ async function renderReceiptIframe(plugin, receiptProps) {
     if (typeof plugin?.generateIframe !== "function") {
         throw new Error("generateIframe unavailable");
     }
-    // Odoo 20 point releases disagree on this signature: some take
-    // (template, props), others just (props). Try the shape implied by
-    // the declared arity first, then the other one on an API mismatch.
-    const propsFirst = plugin.generateIframe.length === 1;
-    const shapes = propsFirst
-        ? [
-              () => plugin.generateIframe(receiptProps),
-              () => plugin.generateIframe(RECEIPT_TEMPLATE, receiptProps),
-          ]
-        : [
-              () => plugin.generateIframe(RECEIPT_TEMPLATE, receiptProps),
-              () => plugin.generateIframe(receiptProps),
-          ];
+    // Odoo 20 core: generateIframe(template, data) renders the template
+    // with `data` produced by getOrderReceiptData(). Passing the raw
+    // {order, basic, simplified} object makes the QWeb template render
+    // an empty #pos-receipt, so generateImage() later finds nothing.
+    let data = receiptProps;
+    if (typeof plugin.getOrderReceiptData === "function") {
+        try {
+            data = await plugin.getOrderReceiptData(receiptProps.order, {
+                basic: !!receiptProps.basic,
+                simplified: !!receiptProps.simplified,
+            });
+        } catch (error) {
+            console.warn("Native Print: Odoo 20 receipt data generation failed.", error);
+        }
+    }
+    const shapes = [
+        () => plugin.generateIframe(RECEIPT_TEMPLATE, data),
+        () => plugin.generateIframe(receiptProps),
+    ];
     let lastError = null;
     for (let i = 0; i < shapes.length; i++) {
         try {
@@ -749,21 +755,6 @@ patch(PosTicketPrinterPlugin.prototype, {
                 return true;
             }
             postPosDeclined(failure.key, failure.code, failure.safeRef, failure.userId, failure.device, failure.mode);
-            if (failure.code === "POS_CAPTURE_FAILED") {
-                // Never strand the cashier: if Odoo's receipt image cannot
-                // be captured in this build, use Odoo's own print path.
-                console.warn("Native Print: falling back to Odoo's standard receipt printing.");
-                try {
-                    await super.printOrderReceipt(...arguments);
-                } catch (fallbackError) {
-                    console.warn("Native Print: standard receipt printing failed.", fallbackError);
-                }
-                notifyPosNativeFailure(
-                    this,
-                    _t("Reason: the receipt could not be captured; the standard print dialog was used."),
-                );
-                return true;
-            }
             notifyPosNativeFailure(this, failure.reason);
         } catch (error) {
             console.warn("Native Print: POS receipt print failed.", error);

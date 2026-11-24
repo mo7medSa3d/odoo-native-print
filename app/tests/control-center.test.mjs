@@ -1120,7 +1120,7 @@ test("tabbar.html pointer-event drag-and-drop reorders tabs and refresh() drains
   assert.deepEqual(JSON.parse(windowObj.localStorage.getItem("np_tab_groups")), { t1: "blue" });
 });
 
-test("index.html Command Palette clears np_cc_open_cmd on storage event and saves/restores workspaces", async () => {
+test("index.html Command Palette clears np_cc_open_cmd on storage event and needs no manual session save", async () => {
   const { windowObj, document } = createMiniDom(html);
   windowObj.__NATIVE_PRINT__ = {
     async appOverview() { return { appVersion: "1.5.7", odooOrigin: "https://odoo.example.com", printers: [], recentJobs: [], counts: { active: 0, done: 0, failed: 0 } }; },
@@ -1139,13 +1139,11 @@ test("index.html Command Palette clears np_cc_open_cmd on storage event and save
   assert.equal(document.getElementById("cmdOverlay").classList.contains("hidden"), false, "Command Palette must open");
   assert.equal(windowObj.localStorage.getItem("np_cc_open_cmd"), null, "np_cc_open_cmd must be cleared on storage event");
 
-  // Save workspace
-  document.getElementById("cmdWorkspaceName").value = "Morning Shift";
-  ctx.saveCurrentWorkspace();
-  const saved = JSON.parse(windowObj.localStorage.getItem("np_workspaces") || "[]");
-  assert.equal(saved.length, 1);
-  assert.equal(saved[0].name, "Morning Shift");
-  assert.deepEqual(saved[0].urls, ["https://odoo.example.com/odoo/sales"]);
+  // Sessions are saved/restored automatically by the tab bar: the manual
+  // "Save Session" button and workspace-name input must be gone.
+  assert.equal(document.getElementById("btnSaveWorkspace"), null);
+  assert.equal(document.getElementById("cmdWorkspaceName"), null);
+  assert.equal(ctx.saveCurrentWorkspace, undefined);
 });
 
 test("index.html Command Palette delegated clicks: filtered restore/delete workspace uses origIdx and tab actions run without ReferenceError", async () => {

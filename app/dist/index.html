@@ -1367,10 +1367,6 @@
           <div class="cmd-section-title">
             <span data-i18n="cmd_workspaces">مساحات العمل (الجلسات المحفوظة)</span>
           </div>
-          <div class="cmd-ws-row">
-            <input type="text" id="cmdWorkspaceName" class="input" placeholder="اسم مساحة العمل (مثل: كاشير الصباح)…" />
-            <button type="button" class="btn btn-primary" id="btnSaveWorkspace" data-action="save-workspace" data-i18n="cmd_save_ws">حفظ الجلسة</button>
-          </div>
           <div class="cmd-list" id="cmdWorkspacesList"></div>
         </div>
         <div>
@@ -1480,7 +1476,6 @@
       cmd_open_tabs: "التبويبات المفتوحة والمجموعات",
       cmd_reopen_closed: "إعادة فتح المغلق",
       cmd_workspaces: "مساحات العمل (الجلسات المحفوظة)",
-      cmd_save_ws: "حفظ الجلسة",
       cmd_quick_actions: "أوامر سريعة",
       btn_open_odoo: "فتح Odoo",
       btn_refresh: "تحديث",
@@ -1661,7 +1656,6 @@
       cmd_open_tabs: "Open Tabs & Groups",
       cmd_reopen_closed: "Reopen Closed",
       cmd_workspaces: "Workspaces (Saved Sessions)",
-      cmd_save_ws: "Save Session",
       cmd_quick_actions: "Quick Actions",
       btn_open_odoo: "Open Odoo",
       btn_refresh: "Refresh",
@@ -2050,12 +2044,6 @@
       const ph = currentLang === "ar" ? "ابحث في التبويبات، مساحات العمل، أو الأوامر…" : "Search tabs, workspaces, or commands…";
       cmdIn.placeholder = ph;
       cmdIn.setAttribute("aria-label", ph);
-    }
-    const wsIn = document.getElementById("cmdWorkspaceName");
-    if (wsIn) {
-      const ph = currentLang === "ar" ? "اسم مساحة العمل (مثل: كاشير الصباح)…" : "Workspace name (e.g. Morning POS)…";
-      wsIn.placeholder = ph;
-      wsIn.setAttribute("aria-label", ph);
     }
     const dict = I18N[currentLang];
     document.querySelectorAll("[data-i18n]").forEach((el) => {
@@ -2976,22 +2964,6 @@
     }
     setCmdActiveIndex(0);
   }
-  function saveCurrentWorkspace() {
-    const inp = document.getElementById("cmdWorkspaceName");
-    const name = inp ? inp.value.trim() : "";
-    if (!name) { showToast(currentLang === "ar" ? "أدخل اسم مساحة العمل" : "Enter a workspace name", true); return; }
-    const tabs = readLocalJson("np_open_tabs", []);
-    const urls = (Array.isArray(tabs) ? tabs : []).filter((t) => t && t.url && !t.is_local).map((t) => t.url);
-    if (!urls.length) { showToast(currentLang === "ar" ? "لا توجد تبويبات Odoo مفتوحة لحفظها" : "No Odoo tabs open to save", true); return; }
-    const list = readLocalJson("np_workspaces", []);
-    const next = (Array.isArray(list) ? list : []).filter((w) => w && w.name !== name);
-    next.unshift({ name, urls, savedAt: Date.now() });
-    writeLocalJson("np_workspaces", next.slice(0, 12));
-    if (inp) inp.value = "";
-    renderCommandPalette(document.getElementById("cmdInput") ? document.getElementById("cmdInput").value : "");
-    showToast(currentLang === "ar" ? "تم حفظ مساحة العمل" : "Workspace saved");
-  }
-
   document.addEventListener("click", (ev) => {
     const btn = ev.target && ev.target.closest ? ev.target.closest("[data-action]") : null;
     if (!btn) return;
@@ -3032,7 +3004,6 @@
       renderCommandPalette(document.getElementById("cmdInput")?.value || "");
       return;
     }
-    if (action === "save-workspace") return saveCurrentWorkspace();
     if (action === "restore-workspace") { executeCmdPrimaryAction(btn); return; }
     if (action === "delete-workspace") {
       const idx = Number(btn.getAttribute("data-ws-idx"));
@@ -3700,11 +3671,6 @@
     if (!ov || ov.classList.contains("hidden")) return;
     if (ev.key === "Escape") {
       closeCommandPalette();
-      return;
-    }
-    const wsInp = document.getElementById("cmdWorkspaceName");
-    if (ev.target === wsInp || document.activeElement === wsInp) {
-      if (ev.key === "Enter") { ev.preventDefault(); saveCurrentWorkspace(); }
       return;
     }
     if (ev.key === "ArrowDown") {
