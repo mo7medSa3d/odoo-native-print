@@ -104,6 +104,10 @@
     border-radius: var(--radius-sm);
     cursor: grab;
     white-space: nowrap;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
+    touch-action: none;
     position: relative;
     transition:
       background-color var(--dur-fast) var(--ease-spring),
@@ -342,12 +346,6 @@
   <div class="divider" aria-hidden="true"></div>
 
   <div class="tb-utilities">
-    <button type="button" class="tb-btn" id="btnReopenTab" title="إعادة فتح آخر تبويب مغلق (Ctrl+Shift+T)" aria-label="إعادة فتح آخر تبويب مغلق">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
-    </button>
-    <button type="button" class="tb-btn" id="btnCmdPalette" title="البحث السريع والأوامر (Ctrl+K)" aria-label="البحث السريع والأوامر">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-    </button>
     <button type="button" class="tb-action brand" id="btnCc" title="مركز التحكم">
       <img src="app-icon.png" alt="" aria-hidden="true"/>
       <span data-i18n="cc">مركز التحكم</span>
@@ -369,15 +367,11 @@
   var STR = {
     ar: {
       new_tab: "تبويب جديد", cc: "مركز التحكم", settings: "الإعدادات",
-      back: "رجوع", forward: "تقدّم", reload: "تحديث", close_tab: "إغلاق", tabs_label: "التبويبات",
-      reopen_tab: "إعادة فتح آخر تبويب مغلق (Ctrl+Shift+T)",
-      cmd_palette: "البحث السريع والأوامر (Ctrl+K)"
+      back: "رجوع", forward: "تقدّم", reload: "تحديث", close_tab: "إغلاق", tabs_label: "التبويبات"
     },
     en: {
       new_tab: "New tab", cc: "Control Center", settings: "Settings",
-      back: "Back", forward: "Forward", reload: "Reload", close_tab: "Close", tabs_label: "Tabs",
-      reopen_tab: "Reopen closed tab (Ctrl+Shift+T)",
-      cmd_palette: "Quick Search & Commands (Ctrl+K)"
+      back: "Back", forward: "Forward", reload: "Reload", close_tab: "Close", tabs_label: "Tabs"
     }
   };
   var lang = "";
@@ -427,8 +421,6 @@
         ["btnBack", STR[lang].back],
         ["btnForward", STR[lang].forward],
         ["btnReload", STR[lang].reload],
-        ["btnReopenTab", STR[lang].reopen_tab],
-        ["btnCmdPalette", STR[lang].cmd_palette],
         ["btnCc", STR[lang].cc],
         ["btnSettings", STR[lang].settings]
       ];
@@ -450,7 +442,7 @@
   var currentTabs = [];
   var dragLabel = null;
   var ptrDrag = null;
-  var suppressNextClick = false;
+  var lastDragEnd = 0;
   var refreshing = false;
 
   function tabKind(tab) {
@@ -477,6 +469,14 @@
     var idx = i + (after ? 1 : 0);
     var from = -1;
     currentTabs.forEach(function (t, j) { if (t.label === dragLabel) from = j; });
+    if (from > -1 && from < idx) idx -= 1;
+    return idx;
+  }
+  // Forgiving insertion index for pointer drags: "after" is a logical
+  // (not visual) direction, so it works in both RTL and LTR strips.
+  function insertionIndexFor(i, after) {
+    var idx = i + (after ? 1 : 0);
+    var from = ptrDrag ? ptrDrag.fromIndex : -1;
     if (from > -1 && from < idx) idx -= 1;
     return idx;
   }
@@ -541,14 +541,19 @@
       var grp = VALID_GROUPS[rawGrp] ? rawGrp : "";
       el.className = "tab" + (t.active ? " active" : "") + (isPinned ? " is-pinned" : "") + (grp ? " group-" + grp : "");
       el.title = t.url || "";
-      el.draggable = true;
+      // Native HTML5 DnD is disabled on purpose: WebView2 shows the
+      // "not allowed here" cursor and swallows pointer events when a
+      // draggable element starts a native drag. Reordering is pure
+      // pointer-driven, exactly like Chrome's tab strip.
+      el.draggable = false;
       el.setAttribute("role", "tab");
       el.setAttribute("aria-selected", t.active ? "true" : "false");
       el.setAttribute("tabindex", t.active ? "0" : "-1");
       el.setAttribute("data-label", t.label);
       el.setAttribute("data-index", String(tabIndex));
 
-      // Real Pointer-Event Drag-and-Drop (works reliably inside Windows WebView2 where HTML5 DnD can be intercepted)
+      // Pointer-driven reorder: capture the pointer immediately so a
+      // gesture can never turn into a native drag or a text selection.
       el.addEventListener("pointerdown", function (ev) {
         if (ev.button === 1) {
           ev.preventDefault();
@@ -565,6 +570,9 @@
           targetIndex: tabIndex,
           pointerId: ev.pointerId
         };
+        if (el.setPointerCapture && ev.pointerId != null) {
+          try { el.setPointerCapture(ev.pointerId); } catch (e) {}
+        }
       });
 
       // Keep HTML5 DnD listeners for fallback & automated test compatibility
@@ -629,7 +637,9 @@
       });
       el.appendChild(close);
       el.addEventListener("click", function () {
-        if (suppressNextClick) { suppressNextClick = false; return; }
+        // A completed drag emits a click too; ignore it without ever
+        // swallowing a genuine subsequent click (time-based guard).
+        if (Date.now() - lastDragEnd < 300) return;
         invoke("tab_switch", { label: t.label }).then(refresh).catch(function () {});
       });
       el.addEventListener("keydown", function (ev) {
@@ -740,55 +750,66 @@
 
   window.addEventListener("pointermove", function (ev) {
     if (!ptrDrag) return;
-    var dx = (ev.clientX || 0) - ptrDrag.startX;
+    var x = ev.clientX || 0;
+    var dx = x - ptrDrag.startX;
     if (!ptrDrag.active && Math.abs(dx) < 5) return;
     if (!ptrDrag.active) {
       ptrDrag.active = true;
       dragLabel = ptrDrag.label;
       ptrDrag.el.classList.add("dragging");
-      if (ptrDrag.el.setPointerCapture && ptrDrag.pointerId != null) {
-        try { ptrDrag.el.setPointerCapture(ptrDrag.pointerId); } catch (e) {}
-      }
     }
+    if (ev.preventDefault) ev.preventDefault();
     ptrDrag.el.style.transform = "translateX(" + dx + "px)";
     clearDropHints(stripEl);
-    var tabNodes = Array.prototype.slice.call(stripEl.querySelectorAll(".tab"));
-    var hitIdx = ptrDrag.fromIndex;
-    for (var i = 0; i < tabNodes.length; i++) {
-      var node = tabNodes[i];
+
+    // Forgiving targeting: pick the nearest tab centre instead of
+    // requiring the pointer to be exactly inside a tab's rectangle.
+    // Gaps, the "+" button and the strip padding all accept a drop.
+    var rtl = document.documentElement.dir === "rtl";
+    var nodes = Array.prototype.slice.call(stripEl.querySelectorAll(".tab"));
+    var bestNode = null;
+    var bestDist = Infinity;
+    var after = false;
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
       if (node === ptrDrag.el) continue;
-      var rect = node.getBoundingClientRect();
-      if (ev.clientX >= rect.left && ev.clientX <= rect.right) {
-        node.classList.add("drop-hint");
-        hitIdx = dropIndexFor(i, ev.clientX, rect);
-        break;
+      var r = node.getBoundingClientRect ? node.getBoundingClientRect() : { left: 0, width: 0 };
+      var centre = (r.left || 0) + (r.width || 0) / 2;
+      var dist = Math.abs(x - centre);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestNode = node;
+        after = rtl ? x < centre : x > centre;
       }
     }
-    ptrDrag.targetIndex = hitIdx;
+    var idx = bestNode
+      ? insertionIndexFor(parseInt(bestNode.getAttribute("data-index"), 10) || 0, after)
+      : ptrDrag.fromIndex;
+    ptrDrag.targetIndex = Math.max(0, Math.min(idx, currentTabs.length));
+    if (bestNode) bestNode.classList.add("drop-hint");
   });
 
   function finishPointerDrag(commit) {
     if (!ptrDrag) return;
     var state = ptrDrag;
     ptrDrag = null;
-    if (state.active) {
-      if (state.el.releasePointerCapture && state.pointerId != null) {
-        try { state.el.releasePointerCapture(state.pointerId); } catch (e) {}
-      }
-      suppressNextClick = true;
-      window.setTimeout(function () { suppressNextClick = false; }, 0);
-      state.el.style.transform = "";
-      state.el.classList.remove("dragging");
-      clearDropHints(stripEl);
-      dragLabel = null;
-      if (commit && state.targetIndex !== state.fromIndex) {
-        invoke("tab_move", { label: state.label, toIndex: state.targetIndex })
-          .then(refresh).catch(function () {});
-      }
+    if (!state.active) return;
+    lastDragEnd = Date.now();
+    if (state.el.releasePointerCapture && state.pointerId != null) {
+      try { state.el.releasePointerCapture(state.pointerId); } catch (e) {}
+    }
+    state.el.style.transform = "";
+    state.el.classList.remove("dragging");
+    clearDropHints(stripEl);
+    dragLabel = null;
+    if (commit && state.targetIndex !== state.fromIndex) {
+      invoke("tab_move", { label: state.label, toIndex: state.targetIndex })
+        .then(refresh).catch(function () { refresh(); });
     }
   }
   window.addEventListener("pointerup", function () { finishPointerDrag(true); });
   window.addEventListener("pointercancel", function () { finishPointerDrag(false); });
+  window.addEventListener("lostpointercapture", function () { finishPointerDrag(false); });
   window.addEventListener("blur", function () {
     finishPointerDrag(false);
     if (!dragLabel) return;
@@ -831,11 +852,6 @@
   });
   document.getElementById("btnReload").addEventListener("click", function () {
     invoke("nav_reload", {}).catch(function () {});
-  });
-  document.getElementById("btnReopenTab").addEventListener("click", reopenLastClosedTab);
-  document.getElementById("btnCmdPalette").addEventListener("click", function () {
-    try { localStorage.setItem("np_cc_open_cmd", String(Date.now())); } catch (e) {}
-    invoke("open_control_center", {}).then(refresh).catch(function () {});
   });
   document.getElementById("btnSettings").addEventListener("click", function () {
     invoke("open_settings", {}).then(refresh).catch(function () {});
