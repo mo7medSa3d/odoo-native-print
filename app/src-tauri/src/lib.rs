@@ -16,11 +16,28 @@ use tauri::{Manager, WebviewUrl};
 /// Control Center.
 const BRIDGE_JS: &str = r#"
 (function () {
+  if (window.__NP_BRIDGE_INSTALLED__) return;
+  window.__NP_BRIDGE_INSTALLED__ = true;
+  // Subframes get no facade, no listeners, no watchdog, and no
+  // environment IPC: a third-party frame embedded in the Odoo page
+  // must not inherit the top page's print rights or UI overlays
+  // (audit B2). Fail closed if the top-frame check throws.
+  var __npIsTop = false;
+  try { __npIsTop = window === window.top; } catch (e) { __npIsTop = false; }
+  if (!__npIsTop) return;
+  function encodeBytesBase64(u8) {
+    if (typeof btoa !== "function") return Array.from(u8);
+    var chunks = [];
+    for (var i = 0; i < u8.length; i += 0x8000) {
+      chunks.push(String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)));
+    }
+    return btoa(chunks.join(""));
+  }
   function normalizeBytes(b) {
     if (!b) return [];
     if (Array.isArray(b) || typeof b === "string") return b;
-    if (b instanceof ArrayBuffer) return Array.from(new Uint8Array(b));
-    if (ArrayBuffer.isView(b)) return Array.from(new Uint8Array(b.buffer, b.byteOffset, b.byteLength));
+    if (b instanceof ArrayBuffer) return encodeBytesBase64(new Uint8Array(b));
+    if (ArrayBuffer.isView(b)) return encodeBytesBase64(new Uint8Array(b.buffer, b.byteOffset, b.byteLength));
     return b;
   }
   var __npTauriInternals = window.__TAURI_INTERNALS__;
@@ -40,12 +57,7 @@ const BRIDGE_JS: &str = r#"
   // here instead of leaving a silent white page. Captured errors are
   // surfaced in the boot card, the environment report and the
   // diagnostics bundle.
-  // Subframes get no facade, no watchdog, and no environment IPC:
-  // a third-party frame embedded in the Odoo page must not inherit
-  // the top page's print rights or UI overlays (audit B2). Fail
-  // closed if the top-frame check throws.
-  var __npIsTop = false;
-  try { __npIsTop = window === window.top; } catch (e) { __npIsTop = false; }
+
   window.__NP_ERRORS__ = [];
   function npPushError(kind, message) {
     try {
@@ -54,11 +66,13 @@ const BRIDGE_JS: &str = r#"
       var text = String(kind || "error") + ": " + String(message == null ? "" : message).slice(0, 300);
       if (list.indexOf(text) !== -1) return;
       list.push(text);
-      if (!__npIsTop || window.__NP_ERROR_TIMER__) return;
-      window.__NP_ERROR_TIMER__ = window.setTimeout(function () {
-        window.__NP_ERROR_TIMER__ = null;
-        npReportEnvironment();
-      }, 300);
+      if (!__npIsTop) return;
+      if (!window.__NP_ERROR_TIMER__) {
+        window.__NP_ERROR_TIMER__ = window.setTimeout(function () {
+          window.__NP_ERROR_TIMER__ = null;
+          npReportEnvironment();
+        }, 300);
+      }
       // If the boot card is already on screen, re-render it so the
       // newest (often most diagnostic) error is what the user sees.
       try {
@@ -99,11 +113,11 @@ const BRIDGE_JS: &str = r#"
     jobDetail: function (jobId) {
       return invoke("job_detail", { jobId: jobId });
     },
-    appOverview: function () {
-      return invoke("app_overview", {});
+    appOverview: function (opts) {
+      return invoke("app_overview", opts && opts.force ? { force: true } : {});
     },
-    listPrinters: function () {
-      return invoke("list_printers", {});
+    listPrinters: function (opts) {
+      return invoke("list_printers", opts && opts.force ? { force: true } : {});
     },
     printerForms: function (printer) {
       return invoke("printer_forms", { printer: printer });
@@ -202,14 +216,12 @@ const BRIDGE_JS: &str = r#"
     }
   }
 
-  // ------------------------------------------------------------------
   // Environment probes + boot watchdog. The Odoo frontend is a large
   // JS application: if the webview environment cannot run it (stale
   // WebView2 runtime, blocked storage, poisoned profile), the result
   // must never be a silent white page. The probes record the facts;
   // the watchdog turns a failed boot into a visible, actionable
   // panel with working recovery actions.
-  // ------------------------------------------------------------------
   function npIsLocalPage() {
     if (window.location.port !== "") return false;
     var proto = window.location.protocol;
@@ -246,7 +258,7 @@ const BRIDGE_JS: &str = r#"
       document.body.appendChild(bar);
     };
     if (document.body) { show(); }
-    else { document.addEventListener('DOMContentLoaded', show); }
+    else { document.addEventListener('DOMContentLoaded', show, { once: true }); }
   }
 
   function npProbeEnvironment() {
@@ -281,7 +293,9 @@ const BRIDGE_JS: &str = r#"
       var env = npProbeEnvironment();
       window.__NATIVE_PRINT_ENV__ = env;
       invoke("report_environment", { report: JSON.stringify(env) }).catch(function () {});
+      return env;
     } catch (e) { /* probes must never break the page */ }
+    return null;
   }
   function npIsBackendPage() {
     var p = window.location.pathname || "/";
@@ -296,8 +310,7 @@ const BRIDGE_JS: &str = r#"
     // Requiring children was a false-positive source: on a slow first
     // boot the shell can sit empty past the old deadline, and the
     // watchdog then covered a healthy page with a dead white screen.
-    if (document.querySelector(".o_web_client")) return true;
-    return !!document.querySelector(".o_action_manager, .o_main_content");
+    return !!document.querySelector(".o_web_client, .o_action_manager, .o_main_content");
   }
   function npBootOverlay(mode, env) {
     var existing = document.getElementById("np-boot-overlay");
@@ -348,7 +361,7 @@ const BRIDGE_JS: &str = r#"
       var esc = function (x) { return String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); };
       var html = '<div style="font-size:0.85rem;color:#5b6472;margin-bottom:0.8rem;">الخادم المستهدف: <span dir="ltr" style="font-weight:600;">' + esc(origin) + '</span></div>';
       if (isTranslations) {
-        html += '<div style="background:#fdf3e3;border:1px solid #f0d9a8;border-radius:12px;padding:0.7rem 0.9rem;font-size:0.85rem;color:#6b5410;margin-bottom:0.8rem;">السبب المرجّح: سيرفر Odoo رجّع خطأ في ملف الترجمة — المشكلة في السيرفر مش في الجهاز ده. الحل: حدّث إضافة الطباعة (native_print) على السيرفر لآخر إصدار وأعد تشغيل Odoo.</div>';
+        html += '<div style="background:#fdf3e3;border:1px solid #f0d9a8;border-radius:12px;padding:0.7rem 0.9rem;font-size:0.85rem;color:#6b5410;margin-bottom:0.8rem;">خطأ في ملف الترجمة من خادم Odoo. حدّث إضافة native_print على الخادم إلى آخر إصدار ثم أعد تشغيل Odoo.</div>';
       }
       return html;
     }
@@ -365,18 +378,18 @@ const BRIDGE_JS: &str = r#"
     }
     var btnBase = 'border:0;border-radius:999px;padding:0.65rem 1.2rem;font-size:0.9rem;cursor:pointer;background:#eef1f6;color:#101219;';
     el.innerHTML = '<div style="position:relative;max-width:460px;width:92vw;padding:1.4rem;background:#ffffff;border:1px solid #e3e8f0;border-radius:20px;box-shadow:0 12px 40px rgba(16,18,25,0.16);">' +
-      '<button id="np-boot-dismiss" title="إخفاء" style="position:absolute;top:10px;inset-inline-end:12px;border:0;background:transparent;color:#8a93a5;font-size:1.05rem;line-height:1;cursor:pointer;padding:4px 6px;">✕</button>' +
+      '<button id="np-boot-dismiss" title="إخفاء" style="position:absolute;top:10px;inset-inline-end:12px;border:0;background:transparent;color:#8a93a5;font-size:1.05rem;line-height:1;cursor:pointer;padding:4px 6px;">&times;</button>' +
       '<div style="font-size:1.15rem;font-weight:800;color:#101219;margin-bottom:0.4rem;">واجهة Odoo لم تكتمل</div>' +
-      '<div style="color:#5b6472;font-size:0.9rem;margin-bottom:1rem;">الصفحة وصلت لكن تطبيق Odoo لم يبدأ. دي نتيجة فحص بيئة العرض على الجهاز ده:</div>' +
+      '<div style="color:#5b6472;font-size:0.9rem;margin-bottom:1rem;">تعذّر بدء تطبيق Odoo بعد تحميل الصفحة. نتائج فحص بيئة العرض:</div>' +
       serverHint() +
       facts() +
       errorRows() +
       '<div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:1.2rem;">' +
       '<button id="np-boot-reload" style="' + btnBase + 'background:#0953DE;color:#fff;">إعادة التحميل</button>' +
-      '<button id="np-boot-clear" style="' + btnBase + '">مسح بيانات التصفح من مركز التحكم</button>' +
+      '<button id="np-boot-clear" style="' + btnBase + '">مسح بيانات التصفح</button>' +
       '<button id="np-boot-cc" style="' + btnBase + '">مركز التحكم</button>' +
       '</div>' +
-      '<div style="color:#8a93a5;font-size:0.78rem;margin-top:0.9rem;">لو إعادة التحميل ما نفعش، امسح بيانات التصفح من مركز التحكم (بيخرّجك من الحساب ويمسح الكاش والتخزين المحلي للتطبيق فقط).</div></div>';
+      '<div style="color:#8a93a5;font-size:0.78rem;margin-top:0.9rem;">إذا لم تنجح إعادة التحميل، امسح بيانات التصفح من مركز التحكم (يُسجّل خروجك ويمسح ذاكرة التخزين المؤقت للتطبيق فقط).</div></div>';
     var reload = document.getElementById("np-boot-reload");
     if (reload) reload.addEventListener("click", function () { window.location.reload(); });
     var dismiss = document.getElementById("np-boot-dismiss");
@@ -389,11 +402,11 @@ const BRIDGE_JS: &str = r#"
       // The wipe itself is Control-Center-only (it logs the user
       // out; a remote page must not trigger it — audit M2). The card
       // takes the user there instead of invoking it directly.
-      window.__NATIVE_PRINT__.openControlCenter().catch(function () {});
+      __npFacade.openControlCenter().catch(function () {});
     });
     var cc = document.getElementById("np-boot-cc");
     if (cc) cc.addEventListener("click", function () {
-      window.__NATIVE_PRINT__.openControlCenter().catch(function () {});
+      __npFacade.openControlCenter().catch(function () {});
     });
   }
   function npContentReady() {
@@ -417,23 +430,29 @@ const BRIDGE_JS: &str = r#"
     var ticks = 0;
     var shellAt = 0;
     var cardShown = false;
+    var maxTicks = delays.failAfter + 300;
+    function stopWatchdog() {
+      window.clearInterval(timer);
+      if (window.__NP_WATCHDOG_TIMER__ === timer) {
+        window.__NP_WATCHDOG_TIMER__ = null;
+      }
+      window.__NP_WATCHDOG_ARMED__ = false;
+    }
     var timer = window.setInterval(function () {
       ticks += 1;
       // The same document can soft-redirect to the login page
       // (session expiry): that page is healthy, never flag it.
       if (!npIsBackendPage()) {
-        window.clearInterval(timer);
-        window.__NP_WATCHDOG_ARMED__ = false;
+        stopWatchdog();
         npBootOverlay("hide", env);
         return;
       }
       if (npBooted()) {
         if (!shellAt) shellAt = ticks;
         if (npContentReady()) {
-          window.clearInterval(timer);
           // Re-armable: later SPA route changes re-run the check
           // via the pushState/popstate hooks below.
-          window.__NP_WATCHDOG_ARMED__ = false;
+          stopWatchdog();
           npBootOverlay("hide", env);
           return;
         }
@@ -441,16 +460,22 @@ const BRIDGE_JS: &str = r#"
         // window: the white-content failure mode.
         if (!cardShown && ticks - shellAt >= 20) {
           cardShown = true;
-          npReportEnvironment();
-          npBootOverlay("problem", npProbeEnvironment());
+          npBootOverlay("problem", npReportEnvironment() || npProbeEnvironment());
+        }
+        if (cardShown && ticks >= maxTicks) {
+          stopWatchdog();
         }
         return;
       }
       // Show the diagnostic card once, then KEEP polling: a late boot
       // removes it automatically. There is deliberately no "loading"
       // cover any more — a slow boot is not a failed boot.
-      if (!cardShown && ticks === delays.failAfter) { cardShown = true; npReportEnvironment(); npBootOverlay("problem", npProbeEnvironment()); }
+      if (!cardShown && ticks === delays.failAfter) { cardShown = true; npBootOverlay("problem", npReportEnvironment() || npProbeEnvironment()); }
+      if (cardShown && ticks >= maxTicks) {
+        stopWatchdog();
+      }
     }, delays.tickMs);
+    window.__NP_WATCHDOG_TIMER__ = timer;
   }
   if (__npIsTop && !npIsLocalPage()) {
     try {
@@ -459,16 +484,13 @@ const BRIDGE_JS: &str = r#"
       // bypasses printer selection, job logging and the native queue.
       window.print = function () {};
     } catch (e) { /* ignore */ }
-    // Arm IMMEDIATELY at init-script evaluation: a page whose
+    // Arm immediately at init-script evaluation: a page whose
     // DOMContentLoaded stalls (a hung render-blocking asset) still
     // gets its watchdog and environment report. Only the HTTP strip
-    // and the nav pill need document.body, and they wait for it
-    // themselves.
+    // needs document.body, and it waits for it itself.
     npReportEnvironment();
     npBootWatchdog();
     npHttpWarning();
-    // No floating nav pill any more: navigation lives in the
-    // window's tab bar (owner brief, 2026-11-05).
     // Odoo is an SPA: it soft-navigates between actions and can
     // soft-navigate from a non-backend landing page into /odoo
     // without a new document load. Re-check on history transitions;
@@ -484,6 +506,17 @@ const BRIDGE_JS: &str = r#"
       window.addEventListener("popstate", function () { npBootWatchdog(); });
     } catch (e) { /* history patching is best-effort */ }
   }
+  window.addEventListener("pagehide", function () {
+    if (window.__NP_WATCHDOG_TIMER__) {
+      window.clearInterval(window.__NP_WATCHDOG_TIMER__);
+      window.__NP_WATCHDOG_TIMER__ = null;
+      window.__NP_WATCHDOG_ARMED__ = false;
+    }
+    if (window.__NP_ERROR_TIMER__) {
+      window.clearTimeout(window.__NP_ERROR_TIMER__);
+      window.__NP_ERROR_TIMER__ = null;
+    }
+  });
   window.addEventListener("keydown", function (ev) {
     if (!__npIsTop) return;
     if (ev.altKey && (ev.key === "ArrowLeft" || ev.key === "ArrowRight")) {
@@ -498,9 +531,9 @@ const BRIDGE_JS: &str = r#"
     if (ev.ctrlKey && ev.shiftKey && (ev.key === "Y" || ev.key === "y")) {
       ev.preventDefault();
       if (npIsLocalPage()) {
-        window.__NATIVE_PRINT__.openOdooOrigin().catch(function () {});
+        __npFacade.openOdooOrigin().catch(function () {});
       } else {
-        window.__NATIVE_PRINT__.openControlCenter().catch(function () {});
+        __npFacade.openControlCenter().catch(function () {});
       }
     }
   });
@@ -510,6 +543,13 @@ const BRIDGE_JS: &str = r#"
 /// Height of the tab bar strip at the top of the window (logical
 /// pixels). Content webviews live below it.
 pub const TABBAR_HEIGHT: f64 = 46.0;
+
+fn bridge_js() -> &'static str {
+    static SCRIPT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SCRIPT
+        .get_or_init(|| BRIDGE_JS.replace("__APP_VERSION__", env!("CARGO_PKG_VERSION")))
+        .as_str()
+}
 
 /// Fit the tab bar and the ACTIVE content webview to the window's
 /// current client size. Called at startup and on every resize.
@@ -604,7 +644,8 @@ pub fn create_tab_webview(
     let load_label = label.to_string();
     let builder = tauri::webview::WebviewBuilder::new(label, url)
         .data_directory(data_dir)
-        .initialization_script(BRIDGE_JS.replace("__APP_VERSION__", env!("CARGO_PKG_VERSION")))
+        .disable_drag_drop_handler()
+        .initialization_script(bridge_js())
         .on_navigation(move |u| {
             if !u.username().is_empty() || u.password().is_some() {
                 return false;
@@ -613,13 +654,15 @@ pub fn create_tab_webview(
                 return true;
             }
             let state = nav_handle.state::<AppState>();
-            let allowed = commands::read_lock(&state.configured_origin).clone();
-            let verdict = match allowed {
-                Some(cfg_origin) => {
-                    let o = u.origin().ascii_serialization();
-                    origin_is_allowed(&cfg_origin, &o)
+            let verdict = {
+                let allowed = commands::read_lock(&state.configured_origin);
+                match allowed.as_deref() {
+                    Some(cfg_origin) => {
+                        let o = u.origin().ascii_serialization();
+                        origin_is_allowed(cfg_origin, &o)
+                    }
+                    None => false,
                 }
-                None => false,
             };
             if !verdict {
                 eprintln!(
@@ -660,15 +703,15 @@ pub fn create_tab_webview(
                 return tauri::webview::NewWindowResponse::Deny;
             }
             let state = open_handle.state::<AppState>();
-            let allowed = commands::read_lock(&state.configured_origin).clone();
             let opener_is_local = commands::read_lock(&state.tabs)
                 .url_of(&open_label)
                 .and_then(|s| tauri::Url::parse(s).ok())
                 .map(|cu| is_local_app_url(&cu))
                 .unwrap_or(false);
             let on_origin = (opener_is_local && is_local_app_url(&u))
-                || allowed
-                    .map(|cfg| origin_is_allowed(&cfg, &u.origin().ascii_serialization()))
+                || commands::read_lock(&state.configured_origin)
+                    .as_deref()
+                    .map(|cfg| origin_is_allowed(cfg, &u.origin().ascii_serialization()))
                     .unwrap_or(false);
             if on_origin {
                 let spawn_handle = open_handle.clone();
@@ -781,8 +824,8 @@ pub fn run() {
                 configured_origin: RwLock::new(initial_origin.clone()),
                 config_dir,
                 environment,
-                printer_cache: RwLock::new(None),
                 tabs: RwLock::new(TabsState::default()),
+                started_at: std::time::Instant::now(),
                 locked_by_policy: resolved.locked_by_policy,
                 auto_reprint: RwLock::new(resolved.auto_reprint),
                 worker_wake,
@@ -801,14 +844,9 @@ pub fn run() {
                 None => WebviewUrl::App("index.html".into()),
             };
 
-            // Tabbed browser (owner brief, 2026-11-05): ONE window
-            // hosting a local tab bar (tabbar.html) plus one child
-            // webview per tab. This supersedes the v1.4.1 caution
-            // below in history: the multi-webview API is enabled
-            // (tauri "unstable" feature, already on), webviews are
-            // created from setup or async commands only (the
-            // documented Windows deadlock rule), and the Windows
-            // build is verified on CI for this exact tree.
+            // Single window hosting a local tab bar (tabbar.html) plus
+            // one child webview per tab. Webviews are created from setup
+            // or async commands only to avoid Windows deadlocks.
             let window = tauri::window::WindowBuilder::new(app, "main")
                 .title("Yaseir Print")
                 .inner_size(1280.0, 820.0)
@@ -819,6 +857,7 @@ pub fn run() {
                     "tabbar",
                     WebviewUrl::App("tabbar.html".into()),
                 )
+                .disable_drag_drop_handler()
                 .on_navigation(|u| is_local_app_url(u))
                 .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny),
                 tauri::LogicalPosition::new(0.0, 0.0),
@@ -909,11 +948,7 @@ pub fn run() {
             ) {
                 if let Some(state) = app_handle.try_state::<AppState>() {
                     state.worker_stop.store(true, Ordering::Release);
-                    let (lock, cvar) = &*state.worker_wake;
-                    if let Ok(mut pending) = lock.lock() {
-                        *pending = true;
-                        cvar.notify_all();
-                    }
+                    state.notify_worker();
                 }
             }
         });

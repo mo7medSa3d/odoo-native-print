@@ -6,7 +6,7 @@ const ok = (name, cond) => { cond ? pass++ : fail++; console.log((cond ? "PASS "
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 function makePage(path) {
   const dom = new JSDOM(`<!DOCTYPE html><html><body><div id="app"></div></body></html>`, {
-    url: "http://68.221.27.248:8070" + path, runScripts: "dangerously", pretendToBeVisual: true,
+    url: "http://203.0.113.10:8070" + path, runScripts: "dangerously", pretendToBeVisual: true,
   });
   const w = dom.window;
   const reports = [];
@@ -43,7 +43,7 @@ function runPageScript(w, code) {
 {
   const { w } = makePage("/odoo");
   const s = w.document.createElement("script");
-  s.src = "http://68.221.27.248:8070/web/assets/bundle.js";
+  s.src = "http://203.0.113.10:8070/web/assets/bundle.js";
   w.document.body.appendChild(s);
   s.dispatchEvent(new w.Event("error"));
   await sleep(60);

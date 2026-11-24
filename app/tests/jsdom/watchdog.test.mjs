@@ -6,7 +6,7 @@ const ok = (name, cond) => { cond ? pass++ : fail++; console.log((cond ? "PASS "
 const BOOTED = '<div class="o_web_client"><div class="o_action_manager"><div class="o_list_view">rows</div></div></div>';
 function makePage(path, bodyHtml, url, beforeEval) {
   const dom = new JSDOM(`<!DOCTYPE html><html><body>${bodyHtml}</body></html>`, {
-    url: url || ("http://68.221.27.248:8070" + path), runScripts: "outside-only", pretendToBeVisual: true,
+    url: url || ("http://203.0.113.10:8070" + path), runScripts: "outside-only", pretendToBeVisual: true,
   });
   const w = dom.window;
   w.__TAURI_INTERNALS__ = { invoke: async () => ({}) };
@@ -104,5 +104,5 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   ok("local: no nav pill", !w.document.getElementById("np-nav-pill"));
   w.close();
 }
-console.log(`watchdog 1.4.7 scenarios: ${pass} pass, ${fail} fail`);
+console.log(`watchdog scenarios: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

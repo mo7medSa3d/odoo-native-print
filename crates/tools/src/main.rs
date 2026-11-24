@@ -118,6 +118,7 @@ impl PrintBackend for FlakyBackend {
 
 fn chaos() {
     let dir = std::env::temp_dir().join(format!("np-chaos-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("chaos.db").to_string_lossy().to_string();
     let total = 300usize;

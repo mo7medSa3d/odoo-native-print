@@ -93,7 +93,8 @@ export class NativePrintSystray extends Component {
             browserMode: _t("Browser Mode"),
             localPrinters: _t("Local Printers"),
             defaultPrinter: _t("Default Printer"),
-            browserNote: _t("Standard browser session: reports download normally unless opened inside the Yaseir Print app."),
+            browserNote: _t("Browser mode: reports download as files. Open Odoo in the Yaseir Print app to print directly."),
+            noPrinters: _t("No printers found on this PC. Connect a printer and refresh."),
             inUse: _t("In use"),
             usePrinter: _t("Use for Reports"),
             inUsePos: _t("POS"),
@@ -104,7 +105,7 @@ export class NativePrintSystray extends Component {
             doneJobs: _t("Done jobs"),
             failedJobs: _t("Failed jobs"),
             jobsLog: _t("Print Jobs Log"),
-            controlCenter: _t("Open Native Control Center"),
+            controlCenter: _t("Open Control Center"),
             updateApp: _t("A newer desktop app is available. Update Yaseir Print for the latest fixes."),
         };
 
@@ -115,29 +116,42 @@ export class NativePrintSystray extends Component {
         };
         this._onJobUpdated = () => {
             if (!this._unmounted) {
-                this.refreshStats();
+                this.refreshStats().catch(() => {});
+            }
+        };
+        this._onVisibilityChange = () => {
+            if (!this._unmounted && !document.hidden) {
+                this.refreshStats().catch(() => {});
             }
         };
 
         this._unmounted = false;
+        this._pendingRefresh = false;
 
         onMounted(() => {
             this.refreshStats().catch(() => {});
             window.addEventListener("click", this._onOutsideClick);
             window.addEventListener(JOB_UPDATED_EVENT, this._onJobUpdated);
+            if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+                document.addEventListener("visibilitychange", this._onVisibilityChange);
+            }
             // Keep workstation inventory and online/offline state current
             // without making every Odoo screen action trigger a full scan.
             this._printerRefreshTimer = window.setInterval(() => {
-                if (document.visibilityState === "visible") {
-                    this.refreshStats();
+                if (!document.hidden) {
+                    this.refreshStats().catch(() => {});
                 }
             }, 60_000);
         });
 
         onWillUnmount(() => {
             this._unmounted = true;
+            this._pendingRefresh = false;
             window.removeEventListener("click", this._onOutsideClick);
             window.removeEventListener(JOB_UPDATED_EVENT, this._onJobUpdated);
+            if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+                document.removeEventListener("visibilitychange", this._onVisibilityChange);
+            }
             if (this._printerRefreshTimer) {
                 window.clearInterval(this._printerRefreshTimer);
                 this._printerRefreshTimer = null;
@@ -159,23 +173,24 @@ export class NativePrintSystray extends Component {
         try {
             // Live discovery only: printers belong to this PC and are
             // never stored on the server.
-            const local = await bridge.appOverview();
-            if (this._unmounted) return;
+            const syncSeq = (this._printerSyncSeq = (this._printerSyncSeq || 0) + 1);
+            const local = await bridge.appOverview(showNotice ? { force: true } : undefined);
+            if (this._unmounted || syncSeq !== this._printerSyncSeq) return;
             const printers = Array.isArray(local && local.printers) ? local.printers : [];
             this.state.printersCount = printers.length;
             this.state.defaultPrinter = local && local.defaultPrinter || null;
             this.state.discoveredPrinters = printers.map(
-                (p) => ({ ...p, meta: printerMeta(p) }));
+                (p) => ({ ...p, printer_class: p.printer_class || p.printerClass || "", meta: printerMeta(p) }));
             this.state.selectedPrinter = getSelectedPrinter();
             this.state.selectedPosPrinter = getSelectedPosPrinter();
-            this.maybeSyncDeviceCaps(printers, showNotice);
+            this.maybeSyncDeviceCaps(printers, showNotice).catch(() => {});
             if (showNotice) this.notification.add(
                 _t("%s printer(s) found on this PC.", printers.length),
                 { title: _t("Printers Refreshed"), type: "success" },
             );
         } catch (error) {
             // Keep raw exception text in console; show localized notice to users.
-            console.error(error);
+            console.error("Yaseir Print: printer refresh failed.", error);
             if (showNotice && !this._unmounted) this.notification.add(
                 _t("Could not read this PC's printers. Check the desktop app and try again."),
                 { title: _t("Printer Refresh Failed"), type: "danger" });
@@ -204,7 +219,8 @@ export class NativePrintSystray extends Component {
         } catch (_e) { store = {}; }
         const prev = store[target.name] || {};
         const now = Date.now();
-        const metaKey = `${target.protocol || ""}|${target.printer_class || ""}`;
+        const printerClass = target.printer_class || target.printerClass || null;
+        const metaKey = `${target.protocol || ""}|${printerClass || ""}`;
         // Skip querying Windows driver capabilities on 60s background polls
         // when this printer's capabilities were already synced within 6 hours
         // and its protocol/class did not change. Manual refresh passes force=true.
@@ -217,12 +233,12 @@ export class NativePrintSystray extends Component {
             const forms = formatFormsSummary(caps.forms, _t("Roll"));
             const trays = Array.isArray(caps.bins) ? caps.bins.slice() : [];
             const hash = JSON.stringify(
-                [target.protocol, target.printer_class, forms, trays]);
-            if (prev.hash === hash && now - (prev.at || 0) < 6 * 3600 * 1000) return;
+                [target.protocol, printerClass, forms, trays]);
+            if (!force && prev.hash === hash && now - (prev.at || 0) < 6 * 3600 * 1000) return;
             const res = await rpc("/native_print/sync_device", {
                 name: target.name,
                 protocol: target.protocol || null,
-                printer_class: target.printer_class || null,
+                printer_class: printerClass,
                 forms, trays,
             }, { silent: true });
             if (res && res.ok) {
@@ -232,12 +248,16 @@ export class NativePrintSystray extends Component {
                 } catch (_e) { /* ignore storage quota/privacy errors */ }
             }
         } catch (error) {
-            console.error(error);
+            console.error("Yaseir Print: device capability sync failed.", error);
         }
     }
 
     async refreshStats() {
-        if (this._refreshingStats || this._unmounted) return;
+        if (this._unmounted) return;
+        if (this._refreshingStats) {
+            this._pendingRefresh = true;
+            return;
+        }
         this._refreshingStats = true;
         try {
             const bridge = window.__NATIVE_PRINT__ || null;
@@ -261,6 +281,10 @@ export class NativePrintSystray extends Component {
             }
         } finally {
             this._refreshingStats = false;
+            if (this._pendingRefresh && !this._unmounted) {
+                this._pendingRefresh = false;
+                this.refreshStats().catch(() => {});
+            }
         }
     }
 
@@ -289,11 +313,11 @@ export class NativePrintSystray extends Component {
             try {
                 await bridge.openControlCenter();
             } catch (err) {
-                console.error(err);
+                console.error("Yaseir Print: opening Control Center failed.", err);
             }
         } else {
             this.notification.add(
-                _t("The Control Center is available when running inside the Yaseir Print desktop app (Ctrl+Shift+Y)."),
+                _t("Open Odoo in the Yaseir Print desktop app to use the Control Center (Ctrl+Shift+Y)."),
                 { title: _t("Browser Fallback Mode"), type: "info" },
             );
         }

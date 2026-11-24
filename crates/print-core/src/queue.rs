@@ -40,7 +40,7 @@ pub const STALE_JOB_THRESHOLD_SECS: i64 = 900;
 /// of its idempotency key. Safe to log and quote in support reports
 /// (one-way fingerprint, not the key itself).
 // FNV-1a 64-bit: deterministic across runs and platforms.
-fn fnv1a_64(bytes: &[u8]) -> u64 {
+pub(crate) fn fnv1a_64(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
     for b in bytes {
         hash ^= u64::from(*b);
@@ -213,6 +213,7 @@ impl Queue {
         conn.pragma_update(None, "synchronous", "FULL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.pragma_update(None, "temp_store", "MEMORY")?;
+        conn.pragma_update(None, "cache_size", -8000)?;
         conn.pragma_update(None, "wal_autocheckpoint", 1000)?;
         // Run DDL and migrations inside IMMEDIATE when user_version < 2
         // so concurrent Queue::open calls cannot race on ALTER TABLE
@@ -285,6 +286,14 @@ impl Queue {
                     "CREATE INDEX IF NOT EXISTS idx_jobs_state_avail_printer ON jobs(state, available_at, printer, priority)",
                     [],
                 )?;
+                tx.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_jobs_claim_order ON jobs(printer, state, priority DESC, seq, available_at, id)",
+                    [],
+                )?;
+                tx.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_jobs_state_updated_id ON jobs(state, updated_at, id)",
+                    [],
+                )?;
                 // Schema version 2 = updated_at + payload_hash + available_at.
                 tx.pragma_update(None, "user_version", 2)?;
             }
@@ -301,6 +310,14 @@ impl Queue {
                 "idx_jobs_state_avail_printer",
                 "CREATE INDEX IF NOT EXISTS idx_jobs_state_avail_printer ON jobs(state, available_at, printer, priority)",
             ),
+            (
+                "idx_jobs_claim_order",
+                "CREATE INDEX IF NOT EXISTS idx_jobs_claim_order ON jobs(printer, state, priority DESC, seq, available_at, id)",
+            ),
+            (
+                "idx_jobs_state_updated_id",
+                "CREATE INDEX IF NOT EXISTS idx_jobs_state_updated_id ON jobs(state, updated_at, id)",
+            ),
         ] {
             let has_idx: bool = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1)",
@@ -311,6 +328,7 @@ impl Queue {
                 conn.execute(ddl, [])?;
             }
         }
+        conn.execute_batch("PRAGMA optimize;")?;
         Ok(Self {
             conn,
             max_active_per_printer: DEFAULT_MAX_ACTIVE_PER_PRINTER,
@@ -1025,10 +1043,13 @@ impl Queue {
                 to: next,
             }));
         }
-        let _ = tx.execute(
-            "INSERT INTO job_events(job_id, at_unix, event, detail) VALUES(?1,?2,?3,?4)",
-            params![id, now, format!("state:{}", next.as_str()), error_code],
-        );
+        let event_name = format!("state:{}", next.as_str());
+        if let Err(e) = tx.execute(
+            "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,?3,?4)",
+            params![id, now, &event_name, error_code],
+        ) {
+            eprintln!("native-print: failed to record job event {event_name} for {id}: {e}");
+        }
         tx.commit()?;
         Ok(())
     }
@@ -1128,20 +1149,35 @@ impl Queue {
             }
             out
         };
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let now = now_unix();
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let mut n = 0u64;
         for id in ids {
             // Direct terminal write: reconciliation must succeed even
             // for states the normal machine would route differently;
             // 'failed' is reachable from every working state anyway.
-            let changed = self.conn.execute(
+            let changed = tx.execute(
                 "UPDATE jobs SET state='failed', error_code='RECONCILED_STALE', updated_at=?1 WHERE id=?2 AND state IN ('rendering','spooling') AND updated_at > 0 AND updated_at < ?3",
-                params![now_unix(), id, cutoff],
+                params![now, &id, cutoff],
             )?;
             if changed > 0 {
-                self.record_event_best_effort(&id, "reconciled_stale", Some("RECONCILED_STALE"));
+                if let Err(e) = tx.execute(
+                    "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'reconciled_stale','RECONCILED_STALE')",
+                    params![&id, now],
+                ) {
+                    eprintln!(
+                        "native-print: failed to record job event reconciled_stale for {id}: {e}"
+                    );
+                }
                 n += 1;
             }
         }
+        tx.commit()?;
         Ok(n)
     }
 
@@ -1151,6 +1187,33 @@ impl Queue {
             params![state.as_str()],
             |r| r.get::<_, i64>(0),
         )? as u64)
+    }
+
+    /// Count jobs across all 8 states in a single covering-index GROUP BY scan.
+    pub fn count_all_states(&self) -> Result<[(JobState, u64); 8], QueueError> {
+        let mut counts = [
+            (JobState::Queued, 0u64),
+            (JobState::Rendering, 0),
+            (JobState::Spooling, 0),
+            (JobState::Printing, 0),
+            (JobState::Done, 0),
+            (JobState::Failed, 0),
+            (JobState::Canceled, 0),
+            (JobState::DeadLetter, 0),
+        ];
+        let mut stmt = self
+            .conn
+            .prepare("SELECT state, COUNT(*) FROM jobs GROUP BY state")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        for row in rows {
+            let (state_s, count) = row?;
+            if let Some(state) = JobState::parse(&state_s) {
+                if let Some(slot) = counts.iter_mut().find(|(s, _)| *s == state) {
+                    slot.1 = count.max(0) as u64;
+                }
+            }
+        }
+        Ok(counts)
     }
 }
 
@@ -1863,6 +1926,116 @@ mod tests {
                 .any(|line| line.contains("COVERING INDEX idx_jobs_state_avail_printer")),
             "expected covering index in query plan, got: {plans:?}"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn set_state_records_job_events() {
+        let mut q = Queue::in_memory().unwrap();
+        q.enqueue(&job("ev1", "k-ev1", "p1", 0)).unwrap();
+        let j = q.claim_next("p1").unwrap().unwrap();
+        q.set_state(&j.id, JobState::Spooling, None).unwrap();
+        q.set_state(&j.id, JobState::Printing, None).unwrap();
+        q.set_state(&j.id, JobState::Failed, Some("PRINTER_ERR"))
+            .unwrap();
+        let events = q.recent_events(20).unwrap();
+        assert!(events
+            .iter()
+            .any(|e| e.job_id == "ev1" && e.event == "state:spooling"));
+        assert!(events
+            .iter()
+            .any(|e| e.job_id == "ev1" && e.event == "state:printing"));
+        assert!(events.iter().any(|e| e.job_id == "ev1"
+            && e.event == "state:failed"
+            && e.detail.as_deref() == Some("PRINTER_ERR")));
+    }
+
+    #[test]
+    fn claim_next_uses_covering_claim_order_index_without_temp_sort() {
+        let dir = std::env::temp_dir().join(format!("pq-claim-order-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("q.db");
+        let p = path.to_str().unwrap().to_string();
+        {
+            let q = Queue::open(&p).unwrap();
+            // Simulate a pre-existing v2 database missing idx_jobs_claim_order.
+            q.conn
+                .execute("DROP INDEX idx_jobs_claim_order", [])
+                .unwrap();
+        }
+        let q = Queue::open(&p).unwrap();
+        let mut stmt = q
+            .conn
+            .prepare(
+                "EXPLAIN QUERY PLAN SELECT id FROM jobs WHERE printer=?1 AND state='queued' AND available_at<=?2 ORDER BY priority DESC, seq ASC LIMIT 1",
+            )
+            .unwrap();
+        let plans: Vec<String> = stmt
+            .query_map(params!["p1", now_unix()], |r| r.get::<_, String>(3))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert!(
+            plans
+                .iter()
+                .any(|line| line.contains("COVERING INDEX idx_jobs_claim_order")),
+            "expected covering claim-order index in query plan, got: {plans:?}"
+        );
+        assert!(
+            plans.iter().all(|line| !line.contains("TEMP B-TREE")),
+            "expected no temp B-tree sort in claim_next plan, got: {plans:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn state_updated_id_covering_index_cache_pragma_and_count_all_states() {
+        let dir = std::env::temp_dir().join(format!("pq-state-upd-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("q.db");
+        let p = path.to_str().unwrap().to_string();
+        {
+            let q = Queue::open(&p).unwrap();
+            let cache_size: i64 = q
+                .conn
+                .query_row("PRAGMA cache_size", [], |r| r.get(0))
+                .unwrap();
+            let sync: i64 = q
+                .conn
+                .query_row("PRAGMA synchronous", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(cache_size, -8000);
+            assert_eq!(sync, 2); // FULL durability preserved
+            q.conn
+                .execute("DROP INDEX idx_jobs_state_updated_id", [])
+                .unwrap();
+        }
+        let mut q = Queue::open(&p).unwrap();
+        let mut stmt = q
+            .conn
+            .prepare(
+                "EXPLAIN QUERY PLAN SELECT id FROM jobs WHERE state IN ('rendering','spooling') AND updated_at > 0 AND updated_at < ?1",
+            )
+            .unwrap();
+        let plans: Vec<String> = stmt
+            .query_map(params![now_unix()], |r| r.get::<_, String>(3))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert!(
+            plans
+                .iter()
+                .any(|line| line.contains("COVERING INDEX idx_jobs_state_updated_id")),
+            "expected covering state_updated_id index in query plan, got: {plans:?}"
+        );
+        drop(stmt);
+        q.enqueue(&job("a1", "k-a1", "p1", 0)).unwrap();
+        q.enqueue(&job("a2", "k-a2", "p1", 0)).unwrap();
+        q.set_state("a2", JobState::Failed, Some("ERR")).unwrap();
+        let all = q.count_all_states().unwrap();
+        for (st, count) in all {
+            assert_eq!(count, q.count_by_state(st).unwrap());
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 }

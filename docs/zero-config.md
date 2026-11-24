@@ -16,13 +16,13 @@ simple:
 3. At print time the page asks the bridge for the chosen printer's
    real capabilities (driver-reported forms, receipt roll width,
    duplex, color), infers the protocol from the driver identity
-   (ESC/POS, ZPL, TSPL, EPL, or GDI through the Windows driver), and
+   (ESC/POS, ZPL, TSPL, EPL, CPCL, or GDI through the Windows driver), and
    the desktop fits the output to that printer's real media:
    receipts to the reported roll width, labels downscaled into the
    largest reported label form, office output shrink-only.
-4. The only thing Odoo stores is the job log (what printed, on
-   which printer name, and the outcome) — an audit trail, not
-   configuration.
+4. Odoo stores only the operational job log (`native.print.job`) and
+   an auto-synced history/picker registry (`native.print.device`) —
+   audit and UI convenience, never routing configuration.
 
 If no printer is connected at that moment, or anything in the
 native path fails, Odoo's standard download happens instead.

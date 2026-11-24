@@ -33,6 +33,9 @@ impl EscPos {
     pub fn bytes(&self) -> &[u8] {
         &self.buf
     }
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.buf
+    }
 
     /// GS v 0 raster image: 1D 76 30 m xL xH yL yH <data>
     /// m=0 normal density. x = bytes per row, y = height in dots (little-endian u16).
@@ -61,8 +64,13 @@ impl EscPos {
             return self;
         }
         let slices = (total_h as usize).div_ceil(MAX_RASTER_SLICE_HEIGHT as usize);
-        self.buf
-            .reserve(expected.saturating_add(slices.saturating_mul(8)));
+        // Reserve 16 bytes of trailer headroom so subsequent feed/cut/drawer commands
+        // (<= 12 bytes) never trigger a 2x reallocation of the full raster buffer.
+        self.buf.reserve(
+            expected
+                .saturating_add(slices.saturating_mul(8))
+                .saturating_add(16),
+        );
         let x = bpr as u16;
         let mut row_start = 0u32;
         while row_start < total_h {
@@ -277,5 +285,7 @@ mod tests {
         let decoded = decode_raster(tall_out.bytes());
         assert_eq!(decoded.height_dots, 600);
         assert_eq!(decoded.data, tall.data);
+        let bytes = tall_out.into_bytes();
+        assert!(bytes.capacity() < bytes.len() * 2);
     }
 }

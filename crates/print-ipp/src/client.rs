@@ -607,7 +607,7 @@ fn dechunk_into(body: &[u8], mut out: Option<&mut Vec<u8>>) -> Result<(), String
 }
 
 fn dechunk(body: &[u8]) -> Result<Vec<u8>, String> {
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(body.len());
     dechunk_into(body, Some(&mut out))?;
     Ok(out)
 }

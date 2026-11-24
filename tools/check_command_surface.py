@@ -86,14 +86,16 @@ def main():
         problems.append(f"lib.rs handler != build.rs manifest: only-handler={sorted(handler - manifest)} only-manifest={sorted(manifest - handler)}")
     if handler != granted:
         problems.append(f"handler != permissions union: ungranted={sorted(handler - granted)} unknown-grants={sorted(granted - handler)}")
-    local_union = caps["main.json"] | caps.get("toolbar.json", set())
+    main_cap = caps.get("main.json", set())
+    remote_cap = caps.get("remote.json", set())
+    local_union = main_cap | caps.get("toolbar.json", set())
     if local_union != handler:
         problems.append(f"local capabilities (main+toolbar) != handler: missing={sorted(handler - local_union)}")
     toolbar_only = caps.get("toolbar.json", set()) - perms.get("allow-app-shell", set()) - perms.get("allow-settings-nav", set())
-    toolbar_leaked = caps["main.json"] & toolbar_only
+    toolbar_leaked = main_cap & toolbar_only
     if toolbar_leaked:
         problems.append(f"main.json leaks toolbar-only commands: {sorted(toolbar_leaked)}")
-    remote_extra = caps["remote.json"] - handler
+    remote_extra = remote_cap - handler
     if remote_extra:
         problems.append(f"remote capability grants unknown commands: {sorted(remote_extra)}")
     # The admin set is DERIVED, not named: it is the permission that
@@ -107,15 +109,15 @@ def main():
             break
     if not admin:
         problems.append("no permission grants clear_finished_cmd: cannot derive the admin set")
-    leaked = caps["remote.json"] & admin
+    leaked = remote_cap & admin
     if leaked:
         problems.append(f"remote capability leaks queue-admin commands: {sorted(leaked)}")
     expected_remote = perms.get("allow-print-pdf", set()) | perms.get("allow-print-status", set()) | perms.get("allow-app-shell", set())
-    if caps.get("remote.json") != expected_remote:
+    if remote_cap != expected_remote:
         problems.append(
             "remote capability must grant exactly print-pdf, print-status and app-shell: "
-            f"missing={sorted(expected_remote - caps.get('remote.json', set()))} "
-            f"extra={sorted(caps.get('remote.json', set()) - expected_remote)}"
+            f"missing={sorted(expected_remote - remote_cap)} "
+            f"extra={sorted(remote_cap - expected_remote)}"
         )
     # The toolbar capability (for a future child webview) may only ever
     # carry its own group; anything else appearing there is a leak the
@@ -130,7 +132,8 @@ def main():
     # Every raw invoke("...") / invoke('...') in the shell's own JS
     # surfaces (bridge facade, and EVERY page in app/dist — Control
     # Center, boot page, toolbar page) must name a real command.
-    js_surfaces = [SRC / "src" / "lib.rs"] + sorted((SRC.parent / "dist").glob("*.html"))
+    dist_pages = sorted((SRC.parent / "dist").glob("*.html"))
+    js_surfaces = [SRC / "src" / "lib.rs"] + dist_pages
     called = set()
     for surface in js_surfaces:
         called |= set(re.findall(r"invoke\(\s*[\"']([a-zA-Z0-9_|:|-]+)[\"']", surface.read_text(encoding="utf-8")))
@@ -170,11 +173,14 @@ def main():
         "index.html": "main.json",
         "settings.html": "main.json",
     }
+    unmapped_pages = sorted(p.name for p in dist_pages if p.name not in surface_caps)
+    if unmapped_pages:
+        problems.append(f"app/dist HTML pages missing from surface_caps ACL map: {unmapped_pages}")
     for page_name, cap_name in surface_caps.items():
         page_path = SRC.parent / "dist" / page_name
         if not page_path.exists() or cap_name not in caps:
             continue
-        page_calls = set(re.findall(rf"invoke\(\s*[\"']([a-zA-Z0-9_|:|-]+)[\"']", page_path.read_text(encoding="utf-8")))
+        page_calls = set(re.findall(r"invoke\(\s*[\"']([a-zA-Z0-9_|:|-]+)[\"']", page_path.read_text(encoding="utf-8")))
         denied = sorted(page_calls - caps[cap_name])
         if denied:
             problems.append(f"{page_name} invokes commands denied by {cap_name}: {denied}")
@@ -184,7 +190,7 @@ def main():
         for p in problems:
             print(" -", p)
         return 1
-    print(f"command surface consistent: {len(handler)} commands guarded, remote reaches {len(caps['remote.json'])}, admin stays local")
+    print(f"command surface consistent: {len(handler)} commands guarded, remote reaches {len(remote_cap)}, admin stays local")
     return 0
 
 

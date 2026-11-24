@@ -26,6 +26,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
 jobs:
   lab:
     name: Printer lab - discovery, sensors, optional test prints
@@ -33,11 +36,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.90.0
       - name: Build the probe and tools
         run: |
           cd crates/print-win && cargo build --release --bin npwin_probe && cd ../..
-          cargo build --release -p print-tools
+          cargo build --locked --release -p print-tools
       - name: Discovery + default printer + forms
         shell: powershell
         run: |
@@ -50,28 +53,36 @@ jobs:
           }
       - name: Status sensors for the named printers
         shell: powershell
+        env:
+          THERMAL_PRINTER: ${{ inputs.thermal_printer }}
+          LABEL_PRINTER: ${{ inputs.label_printer }}
+          OFFICE_PRINTER: ${{ inputs.office_printer }}
         run: |
           $probe = "crates/print-win/target/release/npwin_probe.exe"
-          foreach ($name in @("${{ inputs.thermal_printer }}", "${{ inputs.label_printer }}", "${{ inputs.office_printer }}")) {
+          foreach ($name in @($env:THERMAL_PRINTER, $env:LABEL_PRINTER, $env:OFFICE_PRINTER)) {
             if ($name) {
               "--- status: $name ---" | Tee-Object -FilePath lab-results.txt -Append
-              & $probe status "$name" | Tee-Object -FilePath lab-results.txt -Append
-              & $probe forms "$name" | Tee-Object -FilePath lab-results.txt -Append
+              & $probe status $name | Tee-Object -FilePath lab-results.txt -Append
+              & $probe forms $name | Tee-Object -FilePath lab-results.txt -Append
             }
           }
       - name: REAL test print - thermal calibration page
         if: ${{ inputs.run_test_prints && inputs.thermal_printer != '' }}
         shell: powershell
+        env:
+          THERMAL_PRINTER: ${{ inputs.thermal_printer }}
         run: |
           $probe = "crates/print-win/target/release/npwin_probe.exe"
-          & $probe escpos-test "${{ inputs.thermal_printer }}" | Tee-Object -FilePath lab-results.txt -Append
+          & $probe escpos-test $env:THERMAL_PRINTER | Tee-Object -FilePath lab-results.txt -Append
       - name: REAL test print - ZPL label
         if: ${{ inputs.run_test_prints && inputs.label_printer != '' }}
         shell: powershell
+        env:
+          LABEL_PRINTER: ${{ inputs.label_printer }}
         run: |
           $probe = "crates/print-win/target/release/npwin_probe.exe"
           Set-Content -Path zpl-test.txt -Encoding ascii -Value "^XA`n^FO40,40^ADN,36,20^FDNative Print Lab Test^FS`n^FO40,90^ADN,24,12^FDIf you can read this, RAW ZPL works.^FS`n^XZ"
-          & $probe raw "${{ inputs.label_printer }}" zpl-test.txt | Tee-Object -FilePath lab-results.txt -Append
+          & $probe raw $env:LABEL_PRINTER zpl-test.txt | Tee-Object -FilePath lab-results.txt -Append
       - name: Upload lab results (always)
         if: always()
         uses: actions/upload-artifact@v7

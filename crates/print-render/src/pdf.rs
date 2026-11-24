@@ -273,7 +273,7 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
     }
 
     let mut confidence = Confidence::Exact;
-    let mut pages: Vec<PdfPageInfo> = Vec::new();
+    let mut pages: Vec<PdfPageInfo> = Vec::with_capacity(page_dicts.len());
     for dict in &page_dicts {
         let box_pt = find_pdf_token(dict, "/CropBox")
             .and_then(|p| parse_box_after(dict, p, &indirect_boxes))
@@ -327,6 +327,7 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
             .copied()
             .map(|(w_pt, h_pt)| PageSize::new(points_to_mm(w_pt), points_to_mm(h_pt)))
             .unwrap_or_else(PageSize::a4);
+        pages.reserve(count);
         for _ in 0..count {
             pages.push(PdfPageInfo {
                 size,

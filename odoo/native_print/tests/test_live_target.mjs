@@ -1,8 +1,9 @@
 // Node tests for the live printer helpers in native_print_client.js.
 // Run: node odoo/native_print/tests/test_live_target.mjs
-import { readFileSync, writeFileSync } from "fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { pathToFileURL } from "node:url";
 import vm from "node:vm";
 
 const src = readFileSync(
@@ -13,9 +14,12 @@ const src = readFileSync(
     'import { _t } from "@web/core/l10n/translation";',
     "const _t = (s) => s;",
 );
-const tmp = join(tmpdir(), "np_client_test.mjs");
+const tmpDir = mkdtempSync(join(tmpdir(), "np-live-target-"));
+process.on("exit", () => { try { rmSync(tmpDir, { recursive: true, force: true }); } catch {} });
+const tmp = join(tmpDir, "np_client_test.mjs");
 writeFileSync(tmp, src);
-const m = await import(tmp);
+const tmpUrl = pathToFileURL(tmp).href;
+const m = await import(tmpUrl);
 
 const eq = (a, b, msg) => {
     if (a !== b) {
@@ -196,13 +200,13 @@ vm.runInNewContext(
 );
 eq(ccSandbox.out.ccProtocol({ kind: "virtual", protocol: "escpos" }), "gdi", "Control Center virtual protocol override");
 eq(ccSandbox.out.ccClass({ kind: "virtual", printer_class: "thermal" }), "virtual", "Control Center virtual class override");
-for (const tok of ['"zdesigner"', '"zebra"', '"zpl"', '"tspl"', '"tsc"', '"epl"']) {
+for (const tok of ['"zdesigner"', '"zebra"', '"zpl"', '"tspl"', '"tsc"', '"epl"', '"cpcl"']) {
     if (!rustSrc.includes(tok)) throw new Error("rust detect_protocol lost label token " + tok);
 }
 for (const tok of ['"zdesigner"', '"zebra"']) {
     if (!src.includes(tok)) throw new Error("JS detectPrinterType lost label token " + tok);
 }
-for (const word of ["zpl", "tsc", "tspl", "epl"]) {
+for (const word of ["zpl", "tsc", "tspl", "epl", "cpcl"]) {
     if (!src.includes(`/(^|[^a-z0-9])${word}([^a-z0-9]|$)/`)) {
         throw new Error("JS detectPrinterType missing pre-compiled word regex for " + word);
     }
@@ -227,12 +231,17 @@ for (const word of ["zpl", "tsc", "tspl", "epl"]) {
         { name: "Eltron (EPL)", driver: "" },
         { name: "Replit Office", driver: "" },
         { name: "EPL2 Printer", driver: "" },
+        { name: "CPCL", driver: "" },
+        { name: "Mobile-CPCL-203", driver: "" },
+        { name: "XCPCL Office", driver: "" },
+        { name: "CPCL2 Printer", driver: "" },
     ];
     for (const p of parityCases) {
         const sig = `${p.name} ${p.driver}`.toLowerCase();
         const expectedMode = legacyWord(sig, "zpl") ? "zpl"
             : (legacyWord(sig, "tsc") || legacyWord(sig, "tspl")) ? "tspl"
             : legacyWord(sig, "epl") ? "epl"
+            : legacyWord(sig, "cpcl") ? "cpcl"
             : "gdi";
         eq(m.detectPrinterType(p).mode, expectedMode, `pre-compiled regex parity for ${p.name}`);
     }
@@ -259,6 +268,9 @@ for (const consumer of ["native_print_handler.js", "pos_native_print.js"]) {
 eq(m.detectPrinterType({ name: "Xprinter XP-365B", driver: "XP-365B" }).mode, "tspl", "xprinter 365b is tspl label");
 eq(m.detectPrinterType({ name: "Xprinter XP-365B", driver: "XP-365B" }).printerClass, "label", "xprinter 365b is label class");
 eq(m.detectPrinterType({ name: "Gprinter GP-1324D", driver: "Gprinter" }).mode, "tspl", "gprinter 1324 is tspl label");
+eq(m.detectPrinterType({ name: "Mobile CPCL Label", driver: "Generic" }).mode, "cpcl", "cpcl word detected as cpcl");
+eq(m.detectPrinterType({ name: "Mobile CPCL Label", driver: "Generic" }).printerClass, "label", "cpcl word detected as label class");
+eq(m.detectPrinterType({ name: "XCPCL Office", driver: "Generic" }).mode, "gdi", "cpcl substring is not cpcl");
 eq(m.detectPrinterType({ name: "HP LaserJet Receipt", driver: "HP PCL" }).mode, "gdi", "office laserjet with receipt in name stays gdi");
 m.setSelectedPrinter("HP LaserJet");
 m.setSelectedPosPrinter("EPSON TM-T88VII");
@@ -286,12 +298,12 @@ const handlerSrc = readFileSync(
     .replace('import { _t } from "@web/core/l10n/translation";',
         'const _t = (s, ...args) => args.reduce((acc, v) => acc.replace("%s", String(v)), s);')
     .replace('from "./native_print_client";',
-        `from "${tmp}";`);
+        `from "${tmpUrl}";`);
 globalThis.__npRpcCalls = rpcCalls;
 globalThis.__npUser = { context: {} };
-const tmpHandler = join(tmpdir(), "np_handler_test.mjs");
+const tmpHandler = join(tmpDir, "np_handler_test.mjs");
 writeFileSync(tmpHandler, handlerSrc);
-const h = await import(tmpHandler);
+const h = await import(pathToFileURL(tmpHandler).href);
 registeredHandler = globalThis.__npHandler;
 const testEnv = {
     services: {
@@ -450,7 +462,7 @@ try {
     delete globalThis.window.__NATIVE_PRINT__;
 }
 
-// 5. Phase 3 regression tests: hung fetch AbortController timeout & stale inFlightReports recovery.
+// 5. Regression tests: hung fetch AbortController timeout & stale inFlightReports recovery.
 {
     const origFetch2 = globalThis.fetch;
     const origSetTimeout2 = globalThis.setTimeout;
@@ -596,7 +608,7 @@ try {
     }
 }
 
-// 6. Phase 3 systray regression tests: onWillUnmount cleanup & maybeSyncDeviceCaps throttle.
+// 6. Systray regression tests: onWillUnmount cleanup & maybeSyncDeviceCaps throttle.
 {
     let unmountHook = null;
     let mountedHook = null;
@@ -609,17 +621,17 @@ try {
     )
         .replace(
             'import { Component, onMounted, onWillUnmount, useState } from "@odoo/owl";',
-            'class Component {} const onMounted = (fn) => { globalThis.__npOnMounted = fn; }; const onWillStart = () => {}; const onWillUnmount = (fn) => { globalThis.__npOnWillUnmount = fn; }; const useState = (s) => s;',
+            'class Component {} const onMounted = (fn) => { globalThis.__npOnMounted = fn; }; const onWillUnmount = (fn) => { globalThis.__npOnWillUnmount = fn; }; const useState = (s) => s;',
         )
         .replace('import { registry } from "@web/core/registry";', 'const registry = { category: () => ({ add: () => {} }) };')
         .replace('import { useService } from "@web/core/utils/hooks";', 'const useService = () => ({ add: () => {}, doAction: () => {} });')
         .replace('import { rpc } from "@web/core/network/rpc";', 'const rpc = async (url, params) => { globalThis.__npSystrayRpcs.push({ url, params }); if (url === "/native_print/overview") return globalThis.__npOverviewResp || { ok: true, active_jobs: 0, done_jobs: 0, failed_jobs: 0 }; return { ok: true }; };')
         .replace('import { _t } from "@web/core/l10n/translation";', 'const _t = (s) => s;')
-        .replace('from "./native_print_client";', `from "${tmp}";`);
+        .replace('from "./native_print_client";', `from "${tmpUrl}";`);
     globalThis.__npSystrayRpcs = [];
-    const tmpSystray = join(tmpdir(), "np_systray_test.mjs");
+    const tmpSystray = join(tmpDir, "np_systray_test.mjs");
     writeFileSync(tmpSystray, systraySrc);
-    const sMod = await import(tmpSystray);
+    const sMod = await import(pathToFileURL(tmpSystray).href);
 
     const prevLocalStorage = globalThis.localStorage;
     const prevDocument = globalThis.document;
@@ -715,6 +727,148 @@ try {
     } finally {
         globalThis.localStorage = prevLocalStorage;
         globalThis.document = prevDocument;
+        delete globalThis.window.__NATIVE_PRINT__;
+    }
+}
+
+// 7. Security & IP-literal edge cases: safeErrorCode() and isIpLiteral(":::").
+{
+    eq(m.safeErrorCode("OFFLINE"), "OFFLINE", "safeErrorCode preserves clean code");
+    eq(m.safeErrorCode("  ERR_01.timeout-2  "), "ERR_01.timeout-2", "safeErrorCode trims valid token");
+    eq(m.safeErrorCode("ERR\nSTACK_TRACE", "failed"), "failed", "safeErrorCode rejects multi-line string");
+    eq(m.safeErrorCode("Error: boom at native_print.rs:42", "failed"), "failed", "safeErrorCode rejects trace string");
+    eq(m.safeErrorCode("A".repeat(65)), "error", "safeErrorCode rejects >64-char string");
+    eq(m.safeErrorCode(null), "error", "safeErrorCode handles null");
+
+    const ipSandbox = {};
+    vm.runInNewContext(
+        src.match(/function isIpLiteral\([\s\S]*?\n\}/)[0] + "\nglobalThis.isIpLiteral = isIpLiteral;",
+        ipSandbox,
+    );
+    eq(ipSandbox.isIpLiteral(":::"), false, 'isIpLiteral(":::") must return false');
+    eq(ipSandbox.isIpLiteral("1::2::3"), false, "isIpLiteral rejects multiple :: compressions");
+    eq(ipSandbox.isIpLiteral(":1"), false, "isIpLiteral rejects leading single colon");
+    eq(ipSandbox.isIpLiteral("1:"), false, "isIpLiteral rejects trailing single colon");
+    eq(ipSandbox.isIpLiteral("::1"), true, "isIpLiteral accepts ::1");
+    eq(m.printerPatternFor({ name: "Label", port: ":::" }, "zpl"), "Label", 'printerPatternFor rejects ":::" as IP literal');
+}
+
+// 8. Regression tests: recoveryButtons sync-throw safety, scoped notification className,
+// BRIDGE_ERROR report_name/source_type, camelCase printerClass sync, and visibilitychange cleanup.
+{
+    // 8a. recoveryButtons().onClick catches synchronous throws without rejecting or throwing.
+    globalThis.window.__NATIVE_PRINT__ = {
+        openControlCenter: () => { throw new Error("SYNC_IPC_BOOM"); },
+    };
+    const btns = m.recoveryButtons();
+    eq(Array.isArray(btns) && btns.length === 1, true, "recoveryButtons returns Control Center action");
+    await btns[0].onClick();
+
+    // 8b. notifyUser passes scoped className so addon CSS never overrides core Odoo notifications.
+    let capturedOpts = null;
+    m.notifyUser(
+        { services: { notification: { add: (_msg, opts) => { capturedOpts = opts; } } } },
+        "Scoped toast test",
+        "warning",
+    );
+    eq(capturedOpts && capturedOpts.className, "o_native_print_notification", "notifyUser sets scoped className");
+
+    // 8c. BRIDGE_ERROR failure post carries report_name and source_type.
+    const origFetch3 = globalThis.fetch;
+    try {
+        rpcCalls.length = 0;
+        globalThis.window.__NATIVE_PRINT__ = {
+            listPrinters: async () => [{ name: "HP LaserJet", driver: "HP PCL", kind: "local", is_default: true }],
+            printerCapabilities: async () => ({ forms: [], color: true }),
+            printPdf: async () => { throw new Error("BRIDGE_DOWN"); },
+        };
+        globalThis.fetch = async () => ({
+            ok: true,
+            arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]).buffer,
+        });
+        await registeredHandler(
+            {
+                report_type: "qweb-pdf",
+                report_name: "account.report_invoice",
+                context: { active_model: "account.move", active_ids: [42, 43] },
+            },
+            {},
+            testEnv,
+        );
+        const failPost = rpcCalls.find((c) => c.url === "/native_print/job_status" && c.params.error_code === "BRIDGE_ERROR");
+        eq(Boolean(failPost), true, "BRIDGE_ERROR status posted");
+        eq(failPost.params.report_name, "account.report_invoice", "BRIDGE_ERROR post includes report_name");
+        eq(failPost.params.source_type, "report", "BRIDGE_ERROR post includes source_type");
+        eq(failPost.params.source_model, "account.move", "BRIDGE_ERROR PDF post includes source_model");
+        eq(failPost.params.source_ids, "42,43", "BRIDGE_ERROR PDF post includes source_ids");
+        eq(failPost.params.copies, 1, "BRIDGE_ERROR PDF post includes copies");
+        eq(failPost.params.color, true, "BRIDGE_ERROR PDF post includes color");
+        eq(failPost.params.mode, "gdi", "BRIDGE_ERROR PDF post includes mode");
+        eq(failPost.params.duplex, null, "BRIDGE_ERROR PDF post includes duplex");
+        eq(failPost.params.byte_size, 8, "BRIDGE_ERROR PDF post includes byte_size");
+
+        // 8c-text. qweb-text BRIDGE_ERROR failure post also carries reprintable metadata.
+        rpcCalls.length = 0;
+        globalThis.window.__NATIVE_PRINT__ = {
+            listPrinters: async () => [{ name: "EPSON TM-T88VII", driver: "EPSON", kind: "local", is_default: true }],
+            printerCapabilities: async () => ({ forms: [], color: false }),
+            printText: async () => { throw new Error("BRIDGE_TEXT_DOWN"); },
+        };
+        globalThis.fetch = async () => ({ ok: true, text: async () => "Hello label" });
+        await registeredHandler(
+            {
+                report_type: "qweb-text",
+                report_name: "stock.report_label",
+                context: { active_model: "stock.picking", active_ids: [99] },
+            },
+            {},
+            testEnv,
+        );
+        const textFailPost = rpcCalls.find((c) => c.url === "/native_print/job_status" && c.params.error_code === "BRIDGE_ERROR");
+        eq(Boolean(textFailPost), true, "BRIDGE_ERROR text status posted");
+        eq(textFailPost.params.source_model, "stock.picking", "BRIDGE_ERROR text post includes source_model");
+        eq(textFailPost.params.source_ids, "99", "BRIDGE_ERROR text post includes source_ids");
+        eq(textFailPost.params.copies, 1, "BRIDGE_ERROR text post includes copies");
+        eq(textFailPost.params.mode, "escpos", "BRIDGE_ERROR text post includes mode");
+        eq(textFailPost.params.pages, 1, "BRIDGE_ERROR text post includes pages");
+        eq(textFailPost.params.byte_size, 11, "BRIDGE_ERROR text post includes byte_size");
+    } finally {
+        globalThis.fetch = origFetch3;
+        delete globalThis.window.__NATIVE_PRINT__;
+    }
+
+    // 8d. Systray cleans up document visibilitychange listener and normalizes camelCase printerClass.
+    const docListeners = [];
+    const prevDoc2 = globalThis.document;
+    const prevLs2 = globalThis.localStorage;
+    globalThis.localStorage = globalThis.window.localStorage;
+    globalThis.document = {
+        hidden: false,
+        addEventListener: (ev, fn) => docListeners.push({ ev, fn }),
+        removeEventListener: (ev, fn) => {
+            const idx = docListeners.findIndex((x) => x.ev === ev && x.fn === fn);
+            if (idx >= 0) docListeners.splice(idx, 1);
+        },
+    };
+    try {
+        const sMod2 = await import(pathToFileURL(join(tmpDir, "np_systray_test.mjs")).href + "?v2");
+        globalThis.window.__NATIVE_PRINT__ = {
+            printerCapabilities: async () => ({ forms: [], bins: [] }),
+        };
+        const comp2 = new sMod2.NativePrintSystray();
+        comp2.setup();
+        globalThis.__npOnMounted();
+        eq(docListeners.some((l) => l.ev === "visibilitychange"), true, "onMounted registers visibilitychange");
+        globalThis.__npSystrayRpcs.length = 0;
+        await comp2.maybeSyncDeviceCaps([{ name: "CamelPrinter", protocol: "escpos", printerClass: "thermal" }], true);
+        const syncCall = globalThis.__npSystrayRpcs.find((c) => c.url === "/native_print/sync_device" && c.params.name === "CamelPrinter");
+        eq(Boolean(syncCall), true, "sync_device called for camelCase printerClass");
+        eq(syncCall.params.printer_class, "thermal", "camelCase printerClass normalized to printer_class");
+        globalThis.__npOnWillUnmount();
+        eq(docListeners.length, 0, "onWillUnmount removes visibilitychange listener");
+    } finally {
+        globalThis.document = prevDoc2;
+        globalThis.localStorage = prevLs2;
         delete globalThis.window.__NATIVE_PRINT__;
     }
 }

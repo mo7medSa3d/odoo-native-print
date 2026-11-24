@@ -51,12 +51,14 @@
   .hidden { display: none !important; }
   button, input, select, a, [tabindex], .tab-pane, .card { scroll-margin-top: 112px; }
 
-  /* ── Top Application Bar (Desktop Workbench Chrome) ── */
   .topbar {
-    background: var(--bg-surface);
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: var(--glass-highlight);
     color: var(--text-primary);
     padding: 0 1.25rem;
-    height: 50px;
+    height: 52px;
     flex: 0 0 auto;
     display: flex;
     align-items: center;
@@ -91,7 +93,6 @@
   }
   .topbar-actions { display: flex; align-items: center; gap: 0.45rem; flex-shrink: 0; }
 
-  /* ── Full-Width Desktop Two-Pane Workbench Shell ── */
   .workspace-shell {
     flex: 1 1 auto;
     display: flex;
@@ -186,14 +187,17 @@
       overflow: hidden;
     }
     .tabsbar {
-      flex: 0 0 236px;
-      background: var(--bg-surface);
+      flex: 0 0 244px;
+      background: var(--glass-bg);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
       border-bottom: 0;
       border-inline-end: 1px solid var(--border);
       padding: 1rem 0.75rem;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
+      gap: 0.75rem;
     }
     .sidebar-section-label { display: block; }
     .nav-tabs {
@@ -256,7 +260,6 @@
     color: var(--text-muted);
   }
 
-  /* ── Buttons ── */
   .btn {
     display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
     min-height: 32px;
@@ -267,6 +270,7 @@
     white-space: nowrap;
   }
   .btn:hover:not(:disabled) { background: var(--bg-subtle); border-color: var(--border-strong); }
+  .btn:active:not(:disabled) { transform: scale(0.97); }
   .btn:disabled { opacity: 0.48; cursor: not-allowed; }
   .btn-sm { min-height: 28px; padding: 0.3rem 0.65rem; font-size: 0.76rem; border-radius: var(--radius-sm); }
   .btn-primary { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); font-weight: 600; }
@@ -280,7 +284,6 @@
   .btn.is-refreshing svg { animation: npSpin 0.8s linear infinite; }
   @keyframes npSpin { to { transform: rotate(360deg); } }
 
-  /* ── Alert Banner ── */
   .alert-banner {
     display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
     padding: 0.75rem 1rem; border-radius: var(--radius-lg);
@@ -288,7 +291,6 @@
     font-size: 0.83rem; font-weight: 500; margin-bottom: 1rem;
   }
 
-  /* ── KPI Strip (4-Column Desktop Precision) ── */
   .kpi-grid {
     display: grid;
     grid-template-columns: repeat(1, minmax(0, 1fr));
@@ -349,7 +351,6 @@
   .kpi-icon.ok { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-border); }
   .kpi-icon.err { background: var(--err-bg); color: var(--err-fg); border-color: var(--err-border); }
 
-  /* ── Cards ── */
   .card {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
@@ -369,7 +370,6 @@
   }
   .card-body { padding: 1.1rem; }
 
-  /* ── Segmented Filter & Search Toolbar ── */
   .queue-controls {
     display: flex;
     align-items: center;
@@ -427,7 +427,6 @@
     box-shadow: var(--shadow-sm);
   }
 
-  /* ── High-Density Print Queue Table ── */
   .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 0.81rem; }
   thead th {
@@ -446,7 +445,6 @@
   tbody tr:not(.empty-row):focus-within { background: var(--bg-subtle); }
   td.mono, .mono { font-family: var(--font-mono); font-size: 0.76rem; }
 
-  /* ── Semantic Status Pills ── */
   .main-container.is-stale { opacity: 0.72; transition: opacity var(--dur-fast) var(--ease-out); }
   .badge {
     display: inline-flex; align-items: center; gap: 0.36rem;
@@ -462,7 +460,6 @@
   .badge-info { background: var(--info-bg); color: var(--info-fg); border-color: var(--info-border); }
   .badge-neutral { background: var(--bg-subtle); color: var(--text-secondary); border-color: var(--border); }
 
-  /* ── Forms & Calibration Matrix ── */
   .form-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -486,7 +483,6 @@
     padding: 0.42rem 0.65rem; font-weight: 500;
   }
 
-  /* ── Hardware Printer Cards ── */
   .printer-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
@@ -635,7 +631,6 @@
   .forms-item:last-child { border-bottom: 0; }
   .forms-item span { color: var(--text-muted); font-family: var(--font-mono); font-size: 0.71rem; }
 
-  /* ── Checklist & Setup Steps ── */
   .guide-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -657,7 +652,6 @@
   .guide-step-title { font-size: 0.83rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.2rem; }
   .guide-step-desc { font-size: 0.76rem; color: var(--text-secondary); line-height: 1.55; }
 
-  /* ── Diagnostics Code Inspector ── */
   .diag-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -675,7 +669,6 @@
     margin: 0;
   }
 
-  /* ── Toasts ── */
   .toast-container {
     position: fixed; bottom: 16px; inset-inline-end: 16px; z-index: 100;
     display: flex; flex-direction: column; gap: 0.5rem; max-width: 380px; width: calc(100vw - 32px);
@@ -700,16 +693,17 @@
   }
   .toast-close:hover { opacity: 1; }
 
-  /* ── Modal ── */
   .modal-overlay {
     position: fixed; inset: 0; background: rgba(9, 12, 18, 0.58);
-    backdrop-filter: blur(2px); z-index: 200;
+    backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); z-index: 200;
     display: flex; align-items: center; justify-content: center; padding: 1rem;
   }
+  #confirmOverlay { z-index: 300; }
   .modal-card {
-    width: min(92vw, 420px); background: var(--bg-elevated);
+    width: min(92vw, 420px); background: var(--glass-bg-strong);
+    backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
     border: 1px solid var(--border-strong); border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-lg); padding: 1.35rem;
+    box-shadow: var(--shadow-lg), var(--glass-highlight); padding: 1.35rem;
     display: flex; flex-direction: column; gap: 0.9rem;
   }
   .modal-head { display: flex; align-items: center; gap: 0.75rem; }
@@ -797,11 +791,146 @@
   .settings-select { height: 32px; font-size: 0.78rem; }
   .settings-hint { color: var(--text-muted); margin-top: 0.45rem; }
   .settings-save-btn { margin-top: 0.6rem; }
+
+  .sidebar-tabs-box {
+    display: none;
+    padding: 0.75rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+  @media (min-width: 960px) { .sidebar-tabs-box { display: flex; } }
+  .sidebar-tabs-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.4rem;
+    font-size: 0.76rem; font-weight: 700; color: var(--text-primary);
+  }
+  .sidebar-tabs-list { display: flex; flex-direction: column; gap: 0.25rem; max-height: 160px; overflow-y: auto; }
+  .sidebar-tab-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.4rem;
+    padding: 0.32rem 0.5rem; border-radius: var(--radius-xs);
+    border: 1px solid transparent; background: transparent; color: var(--text-secondary);
+    font: inherit; font-size: 0.75rem; cursor: pointer; text-align: start; width: 100%;
+    transition: background-color var(--dur-fast) var(--ease-spring), color var(--dur-fast) var(--ease-spring);
+  }
+  .sidebar-tab-item:hover { background: var(--bg-subtle); color: var(--text-primary); }
+  .sidebar-tab-item.active { background: var(--brand-soft); color: var(--brand-text); font-weight: 600; border-color: var(--info-border); }
+  .sidebar-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
+  .cmd-overlay {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    z-index: 250; display: flex; align-items: flex-start; justify-content: center;
+    padding: 10vh 1rem 1rem;
+  }
+  .cmd-card {
+    width: min(94vw, 620px); max-height: 76vh;
+    background: var(--glass-bg-strong);
+    backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--border-strong); border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg), var(--glass-highlight);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .cmd-head {
+    display: flex; align-items: center; gap: 0.65rem;
+    padding: 0.85rem 1rem; border-bottom: 1px solid var(--border);
+  }
+  .cmd-input {
+    flex: 1 1 auto; border: 0; background: transparent; color: var(--text-primary);
+    font: inherit; font-size: 0.94rem; outline: none;
+  }
+  .cmd-body { overflow-y: auto; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.85rem; }
+  .cmd-section-title {
+    font-size: 0.7rem; font-weight: 700; color: var(--text-muted);
+    padding: 0 0.4rem 0.25rem; display: flex; align-items: center; justify-content: space-between;
+  }
+  .cmd-list { display: flex; flex-direction: column; gap: 0.25rem; }
+  .cmd-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+    padding: 0.5rem 0.7rem; border-radius: var(--radius-md);
+    border: 1px solid transparent; background: transparent; color: var(--text-primary);
+    font: inherit; font-size: 0.82rem; cursor: pointer; text-align: start; width: 100%;
+    transition: background-color var(--dur-fast) var(--ease-spring), border-color var(--dur-fast) var(--ease-spring);
+  }
+  .cmd-item:hover { background: var(--bg-subtle); border-color: var(--border); }
+  .cmd-item.is-active,
+  .cmd-item[aria-selected="true"] { background: var(--brand-soft); border-color: var(--info-border); }
+  .cmd-item-main { display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex: 1 1 auto; }
+  .cmd-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .cmd-item-sub { font-size: 0.72rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cmd-item-actions { display: flex; align-items: center; gap: 0.25rem; flex-shrink: 0; }
+  .cmd-ws-row { display: flex; gap: 0.45rem; padding: 0 0.25rem; }
+  .cmd-group-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--border-strong); }
+  .cmd-group-dot.g-blue { background: var(--chart-1); }
+  .cmd-group-dot.g-teal { background: var(--chart-2); }
+  .cmd-group-dot.g-orange { background: var(--destructive); }
+  .cmd-group-dot.g-mint { background: var(--chart-4); }
+  .preview-card { width: min(94vw, 520px); max-height: 90vh; overflow-y: auto; }
+  .preview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
+  .preview-printer-name { font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.15rem; word-break: break-word; }
+  .preview-meta-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; }
+  .preview-meta-cell {
+    background: var(--bg-subtle); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 0.5rem 0.65rem;
+    display: flex; flex-direction: column; gap: 0.15rem;
+  }
+  .preview-meta-label { font-size: 0.68rem; color: var(--text-muted); font-weight: 600; }
+  .preview-meta-val { font-size: 0.78rem; color: var(--text-primary); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .preview-stage {
+    background: var(--bg-subtle); border: 1px solid var(--border);
+    border-radius: var(--radius-md); padding: 1rem;
+    display: flex; justify-content: center; align-items: center; min-height: 210px;
+  }
+  .preview-sheet {
+    background: var(--bg-surface); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-xs); box-shadow: var(--shadow-md);
+    padding: 0.55rem; color: var(--text-primary);
+    transition: width var(--dur-med) var(--ease-out), min-height var(--dur-med) var(--ease-out);
+  }
+  .preview-sheet.sheet-58 { width: 158px; min-height: 236px; font-size: 0.64rem; }
+  .preview-sheet.sheet-80 { width: 204px; min-height: 244px; font-size: 0.7rem; }
+  .preview-sheet.sheet-label { width: 214px; min-height: 268px; font-size: 0.72rem; }
+  .preview-sheet.sheet-a4 { width: 232px; min-height: 312px; font-size: 0.74rem; }
+  .preview-printable-area {
+    border: 1px dashed var(--border-strong); border-radius: var(--radius-xs);
+    padding: 0.55rem; display: flex; flex-direction: column; gap: 0.45rem; height: 100%;
+  }
+  .preview-sheet-head {
+    display: flex; flex-direction: column; gap: 0.1rem; text-align: center;
+    border-bottom: 1px dashed var(--border); padding-bottom: 0.35rem;
+  }
+  .preview-sheet-brand { font-weight: 700; font-size: 1.05em; color: var(--text-primary); }
+  .preview-sheet-sub { font-size: 0.85em; color: var(--text-muted); }
+  .preview-sheet-items {
+    display: flex; flex-direction: column; gap: 0.25rem;
+    border-bottom: 1px dashed var(--border); padding-bottom: 0.35rem;
+  }
+  .preview-sheet-row {
+    display: flex; justify-content: space-between; gap: 0.4rem;
+    color: var(--text-secondary); font-variant-numeric: tabular-nums;
+  }
+  .preview-sheet-total {
+    display: flex; justify-content: space-between; font-weight: 700;
+    color: var(--text-primary); font-variant-numeric: tabular-nums;
+  }
+  .preview-barcode-wrap {
+    display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
+    margin-top: auto; padding-top: 0.25rem;
+  }
+  .preview-barcode {
+    width: 84%; height: 26px;
+    background: repeating-linear-gradient(90deg, var(--text-primary) 0 2px, transparent 2px 4px, var(--text-primary) 4px 5px, transparent 5px 8px, var(--text-primary) 8px 11px, transparent 11px 13px);
+  }
+  .preview-barcode-code { font-family: var(--font-mono); font-size: 0.78em; color: var(--text-muted); }
+  @media (max-width: 520px) { .preview-meta-grid { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-transparency: reduce) {
+    .modal-overlay, .cmd-overlay, .modal-card, .cmd-card { backdrop-filter: none; -webkit-backdrop-filter: none; }
+    .modal-card, .cmd-card { background: var(--bg-surface); }
+  }
 </style>
 </head>
 <body>
 
-  <!-- Top Navigation Header -->
   <header class="topbar">
     <div class="brand">
       <div class="brand-logo" aria-hidden="true">
@@ -819,6 +948,12 @@
     </div>
 
     <div class="topbar-actions">
+      <button type="button" class="btn btn-glass" id="btnCmdPalette" data-action="open-cmd-palette" title="Ctrl+K" aria-label="Ctrl+K">
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <span data-i18n="btn_cmd_palette">بحث سريع</span>
+        <kbd class="kbd">Ctrl+K</kbd>
+      </button>
+
       <button type="button" class="btn btn-primary" id="btnOpenOdoo" data-action="open-odoo">
         <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
@@ -851,27 +986,34 @@
   </header>
 
   <div class="workspace-shell">
-  <!-- Navigation Sidebar -->
   <aside class="tabsbar">
     <div class="sidebar-section-label" data-i18n="nav_section">مساحة العمل</div>
     <nav class="nav-tabs" id="navTabs" role="tablist" aria-label="مساحة العمل">
-      <button type="button" class="nav-tab active" id="nav-tab-dashboard" role="tab" aria-selected="true" aria-controls="tab-dashboard" data-tab="dashboard" data-action="switch-tab">
+      <button type="button" class="nav-tab active" id="nav-tab-dashboard" role="tab" aria-selected="true" tabindex="0" aria-controls="tab-dashboard" data-tab="dashboard" data-action="switch-tab">
         <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect></svg>
         <span data-i18n="tab_dashboard">لوحة المراقبة</span>
       </button>
-      <button type="button" class="nav-tab" id="nav-tab-printers" role="tab" aria-selected="false" aria-controls="tab-printers" data-tab="printers" data-action="switch-tab">
+      <button type="button" class="nav-tab" id="nav-tab-printers" role="tab" aria-selected="false" tabindex="-1" aria-controls="tab-printers" data-tab="printers" data-action="switch-tab">
         <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
         <span data-i18n="tab_printers">الطابعات والمعايرة</span>
       </button>
-      <button type="button" class="nav-tab" id="nav-tab-settings" role="tab" aria-selected="false" aria-controls="tab-settings" data-tab="settings" data-action="switch-tab">
+      <button type="button" class="nav-tab" id="nav-tab-settings" role="tab" aria-selected="false" tabindex="-1" aria-controls="tab-settings" data-tab="settings" data-action="switch-tab">
         <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         <span data-i18n="tab_settings">اتصال Odoo</span>
       </button>
-      <button type="button" class="nav-tab" id="nav-tab-diagnostics" role="tab" aria-selected="false" aria-controls="tab-diagnostics" data-tab="diagnostics" data-action="switch-tab">
+      <button type="button" class="nav-tab" id="nav-tab-diagnostics" role="tab" aria-selected="false" tabindex="-1" aria-controls="tab-diagnostics" data-tab="diagnostics" data-action="switch-tab">
         <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
         <span data-i18n="tab_diagnostics">التشخيص</span>
       </button>
     </nav>
+
+    <div class="sidebar-tabs-box">
+      <div class="sidebar-tabs-head">
+        <span data-i18n="sidebar_tabs_title">التبويبات المفتوحة</span>
+        <button type="button" class="btn btn-sm btn-glass" data-action="open-cmd-palette" data-i18n="btn_manage_tabs">إدارة</button>
+      </div>
+      <div class="sidebar-tabs-list" id="sidebarTabsList"></div>
+    </div>
 
     <div class="sidebar-status">
       <div class="sidebar-status-title" data-i18n="sidebar_engine_title">حالة النظام</div>
@@ -890,10 +1032,8 @@
     </div>
   </aside>
 
-  <!-- Main Content Area -->
   <main class="main-container">
 
-    <!-- Status Alert Banner -->
     <div id="originAlertBanner" class="alert-banner hidden" role="status" aria-live="polite">
       <div class="alert-banner-content">
         <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
@@ -902,7 +1042,6 @@
       <button type="button" class="btn btn-sm btn-primary" data-action="switch-tab" data-tab="settings" data-i18n="btn_configure_now">إعداد الرابط</button>
     </div>
 
-    <!-- TAB 1: DASHBOARD & QUEUE -->
     <section id="tab-dashboard" class="tab-pane" role="tabpanel" aria-labelledby="nav-tab-dashboard">
       <div class="pane-header">
         <div>
@@ -938,7 +1077,7 @@
           <div class="kpi-body">
             <div class="kpi-label" data-i18n="kpi_done_jobs">مكتملة</div>
             <div class="kpi-value tabular-nums" id="kpiDoneCount">0</div>
-            <div class="kpi-meta" id="kpiPdfiumStatus">PDFium: —</div>
+            <div class="kpi-meta" id="kpiPdfiumStatus">—</div>
           </div>
           <div class="kpi-icon ok">
             <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
@@ -957,7 +1096,6 @@
         </div>
       </div>
 
-      <!-- Queue Table Card -->
       <div class="card">
         <div class="card-header">
           <div class="card-title">
@@ -1003,7 +1141,6 @@
       </div>
     </section>
 
-    <!-- TAB 2: PRINTERS & CALIBRATION LAB -->
     <section id="tab-printers" class="tab-pane hidden" role="tabpanel" aria-labelledby="nav-tab-printers">
       <div class="pane-header">
         <div>
@@ -1080,7 +1217,6 @@
       <div class="printer-grid" id="printersGrid"></div>
     </section>
 
-    <!-- TAB 3: SETTINGS & SECURITY -->
     <section id="tab-settings" class="tab-pane hidden" role="tabpanel" aria-labelledby="nav-tab-settings">
       <div class="pane-header">
         <div>
@@ -1095,7 +1231,7 @@
             <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
             <span data-i18n="settings_title">إعدادات الخادم</span>
           </div>
-          <span class="badge badge-info" id="policyStatusBadge"><span class="dot"></span>Local Config</span>
+          <span class="badge badge-info" id="policyStatusBadge"><span class="dot"></span>إعداد محلي</span>
         </div>
         <div class="card-body">
           <div class="form-grid">
@@ -1160,7 +1296,6 @@
       </div>
     </section>
 
-    <!-- TAB 4: DIAGNOSTICS & SUPPORT -->
     <section id="tab-diagnostics" class="tab-pane hidden" role="tabpanel" aria-labelledby="nav-tab-diagnostics">
       <div class="pane-header">
         <div>
@@ -1213,7 +1348,39 @@
 
   <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="false"></div>
 
-  <!-- In-app confirmation dialog -->
+  <div id="cmdOverlay" class="cmd-overlay hidden" data-action="cmd-overlay-close">
+    <div class="cmd-card" id="cmdDialog" role="dialog" aria-modal="true" aria-label="بحث سريع">
+      <div class="cmd-head">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input type="search" id="cmdInput" class="cmd-input" placeholder="ابحث في التبويبات، مساحات العمل، أو الأوامر…" aria-label="ابحث في التبويبات، مساحات العمل، أو الأوامر…" autocomplete="off" />
+        <button type="button" class="btn btn-sm btn-glass" id="cmdCloseBtn" data-action="close-cmd-palette">Esc</button>
+      </div>
+      <div class="cmd-body" id="cmdResults">
+        <div>
+          <div class="cmd-section-title">
+            <span data-i18n="cmd_open_tabs">التبويبات المفتوحة والمجموعات</span>
+            <button type="button" class="btn btn-sm btn-glass" data-action="cmd-reopen-tab" data-i18n="cmd_reopen_closed">إعادة فتح المغلق</button>
+          </div>
+          <div class="cmd-list" id="cmdTabsList"></div>
+        </div>
+        <div>
+          <div class="cmd-section-title">
+            <span data-i18n="cmd_workspaces">مساحات العمل (الجلسات المحفوظة)</span>
+          </div>
+          <div class="cmd-ws-row">
+            <input type="text" id="cmdWorkspaceName" class="input" placeholder="اسم مساحة العمل (مثل: كاشير الصباح)…" />
+            <button type="button" class="btn btn-primary" id="btnSaveWorkspace" data-action="save-workspace" data-i18n="cmd_save_ws">حفظ الجلسة</button>
+          </div>
+          <div class="cmd-list" id="cmdWorkspacesList"></div>
+        </div>
+        <div>
+          <div class="cmd-section-title"><span data-i18n="cmd_quick_actions">أوامر سريعة</span></div>
+          <div class="cmd-list" id="cmdActionsList"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="confirmOverlay" class="modal-overlay hidden">
     <div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
       <div class="modal-head">
@@ -1228,7 +1395,60 @@
     </div>
   </div>
 
+  <div id="previewOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+    <div class="modal-card preview-card">
+      <div class="preview-head">
+        <div>
+          <div id="previewTitle" class="modal-title" data-i18n="preview_title">معاينة الطباعة</div>
+          <div id="previewPrinterName" class="preview-printer-name"></div>
+        </div>
+        <span id="previewBadge" class="badge badge-info"></span>
+      </div>
+      <div class="preview-meta-grid">
+        <div class="preview-meta-cell">
+          <span class="preview-meta-label" data-i18n="preview_paper_lbl">المقاس</span>
+          <span id="previewPaperMeta" class="preview-meta-val" dir="ltr">—</span>
+        </div>
+        <div class="preview-meta-cell">
+          <span class="preview-meta-label" data-i18n="preview_mode_lbl">الدقة والوضع</span>
+          <span id="previewModeMeta" class="preview-meta-val" dir="ltr">—</span>
+        </div>
+        <div class="preview-meta-cell">
+          <span class="preview-meta-label" data-i18n="preview_area_lbl">منطقة الطباعة</span>
+          <span id="previewPrintableArea" class="preview-meta-val" dir="ltr">—</span>
+        </div>
+      </div>
+      <div class="preview-stage">
+        <div id="previewSheet" class="preview-sheet sheet-a4">
+          <div class="preview-printable-area">
+            <div class="preview-sheet-head">
+              <div class="preview-sheet-brand">Yaseir Print</div>
+              <div class="preview-sheet-sub" dir="rtl">فاتورة ضريبية · Tax Invoice</div>
+            </div>
+            <div class="preview-sheet-items">
+              <div class="preview-sheet-row"><span>قهوة مختصة · Latte ×2</span><span dir="ltr">36.00</span></div>
+              <div class="preview-sheet-row"><span>كرواسون · Croissant ×1</span><span dir="ltr">14.00</span></div>
+            </div>
+            <div class="preview-sheet-total">
+              <span>الإجمالي · Total</span>
+              <span dir="ltr">50.00</span>
+            </div>
+            <div class="preview-barcode-wrap" aria-hidden="true">
+              <div class="preview-barcode"></div>
+              <div class="preview-barcode-code" dir="ltr">YP-2026-0042</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-glass" id="previewCloseBtn" data-action="preview-close" data-i18n="preview_close">إغلاق</button>
+        <button type="button" class="btn btn-primary" id="previewTestPrintBtn" data-action="preview-test-print" data-i18n="preview_test_print">طباعة تجريبية</button>
+      </div>
+    </div>
+  </div>
+
 <script>
+  "use strict";
   const I18N = {
     ar: {
       app_title: "Yaseir Print",
@@ -1254,6 +1474,14 @@
       guide_s3_t: "الرجوع السريع",
       guide_s3_d: "اضغط Ctrl+Shift+Y في أي لحظة للعودة إلى مركز التحكم.",
       search_queue_ph: "بحث…",
+      btn_cmd_palette: "بحث سريع",
+      sidebar_tabs_title: "التبويبات المفتوحة",
+      btn_manage_tabs: "إدارة",
+      cmd_open_tabs: "التبويبات المفتوحة والمجموعات",
+      cmd_reopen_closed: "إعادة فتح المغلق",
+      cmd_workspaces: "مساحات العمل (الجلسات المحفوظة)",
+      cmd_save_ws: "حفظ الجلسة",
+      cmd_quick_actions: "أوامر سريعة",
       btn_open_odoo: "فتح Odoo",
       btn_refresh: "تحديث",
       refreshed: "تم التحديث",
@@ -1262,7 +1490,7 @@
       env_unavailable: "غير متاح",
       toast_failed: "تعذّر إتمام الإجراء. حاول مجدداً.",
       env_err_translations_t: "خطأ ترجمة من الخادم",
-      env_err_translations_b: "تعذّر تحميل ملف الترجمة من Odoo. حدّث وحدة native_print على الخادم وأعد التشغيل.",
+      env_err_translations_b: "تعذّر تحميل ملف الترجمة من Odoo. حدّث وحدة Yaseir Print على الخادم وأعد التشغيل.",
       env_err_generic: "خطأ غير متوقع",
       state_queued: "بالانتظار",
       state_rendering: "تجهيز",
@@ -1391,6 +1619,17 @@
       btn_copy_diag: "نسخ JSON",
       btn_download_diag: "تنزيل JSON",
       diag_desc: "ملخص الحالة وآخر 200 مهمة — خالٍ تماماً من البيانات الحساسة.",
+      btn_preview: "معاينة",
+      preview_title: "معاينة الطباعة",
+      preview_paper_lbl: "المقاس",
+      preview_mode_lbl: "الدقة والوضع",
+      preview_area_lbl: "منطقة الطباعة",
+      preview_test_print: "طباعة تجريبية",
+      preview_close: "إغلاق",
+      preview_paper_58: "حراري 58مم",
+      preview_paper_80: "حراري 80مم",
+      preview_paper_label: "ملصق 100×150مم",
+      preview_paper_a4: "A4 مكتبي",
     },
     en: {
       app_title: "Yaseir Print",
@@ -1405,26 +1644,34 @@
       pane_printers_title: "Printers & Calibration",
       pane_printers_sub: "Verify print alignment and configure default paper sizes & trays.",
       pane_settings_title: "Odoo Connection",
-      pane_settings_sub: "Configure your Odoo endpoint and crash recovery policy.",
+      pane_settings_sub: "Set your Odoo server URL and job recovery behavior.",
       pane_diag_title: "Diagnostics",
       pane_diag_sub: "Inspect runtime health and export a redacted support bundle.",
       guide_title: "Quick Start",
-      guide_s1_t: "Sync native_print",
+      guide_s1_t: "Update Odoo module",
       guide_s1_d: "Upgrade Yaseir Print in Odoo Apps after updating server add-on files.",
       guide_s2_t: "Multi-tab Odoo",
       guide_s2_d: "Opening Odoo reveals the browser tab bar for seamless multi-session and POS workflows.",
       guide_s3_t: "Quick switch",
       guide_s3_d: "Press Ctrl+Shift+Y anytime to jump back to Control Center.",
       search_queue_ph: "Search jobs…",
+      btn_cmd_palette: "Quick Search",
+      sidebar_tabs_title: "Open Tabs",
+      btn_manage_tabs: "Manage",
+      cmd_open_tabs: "Open Tabs & Groups",
+      cmd_reopen_closed: "Reopen Closed",
+      cmd_workspaces: "Workspaces (Saved Sessions)",
+      cmd_save_ws: "Save Session",
+      cmd_quick_actions: "Quick Actions",
       btn_open_odoo: "Open Odoo",
       btn_refresh: "Refresh",
       refreshed: "Refreshed",
       dialog_title: "Confirm action",
       env_ok: "OK",
       env_unavailable: "Unavailable",
-      toast_failed: "Action failed. Please try again.",
+      toast_failed: "Action failed. Try again.",
       env_err_translations_t: "Server translation error",
-      env_err_translations_b: "Odoo failed to serve translations. Upgrade native_print on the server and restart Odoo.",
+      env_err_translations_b: "Could not load translations from Odoo. Upgrade the Yaseir Print module on your server and restart Odoo.",
       env_err_generic: "Page error",
       state_queued: "Queued",
       state_rendering: "Rendering",
@@ -1432,7 +1679,7 @@
       state_printing: "Printing",
       state_done: "Done",
       state_failed: "Failed",
-      state_dead_letter: "Dead letter",
+      state_dead_letter: "Stopped",
       state_canceled: "Canceled",
       ps_ready: "Ready",
       ps_printing: "Printing",
@@ -1480,7 +1727,7 @@
       confirm_clear_web_data: "Clear cached web data and sign out of Odoo?",
       btn_theme: "Theme",
       tab_dashboard: "Dashboard",
-      tab_printers: "Printers & Lab",
+      tab_printers: "Printers & Calibration",
       tab_settings: "Odoo Connection",
       tab_diagnostics: "Diagnostics",
       env_title: "Runtime Health",
@@ -1489,7 +1736,7 @@
       btn_configure_now: "Configure",
       kpi_printers: "Printers",
       kpi_active_jobs: "In Progress",
-      kpi_active_sub: "Auto-persisted queue",
+      kpi_active_sub: "Auto-saved queue",
       kpi_done_jobs: "Completed",
       kpi_failed_jobs: "Failed",
       queue_title: "Print Queue",
@@ -1512,22 +1759,22 @@
       btn_run_cal_test: "Run calibration test",
       btn_reset_filter: "Show all jobs",
       no_printers_title: "No local printers detected",
-      no_printers: "No local spooler printers detected. Test network printers directly via TCP 9100 or IPP above.",
+      no_printers: "No local printers detected. Test a network printer directly via TCP 9100 or IPP above.",
       btn_rescan_printers: "Rescan printers",
       toast_close: "Dismiss",
       direct_test_title: "Calibration Test",
       lbl_target_printer: "Printer",
       lbl_test_type: "Test template",
       btn_send_test: "Print test page",
-      settings_title: "Server Endpoint",
+      settings_title: "Server Settings",
       lbl_odoo_origin: "Odoo URL",
-      help_odoo_origin: "Enter your Odoo origin URL (HTTPS, or HTTP with an IP address).",
+      help_odoo_origin: "Enter your Odoo URL (HTTPS, or HTTP with an IP address).",
       origin_http_warning: "Unencrypted HTTP — recommended on trusted local networks only.",
       origin_invalid: "Invalid URL — use HTTPS, or HTTP with an IP address.",
       origin_not_configured: "Add your Odoo server URL to get started.",
       native_bridge_unavailable: "Local print service is unavailable.",
       custom_printer_uri_help: "tcp://IP:9100 or ipp://IP:631/ipp/print",
-      custom_printer_uri_invalid: "Invalid printer URI — use tcp://, raw://, or ipp:// with a valid IP.",
+      custom_printer_uri_invalid: "Invalid printer address — use tcp://, raw://, or ipp:// with a valid IP.",
       kpi_pdf_ready: "PDF engine ready",
       kpi_pdf_unavailable: "PDF engine unavailable",
       confirm_clear_done: "Clear all finished jobs from the queue?",
@@ -1535,9 +1782,9 @@
       diagnostics_copied: "Report copied",
       diagnostics_downloaded: "Download started",
       diagnostics_failed: "Could not generate diagnostics bundle.",
-      lbl_recovery_mode: "Crash recovery",
-      opt_recovery_safe: "Safe — skip in-flight jobs",
-      opt_recovery_auto: "Auto — reprint in-flight jobs",
+      lbl_recovery_mode: "Job recovery on startup",
+      opt_recovery_safe: "Safe — skip already-sent jobs",
+      opt_recovery_auto: "Auto — reprint already-sent jobs",
       opt_calibration_pdf: "PDF Calibration (Rulers & Barcode)",
       opt_cal_thermal80: "Thermal Receipt 80mm (ESC/POS)",
       opt_cal_thermal58: "Thermal Receipt 58mm (ESC/POS)",
@@ -1545,7 +1792,7 @@
       opt_cal_tspl: "Label 100×150mm (TSPL)",
       opt_cal_epl: "Label 100×150mm (EPL)",
       cal_virtual_warning: "Virtual printers don't support raw protocols (ESC/POS / ZPL). Choose a physical printer or PDF calibration.",
-      help_recovery_mode: "Queued jobs always resume; already-spooled jobs follow this rule.",
+      help_recovery_mode: "Pending jobs always resume; jobs already sent to the printer follow this setting.",
       btn_save_origin: "Save",
       btn_save_and_launch: "Save & Open Odoo",
       diag_title: "Diagnostics Bundle",
@@ -1553,6 +1800,17 @@
       btn_copy_diag: "Copy JSON",
       btn_download_diag: "Download JSON",
       diag_desc: "App state and last 200 jobs — fully redacted with zero sensitive content.",
+      btn_preview: "Preview",
+      preview_title: "Print Preview",
+      preview_paper_lbl: "Paper",
+      preview_mode_lbl: "DPI / Mode",
+      preview_area_lbl: "Printable Area",
+      preview_test_print: "Test Print",
+      preview_close: "Close",
+      preview_paper_58: "58mm Thermal",
+      preview_paper_80: "80mm Thermal",
+      preview_paper_label: "100×150mm Label",
+      preview_paper_a4: "A4 Office",
     }
   };
 
@@ -1574,9 +1832,12 @@
     testDirty: false,
   };
 
+  let lastOverviewSignature = null;
   let lastJobsSignature = null;
   let lastPrintersSignature = null;
   let lastEnvSignature = null;
+  let lastSidebarTabsSignature = null;
+  let lastNativeControlsEnabled = null;
 
   function bridge() {
     return window.__NATIVE_PRINT__ || null;
@@ -1610,10 +1871,13 @@
   }
 
   function setNativeControlsEnabled(enabled) {
-    for (const id of ["btnOpenOdoo", "btnSaveOrigin", "btnSaveAndOpen", "btnClearFinished", "btnCustomTestPrint", "btnGenerateDiagnostics", "btnCopyDiagnostics", "btnDownloadDiagnostics", "btnClearWebData"]) {
+    const next = !!enabled;
+    if (lastNativeControlsEnabled === next) return;
+    lastNativeControlsEnabled = next;
+    for (const id of ["btnOpenOdoo", "btnSaveOrigin", "btnSaveAndOpen", "btnClearFinished", "btnCustomTestPrint", "previewTestPrintBtn", "btnGenerateDiagnostics", "btnCopyDiagnostics", "btnDownloadDiagnostics", "btnClearWebData"]) {
       if (uiLocks.has(id)) continue;
       const element = document.getElementById(id);
-      if (element) element.disabled = !enabled;
+      if (element && element.disabled !== !next) element.disabled = !next;
     }
   }
 
@@ -1641,7 +1905,7 @@
   }
 
   function showToast(msg, isError = false, type) {
-    const kind = type || (isError ? "error" : "success");
+    const kind = TOAST_ICONS[type] ? type : (isError ? "error" : "success");
     const text = String(msg == null ? "" : msg);
     const now = Date.now();
     const dedupeKey = kind + "|" + text;
@@ -1664,7 +1928,7 @@
 
     const entry = { el, timer: null, remaining: 0, expiresAt: 0 };
     toastState.entries.unshift(entry);
-    el.querySelector(".toast-close").addEventListener("click", () => dismissToast(entry));
+    el.querySelector(".toast-close")?.addEventListener("click", () => dismissToast(entry));
     el.addEventListener("mouseenter", () => {
       if (!entry.timer) return;
       window.clearTimeout(entry.timer);
@@ -1777,6 +2041,22 @@
     if (navTabsEl) navTabsEl.setAttribute("aria-label", I18N[currentLang].nav_section);
     const searchEl = document.getElementById("queueSearchInput");
     if (searchEl) { searchEl.placeholder = I18N[currentLang].search_queue_ph; searchEl.setAttribute("aria-label", I18N[currentLang].search_queue_ph); }
+    const cmdBtn = document.getElementById("btnCmdPalette");
+    if (cmdBtn) { const lbl = I18N[currentLang].btn_cmd_palette + " (Ctrl+K)"; cmdBtn.title = lbl; cmdBtn.setAttribute("aria-label", lbl); }
+    const cmdDlg = document.getElementById("cmdDialog");
+    if (cmdDlg) cmdDlg.setAttribute("aria-label", I18N[currentLang].btn_cmd_palette);
+    const cmdIn = document.getElementById("cmdInput");
+    if (cmdIn) {
+      const ph = currentLang === "ar" ? "ابحث في التبويبات، مساحات العمل، أو الأوامر…" : "Search tabs, workspaces, or commands…";
+      cmdIn.placeholder = ph;
+      cmdIn.setAttribute("aria-label", ph);
+    }
+    const wsIn = document.getElementById("cmdWorkspaceName");
+    if (wsIn) {
+      const ph = currentLang === "ar" ? "اسم مساحة العمل (مثل: كاشير الصباح)…" : "Workspace name (e.g. Morning POS)…";
+      wsIn.placeholder = ph;
+      wsIn.setAttribute("aria-label", ph);
+    }
     const dict = I18N[currentLang];
     document.querySelectorAll("[data-i18n]").forEach((el) => {
       if (el.id === "diagnosticsOutput" && diagnosticsGenerated) return;
@@ -1786,6 +2066,11 @@
     validateCustomPrinterUriField();
     updateCalWarning();
     rebuildTestKindOptions();
+    renderSidebarTabs();
+    const cmdOv = document.getElementById("cmdOverlay");
+    if (cmdOv && !cmdOv.classList.contains("hidden")) renderCommandPalette(cmdIn ? cmdIn.value : "");
+    const pvOv = document.getElementById("previewOverlay");
+    if (pvOv && !pvOv.classList.contains("hidden") && previewState) renderPrintPreview(previewState.printerName);
     if (overviewState) renderOverview(overviewState);
   }
   function toggleLang() {
@@ -1825,16 +2110,6 @@
     document.getElementById("confirmCancelBtn").focus();
     return new Promise((resolve) => { confirmResolver = resolve; });
   }
-  document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape" && confirmResolver) settleConfirm(false);
-    if (ev.key === "Tab" && confirmResolver) {
-      const okB = document.getElementById("confirmOkBtn");
-      const cancelB = document.getElementById("confirmCancelBtn");
-      if (document.activeElement !== okB && document.activeElement !== cancelB) { ev.preventDefault(); cancelB.focus(); }
-      else if (ev.shiftKey && document.activeElement === cancelB) { ev.preventDefault(); okB.focus(); }
-      else if (!ev.shiftKey && document.activeElement === okB) { ev.preventDefault(); cancelB.focus(); }
-    }
-  });
   function confirmOverlayClicked(event) {
     if (event.target === event.currentTarget) settleConfirm(false);
   }
@@ -1850,10 +2125,16 @@
   async function manualRefresh() {
     const btn = document.getElementById("btnRefresh");
     if (btn) { btn.disabled = true; btn.classList.add("is-refreshing"); }
+    capsEpoch++;
     capsCache.clear();
+    openFormsHtmlCache.clear();
+    lastPrinterHardwareMeta.clear();
+    printerSettingsRequested = false;
+    lastOverviewSignature = null;
     lastPrintersSignature = "";
     try {
-      const ok = await refreshAll();
+      const ok = await refreshAll({ force: true });
+      loadPrinterSettings();
       if (ok) showToast(I18N[currentLang].refreshed);
     } finally {
       if (btn) { btn.disabled = false; btn.classList.remove("is-refreshing"); }
@@ -1882,6 +2163,7 @@
     const api = bridge();
     if (!api || typeof api.appOverview !== "function") {
       overviewState = null;
+      lastOverviewSignature = null;
       setNativeControlsEnabled(false);
       document.getElementById("originAlertBanner").classList.remove("hidden");
       document.getElementById("originAlertText").textContent = I18N[currentLang].native_bridge_unavailable;
@@ -1889,20 +2171,22 @@
       return false;
     }
     try {
-      const data = await api.appOverview();
+      const data = await api.appOverview(options.force ? { force: true } : undefined);
       if (!data || typeof data !== "object") throw new Error("invalid_app_overview");
       setNativeControlsEnabled(true);
       overviewState = data;
       renderOverview(data);
-      document.querySelector(".main-container").classList.remove("is-stale");
+      const mainEl = document.querySelector(".main-container");
+      if (mainEl && mainEl.classList.contains("is-stale")) mainEl.classList.remove("is-stale");
       return true;
     } catch (error) {
+      lastOverviewSignature = null;
       document.getElementById("originAlertBanner").classList.remove("hidden");
       document.getElementById("originAlertText").textContent = currentLang === "ar"
         ? "تعذر الاتصال بخدمة الطباعة المحلية. تحقق من تشغيل التطبيق ثم أعد التحديث."
         : "Could not contact the local print service. Check that the desktop app is running, then refresh.";
       document.querySelector(".main-container").classList.add("is-stale");
-      if (!silent) { console.error(error); showToast(I18N[currentLang].toast_failed, true); }
+      if (!silent) showToast(I18N[currentLang].toast_failed, true);
       return false;
     }
   }
@@ -1910,7 +2194,7 @@
   async function clearWebData() {
     const api = bridge();
     if (!api || typeof api.clearWebData !== "function") {
-      showToast(currentLang === "ar" ? "الجسر المحلي غير متاح." : "Local bridge unavailable.", true);
+      showToast(I18N[currentLang].native_bridge_unavailable, true);
       return;
     }
     const sure = await confirmDialog(I18N[currentLang].confirm_clear_web_data, { danger: true });
@@ -1919,30 +2203,84 @@
       await api.clearWebData();
       showToast(currentLang === "ar" ? "تم المسح. أعد تسجيل الدخول." : "Web data cleared. Sign in again.");
     } catch (error) {
-      console.error(error); showToast(I18N[currentLang].toast_failed, true);
+      showToast(I18N[currentLang].toast_failed, true);
     }
   }
 
   function renderOverview(data) {
-    setText("appVersionBadge", data.appVersion ? `v${data.appVersion}` : "—");
     const printers = data.printers || [];
-    setText("kpiPrintersCount", String(printers.length));
-    setText("kpiDefaultPrinter", data.defaultPrinter
-      ? (currentLang === "ar" ? `الافتراضية: ${data.defaultPrinter}` : `Default: ${data.defaultPrinter}`)
-      : (currentLang === "ar" ? "لا توجد طابعة افتراضية" : "No default printer"));
-    setText("sidebarPrinterVal", data.defaultPrinter || "—");
+    const settingsFocused = anyFormControlFocused(document.getElementById("tab-settings"));
+    const overviewSig = JSON.stringify([
+      currentLang,
+      data.appVersion || "",
+      printers.length,
+      data.defaultPrinter || "",
+      data.stateCounts || [],
+      !!data.pdfiumReady,
+      data.odooOrigin || "",
+      !!data.lockedByPolicy,
+      !!data.autoReprint,
+      !!formState.settingsDirty,
+      settingsFocused,
+    ]);
+    if (overviewSig !== lastOverviewSignature) {
+      lastOverviewSignature = overviewSig;
+      setText("appVersionBadge", data.appVersion ? `v${data.appVersion}` : "—");
+      setText("kpiPrintersCount", String(printers.length));
+      setText("kpiDefaultPrinter", data.defaultPrinter
+        ? (currentLang === "ar" ? `الافتراضية: ${data.defaultPrinter}` : `Default: ${data.defaultPrinter}`)
+        : (currentLang === "ar" ? "لا توجد طابعة افتراضية" : "No default printer"));
+      setText("sidebarPrinterVal", data.defaultPrinter || "—");
 
-    const counts = Object.fromEntries(data.stateCounts || []);
-    const active = (counts.queued || 0) + (counts.rendering || 0) + (counts.spooling || 0) + (counts.printing || 0);
-    const done = counts.done || 0;
-    const attention = (counts.failed || 0) + (counts.dead_letter || 0);
+      const counts = Object.fromEntries(data.stateCounts || []);
+      const active = (counts.queued || 0) + (counts.rendering || 0) + (counts.spooling || 0) + (counts.printing || 0);
+      const done = counts.done || 0;
+      const attention = (counts.failed || 0) + (counts.dead_letter || 0);
 
-    setText("kpiActiveCount", String(active));
-    setText("kpiDoneCount", String(done));
-    setText("kpiFailedCount", String(attention));
-    setText("kpiPdfiumStatus", data.pdfiumReady
-      ? I18N[currentLang].kpi_pdf_ready
-      : I18N[currentLang].kpi_pdf_unavailable);
+      setText("kpiActiveCount", String(active));
+      setText("kpiDoneCount", String(done));
+      setText("kpiFailedCount", String(attention));
+      setText("kpiPdfiumStatus", data.pdfiumReady
+        ? I18N[currentLang].kpi_pdf_ready
+        : I18N[currentLang].kpi_pdf_unavailable);
+
+      const alertBanner = document.getElementById("originAlertBanner");
+      const quickStart = document.getElementById("quickStartCard");
+      if (quickStart) quickStart.classList.toggle("hidden", !!data.odooOrigin);
+      if (!data.odooOrigin) {
+        alertBanner.classList.remove("hidden");
+        setText("originAlertText", I18N[currentLang].origin_not_configured);
+        setText("kpiOriginMeta", currentLang === "ar" ? "غير مضبوط" : "Not configured");
+        setText("sidebarOriginVal", currentLang === "ar" ? "غير مضبوط" : "Unset");
+        document.getElementById("btnOpenOdoo").disabled = true;
+      } else {
+        alertBanner.classList.add("hidden");
+        setText("kpiOriginMeta", data.odooOrigin);
+        setText("sidebarOriginVal", data.odooOrigin.replace(/^https?:\/\//, ""));
+        document.getElementById("btnOpenOdoo").disabled = false;
+      }
+
+      const formLocked = !!data.lockedByPolicy;
+      const originInput = document.getElementById("inputOdooOrigin");
+      const autoReprintInput = document.getElementById("inputAutoReprint");
+      if (!formState.settingsDirty && !settingsFocused) {
+        const savedOrigin = data.odooOrigin || "";
+        if (originInput.value !== savedOrigin) originInput.value = savedOrigin;
+        const savedAutoReprint = data.autoReprint ? "true" : "false";
+        if (autoReprintInput.value !== savedAutoReprint) autoReprintInput.value = savedAutoReprint;
+      }
+      if (originInput.disabled !== formLocked) originInput.disabled = formLocked;
+      if (autoReprintInput.disabled !== formLocked) autoReprintInput.disabled = formLocked;
+      const policyLabel = formLocked
+        ? (currentLang === "ar" ? "مُدار بواسطة النظام" : "Managed by policy")
+        : (currentLang === "ar" ? "إعداد محلي" : "Local config");
+      const policyEl = document.getElementById("policyStatusBadge");
+      if (policyEl && policyEl.dataset.policyLabel !== policyLabel) {
+        policyEl.dataset.policyLabel = policyLabel;
+        policyEl.innerHTML = `<span class="dot"></span>${escapeHtml(policyLabel)}`;
+      }
+      validateOriginField();
+    }
 
     const envEl = document.getElementById("envSummary");
     if (envEl) {
@@ -1953,7 +2291,7 @@
         const fact = (label, ok, value) =>
           `<div class="env-row"><span class="env-label">${escapeHtml(label)}</span><strong class="mono env-val ${ok ? "env-val-ok" : "env-val-err"}">${escapeHtml(value)}</strong></div>`;
         envEl.innerHTML =
-          fact("Runtime", !!data.webviewVersion, data.webviewVersion || "—") +
+          fact(currentLang === "ar" ? "بيئة التشغيل" : "Runtime", !!data.webviewVersion, data.webviewVersion || "—") +
           fact("ES2022", !!env.es2022, env.es2022 ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
           fact(currentLang === "ar" ? "التخزين المحلي" : "Local storage", !!env.localStorage, env.localStorage ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
           fact(currentLang === "ar" ? "ملفات الارتباط" : "Cookies", !!env.cookies, env.cookies ? I18N[currentLang].env_ok : I18N[currentLang].env_unavailable) +
@@ -1976,43 +2314,7 @@
       }
     }
 
-    const alertBanner = document.getElementById("originAlertBanner");
-    const quickStart = document.getElementById("quickStartCard");
-    if (quickStart) quickStart.classList.toggle("hidden", !!data.odooOrigin);
-    if (!data.odooOrigin) {
-      alertBanner.classList.remove("hidden");
-      setText("originAlertText", I18N[currentLang].origin_not_configured);
-      setText("kpiOriginMeta", currentLang === "ar" ? "غير مضبوط" : "Not configured");
-      setText("sidebarOriginVal", currentLang === "ar" ? "غير مضبوط" : "Unset");
-      document.getElementById("btnOpenOdoo").disabled = true;
-    } else {
-      alertBanner.classList.add("hidden");
-      setText("kpiOriginMeta", data.odooOrigin);
-      setText("sidebarOriginVal", data.odooOrigin.replace(/^https?:\/\//, ""));
-      document.getElementById("btnOpenOdoo").disabled = false;
-    }
-
-    const formLocked = !!data.lockedByPolicy;
-    const originInput = document.getElementById("inputOdooOrigin");
-    const autoReprintInput = document.getElementById("inputAutoReprint");
-    if (!formState.settingsDirty && !anyFormControlFocused(document.getElementById("tab-settings"))) {
-      const savedOrigin = data.odooOrigin || "";
-      if (originInput.value !== savedOrigin) originInput.value = savedOrigin;
-      const savedAutoReprint = data.autoReprint ? "true" : "false";
-      if (autoReprintInput.value !== savedAutoReprint) autoReprintInput.value = savedAutoReprint;
-    }
-    if (originInput.disabled !== formLocked) originInput.disabled = formLocked;
-    if (autoReprintInput.disabled !== formLocked) autoReprintInput.disabled = formLocked;
-    const policyLabel = formLocked
-      ? (currentLang === "ar" ? "مُدار بواسطة النظام" : "Managed by policy")
-      : (currentLang === "ar" ? "إعداد محلي" : "Local config");
-    const policyEl = document.getElementById("policyStatusBadge");
-    if (policyEl && policyEl.textContent !== policyLabel) {
-      policyEl.innerHTML = `<span class="dot"></span>${escapeHtml(policyLabel)}`;
-    }
-
     populatePrinterSelect(printers, data.defaultPrinter);
-    validateOriginField();
 
     renderJobsTable(data.recentJobs || []);
     renderPrintersGrid(printers);
@@ -2033,7 +2335,7 @@
       return true;
     });
 
-    const signature = currentFilter + "|" + q + "|" + currentLang + "|" + JSON.stringify(filtered.map((j) =>
+    const signature = currentFilter + "|" + q + "|" + currentLang + "|" + (jobs.length > 0 ? "1" : "0") + "|" + JSON.stringify(filtered.map((j) =>
       [j.id, j.report, j.printer, j.pages, j.bytes, j.state, j.attempts, j.error_code, j.diag_id]));
     if (signature === lastJobsSignature) return;
     lastJobsSignature = signature;
@@ -2148,18 +2450,52 @@
     if (!items.length) return "";
     return `<div class="printer-specs">${items.join('<span class="spec-sep">·</span>')}</div>`;
   }
+  let capsEpoch = 0;
+  const lastPrinterHardwareMeta = new Map();
+  function syncPrinterCaches(printers) {
+    const activeNames = new Set(printers.map((p) => p.name));
+    for (const name of [...capsCache.keys()]) {
+      if (!activeNames.has(name)) capsCache.delete(name);
+    }
+    for (const name of [...openFormsHtmlCache.keys()]) {
+      if (!activeNames.has(name)) openFormsHtmlCache.delete(name);
+    }
+    for (const name of [...openSettingsPrinters]) {
+      if (!activeNames.has(name)) openSettingsPrinters.delete(name);
+    }
+    for (const name of [...lastPrinterHardwareMeta.keys()]) {
+      if (!activeNames.has(name)) lastPrinterHardwareMeta.delete(name);
+    }
+    if (openFormsPrinter && !activeNames.has(openFormsPrinter)) openFormsPrinter = null;
+    for (const p of printers) {
+      const hwMeta = `${p.port || ""}|${p.driver || ""}|${p.protocol || ""}|${p.printer_class || ""}`;
+      const prev = lastPrinterHardwareMeta.get(p.name);
+      if (prev !== undefined && prev !== hwMeta) {
+        capsCache.delete(p.name);
+        openFormsHtmlCache.delete(p.name);
+      }
+      lastPrinterHardwareMeta.set(p.name, hwMeta);
+    }
+  }
   function ensureCaps(printers) {
     const b = bridge();
     if (!b || typeof b.printerCapabilities !== "function") return;
+    const epoch = capsEpoch;
     for (const p of printers) {
       if (capsCache.has(p.name)) continue;
       capsCache.set(p.name, "loading");
       b.printerCapabilities(p.name).then((caps) => {
+        if (epoch !== capsEpoch) return;
         capsCache.set(p.name, caps || {});
         capsVersion++;
         renderPrintersGrid(lastGridPrinters);
         rebuildLabOptions();
-      }).catch(() => { capsCache.set(p.name, {}); capsVersion++; renderPrintersGrid(lastGridPrinters); });
+      }).catch(() => {
+        if (epoch !== capsEpoch) return;
+        capsCache.set(p.name, {});
+        capsVersion++;
+        renderPrintersGrid(lastGridPrinters);
+      });
     }
   }
 
@@ -2174,11 +2510,15 @@
     const b = bridge();
     if (!b || typeof b.getPrinterSettings !== "function") return;
     printerSettingsRequested = true;
+    const epoch = capsEpoch;
     b.getPrinterSettings().then((map) => {
+      if (epoch !== capsEpoch) return;
       printerSettings = map || {};
       printerSettingsVersion++;
       renderPrintersGrid(lastGridPrinters);
-    }).catch(() => { printerSettingsRequested = false; });
+    }).catch(() => {
+      if (epoch === capsEpoch) printerSettingsRequested = false;
+    });
   }
   function printerSettingsHtml(p) {
     const caps = capsCache.get(p.name);
@@ -2227,6 +2567,7 @@
     const wrap = btn && btn.closest ? btn.closest("[data-settings-wrap]") : null;
     if (!wrap) return;
     const name = wrap.getAttribute("data-printer");
+    if (!name) return;
     const b = bridge();
     if (!b || typeof b.setPrinterSettings !== "function") return;
     const val = (cls) => {
@@ -2276,7 +2617,7 @@
       return `<span class="badge ${cls}"><span class="dot"></span>${escapeHtml(String(c).replace(/_/g, " ").toUpperCase())}</span>`;
     });
     if (stale) {
-      items.push(`<span class="badge badge-warn">${currentLang === "ar" ? "بيانات قديمة" : "STALE"}</span>`);
+      items.push(`<span class="badge badge-warn">${currentLang === "ar" ? "بيانات قديمة" : "Outdated"}</span>`);
     }
     items.push(`<span class="mono health-source">${escapeHtml(String(h.source || "?").toUpperCase())}</span>`);
     return `<div class="printer-health-line">${items.join('<span>·</span>')}</div>`;
@@ -2285,6 +2626,7 @@
   function renderPrintersGrid(printers) {
     const grid = document.getElementById("printersGrid");
     lastGridPrinters = printers;
+    syncPrinterCaches(printers);
     const ae = document.activeElement;
     if (ae && grid && grid.contains(ae) && (ae.tagName === "SELECT" || ae.tagName === "INPUT")) return;
     const signature = currentLang + "|" + capsVersion + "|" + printerSettingsVersion + "|" + JSON.stringify(printers.map((p) =>
@@ -2363,6 +2705,9 @@
           ${ccProtocol(p) === "epl" ? `<button type="button" class="btn btn-sm btn-secondary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="epl-label">
             ${I18N[currentLang].qt_epl}
           </button>` : ""}
+          <button type="button" class="btn btn-sm btn-secondary" data-action="preview-printer" data-printer="${escapeHtml(p.name)}">
+            ${escapeHtml(I18N[currentLang].btn_preview)}
+          </button>
           <button type="button" class="btn btn-sm btn-secondary" data-action="inspect-forms" data-printer="${escapeHtml(p.name)}" data-idx="${idx}" aria-expanded="${openFormsPrinter === p.name ? "true" : "false"}">
             ${currentLang === "ar" ? "المقاسات" : "Paper sizes"}
           </button>
@@ -2374,10 +2719,331 @@
     if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
   }
 
+  let previewState = null;
+  let previewReturnFocus = null;
+  function resolvePrinterPreviewProfile(printerName) {
+    const list = (overviewState && overviewState.printers) || lastGridPrinters || [];
+    const p = list.find((x) => x.name === printerName) || { name: printerName };
+    const cls = ccClass(p);
+    const proto = ccProtocol(p);
+    const saved = (printerSettings && printerSettings[printerName]) || {};
+    const savedPaper = saved.paper || "";
+    const caps = capsCache.get(printerName);
+    const forms = caps && caps !== "loading" && Array.isArray(caps.forms) ? caps.forms : [];
+    const matchedForm = savedPaper ? forms.find((f) => f && f.name === savedPaper && f.size && f.size.width_mm && f.size.height_mm) : null;
+    const d = I18N[currentLang];
+    const sig = `${p.name || ""} ${p.driver || ""} ${savedPaper}`.toLowerCase();
+
+    let widthMm = 210, heightMm = 297, marginMm = 6, dpi = 300;
+    let mode = cls === "virtual" ? "PDF" : "PDF / GDI";
+    let sheetClass = "sheet-a4";
+    let paperLabel = d.preview_paper_a4;
+    let testKind = "pdf-a4";
+
+    if (cls === "thermal" || proto === "escpos") {
+      dpi = 203;
+      mode = "ESC/POS";
+      marginMm = 4;
+      if (/58\s*mm|pos-?58|xp-?58/.test(sig)) {
+        widthMm = 58; heightMm = 200; sheetClass = "sheet-58"; paperLabel = d.preview_paper_58; testKind = "thermal-58mm";
+      } else {
+        widthMm = 80; heightMm = 200; sheetClass = "sheet-80"; paperLabel = d.preview_paper_80; testKind = "thermal-80mm";
+      }
+    } else if (cls === "label" || proto === "zpl" || proto === "tspl" || proto === "epl") {
+      widthMm = 100; heightMm = 150; marginMm = 2; dpi = 203;
+      mode = proto.toUpperCase();
+      sheetClass = "sheet-label";
+      paperLabel = d.preview_paper_label;
+      testKind = (proto === "zpl" || proto === "tspl" || proto === "epl") ? `${proto}-label` : "zpl-label";
+    }
+
+    if (matchedForm) {
+      widthMm = Math.round(matchedForm.size.width_mm);
+      heightMm = Math.round(matchedForm.size.height_mm);
+      paperLabel = matchedForm.name;
+      sheetClass = widthMm <= 65 ? "sheet-58" : widthMm <= 90 ? "sheet-80" : widthMm <= 120 ? "sheet-label" : "sheet-a4";
+    } else if (savedPaper) {
+      paperLabel = savedPaper;
+    }
+
+    const printableW = Math.max(10, widthMm - marginMm * 2);
+    const printableH = Math.max(10, heightMm - marginMm * 2);
+    return { printerName, paperLabel, widthMm, heightMm, printableW, printableH, dpi, mode, sheetClass, testKind, savedPaper };
+  }
+  function renderPrintPreview(printerName) {
+    const prof = resolvePrinterPreviewProfile(printerName);
+    previewState = prof;
+    setText("previewPrinterName", prof.printerName);
+    setText("previewBadge", prof.paperLabel);
+    setText("previewPaperMeta", `${prof.widthMm}×${prof.heightMm}mm`);
+    setText("previewModeMeta", `${prof.dpi} DPI · ${prof.mode}`);
+    setText("previewPrintableArea", `${prof.printableW}×${prof.printableH}mm`);
+    const sheet = document.getElementById("previewSheet");
+    if (sheet) sheet.className = "preview-sheet " + prof.sheetClass;
+  }
+  function openPrintPreview(printerName) {
+    if (!printerName) return;
+    const overlay = document.getElementById("previewOverlay");
+    if (!overlay) return;
+    if (overlay.classList.contains("hidden")) previewReturnFocus = document.activeElement;
+    renderPrintPreview(printerName);
+    overlay.classList.remove("hidden");
+    const closeBtn = document.getElementById("previewCloseBtn");
+    if (closeBtn && typeof closeBtn.focus === "function") closeBtn.focus();
+  }
+  function closePrintPreview() {
+    const overlay = document.getElementById("previewOverlay");
+    if (overlay) overlay.classList.add("hidden");
+    previewState = null;
+    if (previewReturnFocus && typeof previewReturnFocus.focus === "function") {
+      try { previewReturnFocus.focus(); } catch (e) { /* invoker may be gone */ }
+    }
+    previewReturnFocus = null;
+  }
+  function previewOverlayClicked(event) {
+    if (event.target === event.currentTarget) closePrintPreview();
+  }
+
+  const TAB_GROUPS = ["", "blue", "teal", "orange", "mint"];
+  function readLocalJson(key, fallback) {
+    try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; } catch (e) { return fallback; }
+  }
+  function readTabGroups() {
+    const raw = readLocalJson("np_tab_groups", {});
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  }
+  function safeGroupName(raw) {
+    return typeof raw === "string" && TAB_GROUPS.includes(raw) ? raw : "";
+  }
+  function writeLocalJson(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+  }
+  function sendTabCmd(payload) {
+    writeLocalJson("np_tab_cmd", Object.assign({ ts: Date.now() }, payload));
+  }
+  function renderSidebarTabs() {
+    const box = document.getElementById("sidebarTabsList");
+    if (!box) return;
+    const tabs = readLocalJson("np_open_tabs", []);
+    const groups = readTabGroups();
+    const list = Array.isArray(tabs) ? tabs : [];
+    const sig = currentLang + "|" + JSON.stringify(list.map((t) => [t.label, t.title || "", t.url || "", !!t.active, safeGroupName(groups[t.label])]));
+    if (sig === lastSidebarTabsSignature) return;
+    lastSidebarTabsSignature = sig;
+    if (!list.length) {
+      box.innerHTML = `<div class="muted-dash">${currentLang === "ar" ? "لا توجد تبويبات" : "No open tabs"}</div>`;
+      return;
+    }
+    box.innerHTML = list.map((t) => {
+      const grpName = safeGroupName(groups[t.label]);
+      const grp = grpName ? `g-${grpName}` : "";
+      const title = escapeHtml(t.title || t.url || (currentLang === "ar" ? "تبويب" : "Tab"));
+      return `<button type="button" class="sidebar-tab-item${t.active ? " active" : ""}" data-action="cmd-switch-tab" data-tab-label="${escapeHtml(t.label)}"><span class="cmd-group-dot ${grp}"></span><span class="sidebar-tab-name">${title}</span></button>`;
+    }).join("");
+  }
+  let cmdReturnFocus = null;
+  let cmdActiveIndex = -1;
+  function getCmdItems() {
+    const root = document.getElementById("cmdResults");
+    return root ? [...root.querySelectorAll(".cmd-item")] : [];
+  }
+  function setCmdActiveIndex(nextIdx) {
+    const items = getCmdItems();
+    if (!items.length) { cmdActiveIndex = -1; return; }
+    const idx = ((nextIdx % items.length) + items.length) % items.length;
+    cmdActiveIndex = idx;
+    items.forEach((el, i) => {
+      const active = i === idx;
+      el.classList.toggle("is-active", active);
+      el.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    const activeEl = items[idx];
+    if (activeEl && typeof activeEl.scrollIntoView === "function") {
+      activeEl.scrollIntoView({ block: "nearest" });
+    }
+  }
+  function executeCmdPrimaryAction(btn) {
+    if (!btn) return false;
+    const action = btn.getAttribute("data-action");
+    if (action === "cmd-run-action") {
+      const targetAct = btn.getAttribute("data-run");
+      closeCommandPalette();
+      if (targetAct === "cmd-new-tab") sendTabCmd({ action: "open", url: "" });
+      else if (targetAct === "toggle-theme") toggleTheme();
+      else if (targetAct === "toggle-lang") toggleLang();
+      else if (targetAct === "manual-refresh") manualRefresh();
+      return true;
+    }
+    if (action === "cmd-switch-tab") {
+      const lbl = btn.getAttribute("data-tab-label");
+      if (lbl) sendTabCmd({ action: "switch", label: lbl });
+      closeCommandPalette();
+      return true;
+    }
+    if (action === "restore-workspace") {
+      const idx = Number(btn.getAttribute("data-ws-idx"));
+      const list = readLocalJson("np_workspaces", []);
+      if (Array.isArray(list) && Number.isInteger(idx) && idx >= 0 && idx < list.length && list[idx] && Array.isArray(list[idx].urls)) {
+        sendTabCmd({ action: "restore_workspace", urls: list[idx].urls });
+        closeCommandPalette();
+        return true;
+      }
+      return false;
+    }
+    return false;
+  }
+  function activateCmdItem(idx) {
+    const items = getCmdItems();
+    const item = items[idx] || items[0];
+    if (!item) return false;
+    const target = item.getAttribute("data-action")
+      ? item
+      : (item.querySelector ? item.querySelector('[data-action="cmd-switch-tab"], [data-action="restore-workspace"], [data-action="cmd-run-action"]') : null);
+    return executeCmdPrimaryAction(target);
+  }
+  function openCommandPalette() {
+    const overlay = document.getElementById("cmdOverlay");
+    if (!overlay) return;
+    if (overlay.classList.contains("hidden")) cmdReturnFocus = document.activeElement;
+    overlay.classList.remove("hidden");
+    const inp = document.getElementById("cmdInput");
+    if (inp) { inp.value = ""; inp.focus(); }
+    renderCommandPalette("");
+  }
+  function closeCommandPalette() {
+    const overlay = document.getElementById("cmdOverlay");
+    if (overlay) overlay.classList.add("hidden");
+    cmdActiveIndex = -1;
+    if (cmdReturnFocus && typeof cmdReturnFocus.focus === "function") {
+      try { cmdReturnFocus.focus(); } catch (e) {}
+    }
+    cmdReturnFocus = null;
+  }
+  function renderCommandPalette(query) {
+    const q = String(query || "").trim().toLowerCase();
+    const ar = currentLang === "ar";
+    const tabs = readLocalJson("np_open_tabs", []);
+    const pinned = readLocalJson("np_pinned_tabs", []);
+    const groups = readTabGroups();
+    const tabsEl = document.getElementById("cmdTabsList");
+    if (tabsEl) {
+      const matched = (Array.isArray(tabs) ? tabs : []).filter((t) => !q || `${t.title || ""} ${t.url || ""}`.toLowerCase().includes(q));
+      tabsEl.innerHTML = matched.length ? matched.map((t) => {
+        const isPin = Array.isArray(pinned) && pinned.includes(t.label);
+        const grp = safeGroupName(groups[t.label]);
+        const tabTitle = t.title || t.url || "Tab";
+        return `<div class="cmd-item">
+          <button type="button" class="btn btn-sm btn-glass cmd-item-main" data-action="cmd-switch-tab" data-tab-label="${escapeHtml(t.label)}">
+            <span class="cmd-group-dot ${grp ? "g-" + grp : ""}"></span>
+            <span class="cmd-item-title">${escapeHtml(tabTitle)}</span>
+          </button>
+          <div class="cmd-item-actions">
+            <button type="button" class="btn btn-sm btn-glass" data-action="cmd-pin-tab" data-tab-label="${escapeHtml(t.label)}">${isPin ? (ar ? "إلغاء التثبيت" : "Unpin") : (ar ? "تثبيت" : "Pin")}</button>
+            <button type="button" class="btn btn-sm btn-glass" data-action="cmd-group-tab" data-tab-label="${escapeHtml(t.label)}">${ar ? "مجموعة" : "Group"}</button>
+            <button type="button" class="btn btn-sm btn-glass" data-action="cmd-dup-tab" data-tab-url="${escapeHtml(t.url || "")}">${ar ? "تكرار" : "Duplicate"}</button>
+            <button type="button" class="btn btn-sm btn-danger" data-action="cmd-close-tab" data-tab-label="${escapeHtml(t.label)}" aria-label="${escapeHtml((ar ? "إغلاق: " : "Close: ") + tabTitle)}">×</button>
+          </div>
+        </div>`;
+      }).join("") : `<div class="muted-dash">${ar ? "لا توجد نتائج" : "No matching tabs"}</div>`;
+    }
+    const wsEl = document.getElementById("cmdWorkspacesList");
+    if (wsEl) {
+      const list = readLocalJson("np_workspaces", []);
+      const filteredWs = (Array.isArray(list) ? list : [])
+        .map((w, origIdx) => ({ w, origIdx }))
+        .filter(({ w }) => w && (!q || String(w.name || "").toLowerCase().includes(q)));
+      wsEl.innerHTML = filteredWs.length ? filteredWs.map(({ w, origIdx }) => `
+        <div class="cmd-item">
+          <div class="cmd-item-main">
+            <span class="cmd-item-title">${escapeHtml(w.name)}</span>
+            <span class="cmd-item-sub">(${(w.urls || []).length} ${ar ? "تبويبات" : "tabs"})</span>
+          </div>
+          <div class="cmd-item-actions">
+            <button type="button" class="btn btn-sm btn-primary" data-action="restore-workspace" data-ws-idx="${origIdx}">${ar ? "فتح" : "Open"}</button>
+            <button type="button" class="btn btn-sm btn-danger" data-action="delete-workspace" data-ws-idx="${origIdx}" aria-label="${escapeHtml((ar ? "حذف: " : "Delete: ") + (w.name || ""))}">×</button>
+          </div>
+        </div>`).join("") : `<div class="muted-dash">${ar ? "احفظ تبويباتك الحالية كمساحة عمل لاستعادتها بنقرة واحدة." : "Save your open tabs as a workspace to restore in one click."}</div>`;
+    }
+    const actEl = document.getElementById("cmdActionsList");
+    if (actEl) {
+      const actions = [
+        { label: ar ? "فتح تبويب Odoo جديد (Ctrl+T)" : "New Odoo Tab (Ctrl+T)", act: "cmd-new-tab" },
+        { label: ar ? "تبديل الوضع الليلي / النهاري" : "Toggle Light / Dark Theme", act: "toggle-theme" },
+        { label: ar ? "تبديل اللغة (العربية / English)" : "Switch Language (Arabic / English)", act: "toggle-lang" },
+        { label: ar ? "تحديث الطابعات والطابور" : "Refresh Printers & Queue", act: "manual-refresh" }
+      ].filter((a) => !q || a.label.toLowerCase().includes(q));
+      actEl.innerHTML = actions.map((a) => `<button type="button" class="cmd-item" data-action="cmd-run-action" data-run="${escapeHtml(a.act)}"><span class="cmd-item-title">${escapeHtml(a.label)}</span></button>`).join("");
+    }
+    setCmdActiveIndex(0);
+  }
+  function saveCurrentWorkspace() {
+    const inp = document.getElementById("cmdWorkspaceName");
+    const name = inp ? inp.value.trim() : "";
+    if (!name) { showToast(currentLang === "ar" ? "أدخل اسم مساحة العمل" : "Enter a workspace name", true); return; }
+    const tabs = readLocalJson("np_open_tabs", []);
+    const urls = (Array.isArray(tabs) ? tabs : []).filter((t) => t && t.url && !t.is_local).map((t) => t.url);
+    if (!urls.length) { showToast(currentLang === "ar" ? "لا توجد تبويبات Odoo مفتوحة لحفظها" : "No Odoo tabs open to save", true); return; }
+    const list = readLocalJson("np_workspaces", []);
+    const next = (Array.isArray(list) ? list : []).filter((w) => w && w.name !== name);
+    next.unshift({ name, urls, savedAt: Date.now() });
+    writeLocalJson("np_workspaces", next.slice(0, 12));
+    if (inp) inp.value = "";
+    renderCommandPalette(document.getElementById("cmdInput") ? document.getElementById("cmdInput").value : "");
+    showToast(currentLang === "ar" ? "تم حفظ مساحة العمل" : "Workspace saved");
+  }
+
   document.addEventListener("click", (ev) => {
     const btn = ev.target && ev.target.closest ? ev.target.closest("[data-action]") : null;
     if (!btn) return;
     const action = btn.getAttribute("data-action");
+    if (action === "open-cmd-palette") return openCommandPalette();
+    if (action === "close-cmd-palette") return closeCommandPalette();
+    if (action === "cmd-overlay-close") { if (ev.target === btn) closeCommandPalette(); return; }
+    if (action === "cmd-run-action" || action === "cmd-switch-tab") { executeCmdPrimaryAction(btn); return; }
+    if (action === "cmd-reopen-tab") { sendTabCmd({ action: "reopen" }); closeCommandPalette(); return; }
+    if (action === "cmd-close-tab") {
+      const lbl = btn.getAttribute("data-tab-label");
+      if (lbl) sendTabCmd({ action: "close", label: lbl });
+      setTimeout(() => { renderSidebarTabs(); const ov = document.getElementById("cmdOverlay"); if (ov && !ov.classList.contains("hidden")) renderCommandPalette(document.getElementById("cmdInput")?.value || ""); }, 180);
+      return;
+    }
+    if (action === "cmd-dup-tab") { sendTabCmd({ action: "open", url: btn.getAttribute("data-tab-url") || "" }); closeCommandPalette(); return; }
+    if (action === "cmd-pin-tab") {
+      const lbl = btn.getAttribute("data-tab-label");
+      if (!lbl) return;
+      const pins = readLocalJson("np_pinned_tabs", []);
+      const set = new Set(Array.isArray(pins) ? pins : []);
+      if (set.has(lbl)) set.delete(lbl); else set.add(lbl);
+      writeLocalJson("np_pinned_tabs", [...set]);
+      sendTabCmd({ action: "meta_changed" });
+      renderCommandPalette(document.getElementById("cmdInput")?.value || "");
+      return;
+    }
+    if (action === "cmd-group-tab") {
+      const lbl = btn.getAttribute("data-tab-label");
+      if (!lbl) return;
+      const groups = readTabGroups();
+      const cur = safeGroupName(groups[lbl]);
+      const nextGrp = TAB_GROUPS[(TAB_GROUPS.indexOf(cur) + 1) % TAB_GROUPS.length];
+      if (nextGrp) groups[lbl] = nextGrp; else delete groups[lbl];
+      writeLocalJson("np_tab_groups", groups);
+      sendTabCmd({ action: "meta_changed" });
+      renderSidebarTabs();
+      renderCommandPalette(document.getElementById("cmdInput")?.value || "");
+      return;
+    }
+    if (action === "save-workspace") return saveCurrentWorkspace();
+    if (action === "restore-workspace") { executeCmdPrimaryAction(btn); return; }
+    if (action === "delete-workspace") {
+      const idx = Number(btn.getAttribute("data-ws-idx"));
+      const list = readLocalJson("np_workspaces", []);
+      if (Array.isArray(list) && Number.isInteger(idx) && idx >= 0 && idx < list.length) {
+        list.splice(idx, 1);
+        writeLocalJson("np_workspaces", list);
+        renderCommandPalette(document.getElementById("cmdInput")?.value || "");
+      }
+      return;
+    }
     if (action === "open-odoo") openOdooApp();
     else if (action === "manual-refresh") manualRefresh();
     else if (action === "toggle-theme") toggleTheme();
@@ -2397,6 +3063,11 @@
     else if (action === "retry-job") { btn.disabled = true; retryJob(btn.getAttribute("data-job-id")).finally(() => { btn.disabled = false; }); }
     else if (action === "cancel-job") { btn.disabled = true; cancelJob(btn.getAttribute("data-job-id")).finally(() => { btn.disabled = false; }); }
     else if (action === "test-print") runPrinterTest(btn.getAttribute("data-printer"), btn.getAttribute("data-kind"));
+    else if (action === "preview-printer") openPrintPreview(btn.getAttribute("data-printer"));
+    else if (action === "preview-close") closePrintPreview();
+    else if (action === "preview-test-print") {
+      if (previewState) runPrinterTest(previewState.printerName, previewState.testKind, previewState.savedPaper ? { paper: previewState.savedPaper } : undefined);
+    }
     else if (action === "inspect-forms") inspectForms(btn.getAttribute("data-printer"), Number(btn.getAttribute("data-idx")));
     else if (action === "toggle-settings") toggleSettings(btn);
     else if (action === "save-settings") { btn.disabled = true; saveSettings(btn).finally(() => { btn.disabled = false; }); }
@@ -2409,6 +3080,7 @@
     else if (action === "update-cal-warning") updateCalWarning();
   });
   document.getElementById("confirmOverlay").addEventListener("click", confirmOverlayClicked);
+  document.getElementById("previewOverlay").addEventListener("click", previewOverlayClicked);
   document.getElementById("queueSearchInput").addEventListener("input", (ev) => {
     currentSearch = ev.target.value || "";
     if (queueSearchTimer) clearTimeout(queueSearchTimer);
@@ -2447,9 +3119,9 @@
       showToast(I18N[currentLang].native_bridge_unavailable, true);
       return false;
     }
-    const testBtns = document.querySelectorAll('[data-action="test-print"], #btnCustomTestPrint');
+    const testBtns = document.querySelectorAll('[data-action="test-print"], #btnCustomTestPrint, #previewTestPrintBtn');
     testBtns.forEach((x) => { x.disabled = true; });
-    lockControls(["btnCustomTestPrint"]);
+    lockControls(["btnCustomTestPrint", "previewTestPrintBtn"]);
     try {
       const o = options || {};
       const id = await b.runTestPrint(printerName, kind, o.paper || null, {
@@ -2460,9 +3132,9 @@
       showToast(currentLang === "ar" ? `تمت جدولة اختبار الطباعة (${id})` : `Queued test print (${id})`);
       await refreshAll();
     } catch (e) {
-      console.error(e); showToast(friendlyError(e), true);
+      showToast(friendlyError(e), true);
     } finally {
-      unlockControls(["btnCustomTestPrint"]);
+      unlockControls(["btnCustomTestPrint", "previewTestPrintBtn"]);
       testBtns.forEach((x) => { x.disabled = false; });
     }
   }
@@ -2651,7 +3323,9 @@
       const current = document.getElementById(`forms-box-${idx}`);
       if (!current || current.dataset.printer !== printerName) return;
       if (!forms || !forms.length) {
-        current.textContent = currentLang === "ar" ? "لا توجد نماذج ورق مسجلة من التعريف." : "No forms reported by driver.";
+        const emptyMsg = currentLang === "ar" ? "لا توجد نماذج ورق مسجلة من التعريف." : "No forms reported by driver.";
+        openFormsHtmlCache.set(printerName, escapeHtml(emptyMsg));
+        current.textContent = emptyMsg;
         return;
       }
       const html = `<div class="forms-list">` + forms.filter(Boolean).map((f) => {
@@ -2661,7 +3335,6 @@
       openFormsHtmlCache.set(printerName, html);
       current.innerHTML = html;
     } catch (e) {
-      console.error(e);
       const current = document.getElementById(`forms-box-${idx}`);
       if (current && current.dataset.printer === printerName) {
         current.textContent = I18N[currentLang].toast_failed;
@@ -2680,7 +3353,7 @@
       showToast(currentLang === "ar" ? `تمت إعادة جدولة المهمة ${id}` : `Re-queued job ${id}`);
       await refreshAll();
     } catch (e) {
-      console.error(e); showToast(friendlyError(e), true);
+      showToast(friendlyError(e), true);
     }
   }
 
@@ -2696,7 +3369,7 @@
       showToast(currentLang === "ar" ? `تم إلغاء المهمة ${id}` : `Canceled job ${id}`);
       await refreshAll();
     } catch (e) {
-      console.error(e); showToast(friendlyError(e), true);
+      showToast(friendlyError(e), true);
     }
   }
 
@@ -2712,7 +3385,7 @@
       showToast(currentLang === "ar" ? `تم مسح ${n} مهمة مكتملة` : `Cleared ${n} finished job(s)`);
       await refreshAll();
     } catch (e) {
-      console.error(e); showToast(friendlyError(e), true);
+      showToast(friendlyError(e), true);
     }
   }
 
@@ -2831,7 +3504,7 @@
       await refreshAll({ silent: true, force: true });
       return true;
     } catch (error) {
-      console.error(error); showToast(friendlyError(error), true);
+      showToast(friendlyError(error), true);
       return false;
     } finally {
       unlockControls(["btnSaveOrigin", "btnSaveAndOpen"]);
@@ -2847,7 +3520,7 @@
       return false;
     }
     try { await api.openOdooOrigin(); return true; }
-    catch (error) { console.error(error); showToast(friendlyError(error), true); return false; }
+    catch (error) { showToast(friendlyError(error), true); return false; }
   }
 
   async function saveAndOpenOdoo() {
@@ -2878,7 +3551,7 @@
     } catch (error) {
       diagnosticsGenerated = false;
       output.textContent = JSON.stringify({ error: String(error) }, null, 2);
-      console.error(error); showToast(I18N[currentLang].diagnostics_failed, true);
+      showToast(I18N[currentLang].diagnostics_failed, true);
       return false;
     } finally {
       unlockControls(["btnGenerateDiagnostics", "btnCopyDiagnostics", "btnDownloadDiagnostics"]);
@@ -2941,23 +3614,22 @@
     } catch (error) {
       if (anchor.isConnected) anchor.remove();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
-      console.error(error); showToast(I18N[currentLang].toast_failed, true);
+      showToast(I18N[currentLang].toast_failed, true);
     }
   }
 
-  document.getElementById("inputOdooOrigin").addEventListener("input", validateOriginField);
-  document.getElementById("inputOdooOrigin").addEventListener("keydown", (ev) => {
+  const originInputEl = document.getElementById("inputOdooOrigin");
+  originInputEl.addEventListener("input", () => { formState.settingsDirty = true; validateOriginField(); });
+  originInputEl.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") {
       ev.preventDefault();
       const saveBtn = document.getElementById("btnSaveOrigin");
       if (saveBtn && !saveBtn.disabled) saveOriginSettings();
     }
   });
-  document.getElementById("customPrinterUri").addEventListener("input", validateCustomPrinterUriField);
-  document.getElementById("inputOdooOrigin").addEventListener("input", () => { formState.settingsDirty = true; });
   document.getElementById("inputAutoReprint").addEventListener("change", () => { formState.settingsDirty = true; });
   document.getElementById("customPrinterSelect").addEventListener("change", () => { formState.testDirty = true; });
-  document.getElementById("customPrinterUri").addEventListener("input", () => { formState.testDirty = true; });
+  document.getElementById("customPrinterUri").addEventListener("input", () => { formState.testDirty = true; validateCustomPrinterUriField(); });
   const navTabsContainer = document.getElementById("navTabs");
   if (navTabsContainer) {
     navTabsContainer.addEventListener("keydown", (ev) => {
@@ -2977,14 +3649,87 @@
       }
     });
   }
+  const initThemeBtn = document.getElementById("btnTheme");
+  if (initThemeBtn) initThemeBtn.setAttribute("aria-pressed", document.documentElement.getAttribute("data-theme") === "dark" ? "true" : "false");
   if (currentLang !== "ar") applyLanguage();
   else {
     document.title = "Yaseir Print — مركز التحكم";
     const sEl = document.getElementById("queueSearchInput");
     if (sEl) sEl.setAttribute("aria-label", I18N.ar.search_queue_ph);
+    const cBtn = document.getElementById("btnCmdPalette");
+    if (cBtn) { const lbl = I18N.ar.btn_cmd_palette + " (Ctrl+K)"; cBtn.title = lbl; cBtn.setAttribute("aria-label", lbl); }
   }
+  const cmdInputEl = document.getElementById("cmdInput");
+  if (cmdInputEl) {
+    cmdInputEl.addEventListener("input", () => renderCommandPalette(cmdInputEl.value));
+  }
+  document.addEventListener("keydown", (ev) => {
+    if (confirmResolver) {
+      if (ev.key === "Escape") { settleConfirm(false); return; }
+      if (ev.key === "Tab") {
+        const okB = document.getElementById("confirmOkBtn");
+        const cancelB = document.getElementById("confirmCancelBtn");
+        if (document.activeElement !== okB && document.activeElement !== cancelB) { ev.preventDefault(); cancelB.focus(); }
+        else if (ev.shiftKey && document.activeElement === cancelB) { ev.preventDefault(); okB.focus(); }
+        else if (!ev.shiftKey && document.activeElement === okB) { ev.preventDefault(); cancelB.focus(); }
+      }
+      return;
+    }
+    const pvOv = document.getElementById("previewOverlay");
+    if ((ev.ctrlKey || ev.metaKey) && String(ev.key || "").toLowerCase() === "k") {
+      ev.preventDefault();
+      if (pvOv && !pvOv.classList.contains("hidden")) closePrintPreview();
+      const ov = document.getElementById("cmdOverlay");
+      if (ov && ov.classList.contains("hidden")) openCommandPalette();
+      else closeCommandPalette();
+      return;
+    }
+    if (pvOv && !pvOv.classList.contains("hidden")) {
+      if (ev.key === "Escape") { closePrintPreview(); return; }
+      if (ev.key === "Tab") {
+        const closeB = document.getElementById("previewCloseBtn");
+        const printB = document.getElementById("previewTestPrintBtn");
+        if (printB && printB.disabled) { ev.preventDefault(); closeB.focus(); }
+        else if (document.activeElement !== closeB && document.activeElement !== printB) { ev.preventDefault(); closeB.focus(); }
+        else if (ev.shiftKey && document.activeElement === closeB) { ev.preventDefault(); printB.focus(); }
+        else if (!ev.shiftKey && document.activeElement === printB) { ev.preventDefault(); closeB.focus(); }
+      }
+      return;
+    }
+    const ov = document.getElementById("cmdOverlay");
+    if (!ov || ov.classList.contains("hidden")) return;
+    if (ev.key === "Escape") {
+      closeCommandPalette();
+      return;
+    }
+    const wsInp = document.getElementById("cmdWorkspaceName");
+    if (ev.target === wsInp || document.activeElement === wsInp) {
+      if (ev.key === "Enter") { ev.preventDefault(); saveCurrentWorkspace(); }
+      return;
+    }
+    if (ev.key === "ArrowDown") {
+      ev.preventDefault();
+      setCmdActiveIndex(cmdActiveIndex + 1);
+    } else if (ev.key === "ArrowUp") {
+      ev.preventDefault();
+      setCmdActiveIndex(cmdActiveIndex - 1);
+    } else if (ev.key === "Enter") {
+      const ae = document.activeElement;
+      if (ae && ae.tagName === "BUTTON" && !ae.classList.contains("cmd-item")) return;
+      ev.preventDefault();
+      activateCmdItem(cmdActiveIndex);
+    }
+  });
+  renderSidebarTabs();
   window.addEventListener("storage", (ev) => {
-    if (ev.key === "np_cc_theme") {
+    if (ev.key === "np_open_tabs" || ev.key === "np_tab_groups" || ev.key === "np_pinned_tabs") {
+      renderSidebarTabs();
+      const ov = document.getElementById("cmdOverlay");
+      if (ov && !ov.classList.contains("hidden")) renderCommandPalette(cmdInputEl ? cmdInputEl.value : "");
+    } else if (ev.key === "np_cc_open_cmd" && ev.newValue) {
+      try { localStorage.removeItem("np_cc_open_cmd"); } catch (e) {}
+      openCommandPalette();
+    } else if (ev.key === "np_cc_theme") {
       const nextTheme = ev.newValue === "dark" ? "dark" : "light";
       document.documentElement.setAttribute("data-theme", nextTheme);
       const tBtn = document.getElementById("btnTheme");
@@ -2998,6 +3743,10 @@
     }
   });
   try {
+    if (localStorage.getItem("np_cc_open_cmd")) {
+      localStorage.removeItem("np_cc_open_cmd");
+      openCommandPalette();
+    }
     const requestedTab = localStorage.getItem("np_cc_open_tab");
     if (requestedTab) {
       localStorage.removeItem("np_cc_open_tab");

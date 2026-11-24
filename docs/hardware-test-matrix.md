@@ -25,7 +25,7 @@ Status legend: ☐ not run · ☑ pass · ☒ fail (link the issue).
 | --- | --- | --- | --- | --- |
 | Thermal receipt (USB, driver) | Epson TM / Xprinter / Rongta 80mm | ESC/POS raster via spooler | 80mm roll, 58mm roll | POS receipt renders at the driver-reported width; long receipt bands completely; cut at end |
 | Thermal receipt (network) | LAN 9100 printer | ESC/POS via `tcp://` | 80mm roll | Receipt prints; unplugged printer → `TCP9100_ERROR`, no auto-retry duplicate |
-| Label (USB, driver) | Zebra ZD / TSC | ZPL / TSPL raw via spooler | 100×150, 50×30 labels | Label prints at exact size; wrong-size document → `PAPER_MISMATCH`, nothing printed |
+| Label (USB, driver) | Zebra ZD / TSC / CPCL | ZPL / TSPL / EPL / CPCL raw via spooler | 100×150, 50×30 labels | Label prints at exact size; wrong-size document → `PAPER_MISMATCH`, nothing printed |
 | Label (network) | LAN label printer | ZPL via `tcp://` | 100×150 | Same as above over the network |
 | Office laser (USB/network driver) | Any PCL/PS laser | GDI (PDF via PDFium) | A4, A5, Letter | Report prints at 100%; duplex on/off honoured; colour/mono honoured; tray selection honoured |
 | Office inkjet | Any inkjet | GDI | A4 photo/plain | Report prints; printer offline → `PRINTER_OFFLINE` on the job |

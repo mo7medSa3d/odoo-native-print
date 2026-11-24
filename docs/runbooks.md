@@ -2,20 +2,15 @@
 
 ## Install (per machine, enterprise)
 1. Deploy the MSI silently: `msiexec /i OdooNativePrint.msi /qn ODOO_ORIGIN=https://odoo.company.local:8069`
-   On a LAN without TLS, an HTTP origin on a private IP is also accepted, e.g. `ODOO_ORIGIN=http://192.168.1.20:8069` (ADR-0002 amendment). Hostnames and public IPs still require HTTPS.
-   (the installer writes config.json with odoo_origin; or set the GPO policy).
-2. WebView2: the installers bundle NO WebView2 installer
-   (`webviewInstallMode: skip` since RC5). The app uses the machine's
-   own WebView2 runtime, which is part of Windows 11 and ships with
-   Microsoft Edge on Windows 10 — so target machines must be Windows 11,
-   or Windows 10 with Edge/WebView2 present. Verify before rollout if a
-   site runs stripped images: open Edge, or check
+   HTTP is also accepted for IP literals (e.g. `ODOO_ORIGIN=http://192.168.1.20:8069`) per ADR-0002; hostnames require HTTPS (unencrypted HTTP shows a standing warning in the Control Center).
+   (The installer writes `config.json` with `odoo_origin`; or set the GPO policy.)
+2. WebView2: installers embed the WebView2 bootstrapper
+   (`webviewInstallMode: embedBootstrapper`). Windows 11 ships with the
+   runtime; on Windows 10 machines without a current runtime, the
+   bootstrapper downloads it during install (requires internet at install
+   time unless a current runtime is already present). To check manually:
    `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`.
-   Trade-off: installers stay small and Microsoft keeps the runtime
-   patched (Evergreen); the cost is the runtime is a machine
-   prerequisite, not something the installer can fix offline.
-3. Install the Odoo addon (see docs/odoo-setup.md) and create at least one
-   profile + rule, or nothing will route to native printing (by design).
+3. Install the Odoo addon (`odoo/native_print` for Odoo 19 or `odoo20/native_print` for Odoo 20; see [docs/odoo-setup.md](odoo-setup.md)). No server-side profiles or routing rules are needed (see [docs/zero-config.md](zero-config.md)).
 4. First run: sign in to Odoo inside the app, print the calibration page
    for each printer (app includes the generator), file the hardware kit.
 
@@ -26,38 +21,45 @@
 3. Re-run one calibration print per printer class after a major upgrade.
 
 ## Rollback
-1. Redeploy the previous MSI (downgrade is supported by the installer
-   family; if a site blocks downgrades, uninstall then install previous).
-2. The queue database is backward compatible within v1 (state names and
-   idempotency keys are stable); jobs queued at rollback time are recovered
-   on next start per ADR-0004.
-3. Roll the addon back by restoring the previous module version.
+Per [docs/compatibility.md](compatibility.md), in-place downgrades are not supported because the SQLite queue database and Odoo job log migrate forward only. If a rollback is required, drain active jobs first, uninstall the newer desktop client before installing the previous MSI, and restore the Odoo database snapshot matching the prior addon version.
 
 ## Troubleshooting
 - App shows a configuration error: config.json missing/invalid or the
   origin is not HTTPS or is still a placeholder. Fix the origin, relaunch.
 - Report downloads instead of printing: the user is in a normal browser
-  (expected), OR no rule matches that report (check Rules), OR the addon
-  is not installed/upgraded.
+  (expected), OR no local printer is connected, OR the addon is not
+  installed/upgraded.
 - Job failed with PAPER_MISMATCH: the paper ladder found no acceptable
   form. Do not "fix" it by loosening to a wrong size silently: add the
-  right form, enable custom sizes on the profile, or change the rule's
-  scale policy deliberately.
+  right form in the Windows printer driver or adjust per-printer settings
+  in the Control Center.
 - Job in Dead letter: open the job log, read the error code, fix the cause
   (usually printer offline/paper), then retry from dead letter (state
   transition dead_letter -> queued is supported).
 - RECOVERY_AMBIGUOUS after a crash: the job may already be printed. Check
   the printer/output before reprinting; this prompt is deliberate
   (ADR-0004) so duplicates never happen silently.
+- Windows 11 thermal printer failures:
+  - **LAN TCP 9100 connection refused / timed out**: allow outbound TCP
+    port `9100` in Windows Defender Firewall (and confirm the printer's
+    static IP responds on port 9100 from the workstation).
+  - **Star thermal printers (TSP/mC-Print) printing garbled bytes**:
+    switch the printer from StarPRNT / Star Line Mode to **ESC/POS
+    emulation mode** (via StarPRNT Utility or hardware DIP switches)
+    before using the `escpos` path.
+  - **RAW passthrough mangled or dropped on USB/spooler queues**: if a
+    vendor GDI driver intercepts or re-renders raw ESC/POS/ZPL/TSPL
+    bytes, attach a **Generic / Text Only** Windows print queue to the
+    same port for RAW mode (keep the vendor driver for GDI PDF printing).
 - Diagnostics: export the one-click bundle (versions, printer list,
   last 200 job summaries, redacted) and attach it to the support ticket.
 
 ## Printer onboarding (field staff, ~5 minutes)
 1. Install the printer driver; print a Windows test page.
-2. Add a profile in Odoo (pattern must match the Windows printer name).
+2. Select the printer live from the Odoo systray or Control Center (no server-side profile required).
 3. Print the calibration page; measure the 100 mm square; check edges.
-4. If content is clipped/shifted, record the offset in the profile quirks
-   (docs/hardware/validation-kit.md) instead of scaling the document.
+4. If content is clipped/shifted, adjust the per-printer offset in the Control Center
+   and record it on the validation sheet ([docs/hardware/validation-kit.md](hardware/validation-kit.md)) instead of scaling the document.
 5. File the hardware kit result sheet for that printer class.
 
 ## White page after sign-in (WebView2 environment)

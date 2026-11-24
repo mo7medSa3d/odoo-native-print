@@ -7,10 +7,11 @@ installed app, its crate and its npm shell drift apart:
   - app/src-tauri/Cargo.toml        version
   - app/package.json                "version"
   - app/package-lock.json           "version" (root + packages[""])
-The Odoo addon version (odoo/native_print/__manifest__.py) is an
-independent 19.0.x.y.z line; it is reported, not compared — but an
-unparseable manifest is a hard failure, not a silent "?" (audit
-CI-L: the old gate printed "?" and exited 0).
+The Odoo addon versions (odoo/native_print/__manifest__.py and
+odoo20/native_print/__manifest__.py) are independent 19.0.x.y.z /
+20.0.x.y.z lines; they are reported, not compared — but an unparseable
+manifest is a hard failure, not a silent "?" (audit CI-L: the old gate
+printed "?" and exited 0).
 Also verifies the git tag (when run on a tag) matches the app version.
 """
 import json
@@ -35,12 +36,19 @@ def main():
         "package-lock packages['']": (lock.get("packages") or {}).get("", {}).get("version"),
         "Cargo.toml": (cargo.get("package") or {}).get("version"),
     }
-    manifest = (ROOT / "odoo/native_print/__manifest__.py").read_text(encoding="utf-8")
-    am = re.search(r'''["']version["']\s*:\s*["']([^"']+)["']''', manifest)
-    if not am:
-        print("ADDON MANIFEST UNPARSEABLE: no version string found")
-        return 1
-    print(f"addon version (independent line): {am.group(1)}")
+    for label, rel, prefix in (
+        ("odoo19", "odoo/native_print/__manifest__.py", "19.0."),
+        ("odoo20", "odoo20/native_print/__manifest__.py", "20.0."),
+    ):
+        manifest_path = ROOT / rel
+        if not manifest_path.is_file():
+            print(f"ADDON MANIFEST MISSING ({label}): {rel}")
+            return 1
+        am = re.search(r'''["']version["']\s*:\s*["']([^"']+)["']''', manifest_path.read_text(encoding="utf-8"))
+        if not am or not am.group(1).startswith(prefix):
+            print(f"ADDON MANIFEST UNPARSEABLE ({label}): expected {prefix}* version in {rel}")
+            return 1
+        print(f"addon version ({label}, independent line): {am.group(1)}")
     uniq = set(versions.values())
     if len(uniq) != 1 or None in uniq:
         print(f"VERSION MISMATCH: {versions}")

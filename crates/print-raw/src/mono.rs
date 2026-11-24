@@ -51,10 +51,28 @@ impl MonoBitmap {
             .checked_mul(height as usize)
             .ok_or(MonoError::BadInput)?;
         let mut data = vec![0u8; total];
-        for y in 0..height as usize {
-            for x in 0..width as usize {
-                if gray[y * width as usize + x] < threshold {
-                    data[y * bpr + x / 8] |= 0x80 >> (x % 8);
+        let w = width as usize;
+        if w > 0 && total > 0 {
+            for (src_row, dst_row) in gray.chunks_exact(w).zip(data.chunks_exact_mut(bpr)) {
+                let mut px_chunks = src_row.chunks_exact(8);
+                for (dst_byte, px8) in dst_row.iter_mut().zip(&mut px_chunks) {
+                    let mut byte = 0u8;
+                    for (bit, &p) in px8.iter().enumerate() {
+                        if p < threshold {
+                            byte |= 0x80 >> bit;
+                        }
+                    }
+                    *dst_byte = byte;
+                }
+                let rem = px_chunks.remainder();
+                if !rem.is_empty() {
+                    let mut byte = 0u8;
+                    for (bit, &p) in rem.iter().enumerate() {
+                        if p < threshold {
+                            byte |= 0x80 >> bit;
+                        }
+                    }
+                    dst_row[bpr - 1] = byte;
                 }
             }
         }

@@ -1,0 +1,19 @@
+# Keep Docker build context minimal for Dockerfile.odoo (only odoo/native_print or odoo20/native_print is copied).
+.git/
+.github/
+target/
+node_modules/
+__pycache__/
+*.pyc
+app/
+crates/
+fuzz/
+docs/
+tools/
+evidence/
+release-files/
+*.zip
+*.tar.gz
+*.log
+.env
+.env.*

@@ -8,17 +8,19 @@
 <style>
   html, body { height: 100%; overflow: hidden; }
   body {
-    background: var(--bg-chrome);
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
     color: var(--text-primary);
     display: flex;
-    align-items: stretch;
+    align-items: center;
     gap: 6px;
-    padding-inline: 8px;
+    padding-inline: 10px;
     position: relative;
     user-select: none;
     -webkit-user-select: none;
+    box-shadow: var(--glass-highlight);
   }
-  /* Continuous bottom chrome seam sits behind the active tab so the active tab merges cleanly into the page */
   body::after {
     content: "";
     position: absolute;
@@ -38,8 +40,8 @@
     z-index: 2;
   }
   .tb-btn {
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 30px;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -49,13 +51,16 @@
     align-items: center;
     justify-content: center;
     font-family: inherit;
-    transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+    transition:
+      background-color var(--dur-fast) var(--ease-spring),
+      color var(--dur-fast) var(--ease-spring),
+      transform var(--dur-fast) var(--ease-spring);
   }
   .tb-btn:hover {
     background: var(--bg-hover);
     color: var(--text-primary);
   }
-  .tb-btn:active { background: var(--bg-subtle); }
+  .tb-btn:active { transform: scale(0.93); background: var(--bg-subtle); }
   .tb-btn svg { width: 15px; height: 15px; }
 
   .divider {
@@ -65,30 +70,30 @@
     background: var(--border-strong);
     flex: 0 0 auto;
     margin-inline: 2px;
-    opacity: 0.45;
+    opacity: 0.35;
   }
 
   .tabs {
     flex: 1 1 auto;
     display: flex;
-    align-items: flex-end;
-    gap: 2px;
+    align-items: center;
+    gap: 4px;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
     height: 100%;
-    padding-block-start: 6px;
+    padding-block: 5px;
     position: relative;
     z-index: 2;
+    touch-action: none;
   }
   .tabs::-webkit-scrollbar { display: none; }
 
-  /* Browser-native borderless inactive tabs with subtle vertical separators */
   .tab {
-    flex: 0 1 220px;
+    flex: 0 1 215px;
     min-width: 84px;
-    max-width: 220px;
-    height: 36px;
+    max-width: 215px;
+    height: 34px;
     display: flex;
     align-items: center;
     gap: 7px;
@@ -96,25 +101,32 @@
     background: transparent;
     color: var(--text-secondary);
     border: 1px solid transparent;
-    border-block-end: 0;
-    border-start-start-radius: var(--radius-md);
-    border-start-end-radius: var(--radius-md);
-    cursor: pointer;
+    border-radius: var(--radius-sm);
+    cursor: grab;
     white-space: nowrap;
     position: relative;
     transition:
-      background-color var(--dur-fast) var(--ease-out),
-      color var(--dur-fast) var(--ease-out);
+      background-color var(--dur-fast) var(--ease-spring),
+      color var(--dur-fast) var(--ease-spring),
+      border-color var(--dur-fast) var(--ease-spring),
+      box-shadow var(--dur-fast) var(--ease-spring),
+      transform var(--dur-fast) var(--ease-spring);
   }
-  .tab:not(.active):not(:hover)::after {
+  .tab.is-pinned {
+    flex: 0 0 auto;
+    min-width: 44px;
+    max-width: 118px;
+    padding-inline: 9px;
+  }
+  .tab:not(.active):not(:hover):not(.dragging)::after {
     content: "";
     position: absolute;
-    inset-inline-end: -2px;
-    top: 9px;
-    bottom: 9px;
+    inset-inline-end: -3px;
+    top: 8px;
+    bottom: 8px;
     width: 1px;
     background: var(--border-strong);
-    opacity: 0.32;
+    opacity: 0.28;
     pointer-events: none;
   }
   .tab:has(+ .tab.active)::after,
@@ -124,31 +136,43 @@
     background: var(--bg-hover);
     color: var(--text-primary);
   }
-  .tab.dragging { opacity: 0.45; cursor: grabbing; }
+  .tab.dragging {
+    opacity: 0.92;
+    cursor: grabbing;
+    background: var(--glass-bg-strong);
+    border-color: var(--brand);
+    box-shadow: var(--shadow-md);
+    z-index: 20;
+    transition: none;
+  }
   .tab.drop-hint {
     background: var(--brand-soft);
     color: var(--text-primary);
-    border-color: var(--brand-text);
+    border-color: var(--brand);
+    box-shadow: inset 0 0 0 1px var(--brand);
   }
   .tab.active {
-    height: 38px;
     background: var(--bg-surface);
     color: var(--text-primary);
     border-color: var(--border);
     font-weight: 600;
-    box-shadow: var(--shadow-sm);
+    box-shadow: var(--shadow-sm), var(--glass-highlight);
     z-index: 3;
   }
   .tab.active::before {
     content: "";
     position: absolute;
-    inset-block-start: -1px;
-    inset-inline: 8px;
-    height: 2.5px;
-    border-end-start-radius: var(--radius-pill);
-    border-end-end-radius: var(--radius-pill);
+    inset-block-end: 0;
+    inset-inline: 14px;
+    height: 2px;
+    border-radius: var(--radius-pill);
     background: var(--brand);
   }
+  .tab.group-blue { border-block-start: 2px solid var(--chart-1); }
+  .tab.group-teal { border-block-start: 2px solid var(--chart-2); }
+  .tab.group-orange { border-block-start: 2px solid var(--destructive); }
+  .tab.group-mint { border-block-start: 2px solid var(--chart-4); }
+
   .tab .t-icon {
     flex: 0 0 auto;
     width: 14px;
@@ -178,16 +202,16 @@
     background: var(--info-bg);
     color: var(--info-fg);
     border: 1px solid var(--info-border);
-    padding: 1px 5px;
-    border-radius: var(--radius-xs);
-    line-height: 1.2;
+    padding: 1px 6px;
+    border-radius: var(--radius-pill);
+    line-height: 1.25;
   }
   .tab .t-close {
     flex: 0 0 auto;
     width: 22px;
     height: 22px;
     border: 0;
-    border-radius: var(--radius-xs);
+    border-radius: var(--radius-pill);
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
@@ -196,8 +220,11 @@
     align-items: center;
     justify-content: center;
     line-height: 1;
-    opacity: 0.45;
-    transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+    opacity: 0.48;
+    transition:
+      background-color var(--dur-fast) var(--ease-spring),
+      color var(--dur-fast) var(--ease-spring),
+      opacity var(--dur-fast) var(--ease-spring);
   }
   .tab:hover .t-close,
   .tab.active .t-close,
@@ -210,21 +237,24 @@
     height: 28px;
     align-self: center;
     border: 1px solid transparent;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-pill);
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-inline: 4px;
-    margin-block-end: 2px;
-    transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+    margin-inline: 2px;
+    transition:
+      background-color var(--dur-fast) var(--ease-spring),
+      color var(--dur-fast) var(--ease-spring),
+      transform var(--dur-fast) var(--ease-spring);
   }
   .tab-add:hover {
     background: var(--bg-hover);
-    color: var(--text-primary);
+    color: var(--brand-text);
   }
+  .tab-add:active { transform: scale(0.92); }
   .tab-add svg { width: 14px; height: 14px; }
 
   .tb-utilities {
@@ -238,7 +268,7 @@
   .tb-action {
     flex: 0 0 auto;
     min-width: 28px;
-    height: 28px;
+    height: 30px;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
     cursor: pointer;
@@ -246,29 +276,34 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    padding-inline: 9px;
+    padding-inline: 10px;
     background: transparent;
     color: var(--text-primary);
     font-size: var(--text-xs);
     font-weight: 600;
     font-family: inherit;
-    transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+    transition:
+      background-color var(--dur-fast) var(--ease-spring),
+      border-color var(--dur-fast) var(--ease-spring),
+      color var(--dur-fast) var(--ease-spring),
+      transform var(--dur-fast) var(--ease-spring);
   }
   .tb-action:hover {
     background: var(--bg-hover);
     border-color: var(--border);
   }
-  .tb-action:active { background: var(--bg-subtle); }
+  .tb-action:active { transform: scale(0.96); background: var(--bg-subtle); }
   .tb-action.brand {
     background: var(--bg-surface);
     border-color: var(--border);
     color: var(--brand-text);
+    box-shadow: var(--shadow-sm);
   }
   .tb-action.brand:hover {
     background: var(--brand-soft);
-    border-color: var(--brand-text);
+    border-color: var(--brand);
   }
-  .tb-action img { width: 14px; height: 14px; border-radius: 3px; }
+  .tb-action img { width: 14px; height: 14px; border-radius: 4px; }
   .tb-action svg { width: 14px; height: 14px; }
 
   .tb-btn:focus-visible,
@@ -281,7 +316,7 @@
     box-shadow: var(--focus-ring);
   }
 
-  @media (max-width: 640px) {
+  @media (max-width: 720px) {
     .tb-action span { display: none; }
     .tb-action { padding-inline: 7px; }
   }
@@ -307,6 +342,12 @@
   <div class="divider" aria-hidden="true"></div>
 
   <div class="tb-utilities">
+    <button type="button" class="tb-btn" id="btnReopenTab" title="إعادة فتح آخر تبويب مغلق (Ctrl+Shift+T)" aria-label="إعادة فتح آخر تبويب مغلق">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+    </button>
+    <button type="button" class="tb-btn" id="btnCmdPalette" title="البحث السريع والأوامر (Ctrl+K)" aria-label="البحث السريع والأوامر">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    </button>
     <button type="button" class="tb-action brand" id="btnCc" title="مركز التحكم">
       <img src="app-icon.png" alt="" aria-hidden="true"/>
       <span data-i18n="cc">مركز التحكم</span>
@@ -328,15 +369,45 @@
   var STR = {
     ar: {
       new_tab: "تبويب جديد", cc: "مركز التحكم", settings: "الإعدادات",
-      back: "رجوع", forward: "تقدّم", reload: "تحديث", close_tab: "إغلاق", tabs_label: "التبويبات"
+      back: "رجوع", forward: "تقدّم", reload: "تحديث", close_tab: "إغلاق", tabs_label: "التبويبات",
+      reopen_tab: "إعادة فتح آخر تبويب مغلق (Ctrl+Shift+T)",
+      cmd_palette: "البحث السريع والأوامر (Ctrl+K)"
     },
     en: {
       new_tab: "New tab", cc: "Control Center", settings: "Settings",
-      back: "Back", forward: "Forward", reload: "Reload", close_tab: "Close", tabs_label: "Tabs"
+      back: "Back", forward: "Forward", reload: "Reload", close_tab: "Close", tabs_label: "Tabs",
+      reopen_tab: "Reopen closed tab (Ctrl+Shift+T)",
+      cmd_palette: "Quick Search & Commands (Ctrl+K)"
     }
   };
   var lang = "";
   var theme = "";
+  var VALID_GROUPS = { blue: true, teal: true, orange: true, mint: true };
+  function readJson(key, fallback) {
+    try {
+      var raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch (e) { return fallback; }
+  }
+  function readPinned() {
+    var v = readJson("np_pinned_tabs", []);
+    return Array.isArray(v) ? v : [];
+  }
+  function readGroups() {
+    var v = readJson("np_tab_groups", {});
+    return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+  }
+  function isSafeTabUrl(u) {
+    if (u === "") return true;
+    if (typeof u !== "string" || !/^https?:\/\//i.test(u)) return false;
+    try {
+      var parsed = new URL(u);
+      return (parsed.protocol === "https:" || parsed.protocol === "http:") && parsed.hostname.length > 0 && !parsed.username && !parsed.password;
+    } catch (e) { return false; }
+  }
+  function writeJson(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+  }
   function applyPrefs() {
     var savedLang = null, savedTheme = null;
     try {
@@ -356,6 +427,8 @@
         ["btnBack", STR[lang].back],
         ["btnForward", STR[lang].forward],
         ["btnReload", STR[lang].reload],
+        ["btnReopenTab", STR[lang].reopen_tab],
+        ["btnCmdPalette", STR[lang].cmd_palette],
         ["btnCc", STR[lang].cc],
         ["btnSettings", STR[lang].settings]
       ];
@@ -376,6 +449,8 @@
   var lastSignature = "";
   var currentTabs = [];
   var dragLabel = null;
+  var ptrDrag = null;
+  var suppressNextClick = false;
   var refreshing = false;
 
   function tabKind(tab) {
@@ -410,27 +485,89 @@
       n.classList.remove("drop-hint");
     });
   }
+  function rememberClosedTab(tab) {
+    if (!tab || !tab.url || tab.is_local) return;
+    var list = readJson("np_closed_tabs", []);
+    if (!Array.isArray(list)) list = [];
+    list = list.filter(function (item) { return item && item.url !== tab.url; });
+    list.unshift({ url: tab.url, title: tab.title || tab.url, at: Date.now() });
+    writeJson("np_closed_tabs", list.slice(0, 15));
+  }
+  function reopenLastClosedTab() {
+    var list = readJson("np_closed_tabs", []);
+    if (!Array.isArray(list) || !list.length) return;
+    var last = list.shift();
+    writeJson("np_closed_tabs", list);
+    if (last && last.url && isSafeTabUrl(last.url)) {
+      invoke("tab_open", { url: last.url }).then(refresh).catch(function () {});
+    }
+  }
+  function closeTabWithHistory(tab) {
+    rememberClosedTab(tab);
+    if (tab && tab.label) {
+      var pinned = readPinned();
+      var nextPins = pinned.filter(function (l) { return l !== tab.label; });
+      if (nextPins.length !== pinned.length) writeJson("np_pinned_tabs", nextPins);
+      var groups = readGroups();
+      if (Object.prototype.hasOwnProperty.call(groups, tab.label)) {
+        delete groups[tab.label];
+        writeJson("np_tab_groups", groups);
+      }
+    }
+    invoke("tab_close", { label: tab.label }).then(refresh).catch(function () {});
+  }
+
   function render(tabs) {
     if (!Array.isArray(tabs) || dragLabel) return;
-    var sig = lang + "|" + tabs.map(function (t) {
+    var pinned = readPinned();
+    var groups = readGroups();
+    var metaSig = JSON.stringify([pinned, groups]);
+    var sig = lang + "|" + metaSig + "|" + tabs.map(function (t) {
       return t.label + ":" + (t.title || "") + ":" + (t.url || "") + ":" + (t.active ? 1 : 0) + ":" + (t.is_pos ? 1 : 0);
     }).join("|");
     if (sig === lastSignature) return;
     lastSignature = sig;
     currentTabs = tabs;
+    // Mirror live tabs to localStorage so Control Center Command Palette / Vertical Tab Manager stays live
+    writeJson("np_open_tabs", tabs);
     var strip = document.getElementById("tabs");
     var activeEl = document.activeElement;
     var focusedLabel = activeEl && strip.contains(activeEl) && activeEl.getAttribute ? activeEl.getAttribute("data-label") : null;
     strip.innerHTML = "";
     tabs.forEach(function (t, tabIndex) {
       var el = document.createElement("div");
-      el.className = "tab" + (t.active ? " active" : "");
+      var isPinned = pinned.indexOf(t.label) >= 0;
+      var rawGrp = Object.prototype.hasOwnProperty.call(groups, t.label) ? String(groups[t.label]) : "";
+      var grp = VALID_GROUPS[rawGrp] ? rawGrp : "";
+      el.className = "tab" + (t.active ? " active" : "") + (isPinned ? " is-pinned" : "") + (grp ? " group-" + grp : "");
       el.title = t.url || "";
       el.draggable = true;
       el.setAttribute("role", "tab");
       el.setAttribute("aria-selected", t.active ? "true" : "false");
       el.setAttribute("tabindex", t.active ? "0" : "-1");
       el.setAttribute("data-label", t.label);
+      el.setAttribute("data-index", String(tabIndex));
+
+      // Real Pointer-Event Drag-and-Drop (works reliably inside Windows WebView2 where HTML5 DnD can be intercepted)
+      el.addEventListener("pointerdown", function (ev) {
+        if (ev.button === 1) {
+          ev.preventDefault();
+          closeTabWithHistory(t);
+          return;
+        }
+        if (ev.button !== 0 || (ev.target && ev.target.closest && ev.target.closest(".t-close"))) return;
+        ptrDrag = {
+          label: t.label,
+          fromIndex: tabIndex,
+          el: el,
+          startX: ev.clientX || 0,
+          active: false,
+          targetIndex: tabIndex,
+          pointerId: ev.pointerId
+        };
+      });
+
+      // Keep HTML5 DnD listeners for fallback & automated test compatibility
       el.addEventListener("dragstart", function (ev) {
         dragLabel = t.label;
         el.classList.add("dragging");
@@ -463,6 +600,7 @@
         clearDropHints(strip);
         invoke("tab_move", { label: label, toIndex: idx }).then(refresh).catch(function () {});
       });
+
       var kind = tabKind(t);
       var icon = document.createElement("span");
       icon.className = "t-icon t-icon-" + kind;
@@ -487,10 +625,11 @@
       close.setAttribute("aria-label", STR[lang].close_tab + ": " + safeTitle);
       close.addEventListener("click", function (ev) {
         ev.stopPropagation();
-        invoke("tab_close", { label: t.label }).then(refresh).catch(function () {});
+        closeTabWithHistory(t);
       });
       el.appendChild(close);
       el.addEventListener("click", function () {
+        if (suppressNextClick) { suppressNextClick = false; return; }
         invoke("tab_switch", { label: t.label }).then(refresh).catch(function () {});
       });
       el.addEventListener("keydown", function (ev) {
@@ -537,15 +676,52 @@
       active.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
   }
+
   function refresh() {
     applyPrefs();
+    handleCrossTabCommand();
     if (refreshing) return;
     refreshing = true;
     invoke("tab_list", {}).then(render).catch(function () {}).finally(function () {
       refreshing = false;
     });
   }
+
+  var lastCmdTs = 0;
+  // Execute cross-webview tab commands sent from Control Center Command Palette / Workspaces
+  function handleCrossTabCommand() {
+    var cmd = readJson("np_tab_cmd", null);
+    if (!cmd || !cmd.action) return;
+    if (cmd.ts && cmd.ts === lastCmdTs) return;
+    lastCmdTs = cmd.ts || Date.now();
+    try { localStorage.removeItem("np_tab_cmd"); } catch (e) {}
+    if (cmd.action === "switch" && cmd.label) {
+      invoke("tab_switch", { label: cmd.label }).then(refresh).catch(function () {});
+    } else if (cmd.action === "close" && cmd.label) {
+      var found = currentTabs.find(function (t) { return t.label === cmd.label; });
+      closeTabWithHistory(found || { label: cmd.label });
+    } else if (cmd.action === "open") {
+      var openUrl = typeof cmd.url === "string" ? cmd.url : "";
+      if (isSafeTabUrl(openUrl)) invoke("tab_open", { url: openUrl }).then(refresh).catch(function () {});
+    } else if (cmd.action === "reopen") {
+      reopenLastClosedTab();
+    } else if (cmd.action === "restore_workspace" && Array.isArray(cmd.urls)) {
+      cmd.urls.slice(0, 15).forEach(function (u) {
+        if (typeof u === "string" && u && isSafeTabUrl(u)) invoke("tab_open", { url: u }).catch(function () {});
+      });
+      setTimeout(refresh, 250);
+    } else if (cmd.action === "meta_changed") {
+      lastSignature = "";
+      render(currentTabs);
+    }
+  }
+
   var stripEl = document.getElementById("tabs");
+  stripEl.addEventListener("dblclick", function (ev) {
+    if (ev.target === stripEl) {
+      invoke("tab_open", { url: "" }).then(refresh).catch(function () {});
+    }
+  });
   stripEl.addEventListener("dragover", function (ev) {
     if (dragLabel && ev.target === stripEl) {
       ev.preventDefault();
@@ -561,15 +737,92 @@
     invoke("tab_move", { label: label, toIndex: currentTabs.length })
       .then(refresh).catch(function () {});
   });
-  // Recover if drag ends outside the WebView2 tabbar bounds without firing dragend
-  function resetDragState() {
+
+  window.addEventListener("pointermove", function (ev) {
+    if (!ptrDrag) return;
+    var dx = (ev.clientX || 0) - ptrDrag.startX;
+    if (!ptrDrag.active && Math.abs(dx) < 5) return;
+    if (!ptrDrag.active) {
+      ptrDrag.active = true;
+      dragLabel = ptrDrag.label;
+      ptrDrag.el.classList.add("dragging");
+      if (ptrDrag.el.setPointerCapture && ptrDrag.pointerId != null) {
+        try { ptrDrag.el.setPointerCapture(ptrDrag.pointerId); } catch (e) {}
+      }
+    }
+    ptrDrag.el.style.transform = "translateX(" + dx + "px)";
+    clearDropHints(stripEl);
+    var tabNodes = Array.prototype.slice.call(stripEl.querySelectorAll(".tab"));
+    var hitIdx = ptrDrag.fromIndex;
+    for (var i = 0; i < tabNodes.length; i++) {
+      var node = tabNodes[i];
+      if (node === ptrDrag.el) continue;
+      var rect = node.getBoundingClientRect();
+      if (ev.clientX >= rect.left && ev.clientX <= rect.right) {
+        node.classList.add("drop-hint");
+        hitIdx = dropIndexFor(i, ev.clientX, rect);
+        break;
+      }
+    }
+    ptrDrag.targetIndex = hitIdx;
+  });
+
+  function finishPointerDrag(commit) {
+    if (!ptrDrag) return;
+    var state = ptrDrag;
+    ptrDrag = null;
+    if (state.active) {
+      if (state.el.releasePointerCapture && state.pointerId != null) {
+        try { state.el.releasePointerCapture(state.pointerId); } catch (e) {}
+      }
+      suppressNextClick = true;
+      window.setTimeout(function () { suppressNextClick = false; }, 0);
+      state.el.style.transform = "";
+      state.el.classList.remove("dragging");
+      clearDropHints(stripEl);
+      dragLabel = null;
+      if (commit && state.targetIndex !== state.fromIndex) {
+        invoke("tab_move", { label: state.label, toIndex: state.targetIndex })
+          .then(refresh).catch(function () {});
+      }
+    }
+  }
+  window.addEventListener("pointerup", function () { finishPointerDrag(true); });
+  window.addEventListener("pointercancel", function () { finishPointerDrag(false); });
+  window.addEventListener("blur", function () {
+    finishPointerDrag(false);
     if (!dragLabel) return;
     dragLabel = null;
     stripEl.querySelectorAll(".tab.dragging").forEach(function (n) { n.classList.remove("dragging"); });
     clearDropHints(stripEl);
-  }
-  window.addEventListener("blur", resetDragState);
-  window.addEventListener("pointerup", resetDragState);
+  });
+
+  window.addEventListener("keydown", function (ev) {
+    if (!(ev.ctrlKey || ev.metaKey)) return;
+    var k = String(ev.key || "").toLowerCase();
+    if (k === "k") {
+      ev.preventDefault();
+      try { localStorage.setItem("np_cc_open_cmd", String(Date.now())); } catch (e) {}
+      invoke("open_control_center", {}).then(refresh).catch(function () {});
+    } else if (k === "t" && ev.shiftKey) {
+      ev.preventDefault();
+      reopenLastClosedTab();
+    } else if (k === "t" && !ev.shiftKey) {
+      ev.preventDefault();
+      invoke("tab_open", { url: "" }).then(refresh).catch(function () {});
+    } else if (k === "w" && currentTabs.length) {
+      ev.preventDefault();
+      var activeTab = currentTabs.find(function (t) { return t.active; });
+      if (activeTab) closeTabWithHistory(activeTab);
+    } else if (k >= "1" && k <= "9") {
+      var idx = parseInt(k, 10) - 1;
+      if (currentTabs[idx]) {
+        ev.preventDefault();
+        invoke("tab_switch", { label: currentTabs[idx].label }).then(refresh).catch(function () {});
+      }
+    }
+  });
+
   document.getElementById("btnBack").addEventListener("click", function () {
     invoke("nav_back", {}).catch(function () {});
   });
@@ -579,13 +832,23 @@
   document.getElementById("btnReload").addEventListener("click", function () {
     invoke("nav_reload", {}).catch(function () {});
   });
+  document.getElementById("btnReopenTab").addEventListener("click", reopenLastClosedTab);
+  document.getElementById("btnCmdPalette").addEventListener("click", function () {
+    try { localStorage.setItem("np_cc_open_cmd", String(Date.now())); } catch (e) {}
+    invoke("open_control_center", {}).then(refresh).catch(function () {});
+  });
   document.getElementById("btnSettings").addEventListener("click", function () {
     invoke("open_settings", {}).then(refresh).catch(function () {});
   });
   document.getElementById("btnCc").addEventListener("click", function () {
     invoke("open_control_center", {}).then(refresh).catch(function () {});
   });
-  window.addEventListener("storage", applyPrefs);
+  window.addEventListener("storage", function (ev) {
+    applyPrefs();
+    if (!ev) return;
+    if (ev.key === "np_tab_cmd") handleCrossTabCommand();
+    else if (ev.key === "np_pinned_tabs" || ev.key === "np_tab_groups") render(currentTabs);
+  });
   applyPrefs();
   refresh();
   window.setInterval(function () { if (!document.hidden) refresh(); }, 650);

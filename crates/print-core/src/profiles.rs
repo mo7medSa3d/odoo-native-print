@@ -49,18 +49,21 @@ impl ProfileDb {
         // Deterministic: the LONGEST (most specific) matching key
         // wins. HashMap iteration order must never decide which quirk
         // set a printer gets (e.g. "EPSON" vs "EPSON TM-T88").
-        let mut keys: Vec<&String> = self
-            .by_driver
-            .keys()
-            .filter(|k| !k.trim().is_empty())
-            .collect();
-        keys.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
-        keys.into_iter()
-            .find(|k| d.contains(&k.to_ascii_lowercase()))
-            .and_then(|k| self.by_driver.get(k))
-            .cloned()
-            .map(PrinterQuirks::sanitized)
-            .unwrap_or_default()
+        let mut best: Option<(&String, &PrinterQuirks)> = None;
+        for (k, v) in &self.by_driver {
+            if k.trim().is_empty() {
+                continue;
+            }
+            if let Some((best_k, _)) = best {
+                if k.len() < best_k.len() || (k.len() == best_k.len() && k >= best_k) {
+                    continue;
+                }
+            }
+            if d.contains(&k.to_ascii_lowercase()) {
+                best = Some((k, v));
+            }
+        }
+        best.map(|(_, v)| v.clone().sanitized()).unwrap_or_default()
     }
     pub fn merge_overrides(&mut self, overrides: ProfileDb) {
         for (k, v) in overrides.by_driver {

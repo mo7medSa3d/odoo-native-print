@@ -62,7 +62,7 @@ test("Odoo origin accepts HTTPS anywhere and HTTP on any IP", () => {
     "https://192.168.1.20:8069", "https://8.8.8.8:8069",
     "http://192.168.1.20:8069", "http://10.0.0.5:8069",
     "http://172.16.4.9:8069", "http://127.0.0.1:8069",
-    "http://8.8.8.8:8069", "http://68.221.27.248:8070",
+    "http://8.8.8.8:8069", "http://203.0.113.10:8070",
     "http://[::1]:8069", "http://[fd00::25]:8069", "http://[fe80::1]:8069",
     "http://[2001:4860:4860::8888]:8069",
     "http://localhost:8069"
@@ -474,14 +474,12 @@ function createMiniDom(pageHtml, { lang = "ar", dir = "rtl" } = {}) {
   const markup = pageHtml.slice(0, pageHtml.indexOf("<script"));
   const body = new MiniEl("BODY");
   const tagRe = /<(main|nav|section|div|button|input|select|pre|span|h1|p|footer|tbody)\b([^>]*)>/gi;
-  let currentParent = body;
   for (const m of markup.matchAll(tagRe)) {
     const tag = m[1], attrStr = m[2];
     const el = new MiniEl(tag);
     for (const a of attrStr.matchAll(/([\w-]+)=["']([^"']*)["']/g)) {
       el.setAttribute(a[1], a[2]);
     }
-    if (el.id === "sideNav") currentParent = el;
     if (tag.toLowerCase() === "button" && el.attrs.has("data-page") && byId.has("sideNav")) {
       byId.get("sideNav").appendChild(el);
     } else if (tag.toLowerCase() === "button" && el.classList.contains("nav-tab") && byId.has("navTabs")) {
@@ -539,9 +537,13 @@ function createMiniDom(pageHtml, { lang = "ar", dir = "rtl" } = {}) {
       if (!winListeners.has(type)) winListeners.set(type, []);
       winListeners.get(type).push(fn);
     },
+    dispatch(type, ev = {}) {
+      for (const fn of winListeners.get(type) || []) fn(ev);
+    },
     localStorage: {
       getItem(k) { return storage.has(k) ? storage.get(k) : null; },
       setItem(k, v) { storage.set(k, String(v)); },
+      removeItem(k) { storage.delete(k); },
     },
     URL,
     console: { error() {}, warn() {}, log() {} },
@@ -1067,4 +1069,702 @@ test("Yaseir Precision v2: token-only CSS, RTL Arabic typography, semantic KPI/s
   const emptyPrinters = document.getElementById("printersGrid").innerHTML;
   assert.ok(emptyPrinters.includes("empty-state-inner"), "printers empty state must use calm framed wrapper");
   assert.ok(emptyPrinters.includes('data-action="manual-refresh"'), "printers empty state must provide a rescan action");
+});
+
+test("tabbar.html pointer-event drag-and-drop reorders tabs and refresh() drains pending np_tab_cmd", async () => {
+  const tabHtml = readFileSync(new URL("../dist/tabbar.html", import.meta.url), "utf8");
+  const tabScript = tabHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
+  const { windowObj, document } = createMiniDom(tabHtml);
+  const invoked = [];
+  const tabsFixture = [
+    { label: "t1", title: "Odoo", url: "https://odoo.example.com", active: true, is_pos: false },
+    { label: "t2", title: "POS", url: "https://odoo.example.com/pos", active: false, is_pos: true },
+  ];
+  windowObj.__TAURI_INTERNALS__ = {
+    async invoke(cmd, args) {
+      invoked.push([cmd, args]);
+      if (cmd === "tab_list") return tabsFixture;
+      return {};
+    },
+  };
+  const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, localStorage: windowObj.localStorage });
+  new vm.Script(tabScript).runInContext(ctx);
+  await new Promise(r => setImmediate(r));
+
+  const strip = document.getElementById("tabs");
+  const tabEls = strip.children.filter(c => c.classList.contains("tab"));
+  tabEls[0].getBoundingClientRect = () => ({ left: 100, right: 200, width: 100 });
+  tabEls[1].getBoundingClientRect = () => ({ left: 0, right: 100, width: 100 });
+
+  // Pointer drag t1 over left half of t2 in RTL -> reorders to index 1
+  tabEls[0].dispatch("pointerdown", { button: 0, clientX: 150, pointerId: 1 });
+  windowObj.dispatch("pointermove", { clientX: 20 });
+  windowObj.dispatch("pointerup", {});
+  await new Promise(r => setImmediate(r));
+  assert.ok(invoked.some(([c, a]) => c === "tab_move" && a.label === "t1" && a.toIndex === 1), "pointer drag must invoke tab_move");
+
+  // Pending cross-tab command in localStorage executes on refresh() even without a storage event
+  windowObj.localStorage.setItem("np_tab_cmd", JSON.stringify({ action: "switch", label: "t2", ts: Date.now() }));
+  ctx.refresh();
+  await new Promise(r => setImmediate(r));
+  assert.ok(invoked.some(([c, a]) => c === "tab_switch" && a.label === "t2"), "refresh() must drain np_tab_cmd");
+  assert.equal(windowObj.localStorage.getItem("np_tab_cmd"), null, "np_tab_cmd must be cleared after execution");
+
+  // Closing a tab prunes stale label from np_pinned_tabs and np_tab_groups
+  windowObj.localStorage.setItem("np_pinned_tabs", JSON.stringify(["t1", "t2"]));
+  windowObj.localStorage.setItem("np_tab_groups", JSON.stringify({ t1: "blue", t2: "green" }));
+  windowObj.localStorage.setItem("np_tab_cmd", JSON.stringify({ action: "close", label: "t2", ts: Date.now() + 1 }));
+  ctx.refresh();
+  await new Promise(r => setImmediate(r));
+  assert.deepEqual(JSON.parse(windowObj.localStorage.getItem("np_pinned_tabs")), ["t1"]);
+  assert.deepEqual(JSON.parse(windowObj.localStorage.getItem("np_tab_groups")), { t1: "blue" });
+});
+
+test("index.html Command Palette clears np_cc_open_cmd on storage event and saves/restores workspaces", async () => {
+  const { windowObj, document } = createMiniDom(html);
+  windowObj.__NATIVE_PRINT__ = {
+    async appOverview() { return { appVersion: "1.5.7", odooOrigin: "https://odoo.example.com", printers: [], recentJobs: [], counts: { active: 0, done: 0, failed: 0 } }; },
+    async getPrinterSettings() { return {}; },
+  };
+  windowObj.localStorage.setItem("np_open_tabs", JSON.stringify([
+    { label: "t1", title: "Sales", url: "https://odoo.example.com/odoo/sales", active: true, is_local: false },
+  ]));
+  const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout, localStorage: windowObj.localStorage });
+  new vm.Script(script).runInContext(ctx);
+  await new Promise(r => setImmediate(r));
+
+  // Storage trigger opens palette and clears flag
+  windowObj.localStorage.setItem("np_cc_open_cmd", "123");
+  windowObj.dispatch("storage", { key: "np_cc_open_cmd", newValue: "123" });
+  assert.equal(document.getElementById("cmdOverlay").classList.contains("hidden"), false, "Command Palette must open");
+  assert.equal(windowObj.localStorage.getItem("np_cc_open_cmd"), null, "np_cc_open_cmd must be cleared on storage event");
+
+  // Save workspace
+  document.getElementById("cmdWorkspaceName").value = "Morning Shift";
+  ctx.saveCurrentWorkspace();
+  const saved = JSON.parse(windowObj.localStorage.getItem("np_workspaces") || "[]");
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].name, "Morning Shift");
+  assert.deepEqual(saved[0].urls, ["https://odoo.example.com/odoo/sales"]);
+});
+
+test("index.html Command Palette delegated clicks: filtered restore/delete workspace uses origIdx and tab actions run without ReferenceError", async () => {
+  const { windowObj, document, MiniEl } = createMiniDom(html);
+  windowObj.__NATIVE_PRINT__ = {
+    async appOverview() { return { appVersion: "1.5.7", odooOrigin: "https://odoo.example.com", printers: [], recentJobs: [], counts: { active: 0, done: 0, failed: 0 } }; },
+    async getPrinterSettings() { return {}; },
+  };
+  windowObj.localStorage.setItem("np_open_tabs", JSON.stringify([
+    { label: "t1", title: "Sales", url: "https://odoo.example.com/odoo/sales", active: true, is_local: false },
+    { label: "t2", title: "POS", url: "https://odoo.example.com/pos", active: false, is_local: false },
+  ]));
+  windowObj.localStorage.setItem("np_workspaces", JSON.stringify([
+    { name: "Alpha Shift", urls: ["https://odoo.example.com/alpha"], savedAt: 1 },
+    { name: "Beta Shift", urls: ["https://odoo.example.com/beta"], savedAt: 2 },
+    { name: "Gamma Shift", urls: ["https://odoo.example.com/gamma"], savedAt: 3 },
+  ]));
+  const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout, localStorage: windowObj.localStorage });
+  new vm.Script(script).runInContext(ctx);
+  await new Promise(r => setImmediate(r));
+
+  const clickAction = (action, attrs = {}) => {
+    const btn = new MiniEl("BUTTON");
+    btn.setAttribute("data-action", action);
+    for (const [k, v] of Object.entries(attrs)) btn.setAttribute(k, String(v));
+    btn.closest = () => btn;
+    document.dispatch("click", { target: btn });
+  };
+
+  // Filtered search query "gamma" must emit origIdx=2 (not filtered index 0) and restore Gamma Shift
+  ctx.openCommandPalette();
+  const cmdInput = document.getElementById("cmdInput");
+  cmdInput.value = "gamma";
+  ctx.renderCommandPalette("gamma");
+  const wsHtmlGamma = document.getElementById("cmdWorkspacesList").innerHTML;
+  const restoreMatch = wsHtmlGamma.match(/data-action="restore-workspace"\s+data-ws-idx="(\d+)"/);
+  assert.ok(restoreMatch, "filtered workspace must render restore-workspace button");
+  assert.equal(restoreMatch[1], "2", "filtered restore-workspace must use origIdx=2");
+
+  clickAction("restore-workspace", { "data-ws-idx": restoreMatch[1] });
+  const restoreCmd = JSON.parse(windowObj.localStorage.getItem("np_tab_cmd") || "null");
+  assert.equal(restoreCmd.action, "restore_workspace");
+  assert.deepEqual(restoreCmd.urls, ["https://odoo.example.com/gamma"], "restore-workspace must restore Gamma Shift, not Alpha Shift");
+  assert.equal(document.getElementById("cmdOverlay").classList.contains("hidden"), true, "restore-workspace closes Command Palette");
+
+  // Filtered search query "beta" must emit origIdx=1 and delete Beta Shift only
+  ctx.openCommandPalette();
+  cmdInput.value = "beta";
+  ctx.renderCommandPalette("beta");
+  const wsHtmlBeta = document.getElementById("cmdWorkspacesList").innerHTML;
+  const deleteMatch = wsHtmlBeta.match(/data-action="delete-workspace"\s+data-ws-idx="(\d+)"/);
+  assert.ok(deleteMatch, "filtered workspace must render delete-workspace button");
+  assert.equal(deleteMatch[1], "1", "filtered delete-workspace must use origIdx=1");
+
+  clickAction("delete-workspace", { "data-ws-idx": deleteMatch[1] });
+  const remainingWs = JSON.parse(windowObj.localStorage.getItem("np_workspaces") || "[]").map(w => w.name);
+  assert.deepEqual(remainingWs, ["Alpha Shift", "Gamma Shift"], "delete-workspace must remove only Beta Shift");
+
+  // Delegated cmd-pin-tab, cmd-group-tab, cmd-switch-tab execute cleanly with zero ReferenceError
+  clickAction("cmd-pin-tab", { "data-tab-label": "t1" });
+  assert.deepEqual(JSON.parse(windowObj.localStorage.getItem("np_pinned_tabs")), ["t1"]);
+  assert.equal(JSON.parse(windowObj.localStorage.getItem("np_tab_cmd")).action, "meta_changed");
+  clickAction("cmd-pin-tab", { "data-tab-label": "t1" });
+  assert.deepEqual(JSON.parse(windowObj.localStorage.getItem("np_pinned_tabs")), []);
+
+  clickAction("cmd-group-tab", { "data-tab-label": "t1" });
+  const groupsAfter = JSON.parse(windowObj.localStorage.getItem("np_tab_groups") || "{}");
+  assert.ok(typeof groupsAfter.t1 === "string" && groupsAfter.t1.length > 0, "cmd-group-tab assigns a group color");
+  assert.equal(JSON.parse(windowObj.localStorage.getItem("np_tab_cmd")).action, "meta_changed");
+
+  clickAction("cmd-switch-tab", { "data-tab-label": "t2" });
+  const switchCmd = JSON.parse(windowObj.localStorage.getItem("np_tab_cmd") || "null");
+  assert.equal(switchCmd.action, "switch");
+  assert.equal(switchCmd.label, "t2");
+  assert.equal(document.getElementById("cmdOverlay").classList.contains("hidden"), true, "cmd-switch-tab closes Command Palette");
+});
+
+test("tabbar.html pointercancel rolls back drag without invoking tab_move and isSafeTabUrl rejects unsafe URLs", async () => {
+  const tabHtml = readFileSync(new URL("../dist/tabbar.html", import.meta.url), "utf8");
+  const tabScript = tabHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
+  const { windowObj, document } = createMiniDom(tabHtml);
+  const invoked = [];
+  const tabsFixture = [
+    { label: "t1", title: "Odoo", url: "https://odoo.example.com", active: true, is_pos: false },
+    { label: "t2", title: "POS", url: "https://odoo.example.com/pos", active: false, is_pos: true },
+  ];
+  windowObj.__TAURI_INTERNALS__ = {
+    async invoke(cmd, args) {
+      invoked.push([cmd, args]);
+      if (cmd === "tab_list") return tabsFixture;
+      return {};
+    },
+  };
+  const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout, localStorage: windowObj.localStorage });
+  new vm.Script(tabScript).runInContext(ctx);
+  await new Promise(r => setImmediate(r));
+
+  const strip = document.getElementById("tabs");
+  const tabEls = strip.children.filter(c => c.classList.contains("tab"));
+  tabEls[0].getBoundingClientRect = () => ({ left: 100, right: 200, width: 100 });
+  tabEls[1].getBoundingClientRect = () => ({ left: 0, right: 100, width: 100 });
+
+  // Pointer drag started and moved, then canceled via pointercancel -> must NOT invoke tab_move
+  tabEls[0].dispatch("pointerdown", { button: 0, clientX: 150, pointerId: 1 });
+  windowObj.dispatch("pointermove", { clientX: 20 });
+  assert.equal(tabEls[0].classList.contains("dragging"), true, "drag state active before pointercancel");
+  windowObj.dispatch("pointercancel", {});
+  await new Promise(r => setImmediate(r));
+  assert.equal(tabEls[0].classList.contains("dragging"), false, "pointercancel clears dragging class");
+  assert.equal(invoked.some(([c]) => c === "tab_move"), false, "pointercancel must not invoke tab_move");
+
+  // isSafeTabUrl allows empty / http(s) and rejects javascript:, credentialed, and non-http(s) URLs
+  assert.equal(ctx.isSafeTabUrl(""), true);
+  assert.equal(ctx.isSafeTabUrl("https://odoo.example.com/odoo"), true);
+  assert.equal(ctx.isSafeTabUrl("http://192.168.1.20:8069/pos"), true);
+  assert.equal(ctx.isSafeTabUrl("javascript:alert(1)"), false);
+  assert.equal(ctx.isSafeTabUrl("JAVASCRIPT:void(0)"), false);
+  assert.equal(ctx.isSafeTabUrl("https://user:pass@odoo.example.com"), false);
+  assert.equal(ctx.isSafeTabUrl("https://user@odoo.example.com"), false);
+  assert.equal(ctx.isSafeTabUrl("file:///etc/passwd"), false);
+  assert.equal(ctx.isSafeTabUrl("data:text/html,<script>alert(1)</script>"), false);
+
+  // Command path enforcement: restore_workspace only opens safe URLs
+  windowObj.localStorage.setItem("np_tab_cmd", JSON.stringify({
+    action: "restore_workspace",
+    urls: ["javascript:alert(1)", "https://user:pass@odoo.example.com/x", "https://odoo.example.com/safe"],
+    ts: Date.now(),
+  }));
+  ctx.refresh();
+  await new Promise(r => setImmediate(r));
+  const openedUrls = invoked.filter(([c]) => c === "tab_open").map(([, a]) => a.url);
+  assert.deepEqual(openedUrls, ["https://odoo.example.com/safe"], "unsafe URLs must never reach tab_open");
+});
+
+test("boot.html retry resets down message back to connecting state while re-probing", async () => {
+  const bootHtml = readFileSync(new URL("../dist/boot.html", import.meta.url), "utf8");
+  const bootScript = bootHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
+  const { windowObj, document, replacedUrls } = createMiniDom(bootHtml);
+
+  let probes = 0;
+  let resolveSecondProbe = null;
+  windowObj.__TAURI_INTERNALS__ = {
+    async invoke(cmd) {
+      if (cmd === "app_identity") return { odooOrigin: "http://192.168.1.20:8069" };
+      if (cmd === "probe_origin") {
+        probes++;
+        if (probes === 1) return false;
+        return new Promise((res) => { resolveSecondProbe = res; });
+      }
+    },
+  };
+  const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout, localStorage: windowObj.localStorage });
+  new vm.Script(bootScript).runInContext(ctx);
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  const card = document.querySelector(".card");
+  const title = document.getElementById("title");
+  const msg = document.getElementById("msg");
+  const retryBtn = document.getElementById("retry");
+  assert.equal(card.getAttribute("data-state"), "down");
+  assert.ok(msg.textContent.includes("لا استجابة من "), "failed probe shows down message");
+
+  // Trigger retry and inspect state while second probe is still pending
+  retryBtn.dispatch("click");
+  assert.equal(probes, 2);
+  assert.equal(card.getAttribute("data-state"), "connecting");
+  assert.equal(title.textContent, "جارٍ الاتصال بـ Odoo");
+  assert.equal(msg.textContent, "تجهيز الجلسة… ", "retry must reset stale down message to preparing text");
+  assert.equal(msg.children[0]?.textContent, "http://192.168.1.20:8069", "retry keeps origin span in message");
+  assert.equal(retryBtn.disabled, true, "retry button disabled while probing");
+
+  resolveSecondProbe(true);
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+  assert.equal(retryBtn.disabled, false);
+  assert.deepEqual(replacedUrls, ["http://192.168.1.20:8069"]);
+});
+
+test("index.html Print Preview modal opens per printer profile with dimensions, runs test print, and closes cleanly", async () => {
+  const { windowObj, document, MiniEl } = createMiniDom(html);
+  const testPrints = [];
+  windowObj.__NATIVE_PRINT__ = {
+    async appOverview() {
+      return {
+        appVersion: "1.5.7",
+        printers: [
+          { name: "Epson TM-T88V 80mm", kind: "local", is_default: true, status: "ready", port: "USB001", driver: "EPSON TM-T88V", printer_class: "thermal", protocol: "escpos" },
+          { name: "HP LaserJet Pro", kind: "local", is_default: false, status: "ready", port: "USB002", driver: "HP Universal", printer_class: "office", protocol: "gdi" },
+        ],
+        defaultPrinter: "Epson TM-T88V 80mm",
+        stateCounts: [],
+        pdfiumReady: true,
+        webviewVersion: "120.0",
+        environment: { errors: [] },
+        odooOrigin: "https://odoo.example.com",
+        lockedByPolicy: false,
+        autoReprint: false,
+        recentJobs: [],
+      };
+    },
+    async printerCapabilities() { return { forms: [{ name: "A4", size: { width_mm: 210, height_mm: 297 }, roll: false }], duplex: false, color: false, bins: [] }; },
+    async getPrinterSettings() { return {}; },
+    async runTestPrint(printer, kind, paper, opts) { testPrints.push({ printer, kind, paper, opts }); return "job-pv-1"; },
+  };
+  const origCreate = document.createElement.bind(document);
+  document.createElement = (tag) => {
+    const el = origCreate(tag);
+    el.querySelector = () => new MiniEl("BUTTON");
+    return el;
+  };
+  const ctx = vm.createContext({
+    ...windowObj,
+    setInterval: windowObj.setInterval,
+    setTimeout: windowObj.setTimeout,
+    clearTimeout: windowObj.clearTimeout,
+    clearInterval: windowObj.clearInterval,
+    localStorage: windowObj.localStorage,
+    navigator: {},
+  });
+  new vm.Script(script).runInContext(ctx);
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  const gridHtml = document.getElementById("printersGrid").innerHTML;
+  assert.ok(gridHtml.includes('data-action="preview-printer"'), "printer cards must include preview-printer button");
+
+  const clickAction = (action, attrs = {}) => {
+    const btn = new MiniEl("BUTTON");
+    btn.setAttribute("data-action", action);
+    for (const [k, v] of Object.entries(attrs)) btn.setAttribute(k, String(v));
+    btn.closest = () => btn;
+    document.dispatch("click", { target: btn });
+  };
+
+  // Open thermal printer preview
+  const overlay = document.getElementById("previewOverlay");
+  assert.equal(overlay.classList.contains("hidden"), true, "previewOverlay starts hidden");
+  clickAction("preview-printer", { "data-printer": "Epson TM-T88V 80mm" });
+  assert.equal(overlay.classList.contains("hidden"), false, "previewOverlay becomes visible");
+  assert.equal(document.getElementById("previewPrinterName").textContent, "Epson TM-T88V 80mm");
+  assert.equal(document.getElementById("previewPaperMeta").textContent, "80×200mm");
+  assert.ok(document.getElementById("previewModeMeta").textContent.includes("203 DPI"));
+  assert.equal(document.getElementById("previewSheet").classList.contains("sheet-80"), true);
+
+  // Trigger Test Print from preview modal
+  clickAction("preview-test-print");
+  await new Promise(r => setImmediate(r));
+  assert.equal(testPrints.length, 1);
+  assert.equal(testPrints[0].printer, "Epson TM-T88V 80mm");
+  assert.equal(testPrints[0].kind, "thermal-80mm");
+
+  // Close via preview-close
+  clickAction("preview-close");
+  assert.equal(overlay.classList.contains("hidden"), true, "preview-close hides previewOverlay");
+
+  // Open office printer preview and close via Escape key
+  clickAction("preview-printer", { "data-printer": "HP LaserJet Pro" });
+  assert.equal(overlay.classList.contains("hidden"), false);
+  assert.equal(document.getElementById("previewPrinterName").textContent, "HP LaserJet Pro");
+  assert.equal(document.getElementById("previewPaperMeta").textContent, "210×297mm");
+  assert.equal(document.getElementById("previewSheet").classList.contains("sheet-a4"), true);
+  document.dispatch("keydown", { key: "Escape" });
+  assert.equal(overlay.classList.contains("hidden"), true, "Escape key hides previewOverlay");
+});
+
+test("modal keyboard isolation: Escape only closes topmost confirmOverlay, Ctrl+K respects modals, preview Tab traps focus, and previewTestPrintBtn locks in-flight", async () => {
+  const { windowObj, document, MiniEl } = createMiniDom(html);
+  let resolvePrint = null;
+  windowObj.__NATIVE_PRINT__ = {
+    async appOverview() {
+      return {
+        appVersion: "1.5.7",
+        printers: [
+          { name: "HP LaserJet Pro", kind: "local", is_default: true, status: "ready", port: "USB001", driver: "HP", printer_class: "office", protocol: "gdi" },
+        ],
+        defaultPrinter: "HP LaserJet Pro",
+        stateCounts: [],
+        pdfiumReady: true,
+        webviewVersion: "120.0",
+        environment: { errors: [] },
+        odooOrigin: "https://odoo.example.com",
+        lockedByPolicy: false,
+        autoReprint: false,
+        recentJobs: [],
+      };
+    },
+    async printerCapabilities() { return { forms: [], duplex: false, color: false, bins: [] }; },
+    async getPrinterSettings() { return {}; },
+    async runTestPrint() { return new Promise((res) => { resolvePrint = () => res("job-lock-1"); }); },
+  };
+  const origCreate = document.createElement.bind(document);
+  document.createElement = (tag) => {
+    const el = origCreate(tag);
+    el.querySelector = () => new MiniEl("BUTTON");
+    return el;
+  };
+  const ctx = vm.createContext({
+    ...windowObj,
+    setInterval: windowObj.setInterval,
+    setTimeout: windowObj.setTimeout,
+    clearTimeout: windowObj.clearTimeout,
+    clearInterval: windowObj.clearInterval,
+    localStorage: windowObj.localStorage,
+    navigator: {},
+  });
+  new vm.Script(script).runInContext(ctx);
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  // 1. Initial roving tabindex on navTabs
+  assert.equal(document.getElementById("nav-tab-dashboard").getAttribute("tabindex"), "0");
+  assert.equal(document.getElementById("nav-tab-printers").getAttribute("tabindex"), "-1");
+
+  // 2. Escape when confirmOverlay is open over previewOverlay must ONLY close confirmOverlay
+  const pvOv = document.getElementById("previewOverlay");
+  const cfOv = document.getElementById("confirmOverlay");
+  const cmdOv = document.getElementById("cmdOverlay");
+  ctx.openPrintPreview("HP LaserJet Pro");
+  const confirmP = ctx.confirmDialog("Sure?", { danger: true });
+  assert.equal(pvOv.classList.contains("hidden"), false);
+  assert.equal(cfOv.classList.contains("hidden"), false);
+
+  // Ctrl+K must be ignored while confirmOverlay is open
+  document.dispatch("keydown", { key: "k", ctrlKey: true, preventDefault() {} });
+  assert.equal(cmdOv.classList.contains("hidden"), true, "Ctrl+K must not open cmdOverlay over confirmOverlay");
+
+  // Escape closes ONLY confirmOverlay, leaving previewOverlay open
+  document.dispatch("keydown", { key: "Escape", preventDefault() {} });
+  assert.equal(await confirmP, false);
+  assert.equal(cfOv.classList.contains("hidden"), true, "confirmOverlay closed on Escape");
+  assert.equal(pvOv.classList.contains("hidden"), false, "previewOverlay must stay open when Escape dismisses confirmOverlay");
+
+  // 3. Tab inside previewOverlay traps focus between previewCloseBtn and previewTestPrintBtn
+  const pvClose = document.getElementById("previewCloseBtn");
+  const pvPrint = document.getElementById("previewTestPrintBtn");
+  pvPrint.focus();
+  let tabPrevented = false;
+  document.dispatch("keydown", { key: "Tab", shiftKey: false, preventDefault() { tabPrevented = true; } });
+  assert.equal(tabPrevented, true, "Tab on last button in previewOverlay must wrap");
+  assert.equal(document.activeElement, pvClose);
+
+  // 4. previewTestPrintBtn is disabled while runPrinterTest is in flight
+  const printP = ctx.runPrinterTest("HP LaserJet Pro", "pdf-a4");
+  assert.equal(pvPrint.disabled, true, "previewTestPrintBtn must be disabled while test print is in flight");
+  resolvePrint();
+  await printP;
+  assert.equal(pvPrint.disabled, false, "previewTestPrintBtn must re-enable after test print finishes");
+
+  // 5. Ctrl+K while previewOverlay is open closes previewOverlay and opens cmdOverlay
+  document.dispatch("keydown", { key: "k", ctrlKey: true, preventDefault() {} });
+  assert.equal(pvOv.classList.contains("hidden"), true, "Ctrl+K closes previewOverlay before opening cmdOverlay");
+  assert.equal(cmdOv.classList.contains("hidden"), false, "Ctrl+K opens cmdOverlay");
+});
+
+test("steady-state 5s polls perform zero redundant DOM writes while state, filter, search, language, and error recovery re-render immediately", async () => {
+  const { windowObj, document, timers, MiniEl } = createMiniDom(html);
+  const writes = [];
+  const wrapEl = (el) => {
+    if (!el || el.__instrumented) return el;
+    el.__instrumented = true;
+    const tag = () => el.id || el.tagName;
+    const origAdd = el.classList.add.bind(el.classList);
+    const origRem = el.classList.remove.bind(el.classList);
+    const origTog = el.classList.toggle.bind(el.classList);
+    el.classList.add = (...c) => { writes.push(`${tag()}.classList.add(${c.join(",")})`); return origAdd(...c); };
+    el.classList.remove = (...c) => { writes.push(`${tag()}.classList.remove(${c.join(",")})`); return origRem(...c); };
+    el.classList.toggle = (c, f) => { writes.push(`${tag()}.classList.toggle(${c},${f})`); return origTog(c, f); };
+    const origSetAttr = el.setAttribute.bind(el);
+    el.setAttribute = (k, v) => { writes.push(`${tag()}.setAttribute(${k}=${v})`); return origSetAttr(k, v); };
+    const origHtmlDesc = Object.getOwnPropertyDescriptor(MiniEl.prototype, "innerHTML");
+    Object.defineProperty(el, "innerHTML", {
+      get() { return origHtmlDesc.get.call(this); },
+      set(v) { writes.push(`${tag()}.innerHTML`); origHtmlDesc.set.call(this, v); },
+    });
+    const origTextDesc = Object.getOwnPropertyDescriptor(MiniEl.prototype, "textContent");
+    Object.defineProperty(el, "textContent", {
+      get() { return origTextDesc.get.call(this); },
+      set(v) { writes.push(`${tag()}.textContent`); origTextDesc.set.call(this, v); },
+    });
+    let disabledVal = el.disabled;
+    Object.defineProperty(el, "disabled", {
+      get() { return disabledVal; },
+      set(v) { writes.push(`${tag()}.disabled=${!!v}`); disabledVal = !!v; },
+    });
+    return el;
+  };
+  const walkWrap = (node) => {
+    wrapEl(node);
+    for (const c of node.children || []) walkWrap(c);
+  };
+  walkWrap(document.body);
+
+  let payload = {
+    appVersion: "1.5.7",
+    printers: [
+      { name: "HP LaserJet", kind: "local", is_default: true, status: "ready", port: "USB001", driver: "HP" },
+      { name: "Epson TM-T88", kind: "local", is_default: false, status: "ready", port: "192.168.1.50", driver: "EPSON" },
+    ],
+    defaultPrinter: "HP LaserJet",
+    stateCounts: [["queued", 1], ["done", 5], ["failed", 0]],
+    pdfiumReady: true,
+    webviewVersion: "120.0",
+    environment: { es2022: true, localStorage: true, cookies: true, webSocket: true, secureContext: true, errors: [] },
+    odooOrigin: "https://odoo.example.com",
+    lockedByPolicy: false,
+    autoReprint: false,
+    recentJobs: [
+      { id: "j-1", report: "Invoice", printer: "HP LaserJet", pages: 2, bytes: 2048, state: "done", attempts: 1, error_code: "" },
+      { id: "j-2", report: "Receipt", printer: "Epson TM-T88", pages: 1, bytes: 512, state: "queued", attempts: 0, error_code: "" },
+    ],
+  };
+  let failOverview = false;
+  windowObj.__NATIVE_PRINT__ = {
+    async appOverview() {
+      if (failOverview) throw new Error("ipc_down");
+      return JSON.parse(JSON.stringify(payload));
+    },
+    async printerCapabilities() { return { forms: [{ name: "A4", size: { width_mm: 210, height_mm: 297 } }], duplex: true, color: false, bins: ["Tray 1"] }; },
+    async getPrinterSettings() { return {}; },
+  };
+
+  const ctx = vm.createContext({
+    ...windowObj,
+    setInterval: windowObj.setInterval,
+    setTimeout: windowObj.setTimeout,
+    clearTimeout: windowObj.clearTimeout,
+    clearInterval: windowObj.clearInterval,
+    localStorage: windowObj.localStorage,
+    navigator: {},
+  });
+  new vm.Script(script).runInContext(ctx);
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  // 1. Five consecutive identical steady-state polls must perform 0 DOM writes
+  writes.length = 0;
+  for (let i = 0; i < 5; i++) {
+    assert.equal(await ctx.refreshAll({ silent: true }), true);
+  }
+  assert.deepEqual(writes, [], "identical steady-state polls must perform zero redundant DOM writes");
+
+  // 2. Job filter change re-renders jobsTableBody immediately without touching printersGrid
+  writes.length = 0;
+  ctx.setJobFilter("done");
+  assert.ok(writes.includes("jobsTableBody.innerHTML"), "filter change must re-render jobsTableBody");
+  assert.ok(!writes.includes("printersGrid.innerHTML"), "filter change must not re-render printersGrid");
+  ctx.setJobFilter("all");
+
+  // 3. Queue search change re-renders jobsTableBody after debounce
+  writes.length = 0;
+  const searchEl = document.getElementById("queueSearchInput");
+  searchEl.value = "Receipt";
+  searchEl.dispatch("input", { target: searchEl });
+  const searchTimer = timers.find(t => !t.cleared && t.ms === 120);
+  assert.ok(searchTimer, "expected debounced search timer");
+  searchTimer.fn();
+  assert.ok(writes.includes("jobsTableBody.innerHTML"), "search change must re-render jobsTableBody");
+  searchEl.value = "";
+  searchEl.dispatch("input", { target: searchEl });
+  timers.filter(t => !t.cleared && t.ms === 120).at(-1).fn();
+
+  // 4. Printer status change re-renders printersGrid without rewriting jobsTableBody
+  writes.length = 0;
+  payload.printers[0].status = "offline";
+  await ctx.refreshAll({ silent: true });
+  assert.ok(writes.includes("printersGrid.innerHTML"), "printer status change must re-render printersGrid");
+  assert.ok(!writes.includes("jobsTableBody.innerHTML"), "printer status change must not re-render jobsTableBody");
+
+  // 5. KPI / job change updates KPIs and jobsTableBody without rewriting policyStatusBadge
+  writes.length = 0;
+  payload.stateCounts = [["queued", 0], ["done", 6], ["failed", 0]];
+  payload.recentJobs[1].state = "done";
+  await ctx.refreshAll({ silent: true });
+  assert.equal(document.getElementById("kpiDoneCount").textContent, "6");
+  assert.ok(writes.includes("jobsTableBody.innerHTML"), "job state change must re-render jobsTableBody");
+  assert.ok(!writes.includes("policyStatusBadge.innerHTML"), "unchanged policy badge must not rewrite innerHTML");
+
+  // 6. Language switch re-renders printersGrid, jobsTableBody, envSummary, and policyStatusBadge immediately
+  writes.length = 0;
+  ctx.toggleLang();
+  assert.ok(writes.includes("printersGrid.innerHTML"), "language switch must re-render printersGrid");
+  assert.ok(writes.includes("jobsTableBody.innerHTML"), "language switch must re-render jobsTableBody");
+  assert.ok(writes.includes("envSummary.innerHTML"), "language switch must re-render envSummary");
+  assert.ok(writes.includes("policyStatusBadge.innerHTML"), "language switch must re-render policyStatusBadge");
+
+  // 7. Recovery after an IPC error clears is-stale and hides originAlertBanner even when payload is unchanged
+  failOverview = true;
+  assert.equal(await ctx.refreshAll({ silent: true }), false);
+  assert.equal(document.querySelector(".main-container").classList.contains("is-stale"), true);
+  assert.equal(document.getElementById("originAlertBanner").classList.contains("hidden"), false);
+  failOverview = false;
+  assert.equal(await ctx.refreshAll({ silent: true }), true);
+  assert.equal(document.querySelector(".main-container").classList.contains("is-stale"), false);
+  assert.equal(document.getElementById("originAlertBanner").classList.contains("hidden"), true);
+});
+
+test("prefers-reduced-motion is enforced in theme.css and respected across all desktop pages", () => {
+  const css = readFileSync(new URL("../dist/theme.css", import.meta.url), "utf8");
+  const rmBlock = css.match(/@media\s*\(\s*prefers-reduced-motion\s*:\s*reduce\s*\)\s*\{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.ok(rmBlock, "theme.css must declare @media (prefers-reduced-motion: reduce)");
+  for (const prop of ["--dur-fast: 0ms", "--dur-med: 0ms", "animation-duration: 0.01ms !important", "animation-delay: 0ms !important", "transition-duration: 0.01ms !important", "transition-delay: 0ms !important", "scroll-behavior: auto !important"]) {
+    assert.ok(rmBlock.includes(prop), "theme.css reduced-motion block missing: " + prop);
+  }
+  for (const file of ["index.html", "tabbar.html", "settings.html", "boot.html"]) {
+    const pageHtml = readFileSync(new URL("../dist/" + file, import.meta.url), "utf8");
+    assert.match(pageHtml, /<link\s+rel=["']stylesheet["']\s+href=["']theme\.css["']\s*\/?>/i, file + " must load theme.css");
+    assert.doesNotMatch(pageHtml, /(?:animation|transition)[^;]*!important/i, file + " must not override reduced-motion with !important");
+  }
+});
+
+test("stale-printer root-cause fix: single discovery cache invariant, force-refresh invalidation, and capsEpoch race guard", async () => {
+  // 1. Verify Rust cache coherence invariant (no stacked outer printer_cache; DISCOVERY_TTL + 5s poll < 30s health TTL).
+  const commandsRs = readFileSync(new URL("../src-tauri/src/commands.rs", import.meta.url), "utf8");
+  const winRs = readFileSync(new URL("../../crates/print-win/src/win.rs", import.meta.url), "utf8");
+  assert.equal(commandsRs.includes("pub printer_cache"), false, "duplicate outer printer_cache must be removed");
+  assert.match(commandsRs, /print_win::invalidate_discovery_cache\(\)/, "force refresh must invalidate winspool caches");
+  const ttlMatch = winRs.match(/const DISCOVERY_TTL:\s*std::time::Duration\s*=\s*std::time::Duration::from_secs\((\d+)\);/);
+  assert.ok(ttlMatch, "DISCOVERY_TTL constant must exist");
+  const discoveryTtl = Number(ttlMatch[1]);
+  assert.ok(discoveryTtl + 5 < 30, `DISCOVERY_TTL (${discoveryTtl}s) + 5s UI poll must stay strictly below 30s health TTL`);
+
+  // 2. Verify Control Center manualRefresh sends { force: true }, drops stale in-flight caps, and reloads settings.
+  const { windowObj, document } = createMiniDom(html);
+  const overviewCalls = [];
+  let resolveStaleCaps;
+  let capsCallCount = 0;
+  let settingsCallCount = 0;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const makePrinter = (port) => ({
+    name: "POS-80",
+    kind: "thermal",
+    is_default: true,
+    status: "ready",
+    port,
+    driver: "Generic / Text Only",
+    protocol: "escpos",
+    printer_class: "receipt",
+    health: { source: "spooler", conditions: [], observed_at: nowSec - 17, ttl_secs: 30 },
+  });
+
+  windowObj.__NATIVE_PRINT__ = {
+    async appOverview(opts) {
+      overviewCalls.push(opts || null);
+      return {
+        appVersion: "1.5.7",
+        os: "windows",
+        odooOrigin: "https://erp.example.com",
+        lockedByPolicy: false,
+        autoReprint: true,
+        pdfiumReady: true,
+        webviewVersion: "120.0",
+        environment: { es2022: true, localStorage: true, cookies: true, webSocket: true, secureContext: true, errors: [] },
+        printers: [makePrinter(overviewCalls.length >= 2 ? "USB002" : "USB001")],
+        defaultPrinter: "POS-80",
+        stateCounts: [],
+        recentJobs: [],
+      };
+    },
+    async printerCapabilities() {
+      capsCallCount++;
+      if (capsCallCount === 1) {
+        return new Promise((r) => { resolveStaleCaps = r; });
+      }
+      return { forms: [{ name: "80mm Fresh", size: { width_mm: 80, height_mm: 200 }, roll: true }], bins: ["Tray Fresh"] };
+    },
+    async getPrinterSettings() {
+      settingsCallCount++;
+      return { "POS-80": { paper: settingsCallCount >= 2 ? "80mm Fresh" : "80mm Old" } };
+    },
+  };
+
+  const ctx = vm.createContext({
+    ...windowObj,
+    setInterval: windowObj.setInterval,
+    setTimeout: windowObj.setTimeout,
+    clearTimeout: windowObj.clearTimeout,
+    clearInterval: windowObj.clearInterval,
+    console,
+    Date,
+    Math,
+    JSON,
+    URL,
+    Set,
+    Map,
+    Promise,
+    Array,
+    Object,
+    Number,
+    String,
+    Boolean,
+    RegExp,
+    Error,
+    encodeURIComponent,
+    decodeURIComponent,
+  });
+  ctx.window = ctx;
+  ctx.self = ctx;
+  ctx.globalThis = ctx;
+  new vm.Script(script).runInContext(ctx);
+  await new Promise((r) => setTimeout(r, 15));
+
+  const gridHtmlBefore = document.getElementById("printersGrid").innerHTML;
+  assert.equal(gridHtmlBefore.includes("بيانات قديمة") || gridHtmlBefore.includes("Outdated"), false,
+    "printer observed 17s ago (max age under 12s TTL + 5s poll) must never show stale badge");
+
+  // Trigger manualRefresh while first printerCapabilities call is still in-flight.
+  await ctx.manualRefresh();
+  await new Promise((r) => setTimeout(r, 15));
+  assert.equal(overviewCalls[overviewCalls.length - 1]?.force, true,
+    "manualRefresh must call appOverview({ force: true })");
+  assert.ok(settingsCallCount >= 2, "manualRefresh must reload printerSettings");
+
+  // Resolve the old in-flight caps call AFTER manualRefresh: epoch guard must ignore it.
+  if (resolveStaleCaps) {
+    resolveStaleCaps({ forms: [{ name: "STALE_FORM_OLD", size: { width_mm: 58, height_mm: 100 }, roll: true }], bins: ["STALE_TRAY"] });
+  }
+  await new Promise((r) => setTimeout(r, 15));
+  const gridHtmlAfter = document.getElementById("printersGrid").innerHTML;
+  assert.equal(gridHtmlAfter.includes("STALE_FORM_OLD"), false, "stale in-flight capabilities must be discarded by capsEpoch");
+  assert.equal(gridHtmlAfter.includes("80mm Fresh"), true, "fresh capabilities must render after manualRefresh");
 });

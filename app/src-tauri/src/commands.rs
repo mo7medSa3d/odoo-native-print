@@ -6,7 +6,7 @@
 //! (CVE-2026-42184) can never bypass security.
 
 use crate::config;
-use print_core::diagnostics::{build_bundle_from_queue, bundle_to_json, JobSummary};
+use print_core::diagnostics::{build_bundle_from_queue, JobSummary};
 use print_core::paper::{Form, ScalePolicy};
 use print_core::printer::{PrinterInfo, PrinterKind};
 use print_core::routing::resolve_printer;
@@ -107,22 +107,17 @@ pub struct AppState {
     pub worker_wake: Arc<(Mutex<bool>, Condvar)>,
     pub worker_stop: Arc<AtomicBool>,
     pub printer_settings: Arc<RwLock<config::PrinterSettingsMap>>,
-    /// Latest environment probe report from the page (JSON string):
+    /// Latest parsed environment probe report from the page:
     /// the JavaScript feature/storage facts the Odoo frontend depends
     /// on, surfaced in the overview and the diagnostics bundle so a
     /// broken webview environment is a fact, not a guess.
-    pub environment: RwLock<Option<String>>,
-    /// Short-lived cache of the last printer enumeration. Windows
-    /// printer discovery can take seconds (offline network printers),
-    /// and the Control Center polls the overview every few seconds;
-    /// enumerating on every call made the whole app feel heavy and
-    /// blocked the UI thread. 20s is fresh enough for a settings page.
-    pub printer_cache: RwLock<Option<PrinterCache>>,
+    pub environment: RwLock<Option<serde_json::Value>>,
     /// Tab registry for the tabbed browser (owner brief,
     /// 2026-11-05): one window, a local tab bar, and one child
     /// webview per tab, all sharing one data directory so Odoo
     /// sessions and cookies behave as in a single browser profile.
     pub tabs: RwLock<TabsState>,
+    pub started_at: Instant,
 }
 
 /// One tab in the tabbed browser. The tab bar renders from these
@@ -259,47 +254,38 @@ pub fn tab_title_for(url: &str) -> String {
     "Odoo".to_string()
 }
 
-/// One cached printer enumeration (see `AppState::printer_cache`).
-pub struct PrinterCache {
-    pub at: Instant,
-    pub printers: Vec<PrinterInfo>,
-    pub default: Option<String>,
-}
-
-/// Printer enumeration through the 20s cache (see `PrinterCache`).
-async fn cached_printers(state: &AppState) -> Result<(Vec<PrinterInfo>, Option<String>), String> {
-    const TTL: Duration = Duration::from_secs(20);
-    {
-        let guard = read_lock(&state.printer_cache);
-        if let Some(cache) = &*guard {
-            if cache.at.elapsed() < TTL {
-                return Ok((cache.printers.clone(), cache.default.clone()));
-            }
+/// Single-source printer enumeration backed by `print_win::DISCOVERY_CACHE` (12 s TTL).
+/// Eliminates the former 20 s + 30 s stacked cache that caused live printers to exceed
+/// `PrinterHealth::ttl_secs` (30 s) and flash "Outdated / بيانات قديمة" in the UI.
+/// Passing `force = true` clears both discovery and capability caches before reading.
+async fn cached_printers(force: bool) -> Result<(Vec<PrinterInfo>, Option<String>), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if force {
+            print_win::invalidate_discovery_cache();
         }
-    }
-    let (printers, default) = tauri::async_runtime::spawn_blocking(|| {
         let printers = print_win::discover_printers().map_err(|e| e.to_string())?;
         let default = print_win::default_printer_name().ok();
         Ok::<_, String>((printers, default))
     })
     .await
-    .map_err(|e| e.to_string())??;
-    {
-        let mut guard = write_lock(&state.printer_cache);
-        *guard = Some(PrinterCache {
-            at: Instant::now(),
-            printers: printers.clone(),
-            default: default.clone(),
-        });
-    }
-    Ok((printers, default))
+    .map_err(|e| e.to_string())?
 }
+
+static PDFIUM_READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
 /// PDFium availability is a process-lifetime fact; probing it used to
 /// load the 7.5 MB DLL on every overview call.
 fn pdfium_ready() -> bool {
-    static READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *READY.get_or_init(|| print_render::Pdfium::load().is_ok())
+    *PDFIUM_READY.get_or_init(|| print_render::Pdfium::load().is_ok())
+}
+
+/// WebView2 runtime version is a process-lifetime constant; caching
+/// avoids querying the runtime on every Control Center poll.
+fn webview_version_cached() -> &'static str {
+    static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    VERSION
+        .get_or_init(|| tauri::webview_version().unwrap_or_else(|_| "unknown".to_string()))
+        .as_str()
 }
 
 impl AppState {
@@ -366,7 +352,9 @@ where
                 let idx = k
                     .parse::<usize>()
                     .map_err(|_| serde::de::Error::custom("invalid byte map key"))?;
-                if m.len() >= print_core::security::MAX_JOB_BYTES {
+                if idx >= print_core::security::MAX_JOB_BYTES
+                    || m.len() >= print_core::security::MAX_JOB_BYTES
+                {
                     return Err(serde::de::Error::custom("payload_too_large"));
                 }
                 m.insert(idx, v);
@@ -878,18 +866,23 @@ pub struct AppOverviewResponse {
 pub async fn app_overview(
     webview: tauri::Webview,
     state: State<'_, AppState>,
+    force: Option<bool>,
 ) -> Result<AppOverviewResponse, String> {
     check_origin(&webview, &state)?;
-    let pdfium_ready = tauri::async_runtime::spawn_blocking(pdfium_ready)
-        .await
-        .map_err(|e| e.to_string())?;
-    let (printers, default_printer) = cached_printers(&state).await?;
+    let pdfium_ready = match PDFIUM_READY.get().copied() {
+        Some(ready) => ready,
+        None => tauri::async_runtime::spawn_blocking(pdfium_ready)
+            .await
+            .map_err(|e| e.to_string())?,
+    };
+    let (printers, default_printer) = cached_printers(force.unwrap_or(false)).await?;
     let origin = read_lock(&state.configured_origin).clone();
     let auto_reprint = *read_lock(&state.auto_reprint);
     let bundle = {
         let queue = lock_queue(&state.queue);
         build_bundle_from_queue(&queue).map_err(|e| e.to_string())?
     };
+    let environment = read_lock(&state.environment).clone();
     Ok(AppOverviewResponse {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         os: std::env::consts::OS.to_string(),
@@ -897,10 +890,8 @@ pub async fn app_overview(
         locked_by_policy: state.locked_by_policy,
         auto_reprint,
         pdfium_ready,
-        webview_version: tauri::webview_version().unwrap_or_else(|_| "unknown".to_string()),
-        environment: read_lock(&state.environment)
-            .clone()
-            .and_then(|raw| serde_json::from_str(&raw).ok()),
+        webview_version: webview_version_cached().to_string(),
+        environment,
         printers,
         default_printer,
         state_counts: bundle.state_counts,
@@ -912,9 +903,10 @@ pub async fn app_overview(
 pub async fn list_printers(
     webview: tauri::Webview,
     state: State<'_, AppState>,
+    force: Option<bool>,
 ) -> Result<Vec<PrinterInfo>, String> {
     check_origin(&webview, &state)?;
-    let (printers, _default) = cached_printers(&state).await?;
+    let (printers, _default) = cached_printers(force.unwrap_or(false)).await?;
     Ok(printers)
 }
 
@@ -1062,7 +1054,9 @@ pub async fn run_test_print(
     if printer.trim().is_empty() || printer.len() > 512 {
         return Err("printer_required".to_string());
     }
-    let config_dir = state.config_dir.clone();
+    let saved_paper = read_lock(&state.printer_settings)
+        .get(printer.trim())
+        .and_then(|s| s.paper.clone());
     let queue_arc = Arc::clone(&state.queue);
     let id = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let options = options.unwrap_or_default();
@@ -1074,7 +1068,7 @@ pub async fn run_test_print(
     // up front with the reason instead of enqueueing a doomed job.
     let raw_kind = matches!(
         kind.as_str(),
-        "thermal-80mm" | "thermal-58mm" | "escpos" | "zpl-label" | "zpl" | "tspl-label" | "tspl" | "epl-label" | "epl"
+        "thermal-80mm" | "thermal-58mm" | "escpos" | "zpl-label" | "zpl" | "tspl-label" | "tspl" | "epl-label" | "epl" | "cpcl-label" | "cpcl"
     );
     if raw_kind && !printer.contains("://") {
         // Fail closed: a raw calibration is refused whenever the
@@ -1084,7 +1078,7 @@ pub async fn run_test_print(
         let verified_physical = matches!(found, Some(f) if f.kind != PrinterKind::Virtual);
         if !verified_physical {
             return Err(
-                "This calibration sends raw printer language (ESC/POS / ZPL / TSPL). It was refused because the target printer could not be verified as a physical printer (a virtual PDF/XPS writer would turn it into a corrupt file). Choose a physical printer from the discovered list."
+                "Raw calibration (ESC/POS, ZPL, TSPL) requires a verified physical printer. Select a physical printer from the list."
                     .to_string(),
             );
         }
@@ -1100,11 +1094,12 @@ pub async fn run_test_print(
                 "zpl-label" | "zpl" => "zpl",
                 "tspl-label" | "tspl" => "tspl",
                 "epl-label" | "epl" => "epl",
+                "cpcl-label" | "cpcl" => "cpcl",
                 _ => "",
             };
             if !wanted.is_empty() && f.protocol != wanted {
                 return Err(format!(
-                    "This calibration sends {} printer language, but \"{}\" is a {} printer ({}). It was refused so the printer never receives a language it cannot print. Choose the calibration that matches this printer.",
+                    "Calibration language {} does not match \"{}\" ({}, {}). Select the calibration that matches this printer.",
                     wanted.to_uppercase(),
                     f.name,
                     f.printer_class,
@@ -1226,6 +1221,29 @@ pub async fn run_test_print(
                 5,
             )
         }
+        "cpcl-label" | "cpcl" => {
+            let bm = print_render::calibration::calibration_thermal_80mm();
+            let cpcl = print_raw::cpcl::bitmap_label(&bm, 203, 1)
+                .map_err(|e| e.to_string())?;
+            (
+                "cpcl",
+                cpcl,
+                JobOptions {
+                    mode: "cpcl".to_string(),
+                    paper: Some(paper.unwrap_or_else(|| "100x150mm".to_string())),
+                    copies: 1,
+                    scale_policy: Some("custom_allowed".to_string()),
+                    duplex: None,
+                    color: false,
+                    cut: false,
+                    tray: None,
+                    media_roll_width_mm: None,
+                    label_gap_mm: None,
+                    source_width_mm: None,
+                },
+                5,
+            )
+        }
         "pdf-a4" | "pdf" | "gdi" => {
             // The test page is generated AT the size it will print
             // on — the form the user chose in the lab (by name,
@@ -1241,11 +1259,7 @@ pub async fn run_test_print(
             let chosen = paper
                 .clone()
                 .filter(|n| !n.trim().is_empty() && !n.eq_ignore_ascii_case("auto"))
-                .or_else(|| {
-                    config::load_printer_settings(&config_dir)
-                        .get(printer.trim())
-                        .and_then(|s| s.paper.clone())
-                });
+                .or(saved_paper);
             let form = chosen
                 .as_deref()
                 .and_then(|name| caps.as_ref().and_then(|c| find_caps_form(c, name)))
@@ -1335,19 +1349,25 @@ pub fn export_diagnostics(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     check_local_only(&webview)?;
-    let queue = lock_queue(&state.queue);
-    let bundle = build_bundle_from_queue(&queue).map_err(|e| e.to_string())?;
+    let bundle = {
+        let queue = lock_queue(&state.queue);
+        build_bundle_from_queue(&queue).map_err(|e| e.to_string())?
+    };
     let mut value: serde_json::Value =
-        serde_json::from_str(&bundle_to_json(&bundle)).unwrap_or(serde_json::json!({}));
+        serde_json::to_value(&bundle).unwrap_or_else(|_| serde_json::json!({}));
     // The bundle is built by print-core and stamps its own crate
     // version; report the desktop app's version instead.
     value["app_version"] = serde_json::json!(env!("CARGO_PKG_VERSION"));
-    value["webview_version"] =
-        serde_json::json!(tauri::webview_version().unwrap_or_else(|_| "unknown".to_string()));
-    if let Some(raw) = read_lock(&state.environment).clone() {
-        if let Ok(env) = serde_json::from_str::<serde_json::Value>(&raw) {
-            value["environment"] = env;
-        }
+    value["webview_version"] = serde_json::json!(webview_version_cached());
+    value["arch"] = serde_json::json!(std::env::consts::ARCH);
+    value["uptime_secs"] = serde_json::json!(state.started_at.elapsed().as_secs());
+    value["open_tab_count"] = serde_json::json!(read_lock(&state.tabs).order.len());
+    value["pdfium_ready"] = serde_json::json!(pdfium_ready());
+    value["locked_by_policy"] = serde_json::json!(state.locked_by_policy);
+    value["auto_reprint"] = serde_json::json!(*read_lock(&state.auto_reprint));
+    value["origin_configured"] = serde_json::json!(read_lock(&state.configured_origin).is_some());
+    if let Some(env) = read_lock(&state.environment).clone() {
+        value["environment"] = env;
     }
     Ok(value.to_string())
 }
@@ -1438,6 +1458,9 @@ pub async fn open_tab_internal(
         tabs.order.retain(|l| l != &label);
         tabs.urls.remove(&label);
         tabs.pos_tabs.remove(&label);
+        if tabs.active.as_deref() == Some(label.as_str()) {
+            tabs.active = tabs.order.first().cloned();
+        }
         return Err(err);
     }
     crate::activate_tab(app, &label);
@@ -1564,10 +1587,10 @@ pub async fn tab_close(
         tabs.order.len() == 1
     };
     if is_last {
-        let origin = read_lock(&state.configured_origin).clone();
-        let fallback_url = match origin {
-            Some(_) => local_app_url("boot.html")?,
-            None => local_app_url("index.html")?,
+        let fallback_url = if read_lock(&state.configured_origin).is_some() {
+            local_app_url("boot.html")?
+        } else {
+            local_app_url("index.html")?
         };
         open_tab_internal(&app, &state, fallback_url).await?;
     }
@@ -1594,10 +1617,17 @@ pub async fn tab_close(
     if let Some(wv) = app.get_webview(&label) {
         let _ = wv.close();
     }
-    if was_active {
-        if let Some(next) = neighbor {
+    if let Some(next) = neighbor {
+        if was_active {
             crate::activate_tab(&app, &next);
         }
+    } else {
+        let fallback_url = if read_lock(&state.configured_origin).is_some() {
+            local_app_url("boot.html")?
+        } else {
+            local_app_url("index.html")?
+        };
+        open_tab_internal(&app, &state, fallback_url).await?;
     }
     Ok(())
 }
@@ -1664,9 +1694,10 @@ pub async fn report_environment(
     if report.len() > 8192 {
         return Err("environment_report_too_large".to_string());
     }
+    let parsed = serde_json::from_str::<serde_json::Value>(&report).ok();
     {
         let mut guard = write_lock(&state.environment);
-        *guard = Some(report);
+        *guard = parsed;
     }
     // A page on the configured origin just loaded: if the user is
     // signed in, keep that session alive across restarts.
@@ -1791,6 +1822,7 @@ pub fn set_printer_settings(
             return Err("printer setting value too long".to_string());
         }
     }
+    let mut guard = write_lock(&state.printer_settings);
     let mut map = config::load_printer_settings_checked(&state.config_dir)?;
     if settings == config::PrinterSettings::default() {
         map.remove(&name);
@@ -1798,7 +1830,7 @@ pub fn set_printer_settings(
         map.insert(name, settings);
     }
     config::save_printer_settings(&state.config_dir, &map)?;
-    *write_lock(&state.printer_settings) = map.clone();
+    *guard = map.clone();
     Ok(map)
 }
 
@@ -1896,7 +1928,7 @@ pub async fn open_odoo_origin(
     Ok(())
 }
 
-// --- Background Print Worker & Hardware Dispatch ----------------------
+// Background print worker and hardware dispatch.
 
 /// Parameters shared by the PDF and PNG raw-render paths.
 /// `render_dpi` is the device render resolution
@@ -1945,6 +1977,14 @@ pub(crate) fn is_blocked_metadata_ip(ip: std::net::IpAddr) -> bool {
     }
 }
 
+pub(crate) fn is_blocked_metadata_host(host: &str) -> bool {
+    let h = host.trim_end_matches('.').to_ascii_lowercase();
+    matches!(
+        h.as_str(),
+        "metadata.google.internal" | "metadata.goog" | "instance-data"
+    )
+}
+
 struct NativePrintBackend {
     db_path: String,
     printer_settings: Arc<RwLock<config::PrinterSettingsMap>>,
@@ -1965,7 +2005,9 @@ impl NativePrintBackend {
             self.read_queue = Some(q);
         }
         let payload = {
-            let q = self.read_queue.as_ref().expect("read_queue initialized");
+            let q = self.read_queue.as_ref().ok_or_else(|| {
+                BackendError::retryable("QUEUE_DB_ERROR", "read queue unavailable")
+            })?;
             q.payload(job_id)
         };
         let (kind, data) = match payload {
@@ -1984,7 +2026,9 @@ impl NativePrintBackend {
             }
         };
         let opts = {
-            let q = self.read_queue.as_ref().expect("read_queue initialized");
+            let q = self.read_queue.as_ref().ok_or_else(|| {
+                BackendError::retryable("QUEUE_DB_ERROR", "read queue unavailable")
+            })?;
             q.options(job_id)
         };
         let opts = match opts {
@@ -2184,17 +2228,7 @@ impl NativePrintBackend {
         }
     }
 
-    fn is_blocked_metadata_ip(ip: std::net::IpAddr) -> bool {
-        is_blocked_metadata_ip(ip)
-    }
-
-    fn is_blocked_metadata_host(host: &str) -> bool {
-        let h = host.trim_end_matches('.').to_ascii_lowercase();
-        matches!(
-            h.as_str(),
-            "metadata.google.internal" | "metadata.goog" | "instance-data"
-        )
-    }
+    // Metadata host/IP checks live at module level so config.rs shares them.
 
     fn reject_metadata_resolution(host: &str, port: u16) -> Result<(), BackendError> {
         if host.parse::<std::net::IpAddr>().is_ok() {
@@ -2319,14 +2353,14 @@ impl NativePrintBackend {
             let v6 = host.parse::<std::net::Ipv6Addr>().map_err(|_| {
                 BackendError::fatal("BAD_PRINTER_ADDRESS", "invalid IPv6 printer host")
             })?;
-            if Self::is_blocked_metadata_ip(std::net::IpAddr::V6(v6)) {
+            if is_blocked_metadata_ip(std::net::IpAddr::V6(v6)) {
                 return Err(BackendError::fatal(
                     "BAD_PRINTER_ADDRESS",
                     "cloud metadata address is not allowed",
                 ));
             }
         } else if let Ok(v4) = host.parse::<std::net::Ipv4Addr>() {
-            if Self::is_blocked_metadata_ip(std::net::IpAddr::V4(v4)) {
+            if is_blocked_metadata_ip(std::net::IpAddr::V4(v4)) {
                 return Err(BackendError::fatal(
                     "BAD_PRINTER_ADDRESS",
                     "cloud metadata address is not allowed",
@@ -2337,7 +2371,7 @@ impl NativePrintBackend {
                 "BAD_PRINTER_ADDRESS",
                 "invalid printer host",
             ));
-        } else if Self::is_blocked_metadata_host(&host) {
+        } else if is_blocked_metadata_host(&host) {
             return Err(BackendError::fatal(
                 "BAD_PRINTER_ADDRESS",
                 "cloud metadata address is not allowed",
@@ -2459,7 +2493,7 @@ impl NativePrintBackend {
                 }
                 Ok(out)
             }
-            "epl" => {
+            "epl" | "cpcl" => {
                 let mut out = Vec::new();
                 for i in 0..count {
                     let page = doc
@@ -2472,11 +2506,21 @@ impl NativePrintBackend {
                         Some((w, h)) => print_render::bitmap::fit_mono_to_box(&bm, w, h),
                         None => bm,
                     };
-                    out.extend_from_slice(&print_raw::epl::epl_label_copies_with_gap(
-                        &bm,
-                        copies,
-                        Self::label_gap_dots(label_gap_mm, render_dpi),
-                    ));
+                    if mode == "cpcl" {
+                        let chunk = print_raw::cpcl::bitmap_label(
+                            &bm,
+                            render_dpi.clamp(72, u16::MAX as u32) as u16,
+                            copies.max(1),
+                        )
+                        .map_err(|e| BackendError::fatal("CPCL_ENCODE_ERROR", &e.to_string()))?;
+                        out.extend_from_slice(&chunk);
+                    } else {
+                        out.extend_from_slice(&print_raw::epl::epl_label_copies_with_gap(
+                            &bm,
+                            copies,
+                            Self::label_gap_dots(label_gap_mm, render_dpi),
+                        ));
+                    }
                 }
                 Ok(out)
             }
@@ -2533,7 +2577,7 @@ impl NativePrintBackend {
                 .bitmap(0, 0, &mono)
                 .print(1, copies.max(1) as u32))
             }
-            "epl" => {
+            "epl" | "cpcl" => {
                 let canvas = print_render::decode_png(png_bytes)
                     .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
                 let mono = canvas.to_mono(print_render::image::RECEIPT_THRESHOLD);
@@ -2541,11 +2585,20 @@ impl NativePrintBackend {
                     Some((w, h)) => print_render::bitmap::fit_mono_to_box(&mono, w, h),
                     None => mono,
                 };
-                Ok(print_raw::epl::epl_label_copies_with_gap(
-                    &mono,
-                    copies,
-                    Self::label_gap_dots(label_gap_mm, render_dpi),
-                ))
+                if mode == "cpcl" {
+                    print_raw::cpcl::bitmap_label(
+                        &mono,
+                        render_dpi.clamp(72, u16::MAX as u32) as u16,
+                        copies.max(1),
+                    )
+                    .map_err(|e| BackendError::fatal("CPCL_ENCODE_ERROR", &e.to_string()))
+                } else {
+                    Ok(print_raw::epl::epl_label_copies_with_gap(
+                        &mono,
+                        copies,
+                        Self::label_gap_dots(label_gap_mm, render_dpi),
+                    ))
+                }
             }
             "escpos" => {
                 let target_width_dots = target_width_dots
@@ -2702,10 +2755,10 @@ impl PrintBackend for NativePrintBackend {
                         }
                         Ok(None) => {}
                         Err(_) => {
-                            silent_set
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .insert(addr_key);
+                            let mut set = silent_set.lock().unwrap_or_else(|e| e.into_inner());
+                            if set.len() < 256 {
+                                set.insert(addr_key);
+                            }
                         }
                     }
                 }
@@ -2965,9 +3018,9 @@ impl PrintBackend for NativePrintBackend {
                 print_core::printer::raw_target_block(&kind, &opts.mode, pk, &target_class)
             {
                 let message = if code == "RAW_TO_OFFICE_PRINTER" {
-                    "raw printer language (ESC/POS / ZPL / TSPL / EPL) cannot be printed by an office printer; choose a printer that speaks this language"
+                    "Raw printer language (ESC/POS, ZPL, TSPL, EPL) is not supported on office printers. Select a compatible thermal or label printer."
                 } else {
-                    "raw printer language (ESC/POS / ZPL / TSPL / EPL) cannot be sent to a virtual PDF/XPS printer; choose a physical printer"
+                    "Raw printer language (ESC/POS, ZPL, TSPL, EPL) cannot print to a virtual PDF/XPS printer. Select a physical printer."
                 };
                 return Err(BackendError::fatal(code, message));
             }
@@ -2995,36 +3048,38 @@ impl PrintBackend for NativePrintBackend {
         // The same capabilities read supplies the render DPI:
         // label bitmaps are emitted in device dots, so the box
         // and the render must use one resolution.
-        let (label_box, render_dpi) = if matches!(opts.mode.as_str(), "zpl" | "tspl" | "epl")
-            && matches!(kind.as_str(), "pdf" | "image-png")
-        {
-            match print_win::printer_capabilities(&target_name) {
-                Ok(caps) => {
-                    let dpi = print_core::printer::preferred_raw_render_dpi(&caps.resolutions_dpi);
-                    let mut best: Option<(u32, u32)> = None;
-                    let mut roll_w: Option<u32> = None;
-                    for form in &caps.forms {
-                        let w = (form.size.width_mm * dpi as f64 / 25.4) as u32;
-                        if form.roll {
-                            roll_w = Some(w);
-                            continue;
+        let (label_box, render_dpi) =
+            if matches!(opts.mode.as_str(), "zpl" | "tspl" | "epl" | "cpcl")
+                && matches!(kind.as_str(), "pdf" | "image-png")
+            {
+                match print_win::printer_capabilities(&target_name) {
+                    Ok(caps) => {
+                        let dpi =
+                            print_core::printer::preferred_raw_render_dpi(&caps.resolutions_dpi);
+                        let mut best: Option<(u32, u32)> = None;
+                        let mut roll_w: Option<u32> = None;
+                        for form in &caps.forms {
+                            let w = (form.size.width_mm * dpi as f64 / 25.4) as u32;
+                            if form.roll {
+                                roll_w = Some(w);
+                                continue;
+                            }
+                            let cand = (w, (form.size.height_mm * dpi as f64 / 25.4) as u32);
+                            let area = cand.0 as u64 * cand.1 as u64;
+                            if best.map_or(true, |b: (u32, u32)| area > b.0 as u64 * b.1 as u64) {
+                                best = Some(cand);
+                            }
                         }
-                        let cand = (w, (form.size.height_mm * dpi as f64 / 25.4) as u32);
-                        let area = cand.0 as u64 * cand.1 as u64;
-                        if best.map_or(true, |b: (u32, u32)| area > b.0 as u64 * b.1 as u64) {
-                            best = Some(cand);
-                        }
+                        (best.or_else(|| roll_w.map(|w| (w, u32::MAX))), dpi)
                     }
-                    (best.or_else(|| roll_w.map(|w| (w, u32::MAX))), dpi)
+                    Err(_) => (None, 203),
                 }
-                Err(_) => (None, 203),
-            }
-        } else {
-            (None, 203)
-        };
+            } else {
+                (None, 203)
+            };
 
         match (kind.as_str(), opts.mode.as_str()) {
-            ("pdf", "escpos" | "zpl" | "tspl" | "epl") => {
+            ("pdf", "escpos" | "zpl" | "tspl" | "epl" | "cpcl") => {
                 let raw_bytes = Self::pdf_to_raw_stream(
                     &data,
                     RawRender {
@@ -3064,7 +3119,7 @@ impl PrintBackend for NativePrintBackend {
                 &format!("unsupported print mode {:?} for this document", opts.mode),
             )),
             ("image-png", "gdi") => print_png_via_gdi(&target_name, title, &data, &opts),
-            ("image-png", "escpos" | "zpl" | "tspl" | "epl") => {
+            ("image-png", "escpos" | "zpl" | "tspl" | "epl" | "cpcl") => {
                 let raw_bytes = Self::png_to_raw_stream(
                     &data,
                     RawRender {
@@ -3217,10 +3272,9 @@ pub fn spawn_worker_loop(
                                     .unwrap_or_else(|e| e.into_inner())
                                     .remove(&self.1);
                                 let (lock, cvar) = &*self.2;
-                                if let Ok(mut pending) = lock.lock() {
-                                    *pending = true;
-                                    cvar.notify_one();
-                                }
+                                let mut pending = lock.lock().unwrap_or_else(|p| p.into_inner());
+                                *pending = true;
+                                cvar.notify_one();
                             }
                         }
                         let _guard = SlotGuard(flight_c, printer.clone(), wake_c);
@@ -3592,7 +3646,7 @@ mod tests {
         q.store_payload("job-reuse-1", "pdf", b"%PDF-1.4").unwrap();
         let mut backend = NativePrintBackend {
             db_path: String::new(),
-            config_dir: std::path::PathBuf::new(),
+            printer_settings: Arc::new(RwLock::new(config::PrinterSettingsMap::new())),
             read_queue: Some(q),
         };
         let (kind1, data1, _) = backend.load_job_data("job-reuse-1").unwrap();

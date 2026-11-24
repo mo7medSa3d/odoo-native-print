@@ -285,8 +285,8 @@ mod tests {
             "http://8.8.8.8:8069"
         ));
         assert!(origin_is_allowed(
-            "http://68.221.27.248:8070",
-            "http://68.221.27.248:8070"
+            "http://203.0.113.42:8070",
+            "http://203.0.113.42:8070"
         ));
         assert!(origin_is_allowed(
             "http://172.32.0.1:8069",

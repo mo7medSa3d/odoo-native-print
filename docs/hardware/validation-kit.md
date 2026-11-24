@@ -5,7 +5,7 @@ sheet is filed in this folder. Do not change a status on the basis of a
 virtual-printer or mock test.
 
 ## How to run a validation (human, ~15 min per printer)
-1. Install the Windows build, configure the Odoo origin, add the printer profile.
+1. Install the Windows build, configure the Odoo origin, and select the target printer in the Control Center or Odoo systray.
 2. Print the built-in calibration page: rulers on all edges, 100x100 mm box,
    offset marks, Code128 + QR barcode, Arabic sample line, printer/paper/DPI header.
 3. Measure the box with a ruler (tolerance: within 1 mm), scan the barcodes

@@ -6,7 +6,7 @@ const ok = (name, cond) => { cond ? pass++ : fail++; console.log((cond ? "PASS "
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const overview = {
-  appVersion: "1.3.2", printers: [{ name: "HP LaserJet", kind: "local", is_default: true, status: "ready", port: "USB001", driver: "HP" }],
+  appVersion: "1.5.7", printers: [{ name: "HP LaserJet", kind: "local", is_default: true, status: "ready", port: "USB001", driver: "HP" }],
   defaultPrinter: "HP LaserJet", stateCounts: [["queued", 1]], pdfiumReady: true,
   webviewVersion: "120.0", environment: { es2022: true }, odooOrigin: "http://192.168.1.20:8069",
   lockedByPolicy: false, autoReprint: false,

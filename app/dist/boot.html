@@ -18,10 +18,12 @@
     overflow: hidden;
     width: min(92vw, 440px);
     margin-block: auto;
-    background: var(--bg-elevated);
+    background: var(--glass-bg-strong);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
     border: 1px solid var(--border);
     border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-lg), var(--glass-highlight);
     padding: calc(var(--space-8) + 3px) var(--space-6) var(--space-6);
     text-align: center;
     transition: border-color var(--dur-med) var(--ease-out), box-shadow var(--dur-med) var(--ease-out);
@@ -103,7 +105,7 @@
     transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
   }
   button:hover:not(:disabled) { background: var(--bg-subtle); border-color: var(--border-strong); }
-  button:active:not(:disabled) { background: var(--bg-hover); }
+  button:active:not(:disabled) { background: var(--bg-hover); transform: scale(0.97); }
   button:focus-visible { box-shadow: var(--focus-ring); }
   button:disabled { opacity: 0.55; cursor: not-allowed; }
   button.primary {
@@ -213,9 +215,13 @@
     document.getElementById("credit").textContent = T.credit;
     if (viewState === "connecting") {
       document.getElementById("title").textContent = T.connecting;
-      var msgEl = document.getElementById("msg");
-      if (msgEl && msgEl.firstChild && msgEl.firstChild.nodeType === 3) {
-        msgEl.firstChild.nodeValue = T.preparing + " ";
+      if (origin) {
+        setMsgWithOrigin(T.preparing + " ", "");
+      } else {
+        var msgEl = document.getElementById("msg");
+        if (msgEl && msgEl.firstChild && msgEl.firstChild.nodeType === 3) {
+          msgEl.firstChild.nodeValue = T.preparing + " ";
+        }
       }
     }
     else if (viewState === "down") showDown(true);
@@ -300,7 +306,7 @@
     if (typeof u !== "string" || !/^https?:\/\//i.test(u)) return false;
     try {
       var parsed = new URL(u);
-      return (parsed.protocol === "https:" || parsed.protocol === "http:") && parsed.hostname.length > 0;
+      return (parsed.protocol === "https:" || parsed.protocol === "http:") && parsed.hostname.length > 0 && !parsed.username && !parsed.password;
     } catch (e) { return false; }
   }
   function tryProbe() {
@@ -308,6 +314,7 @@
     probing = true;
     setCardState("connecting");
     document.getElementById("title").textContent = T.connecting;
+    if (origin) setMsgWithOrigin(T.preparing + " ", "");
     var retryBtn = document.getElementById("retry");
     if (retryBtn) retryBtn.disabled = true;
     document.getElementById("spinner").style.display = "block";
@@ -334,6 +341,7 @@
     window.location.replace("index.html");
   });
 
+  window.addEventListener("pagehide", function () { stopCountdown(); disarmNavWatchdog(); });
   window.addEventListener("storage", applyPrefs);
   applyPrefs();
 

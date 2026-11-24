@@ -1,11 +1,9 @@
 /** @odoo-module **/
 import { _t } from "@web/core/l10n/translation";
 
-// ---------------------------------------------------------------------
 // Live printer model: printers are never stored on the server. The
 // desktop app on THIS PC is the only printer authority; these helpers
 // turn its live inventory into a print target at click time.
-// ---------------------------------------------------------------------
 
 const SELECTION_KEY = "native_print.selected_printer";
 const POS_SELECTION_KEY = "native_print.selected_pos_printer";
@@ -13,6 +11,12 @@ const POS_SELECTION_KEY = "native_print.selected_pos_printer";
 // Shared terminal job states matching the desktop queue and server log.
 // Watchers decide whether to keep observing after retryable outcomes (failed/dead_letter).
 export const JOB_TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);
+
+/** Allow only short machine error codes in UI toasts so raw traces never leak. */
+export function safeErrorCode(code, fallback = "error") {
+    const text = typeof code === "string" ? code.trim() : "";
+    return /^[A-Za-z0-9_.-]{1,64}$/.test(text) ? text : fallback;
+}
 export const JOB_UPDATED_EVENT = "native_print:job_updated";
 
 export function notifyJobUpdated() {
@@ -64,10 +68,10 @@ const WORD_RE_ZPL = /(^|[^a-z0-9])zpl([^a-z0-9]|$)/;
 const WORD_RE_TSC = /(^|[^a-z0-9])tsc([^a-z0-9]|$)/;
 const WORD_RE_TSPL = /(^|[^a-z0-9])tspl([^a-z0-9]|$)/;
 const WORD_RE_EPL = /(^|[^a-z0-9])epl([^a-z0-9]|$)/;
+const WORD_RE_CPCL = /(^|[^a-z0-9])cpcl([^a-z0-9]|$)/;
 
 /** Conservative protocol inference from the installed driver identity. */
 export function detectPrinterType(printer) {
-    // The desktop bridge ships the app's own protocol detection on
     // Virtual writers are an unconditional safety override. Even a
     // stale or inconsistent bridge payload must never make a PDF/XPS
     // writer look like a RAW thermal or label target.
@@ -102,6 +106,9 @@ export function detectPrinterType(printer) {
     }
     if (WORD_RE_EPL.test(signature)) {
         return { mode: "epl", printerClass: "label" };
+    }
+    if (WORD_RE_CPCL.test(signature)) {
+        return { mode: "cpcl", printerClass: "label" };
     }
     const officeExclusions = [
         "laserjet", "deskjet", "officejet", "inkjet", "ecosys", "bizhub",
@@ -142,6 +149,7 @@ function isIpLiteral(value) {
     // IPv6: hex groups with at most one "::" compression and no
     // stray leading/trailing single colon.
     return /^[0-9a-fA-F:]+$/.test(text)
+        && !text.includes(":::")
         && (text.match(/::/g) || []).length <= 1
         && (!text.startsWith(":") || text.startsWith("::"))
         && (!text.endsWith(":") || text.endsWith("::"));
@@ -162,7 +170,7 @@ export function formatFormsSummary(forms, rollLabel) {
 }
 
 export function printerPatternFor(printer, mode) {
-    const rawModes = ["escpos", "zpl", "tspl", "epl"];
+    const rawModes = ["escpos", "zpl", "tspl", "epl", "cpcl"];
     const port = String((printer && printer.port) || "").trim();
     if (rawModes.includes(mode) && isIpLiteral(port)) {
         // Bracket IPv6 literals in URI authority so the port suffix is unambiguous.
@@ -283,8 +291,7 @@ export async function resolveBridgeTarget(bridge, options = {}) {
     };
 }
 
-// ---------------------------------------------------------------------
-// User notifications: one helper for every Native Print message, so
+// User notifications: one helper for every Yaseir Print message, so
 // report prints and POS receipts behave identically.
 // - Success/info stay quiet: short-lived and auto-dismissed.
 // - Warnings and failures are sticky: a print that did not happen
@@ -295,12 +302,32 @@ export async function resolveBridgeTarget(bridge, options = {}) {
 //   reporting the same failure) is shown only once.
 // Notification problems must never block printing, so every failure
 // inside this helper is swallowed.
-// ---------------------------------------------------------------------
 
 const NOTIFICATION_DEDUPE_MS = 4000;
 const shownNotifications = new Map();
 
-export function notifyUser(env, message, type = "info", title = _t("Yaseir Print")) {
+function nativeBridge() {
+    return typeof window !== "undefined" ? window.__NATIVE_PRINT__ || null : null;
+}
+
+function isNativeApp() {
+    return Boolean(nativeBridge());
+}
+
+export function recoveryButtons() {
+    if (isNativeApp() && typeof nativeBridge()?.openControlCenter === "function") {
+        return [
+            {
+                name: _t("Open Control Center"),
+                primary: true,
+                onClick: () => Promise.resolve().then(() => nativeBridge()?.openControlCenter?.()).catch(() => {}),
+            },
+        ];
+    }
+    return null;
+}
+
+export function notifyUser(env, message, type = "info", title = _t("Yaseir Print"), buttons = null) {
     try {
         const notification =
             env && env.services && env.services.notification;
@@ -324,6 +351,8 @@ export function notifyUser(env, message, type = "info", title = _t("Yaseir Print
             title,
             type,
             sticky: type === "danger" || type === "warning",
+            className: "o_native_print_notification",
+            ...(Array.isArray(buttons) && buttons.length ? { buttons } : {}),
         });
     } catch (_err) {
         // Informational only; never block printing.

@@ -23,7 +23,7 @@ const capsByName = {
   "OneNote (Desktop)": { forms: [{ name: "A4", size: { width_mm: 210, height_mm: 297 }, roll: false }], resolutions_dpi: [], duplex: false, color: true },
 };
 const overview = {
-  appVersion: "1.4.11", printers, defaultPrinter: "HP LaserJet",
+  appVersion: "1.5.7", printers, defaultPrinter: "HP LaserJet",
   stateCounts: [], pdfiumReady: true, webviewVersion: "120.0",
   environment: { es2022: true }, odooOrigin: "http://192.168.1.20:8069",
   lockedByPolicy: false, autoReprint: false, recentJobs: [],

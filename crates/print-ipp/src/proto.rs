@@ -1,5 +1,4 @@
-//! IPP message encoding/parsing (RFC 8010). See
-//! docs/research/ipp-protocol.md for the verified constants and pitfalls.
+//! IPP message encoding/parsing (RFC 8010).
 
 pub mod tag {
     pub const GROUP_OPERATION: u8 = 0x01;
@@ -140,6 +139,30 @@ fn base_operation_attrs(printer_uri: &str) -> Vec<Attr> {
     ]
 }
 
+fn attr_encoded_len(attr: &Attr) -> usize {
+    if attr.name.is_empty() {
+        return 0;
+    }
+    let name_len = attr.name.len().min(u16::MAX as usize);
+    attr.values
+        .iter()
+        .enumerate()
+        .map(|(i, value)| {
+            let n = if i == 0 { name_len } else { 0 };
+            let vlen = match value {
+                Value::Integer(_) | Value::Enum(_) => 4,
+                Value::Boolean(_) => 1,
+                Value::Text(_, s) => s.len().min(u16::MAX as usize),
+            };
+            1usize
+                .saturating_add(2)
+                .saturating_add(n)
+                .saturating_add(2)
+                .saturating_add(vlen)
+        })
+        .fold(0usize, usize::saturating_add)
+}
+
 fn write_attr(out: &mut Vec<u8>, attr: &Attr) {
     if attr.name.is_empty() {
         return;
@@ -174,11 +197,22 @@ pub fn encode_request(
     job_attrs: &[Attr],
     document: Option<&[u8]>,
 ) -> Vec<u8> {
-    let mut out = Vec::with_capacity(document.map_or(0, |d| d.len()).saturating_add(256));
+    let base_attrs = base_operation_attrs(printer_uri);
+    let attrs_bytes = base_attrs
+        .iter()
+        .chain(extra_operation_attrs.iter())
+        .chain(job_attrs.iter())
+        .map(attr_encoded_len)
+        .fold(0usize, usize::saturating_add);
+    let header_and_tags = 8usize + 1 + usize::from(!job_attrs.is_empty()) + 1;
+    let total_cap = header_and_tags
+        .saturating_add(attrs_bytes)
+        .saturating_add(document.map_or(0, |d| d.len()));
+    let mut out = Vec::with_capacity(total_cap);
     write_header(&mut out, operation, request_id);
     out.push(tag::GROUP_OPERATION);
-    for a in base_operation_attrs(printer_uri) {
-        write_attr(&mut out, &a);
+    for a in &base_attrs {
+        write_attr(&mut out, a);
     }
     for a in extra_operation_attrs {
         write_attr(&mut out, a);

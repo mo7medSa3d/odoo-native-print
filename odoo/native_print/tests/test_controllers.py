@@ -436,3 +436,28 @@ class TestNativePrintMultiUser(HttpCase):
         overview = self._rpc("/native_print/overview", {})
         self.assertEqual(overview["active_jobs"], 1)
         self.assertEqual(overview["done_jobs"], 0)
+
+    def test_portal_user_is_forbidden_on_all_endpoints(self):
+        self.env["res.users"].sudo().create({
+            "name": "NP Portal User",
+            "login": "np_portal",
+            "password": "np-test-password",
+            "company_id": self.company.id,
+            "company_ids": [self.company.id],
+            "group_ids": [(6, 0, [self.env.ref("base.group_portal").id])],
+        })
+        self.authenticate("np_portal", "np-test-password")
+        self.assertEqual(
+            self._rpc("/native_print/job_status", {
+                "idempotency_key": "portal-blocked-key", "state": "queued",
+            }),
+            {"ok": False, "error": "forbidden"},
+        )
+        self.assertEqual(
+            self._rpc("/native_print/sync_device", {"name": "Portal Printer"}),
+            {"ok": False, "error": "forbidden"},
+        )
+        self.assertEqual(
+            self._rpc("/native_print/overview", {}),
+            {"ok": False, "error": "forbidden"},
+        )

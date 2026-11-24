@@ -5,6 +5,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -16,9 +19,10 @@ jobs:
   core-linux:
     name: Core (Linux) - fmt, clippy, tests, addon checks, bench, chaos
     runs-on: ubuntu-26.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.90.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
@@ -30,40 +34,52 @@ jobs:
             rustfmt --edition 2021 --check "$f"
           done
       - name: Clippy (workspace, warnings are errors)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Tests (workspace)
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
       - name: print-win on Linux (stub platform + shared logic tests)
         working-directory: crates/print-win
         run: |
           cargo clippy --all-targets -- -D warnings
           cargo test
-      - name: Addon static checks (Python compiles, XML parses, JS parses)
+      - name: PDFium render tests (Linux)
+        env:
+          PDFIUM_TEST_REQUIRED: "1"
         run: |
-          python3 -m compileall -q odoo/native_print
+          bash tools/fetch-pdfium.sh
+          cargo test --locked -p print-render --test pdfium_render
+      - name: Addon static checks (Odoo 19 & 20 - Python compiles, XML parses, JS parses)
+        run: |
+          python3 -m compileall -q odoo/native_print odoo20/native_print
           python3 - <<'PY'
           import pathlib, xml.dom.minidom
-          for p in pathlib.Path("odoo/native_print").rglob("*.xml"):
-              xml.dom.minidom.parse(str(p))
+          for root in ("odoo/native_print", "odoo20/native_print"):
+              for p in sorted(pathlib.Path(root).rglob("*.xml")):
+                  xml.dom.minidom.parse(str(p))
           print("addon XML OK")
           PY
-          for f in odoo/native_print/static/src/js/*.js; do
-            cp "$f" /tmp/check.mjs && node --check /tmp/check.mjs
+          tmp_mjs="$(mktemp --suffix=.mjs)"
+          trap 'rm -f "$tmp_mjs"' EXIT
+          for f in odoo/native_print/static/src/js/*.js odoo20/native_print/static/src/js/*.js; do
+            cp "$f" "$tmp_mjs" && node --check "$tmp_mjs"
           done
           echo "addon JS OK"
       - name: Consistency gates (command surface, versions, JS unit tests)
         run: |
           python3 tools/check_command_surface.py
           python3 tools/check_versions.py
-          node odoo/native_print/tests/test_live_target.mjs
-          node odoo/native_print/tests/test_pos_keys.mjs
+          node --test app/tests/control-center.test.mjs
+          node --test odoo/native_print/tests/test_live_target.mjs
+          node --test odoo/native_print/tests/test_pos_keys.mjs
+          node --test odoo20/native_print/tests/test_live_target.mjs
+          node --test odoo20/native_print/tests/test_pos_keys.mjs
       - name: Bench, chaos, calibration (measured evidence)
         run: |
           set -o pipefail
           mkdir -p evidence
-          cargo run --release -p print-tools -- bench | tee evidence/bench.txt
-          cargo run --release -p print-tools -- chaos | tee evidence/chaos.txt
-          cargo run --release -p print-tools -- calibration | tee evidence/calibration.txt
+          cargo run --locked --release -p print-tools -- bench | tee evidence/bench.txt
+          cargo run --locked --release -p print-tools -- chaos | tee evidence/chaos.txt
+          cargo run --locked --release -p print-tools -- calibration | tee evidence/calibration.txt
       - name: Upload Linux evidence
         uses: actions/upload-artifact@v7
         with:
@@ -73,6 +89,7 @@ jobs:
   audit:
     name: Supply chain - audit and deny
     runs-on: ubuntu-26.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
@@ -83,16 +100,17 @@ jobs:
   windows-tests:
     name: Windows - workspace tests + print-win (real Win32 compile)
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.90.0
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Tests (workspace, MSVC)
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
       - name: Clippy (workspace, warnings are errors)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: print-win tests + probe build (real winspool FFI)
         working-directory: crates/print-win
         run: |
@@ -108,9 +126,10 @@ jobs:
   windows-app:
     name: Windows - build the app installers (MSI + NSIS)
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.90.0
       - uses: actions/setup-node@v7
         with:
           node-version: 20
@@ -119,6 +138,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: app/src-tauri -> target
+      - name: App crate unit tests
+        working-directory: app/src-tauri
+        run: cargo test --locked
       - name: Install Tauri CLI
         working-directory: app
         run: npm ci
@@ -140,6 +162,7 @@ jobs:
   windows-print-smoke:
     name: Windows - printer discovery smoke (hosted runner)
     runs-on: windows-latest
+    timeout-minutes: 15
     needs: windows-tests
     steps:
       - name: Download the probe

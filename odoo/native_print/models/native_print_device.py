@@ -23,7 +23,7 @@ class NativePrintDevice(models.Model):
     """
 
     _name = "native.print.device"
-    _description = "Native Print: printer seen in the job log"
+    _description = "Yaseir Print: printer seen in the job log"
     _order = "name"
 
     @api.model

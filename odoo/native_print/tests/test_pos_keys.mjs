@@ -68,7 +68,7 @@ assert.strictEqual(
     "falls through to order.user_id.id",
 );
 
-// Phase 3 regression test: single-pass getComputedStyle, root backgroundImage inlining,
+// Regression test: single-pass getComputedStyle, root backgroundImage inlining,
 // URL fetch deduplication, and timeout/error fallback in inlineStyles + inlineMedia.
 {
     const helpers = [
@@ -380,8 +380,9 @@ assert.strictEqual(
         const posWatchHelpers = [
             'const POS_RECEIPT_SOURCE = "point_of_sale.receipt";',
             'const TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);',
-            'const _t = (s) => s;',
-            'const notifyUser = () => {};',
+            'const _t = (s, ...args) => args.reduce((acc, v) => acc.replace("%s", String(v)), s);',
+            'const notifyUser = (_env, msg, type) => { globalThis.__posNotices.push({ msg, type }); };',
+            'const safeErrorCode = (code, fallback = "error") => { const t = typeof code === "string" ? code.trim() : ""; return /^[A-Za-z0-9_.-]{1,64}$/.test(t) ? t : fallback; };',
             'const notifyJobUpdated = () => { if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") window.dispatchEvent(typeof CustomEvent === "function" ? new CustomEvent("native_print:job_updated") : new Event("native_print:job_updated")); };',
             'const rpc = async (url, params) => { globalThis.__posRpcCalls.push({ url, params }); return { ok: true }; };',
             extract("finishPosReceiptAttempt"),
@@ -389,7 +390,9 @@ assert.strictEqual(
             extract("postPosDeclined"),
             "globalThis.__watchPosJob = watchPosJob; globalThis.__postPosDeclined = postPosDeclined;",
         ].join("\n");
+        const posNotices = [];
         globalThis.__posRpcCalls = rpcCalls;
+        globalThis.__posNotices = posNotices;
         eval(posWatchHelpers);
 
         const order = { _printed: false };
@@ -410,10 +413,31 @@ assert.strictEqual(
         globalThis.__postPosDeclined("pos-decl-1", "POS_NO_PRINTER", "Order_Ev2", "7", "EPSON", "escpos");
         await new Promise((r) => prevSetTimeout(r, 10));
         assert.strictEqual(jobUpdatedEvents, 2, "postPosDeclined dispatches native_print:job_updated");
+
+        // Failure path: dead_letter sanitizes multi-line trace errorCode via safeErrorCode without ReferenceError.
+        const failOrder = { _printed: true };
+        await globalThis.__watchPosJob(
+            { jobDetail: async () => ({ state: "dead_letter", errorCode: "Error: SECRET_TRACE\n at rust.rs:42", attempts: 3 }) },
+            "pos-ev-fail",
+            { printer_pattern: "EPSON", copies: 1, mode: "escpos" },
+            128,
+            "Order_EvFail",
+            "EPSON",
+            null,
+            "7",
+            failOrder,
+        );
+        assert.strictEqual(failOrder._printed, false, "watchPosJob clears _printed on dead_letter");
+        assert.strictEqual(jobUpdatedEvents, 3, "watchPosJob dispatches native_print:job_updated on dead_letter");
+        assert.strictEqual(posNotices.length, 1, "watchPosJob notifies user once on dead_letter");
+        assert.strictEqual(posNotices[0].type, "danger", "dead_letter toast uses danger severity");
+        assert.ok(posNotices[0].msg.includes("(dead_letter)"), "multi-line errorCode falls back to state");
+        assert.ok(!posNotices[0].msg.includes("SECRET_TRACE"), "raw trace is never leaked into POS toast");
     } finally {
         globalThis.window = prevWindow;
         globalThis.setTimeout = prevSetTimeout;
         delete globalThis.__posRpcCalls;
+        delete globalThis.__posNotices;
     }
 }
 

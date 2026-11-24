@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<templates xml:space="preserve">
+    <t t-name="native_print.SystrayItem">
+        <div class="o_mail_systray_item dropdown o_native_print_systray" t-att-class="{'show': this.state.isOpen}" t-on-keydown="this.onKeyDown">
+            <button type="button"
+                    class="dropdown-toggle o-no-caret btn d-flex align-items-center px-2"
+                    t-att-title="this.labels.title"
+                    t-att-aria-label="this.labels.title"
+                    aria-haspopup="true"
+                    t-att-aria-expanded="this.state.isOpen ? 'true' : 'false'"
+                    t-on-click.stop="this.toggleMenu">
+                <img src="/native_print/static/description/icon.png"
+                     class="np-systray-icon" alt="Yaseir Print"/>
+                <span t-if="this.state.failedJobs &gt; 0"
+                      class="badge rounded-pill text-bg-danger ms-1"
+                      role="status"
+                      t-out="this.state.failedJobs"/>
+                <span t-elif="this.state.bridgeActive"
+                      class="o_native_print_dot o_native_print_dot_online ms-1"
+                      aria-hidden="true"/>
+                <span t-else=""
+                      class="o_native_print_dot o_native_print_dot_browser ms-1"
+                      aria-hidden="true"/>
+            </button>
+
+            <div t-if="this.state.isOpen"
+                 class="dropdown-menu dropdown-menu-end show shadow o_native_print_dropdown"
+                 role="region"
+                 t-att-aria-label="this.labels.title"
+                 t-on-click.stop="() => {}">
+                <!-- Header: brand tile + name + mode pill -->
+                <div class="np-head">
+                    <div class="np-brand-tile"><img src="/native_print/static/description/icon.png" class="np-brand-icon" alt=""/></div>
+                    <div class="np-head-text">
+                        <div class="np-brand-name">Yaseir Print</div>
+                        <div class="np-head-sub" t-out="this.state.bridgeActive ? this.labels.appActive : this.labels.browserMode"/>
+                    </div>
+                    <span t-if="this.state.bridgeActive" class="badge rounded-pill text-bg-success np-mode-pill" role="status">
+                        <i class="oi me-1" data-icon="check_circle" aria-hidden="true"/><t t-out="this.labels.appActive"/>
+                    </span>
+                    <span t-else="" class="badge rounded-pill text-bg-secondary np-mode-pill" role="status">
+                        <i class="oi me-1" data-icon="public" aria-hidden="true"/><t t-out="this.labels.browserMode"/>
+                    </span>
+                </div>
+
+                <!-- Browser mode explainer -->
+                <div t-if="!this.state.bridgeActive" class="np-info-box" dir="auto">
+                    <i class="oi np-info-icon" data-icon="info" aria-hidden="true"/>
+                    <span t-out="this.labels.browserNote"/>
+                </div>
+
+                <!-- Desktop app update notice (bridge older than this panel) -->
+                <div t-if="this.state.appOutdated" class="np-info-box" dir="auto" role="status">
+                    <i class="oi np-info-icon" data-icon="arrow_circle_up" aria-hidden="true"/>
+                    <span t-out="this.labels.updateApp"/>
+                </div>
+
+                <!-- App mode: this PC's printers summary -->
+                <div t-if="this.state.bridgeActive" class="np-info-box np-info-rows">
+                    <div class="np-info-row">
+                        <i class="oi np-info-icon" data-icon="print" aria-hidden="true"/>
+                        <span class="np-info-label" t-out="this.labels.localPrinters"/>
+                        <strong class="np-info-value" t-out="this.state.printersCount"/>
+                    </div>
+                    <div t-if="this.state.defaultPrinter" class="np-info-row">
+                        <i class="oi np-info-icon" data-icon="star" aria-hidden="true"/>
+                        <span class="np-info-label" t-out="this.labels.defaultPrinter"/>
+                        <strong class="np-info-value text-truncate" dir="auto" t-out="this.state.defaultPrinter"/>
+                    </div>
+                </div>
+
+                <!-- App mode: live printer picker -->
+                <div t-if="this.state.bridgeActive and this.state.discoveredPrinters.length" class="np-printer-list">
+                    <t t-foreach="this.state.discoveredPrinters" t-as="printer" t-key="printer.name || printer_index">
+                        <div class="np-printer-row">
+                            <div class="np-printer-text">
+                                <span class="np-printer-name" dir="auto" t-att-title="printer.name" t-out="printer.name"/>
+                                <span t-if="printer.meta" class="np-printer-meta" dir="auto" t-out="printer.meta"/>
+                            </div>
+                            <div class="d-flex align-items-center gap-1 flex-shrink-0">
+                                <span t-if="this.state.selectedPrinter === printer.name || (!this.state.selectedPrinter &amp;&amp; this.state.defaultPrinter === printer.name)" class="badge rounded-pill text-bg-primary np-inuse-pill">
+                                    <i class="oi me-1" data-icon="star" aria-hidden="true"/><t t-out="this.labels.inUse"/>
+                                </span>
+                                <button t-else="" type="button" class="btn btn-sm btn-link np-use-btn"
+                                        t-att-aria-label="this.labels.usePrinter + ': ' + printer.name"
+                                        t-on-click="() => this.selectPrinter(printer)">
+                                    <t t-out="this.labels.usePrinter"/>
+                                </button>
+                                <span t-if="this.state.selectedPosPrinter === printer.name" class="badge rounded-pill text-bg-info np-inuse-pill">
+                                    <i class="oi me-1" data-icon="shopping_bag" aria-hidden="true"/><t t-out="this.labels.inUsePos"/>
+                                </span>
+                                <button t-elif="printer.printer_class === 'thermal' || printer.printer_class === 'label' || this.state.selectedPosPrinter" type="button" class="btn btn-sm btn-link np-use-btn"
+                                        t-att-aria-label="this.labels.usePosPrinter + ': ' + printer.name"
+                                        t-on-click="() => this.selectPosPrinter(printer)">
+                                    <t t-out="this.labels.usePosPrinter"/>
+                                </button>
+                            </div>
+                        </div>
+                    </t>
+                </div>
+                <div t-elif="this.state.bridgeActive and !this.state.syncingPrinters" class="np-info-box" dir="auto">
+                    <i class="oi np-info-icon" data-icon="info" aria-hidden="true"/>
+                    <span t-out="this.labels.noPrinters"/>
+                </div>
+
+                <button t-if="this.state.bridgeActive" type="button"
+                        class="btn btn-sm btn-outline-secondary w-100 np-refresh-btn"
+                        t-on-click="this.refreshPrinters" t-att-disabled="this.state.syncingPrinters">
+                    <i t-att-class="this.state.syncingPrinters ? 'oi oi-spin me-2' : 'oi me-2'"
+                       t-att-data-icon="this.state.syncingPrinters ? 'progress_activity' : 'refresh'"
+                       aria-hidden="true"/>
+                    <t t-if="this.state.syncingPrinters"><t t-out="this.labels.discovering"/></t>
+                    <t t-else=""><t t-out="this.labels.refreshPrinters"/> (<t t-out="this.state.printersCount"/>)</t>
+                </button>
+
+                <!-- Job counters -->
+                <div class="np-stats">
+                    <div class="np-stat np-stat-active">
+                        <div class="np-stat-num"><span class="np-dot np-dot-active" aria-hidden="true"/><t t-out="this.state.activeJobs"/></div>
+                        <div class="np-stat-label" t-out="this.labels.activeJobs"/>
+                    </div>
+                    <div class="np-stat np-stat-done">
+                        <div class="np-stat-num"><span class="np-dot np-dot-done" aria-hidden="true"/><t t-out="this.state.doneJobs"/></div>
+                        <div class="np-stat-label" t-out="this.labels.doneJobs"/>
+                    </div>
+                    <div class="np-stat np-stat-failed" t-att-class="{'np-stat-alert': this.state.failedJobs &gt; 0}">
+                        <div class="np-stat-num"><span class="np-dot np-dot-failed" aria-hidden="true"/><t t-out="this.state.failedJobs"/></div>
+                        <div class="np-stat-label" t-out="this.labels.failedJobs"/>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="np-actions">
+                    <button type="button" class="btn btn-sm btn-primary w-100 np-primary-action" t-on-click="this.openJobs">
+                        <i class="oi me-2" data-icon="format_list_bulleted" aria-hidden="true"/><t t-out="this.labels.jobsLog"/>
+                    </button>
+                    <div t-if="this.state.bridgeActive" class="np-action-row">
+                        <button type="button" class="btn btn-sm btn-outline-secondary w-100" t-on-click="this.openControlCenter">
+                            <i class="oi me-1" data-icon="tune" aria-hidden="true"/><t t-out="this.labels.controlCenter"/>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </t>
+</templates>

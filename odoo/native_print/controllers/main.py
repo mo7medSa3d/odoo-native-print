@@ -2,6 +2,7 @@ from psycopg2 import IntegrityError
 
 from odoo import fields, http
 from odoo.http import request
+from odoo.tools import SQL
 
 JOB_STATES = {
     "queued", "rendering", "spooling", "printing",
@@ -39,7 +40,7 @@ ALLOWED_TRANSITIONS = {
 
 SOURCE_TYPES = {"report", "pos_receipt", "test"}
 
-PRINT_MODES = {"gdi", "escpos", "zpl", "tspl", "epl"}
+PRINT_MODES = {"gdi", "escpos", "zpl", "tspl", "epl", "cpcl"}
 
 
 def _safe_source_ids(val):
@@ -89,7 +90,7 @@ def _safe_int(val, default=None):
     try:
         # Clamp to PostgreSQL int4 max (desktop queue allows up to 50 MB).
         return max(0, min(int(val), 2_147_483_647))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         return default
 
 
@@ -110,8 +111,7 @@ def _lock_status_job(job):
         return job
     job.flush_recordset(_STATUS_LOCK_FIELDS)
     job.env.cr.execute(
-        f'SELECT id FROM "{job._table}" WHERE id = %s FOR UPDATE',
-        [job.id],
+        SQL("SELECT id FROM %s WHERE id = %s FOR UPDATE", SQL.identifier(job._table), job.id)
     )
     if not job.env.cr.fetchone():
         return job.browse()

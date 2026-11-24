@@ -32,6 +32,8 @@ means the client is submitting faster than the printer works.
 | `RENDER_FAILED` | A page could not be rendered for printing. | Export diagnostics with the job's diagnostics id. |
 | `IMAGE_DECODE_ERROR` | A receipt/label image could not be decoded. | Retry; if it repeats, export diagnostics. |
 | `BITMAP_PACK_ERROR` | An internal bitmap conversion failed. | Export diagnostics. |
+| `CPCL_ENCODE_ERROR` | Encoding a 1-bit bitmap to CPCL `CG` failed (e.g. dimensions exceed CPCL limit or invalid DPI). | Check label size/DPI; export diagnostics. |
+| `PAYLOAD_TOO_LARGE` | The job payload exceeds the configured safety limit. | Reduce document size or split the report. |
 
 Submission-time validation refusals (HTTP-style string errors from
 the bridge, before anything is queued): `bad_idempotency_key`,
@@ -57,7 +59,7 @@ the bridge, before anything is queued): `bad_idempotency_key`,
 | `PRINTER_OFFLINE` | Windows reports the printer offline. | Power/connect the printer. |
 | `PRINTER_PAUSED` | The Windows queue is paused. | Resume it in Windows print settings. |
 | `PRINTER_STOPPED` | The print spooler service is stopped. | Start the "Print Spooler" service. |
-| `PRINTER_BUSY` | The printer is busy with another job. | Wait; the worker retries with backoff. |
+| `PRINTER_BUSY` / `BUSY` | The printer is busy with another job. | Wait; the worker retries with backoff. |
 | `PAPER_JAM` | The printer reports a paper jam. | Clear the jam. |
 | `DOOR_OPEN` | The printer cover is open. | Close it. |
 | `NO_TONER` | The printer reports toner/ink empty. | Replace it. |
@@ -65,12 +67,13 @@ the bridge, before anything is queued): `bad_idempotency_key`,
 | `PRINTER_CAPABILITIES_UNAVAILABLE` | The driver did not answer the capabilities query. | Update/reinstall the printer driver. |
 | `BAD_PRINTER_ADDRESS` | A `tcp://` / `ipp://` printer address is malformed. | Fix the printer URI in the Control Center picker. |
 | `SPOOLER_UNAVAILABLE` | The Windows print spooler cannot be reached. | Restart the spooler service. |
-| `SPOOLER_RAW_ERROR` | Sending raw bytes (ESC/POS/ZPL/TSPL) through the spooler failed. | Check the queue; export diagnostics if it repeats. |
-| `GDI_PRINT_ERROR` | A GDI print job failed on Windows. | Export diagnostics with the diagnostics id. |
-| `TCP9100_ERROR` | A direct network print (port 9100) failed. Ambiguous by nature: the job is NOT auto-retried, because the printer may have received it. | Check the printer before reprinting. |
-| `IPP_PRINT_ERROR` / `IPP_ATTRIBUTES_ERROR` / `IPP_FORMAT_UNSUPPORTED` | IPP printing failed / the printer rejected the attributes / the document format is unsupported over IPP. | Check the printer's IPP support or use its Windows queue instead. |
+| `SPOOLER_RAW_ERROR` | Sending raw bytes (ESC/POS/ZPL/TSPL/EPL/CPCL) through the spooler failed. | Check the queue; export diagnostics if it repeats. |
+| `GDI_SETUP_ERROR` / `GDI_PRINT_ERROR` | Windows GDI device-context setup or print submission failed. | Update the printer driver; export diagnostics with the diagnostics id. |
+| `TCP9100_CONNECT_ERROR` | Direct network print (port 9100) failed during TCP connect before any bytes were sent; safe to auto-retry. | Check printer power and LAN connectivity. |
+| `TCP9100_ERROR` | A direct network print (port 9100) failed during write. Ambiguous by nature: the job is NOT auto-retried, because the printer may have received it. | Check the printer before reprinting. |
+| `IPP_PRINT_ERROR` / `IPP_ATTRIBUTES_ERROR` / `IPP_FORMAT_UNSUPPORTED` / `IPP_REQUIRES_PDF` | IPP printing failed / attributes rejected / format unsupported / non-PDF payload sent to IPP backend. | Check the printer's IPP support or use its Windows queue instead. |
 | `UNKNOWN_MODE` | A job asked for a print mode the app does not implement. It fails loudly; bytes are never sent in a guessed format. | Update the app/addon pair (see the compatibility policy). |
-| `RAW_TO_VIRTUAL_PRINTER` | A job carries raw printer language (ESC/POS/ZPL/TSPL/EPL bytes) addressed to a virtual PDF/XPS writer, which would spool the bytes into a corrupt document file. Refused before any byte is sent. | Pick a physical printer for raw jobs; documents (PDF/images) print to virtual writers normally via GDI. |
+| `RAW_TO_VIRTUAL_PRINTER` | A job carries raw printer language (ESC/POS/ZPL/TSPL/EPL/CPCL bytes) addressed to a virtual PDF/XPS writer, which would spool the bytes into a corrupt document file. Refused before any byte is sent. | Pick a physical printer for raw jobs; documents (PDF/images) print to virtual writers normally via GDI. |
 | `RAW_TO_OFFICE_PRINTER` | A job carries raw printer language addressed to an office printer, whose queue renders GDI only — the bytes could only print as garbage. Refused before any byte is sent (2026-11-07). | Pick a printer that speaks the job's language; documents print to office printers normally via GDI. |
 | `PRINTER_PAPER_OUT` | No paper: reported by the Windows spooler, or — for a TCP ESC/POS printer — by the printer's own paper-end sensor (DLE EOT) before the job is sent. | Load paper; the job retries, then can be reprinted. |
 | `PRINTER_CUTTER_ERROR` | A TCP ESC/POS printer's own sensor reports an auto-cutter error (DLE EOT) before the job is sent. | Clear the cutter jam on the device; the job retries. |

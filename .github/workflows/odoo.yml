@@ -10,54 +10,71 @@ on:
     branches: ["main"]
     paths:
       - "odoo/**"
+      - "odoo20/**"
       - ".github/workflows/odoo.yml"
     tags:
       - "v*"
   pull_request:
     paths:
       - "odoo/**"
+      - "odoo20/**"
       - ".github/workflows/odoo.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: odoo-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   addon-tests:
-    name: Odoo 19 - install addon + run its tests
+    name: Odoo ${{ matrix.odoo_version }} - install addon + run its tests
     runs-on: ubuntu-26.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - odoo_version: "19.0"
+            addon_dir: "odoo"
+          - odoo_version: "20.0"
+            addon_dir: "odoo20"
     steps:
       - uses: actions/checkout@v7
-      - name: Pick an Odoo image (19.0 preferred)
+      - name: Pull pinned Odoo ${{ matrix.odoo_version }} image
+        env:
+          ODOO_VERSION: ${{ matrix.odoo_version }}
         run: |
-          ODOO_IMAGE=""
-          for tag in 19.0 19 latest; do
-            if docker pull "odoo:$tag"; then
-              ODOO_IMAGE="odoo:$tag"
-              echo "ODOO_IMAGE=$ODOO_IMAGE" >> "$GITHUB_ENV"
-              echo "Using $ODOO_IMAGE"
-              break
-            fi
-          done
-          if [ -z "$ODOO_IMAGE" ]; then
-            echo "::error::Unable to pull any supported Odoo image (19.0, 19, latest)."
-            exit 1
-          fi
+          ODOO_IMAGE="odoo:${ODOO_VERSION}"
+          docker pull "$ODOO_IMAGE"
+          echo "ODOO_IMAGE=$ODOO_IMAGE" >> "$GITHUB_ENV"
       - name: Start Postgres and run Odoo with the addon + tests
+        env:
+          ADDON_DIR: ${{ matrix.addon_dir }}
         run: |
           set -o pipefail
           docker network create odoo-test
           docker run -d --name db --network odoo-test \
             -e POSTGRES_DB=postgres -e POSTGRES_USER=odoo -e POSTGRES_PASSWORD=odoo \
-            postgres:16
+            postgres:16.4
           # Wait for Postgres to accept connections.
+          PG_READY=0
           for i in $(seq 1 30); do
-            if docker run --rm --network odoo-test -e PGPASSWORD=odoo postgres:16 \
+            if docker run --rm --network odoo-test -e PGPASSWORD=odoo postgres:16.4 \
                  pg_isready -h db -U odoo > /dev/null 2>&1; then
-              echo "Postgres is ready"; break
+              echo "Postgres is ready"
+              PG_READY=1
+              break
             fi
             sleep 2
           done
+          if [ "$PG_READY" -ne 1 ]; then
+            echo "::error::Postgres did not become ready within 60s"; exit 1
+          fi
           set +e
           docker run --rm --network odoo-test \
-            -v "$PWD/odoo:/mnt/extra-addons" \
+            -v "$PWD/${ADDON_DIR}:/mnt/extra-addons" \
             -e HOST=db -e USER=odoo -e PASSWORD=odoo \
             "$ODOO_IMAGE" \
             -d native_print_test -i native_print \
@@ -85,5 +102,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: odoo-test-log
+          name: odoo-test-log-${{ matrix.odoo_version }}
           path: odoo-test.log

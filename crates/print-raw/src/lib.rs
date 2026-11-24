@@ -3,6 +3,7 @@
 //! RTL, per spec). ZPL covers label bitmaps. Transports (spooler RAW,
 //! TCP 9100) are platform/network code built on top of these encoders.
 
+pub mod cpcl;
 pub mod epl;
 pub mod escpos;
 pub mod mono;

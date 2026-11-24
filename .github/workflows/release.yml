@@ -1,6 +1,6 @@
 name: Release
 
-# Push a version tag (e.g. v0.3.0 or v0.4.0-rc4) to build everything and
+# Push a version tag (e.g. v1.5.7 or v1.6.0-rc1) to build everything and
 # publish a GitHub Release with the Windows installers, the source
 # tarball, and SHA-256 checksums. Can also be run manually to produce
 # the artifacts without publishing.
@@ -10,6 +10,9 @@ on:
       - "v*"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -17,21 +20,33 @@ jobs:
   gate-linux:
     name: Release gate (Linux) - full test suite
     runs-on: ubuntu-26.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.90.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
-      - run: cargo run --release -p print-tools -- bench
-      - run: cargo run --release -p print-tools -- chaos
-      - name: Consistency gates (command surface + versions vs tag)
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo test --locked --workspace
+      - name: PDFium render tests (Linux)
+        env:
+          PDFIUM_TEST_REQUIRED: "1"
+        run: |
+          bash tools/fetch-pdfium.sh
+          cargo test --locked -p print-render --test pdfium_render
+      - run: cargo run --locked --release -p print-tools -- bench
+      - run: cargo run --locked --release -p print-tools -- chaos
+      - name: Consistency gates (command surface, versions vs tag, JS unit tests)
         run: |
           python3 tools/check_command_surface.py
           python3 tools/check_versions.py
+          node --test app/tests/control-center.test.mjs
+          node --test odoo/native_print/tests/test_live_target.mjs
+          node --test odoo/native_print/tests/test_pos_keys.mjs
+          node --test odoo20/native_print/tests/test_live_target.mjs
+          node --test odoo20/native_print/tests/test_pos_keys.mjs
       - name: Source tarball
         run: |
           VERSION="${GITHUB_REF_NAME:-manual}"
@@ -46,9 +61,13 @@ jobs:
   windows-installers:
     name: Release - Windows installers (MSI + NSIS)
     runs-on: windows-latest
+    timeout-minutes: 30
+    needs: gate-linux
+    outputs:
+      signed: ${{ steps.signing.outputs.signed }}
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.90.0
       - uses: actions/setup-node@v7
         with:
           node-version: 20
@@ -57,33 +76,41 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: app/src-tauri -> target
-      - name: Tests (workspace + print-win, real Windows)
+      - name: Tests (workspace + print-win + app crate, real Windows)
         run: |
-          cargo test --workspace
+          cargo test --locked --workspace
           cd crates/print-win && cargo test && cd ../..
+          cd app/src-tauri && cargo test --locked && cd ../..
       - name: Install Tauri CLI
         working-directory: app
         run: npm ci
       - name: Code signing (when a certificate is configured)
+        id: signing
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
           if (-not $env:WINDOWS_CERTIFICATE_BASE64) {
+            "signed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
             Write-Host "No signing certificate configured: installers will be UNSIGNED."
             return
           }
           $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
-          $sec = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
-          $cert = Import-PfxCertificate -FilePath $pfx -Password $sec -CertStoreLocation Cert:\CurrentUser\My
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+            $sec = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+            $cert = Import-PfxCertificate -FilePath $pfx -Password $sec -CertStoreLocation Cert:\CurrentUser\My
+          } finally {
+            Remove-Item -Force -ErrorAction SilentlyContinue $pfx
+          }
           $confPath = "app/src-tauri/tauri.conf.json"
           $conf = Get-Content $confPath -Raw | ConvertFrom-Json
           $conf.bundle.windows.certificateThumbprint = $cert.Thumbprint
           $conf.bundle.windows.digestAlgorithm = "sha256"
-          $conf.bundle.windows.timestampUrl = "http://timestamp.digicert.com"
+          $conf.bundle.windows.timestampUrl = "https://timestamp.digicert.com"
           $conf | ConvertTo-Json -Depth 32 | Set-Content $confPath -Encoding utf8
+          "signed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Signing enabled with certificate $($cert.Thumbprint)"
       - name: Build the app and bundles
         working-directory: app
@@ -104,14 +131,11 @@ jobs:
           name: windows-installers
           path: release-files/
           if-no-files-found: error
-      # Code signing: when the company adds its certificate, wire it here
-      # (secrets WINDOWS_CERTIFICATE / WINDOWS_CERTIFICATE_PASSWORD with
-      # signtool, or Tauri's signing config). Until then the installers
-      # are UNSIGNED and the release notes say so.
 
   publish:
     name: Publish GitHub Release
     runs-on: ubuntu-26.04
+    timeout-minutes: 15
     needs: [gate-linux, windows-installers]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -122,22 +146,33 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Release notes
+      - name: Finalize SHA256SUMS across all release artifacts
         run: |
-          cat > notes.md <<'EOF'
-          ## Odoo Native Print ${{ github.ref_name }}
-
+          cd dist
+          rm -f SHA256SUMS.txt
+          sha256sum -- * > SHA256SUMS.txt
+      - name: Release notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          IS_SIGNED: ${{ needs.windows-installers.outputs.signed }}
+        run: |
+          if [ "$IS_SIGNED" = "true" ]; then
+            SIGNING_NOTE="**Installers are Authenticode-signed** using the configured release certificate."
+          else
+            SIGNING_NOTE="**Installers are unsigned** until the company's code-signing certificate is configured in GitHub Secrets; Windows may show a SmartScreen prompt."
+          fi
+          {
+            printf '## Odoo Native Print %s\n\n' "$RELEASE_TAG"
+            cat <<'EOF'
           Windows installers (MSI + NSIS) and the full source tree.
-          Verification evidence for this tree: see PROGRESS.md and
+          Verification evidence for this tree: see CHANGELOG.md and
           docs/release-checklist.md in the source tarball (test suite,
           bench and chaos results are produced by the Release workflow's
           Linux gate on this exact tag).
 
-          **Installers are unsigned** until the company's code-signing
-          certificate is wired into the release workflow; Windows may
-          show a SmartScreen prompt. Field gates (real Odoo 19, real
-          printers) are listed in docs/release-checklist.md.
           EOF
+            printf '%s Field gates (real Odoo 19, real printers) are listed in docs/release-checklist.md.\n' "$SIGNING_NOTE"
+          } > notes.md
       - name: Create the release
         uses: softprops/action-gh-release@v2
         with:

@@ -1,5 +1,5 @@
 //! print-render: everything that turns input documents into printable
-//! pages, platform-independently. PDFium (Windows phase) supplies the
+//! pages, platform-independently. PDFium supplies the
 //! authoritative rendering; this crate supplies PDF inspection for
 //! queue-time planning, render planning under a memory ceiling, mixed-size
 //! splitting, bitmap drawing, and the calibration page generator.

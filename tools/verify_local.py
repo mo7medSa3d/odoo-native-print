@@ -1,19 +1,29 @@
 #!/usr/bin/env python3
 """One-command offline local verifier for odoo-native-print.
 
-Runs version/command-surface gates, shell syntax, Node tests, Python compile,
-XML/ADMX/ADML well-formedness, TOML/JSON syntax, and ar.po msgid checks with
-per-step timings and a PASS/FAIL summary. Zero third-party dependencies.
+Runs version/command-surface gates, shell syntax, Node tests, Odoo ESM syntax,
+Python compile, XML/ADMX/ADML well-formedness, TOML/JSON syntax, GitHub Actions
+workflow YAML validation (when PyYAML is installed), and ar.po msgid checks in
+parallel with deterministic output order, per-step timings, and a PASS/FAIL
+summary. Zero required third-party dependencies.
 """
 import ast
 import json
+import os
 import py_compile
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 ROOT = Path(__file__).resolve().parent.parent
 SKIP_DIRS = {".git", "node_modules", "target", "__pycache__"}
@@ -25,8 +35,8 @@ def _iter_files(suffixes):
             yield p
 
 
-def _run_cmd(cmd):
-    proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+def _run_cmd(cmd, env=None):
+    proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
     if proc.returncode != 0:
         out = (proc.stdout + "\n" + proc.stderr).strip()
         tail = "\n".join(out.splitlines()[-15:]) if out else f"exit {proc.returncode}"
@@ -35,7 +45,11 @@ def _run_cmd(cmd):
 
 
 def _check_py_compile():
-    files = sorted(ROOT.glob("odoo/native_print/**/*.py")) + sorted(ROOT.glob("tools/*.py"))
+    files = (
+        sorted(ROOT.glob("odoo/native_print/**/*.py"))
+        + sorted(ROOT.glob("odoo20/native_print/**/*.py"))
+        + sorted(ROOT.glob("tools/*.py"))
+    )
     if not files:
         return False, "no Python files found"
     for f in files:
@@ -60,6 +74,62 @@ def _check_toml_json():
     for f in json_files:
         json.loads(f.read_text(encoding="utf-8"))
     return True, f"{len(toml_files)} toml, {len(json_files)} json"
+
+
+def check_js_esm(text, label="<stdin>"):
+    proc = subprocess.run(
+        ["node", "--input-type=module", "--check"],
+        input=text,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        out = (proc.stderr or proc.stdout).strip()
+        tail = "\n".join(out.splitlines()[-10:]) if out else f"exit {proc.returncode}"
+        return False, f"{label}: {tail}"
+    return True, ""
+
+
+def _check_odoo_esm_syntax():
+    files = sorted(ROOT.glob("odoo/native_print/static/src/js/*.js")) + sorted(
+        ROOT.glob("odoo20/native_print/static/src/js/*.js")
+    )
+    if not files:
+        return False, "no Odoo JS files found"
+    with ThreadPoolExecutor(max_workers=len(files)) as pool:
+        results = list(
+            pool.map(
+                lambda f: check_js_esm(f.read_text(encoding="utf-8"), str(f.relative_to(ROOT))),
+                files,
+            )
+        )
+    failures = [err for ok, err in results if not ok]
+    if failures:
+        return False, "\n".join(failures)
+    return True, f"{len(files)} files"
+
+
+def check_yaml_text(text):
+    if yaml is None:
+        return True, "skipped: PyYAML not installed"
+    doc = yaml.safe_load(text)
+    if not isinstance(doc, dict):
+        return False, f"expected YAML mapping, got {type(doc).__name__}"
+    return True, ""
+
+
+def _check_workflow_yaml():
+    if yaml is None:
+        return True, "skipped: PyYAML not installed"
+    files = sorted(ROOT.glob(".github/workflows/*.yml"))
+    if not files:
+        return False, "no workflow YAML files found"
+    for f in files:
+        ok, err = check_yaml_text(f.read_text(encoding="utf-8"))
+        if not ok:
+            return False, f"{f.relative_to(ROOT)}: {err}"
+    return True, f"{len(files)} files"
 
 
 def parse_po_entries(text):
@@ -121,12 +191,27 @@ def check_po_text(text):
     return len(entries), errors
 
 
-def _check_ar_po():
-    po_path = ROOT / "odoo/native_print/i18n/ar.po"
+def _check_ar_po(rel="odoo/native_print/i18n/ar.po"):
+    po_path = ROOT / rel
     count, errors = check_po_text(po_path.read_text(encoding="utf-8"))
     if errors:
         return False, "\n".join(errors[:10])
     return True, f"{count} entries"
+
+
+def _run_step(step):
+    name, fn = step
+    t0 = time.perf_counter()
+    try:
+        ok, detail = fn()
+    except Exception as exc:
+        ok, detail = False, f"{type(exc).__name__}: {exc}"
+    return name, ok, detail, (time.perf_counter() - t0) * 1000.0
+
+
+def _run_steps(steps):
+    with ThreadPoolExecutor(max_workers=len(steps) or 1) as pool:
+        return list(pool.map(_run_step, steps))
 
 
 def _self_test():
@@ -136,6 +221,32 @@ def _self_test():
     assert len(errs) == 1 and "empty msgid" in errs[0], errs
     _, errs = check_po_text('msgid "Dup"\nmsgstr "1"\n\nmsgid "Dup"\nmsgstr "2"\n')
     assert len(errs) == 1 and "duplicate msgid" in errs[0], errs
+
+    ok, err = check_js_esm("export const x = 1;\n", "ok.js")
+    assert ok and not err, (ok, err)
+    ok, err = check_js_esm("export const = ;\n", "bad.js")
+    assert not ok and "bad.js" in err, (ok, err)
+
+    if yaml is not None:
+        ok, err = check_yaml_text("name: CI\non:\n  push:\n")
+        assert ok and not err, (ok, err)
+        ok, err = check_yaml_text("- not_a_mapping\n")
+        assert not ok and "expected YAML mapping" in err, (ok, err)
+        try:
+            check_yaml_text("name: [unclosed\n")
+        except yaml.YAMLError:
+            pass
+        else:
+            raise AssertionError("expected YAMLError for malformed YAML")
+
+    res = _run_steps([
+        ("slow", lambda: (time.sleep(0.02), (True, "ok"))[1]),
+        ("fast", lambda: (True, "ok")),
+        ("boom", lambda: (_ for _ in ()).throw(ValueError("boom"))),
+    ])
+    assert [r[0] for r in res] == ["slow", "fast", "boom"], res
+    assert res[0][1] is True and res[1][1] is True
+    assert res[2][1] is False and "ValueError: boom" in res[2][2], res
     print("self-test OK")
     return 0
 
@@ -144,30 +255,33 @@ def main():
     if "--self-test" in sys.argv[1:]:
         return _self_test()
 
-    steps = [
-        ("versions", lambda: _run_cmd([sys.executable, "tools/check_versions.py"])),
-        ("command_surface", lambda: _run_cmd([sys.executable, "tools/check_command_surface.py"])),
-        ("bash_syntax:fetch-pdfium", lambda: _run_cmd(["bash", "-n", "tools/fetch-pdfium.sh"])),
-        ("node:control-center", lambda: _run_cmd(["node", "--test", "app/tests/control-center.test.mjs"])),
-        ("node:pos_keys", lambda: _run_cmd(["node", "--test", "odoo/native_print/tests/test_pos_keys.mjs"])),
-        ("node:live_target", lambda: _run_cmd(["node", "--test", "odoo/native_print/tests/test_live_target.mjs"])),
-        ("python:py_compile", _check_py_compile),
-        ("xml/admx/adml", _check_xml),
-        ("toml/json", _check_toml_json),
-        ("i18n:ar.po", _check_ar_po),
-    ]
-
     total_t0 = time.perf_counter()
     passed = 0
     failures = []
 
-    for name, fn in steps:
-        t0 = time.perf_counter()
-        try:
-            ok, detail = fn()
-        except Exception as exc:
-            ok, detail = False, f"{type(exc).__name__}: {exc}"
-        dt_ms = (time.perf_counter() - t0) * 1000.0
+    # Isolate TMPDIR per run so concurrent runs do not collide on fixed /tmp test filenames.
+    with tempfile.TemporaryDirectory(prefix="np-verify-") as tmpdir:
+        sub_env = {**os.environ, "TMPDIR": tmpdir}
+        steps = [
+            ("versions", lambda: _run_cmd([sys.executable, "tools/check_versions.py"], sub_env)),
+            ("command_surface", lambda: _run_cmd([sys.executable, "tools/check_command_surface.py"], sub_env)),
+            ("bash_syntax:fetch-pdfium", lambda: _run_cmd(["bash", "-n", "tools/fetch-pdfium.sh"], sub_env)),
+            ("node:control-center", lambda: _run_cmd(["node", "--test", "app/tests/control-center.test.mjs"], sub_env)),
+            ("node:pos_keys", lambda: _run_cmd(["node", "--test", "odoo/native_print/tests/test_pos_keys.mjs"], sub_env)),
+            ("node:live_target", lambda: _run_cmd(["node", "--test", "odoo/native_print/tests/test_live_target.mjs"], sub_env)),
+            ("node:odoo20_pos_keys", lambda: _run_cmd(["node", "--test", "odoo20/native_print/tests/test_pos_keys.mjs"], sub_env)),
+            ("node:odoo20_live_target", lambda: _run_cmd(["node", "--test", "odoo20/native_print/tests/test_live_target.mjs"], sub_env)),
+            ("node:odoo_esm_syntax", _check_odoo_esm_syntax),
+            ("python:py_compile", _check_py_compile),
+            ("xml/admx/adml", _check_xml),
+            ("toml/json", _check_toml_json),
+            ("yaml:workflows", _check_workflow_yaml),
+            ("i18n:ar.po", _check_ar_po),
+            ("i18n:odoo20_ar.po", lambda: _check_ar_po("odoo20/native_print/i18n/ar.po")),
+        ]
+        results = _run_steps(steps)
+
+    for name, ok, detail, dt_ms in results:
         status = "PASS" if ok else "FAIL"
         suffix = f" ({detail})" if ok and detail else ""
         print(f"[{status}] {name:<26} {dt_ms:7.1f} ms{suffix}")

@@ -6,7 +6,7 @@
 //! (alpha composited over white), area-average downscale to the receipt
 //! printer's printable width, threshold to a 1-bit bitmap, and encode
 //! the ESC/POS raster stream. The same decoded image is what a GDI
-//! backend prints for office printers (Windows phase).
+//! backend prints for office printers.
 
 use crate::bitmap::Canvas;
 use print_raw::EscPos;
@@ -144,10 +144,16 @@ pub fn receipt_png_to_escpos_width(
         return Err(ImageError::DimensionsTooLarge(target_width_dots, 1));
     }
     let img = decode_png(png_bytes)?;
-    let scaled = scale_to_width(&img, target_width_dots);
-    let mono = scaled.to_mono(RECEIPT_THRESHOLD);
-    let stream = EscPos::new().raster(&mono).feed_lines(3).cut_partial();
-    Ok(stream.bytes().to_vec())
+    let mono = if img.width <= target_width_dots {
+        img.to_mono(RECEIPT_THRESHOLD)
+    } else {
+        scale_to_width(&img, target_width_dots).to_mono(RECEIPT_THRESHOLD)
+    };
+    Ok(EscPos::new()
+        .raster(&mono)
+        .feed_lines(3)
+        .cut_partial()
+        .into_bytes())
 }
 
 fn luma_over_white(r: u8, g: u8, b: u8, a: u8) -> u8 {

@@ -1,5 +1,4 @@
 use crate::queue::{Job, Queue, QueueError};
-use crate::state::JobState;
 use serde::Serialize;
 
 /// One-click diagnostics bundle content (spec section 8): versions, queue
@@ -39,49 +38,83 @@ pub struct JobSummary {
     pub error_code: Option<String>,
 }
 
+/// Strip `user[:pass]@` credentials from any `scheme://userinfo@host` URI
+/// so diagnostics bundles never leak embedded network printer credentials.
+fn redact_uri_credentials(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(scheme_end) = rest.find("://") {
+        let after_scheme = scheme_end + 3;
+        out.push_str(&rest[..after_scheme]);
+        rest = &rest[after_scheme..];
+        let authority_end = rest
+            .find(|c: char| matches!(c, '/' | '?' | '#') || c.is_whitespace())
+            .unwrap_or(rest.len());
+        let authority = &rest[..authority_end];
+        if let Some(at) = authority.rfind('@') {
+            out.push_str("[redacted]");
+            out.push_str(&authority[at..]);
+        } else {
+            out.push_str(authority);
+        }
+        rest = &rest[authority_end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 impl From<&Job> for JobSummary {
     fn from(j: &Job) -> Self {
         Self {
             id: j.id.clone(),
             diag_id: crate::queue::diag_id_for_key(&j.idempotency_key),
-            printer: j.printer.clone(),
+            printer: redact_uri_credentials(&j.printer),
             report: j.report.clone(),
             pages: j.pages,
             bytes: j.bytes,
             state: j.state.as_str().to_string(),
             attempts: j.attempts,
-            error_code: j.error_code.clone(),
+            error_code: j.error_code.as_deref().map(redact_uri_credentials),
         }
     }
 }
 
-const ALL_STATES: [JobState; 8] = [
-    JobState::Queued,
-    JobState::Rendering,
-    JobState::Spooling,
-    JobState::Printing,
-    JobState::Done,
-    JobState::Failed,
-    JobState::Canceled,
-    JobState::DeadLetter,
-];
-
 /// Build the bundle; at most the last 200 job summaries are included.
 pub fn build_bundle(queue: &Queue, recent: &[JobSummary]) -> Result<DiagnosticsBundle, QueueError> {
-    let mut counts = Vec::new();
-    for s in ALL_STATES {
-        counts.push((s.as_str().to_string(), queue.count_by_state(s)?));
-    }
+    let counts: Vec<(String, u64)> = queue
+        .count_all_states()?
+        .into_iter()
+        .map(|(s, n)| (s.as_str().to_string(), n))
+        .collect();
     let (recent_events, events_error) = match queue.recent_events(100) {
-        Ok(events) => (events, None),
-        Err(e) => (Vec::new(), Some(e.to_string())),
+        Ok(events) => (
+            events
+                .into_iter()
+                .map(|mut ev| {
+                    ev.detail = ev.detail.as_deref().map(redact_uri_credentials);
+                    ev
+                })
+                .collect(),
+            None,
+        ),
+        Err(e) => (Vec::new(), Some(redact_uri_credentials(&e.to_string()))),
     };
+    let recent_jobs = recent
+        .iter()
+        .take(200)
+        .cloned()
+        .map(|mut job| {
+            job.printer = redact_uri_credentials(&job.printer);
+            job.error_code = job.error_code.as_deref().map(redact_uri_credentials);
+            job
+        })
+        .collect();
     Ok(DiagnosticsBundle {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         core_version: env!("CARGO_PKG_VERSION").to_string(),
         os: std::env::consts::OS.to_string(),
         state_counts: counts,
-        recent_jobs: recent.iter().take(200).cloned().collect(),
+        recent_jobs,
         recent_events,
         events_error,
     })
@@ -102,6 +135,7 @@ pub fn bundle_to_json(b: &DiagnosticsBundle) -> String {
 mod tests {
     use super::*;
     use crate::queue::Job;
+    use crate::state::JobState;
     #[test]
     fn bundle_counts_and_redaction() {
         let mut q = Queue::in_memory().unwrap();
@@ -125,5 +159,40 @@ mod tests {
         // The bundle schema has no field for document content or secrets.
         assert!(!json.contains("session_id"));
         assert!(!json.contains("password"));
+    }
+
+    #[test]
+    fn uri_credentials_are_redacted_in_diagnostics() {
+        assert_eq!(
+            redact_uri_credentials("ipp://admin:s3cr3t@192.168.1.50:631/ipp/print"),
+            "ipp://[redacted]@192.168.1.50:631/ipp/print"
+        );
+        assert_eq!(redact_uri_credentials(r"\\POS-1\XP-80C"), r"\\POS-1\XP-80C");
+        assert_eq!(redact_uri_credentials("HP LaserJet Pro"), "HP LaserJet Pro");
+        let mut q = Queue::in_memory().unwrap();
+        q.enqueue(&Job {
+            id: "u1".into(),
+            idempotency_key: "k-u1".into(),
+            printer: "ipp://admin:s3cr3t@192.168.1.50:631/ipp/print".into(),
+            report: None,
+            pages: 1,
+            bytes: 10,
+            priority: 0,
+            state: JobState::Queued,
+            attempts: 0,
+            error_code: None,
+        })
+        .unwrap();
+        q.set_state(
+            "u1",
+            JobState::Failed,
+            Some("http://user:hunter2@10.0.0.5:631/ipp"),
+        )
+        .unwrap();
+        let json = bundle_to_json(&build_bundle_from_queue(&q).unwrap());
+        assert!(!json.contains("s3cr3t"));
+        assert!(!json.contains("hunter2"));
+        assert!(json.contains("[redacted]@192.168.1.50:631/ipp/print"));
+        assert!(json.contains("[redacted]@10.0.0.5:631/ipp"));
     }
 }

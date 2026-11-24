@@ -9,8 +9,11 @@
   html, body { height: 100%; }
   body { display: flex; flex-direction: column; overflow: hidden; }
   header {
-    background: var(--bg-surface);
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
     border-bottom: 1px solid var(--border);
+    box-shadow: var(--glass-highlight);
     flex: 0 0 auto;
   }
   .header-inner {
@@ -116,7 +119,7 @@
     transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
   }
   .btn:hover:not(:disabled) { background: var(--bg-subtle); border-color: var(--border-strong); }
-  .btn:active:not(:disabled) { background: var(--bg-hover); }
+  .btn:active:not(:disabled) { background: var(--bg-hover); transform: scale(0.97); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn.brand { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); font-weight: 600; }
   .btn.brand:hover:not(:disabled),
@@ -239,7 +242,7 @@
           <h2 data-i18n="contact_title">الدعم الفني</h2>
           <div class="rows">
             <div class="row"><span class="k" data-i18n="support_channel">جهة الدعم</span><span class="v" data-i18n="support_channel_val">مسؤول تقنية المعلومات / مدير Odoo</span></div>
-            <div class="row"><span class="k" data-i18n="support_diag">حزمة التشخيص</span><span class="v" data-i18n="support_diag_val">JSON منقّح من مركز التحكم</span></div>
+            <div class="row"><span class="k" data-i18n="support_diag">حزمة التشخيص</span><span class="v" data-i18n="support_diag_val">تقرير تشخيص منقّح من مركز التحكم</span></div>
           </div>
           <div class="actions">
             <button type="button" class="btn brand" id="btnOpenDiagnostics" data-i18n="open_diagnostics">فتح التشخيص</button>
@@ -266,7 +269,7 @@
       appearance_title: "المظهر واللغة", theme_label: "المظهر", theme_light: "فاتح", theme_dark: "داكن", lang_label: "اللغة",
       contact_title: "الدعم الفني",
       support_channel: "جهة الدعم", support_channel_val: "مسؤول تقنية المعلومات / مدير Odoo",
-      support_diag: "حزمة التشخيص", support_diag_val: "JSON منقّح من مركز التحكم",
+      support_diag: "حزمة التشخيص", support_diag_val: "تقرير تشخيص منقّح من مركز التحكم",
       open_diagnostics: "فتح التشخيص",
       open_cc: "مركز التحكم", open_odoo: "فتح Odoo",
       no_origin_hint: "اضبط رابط خادم Odoo من مركز التحكم أولاً.",
@@ -280,7 +283,7 @@
       appearance_title: "Appearance & language", theme_label: "Theme", theme_light: "Light", theme_dark: "Dark", lang_label: "Language",
       contact_title: "Technical support",
       support_channel: "Support contact", support_channel_val: "IT or Odoo administrator",
-      support_diag: "Diagnostics bundle", support_diag_val: "Sanitized JSON from Control Center",
+      support_diag: "Diagnostics bundle", support_diag_val: "Redacted diagnostics report from Control Center",
       open_diagnostics: "Open Diagnostics",
       open_cc: "Control Center", open_odoo: "Open Odoo",
       no_origin_hint: "Configure Odoo server URL in Control Center first.",

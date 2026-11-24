@@ -15,6 +15,7 @@ tools/pdfium/
 *.key
 .env
 .env.*
+!.env.example
 
 # Local evidence bundles and release staging.
 evidence/

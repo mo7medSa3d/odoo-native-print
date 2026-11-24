@@ -3,7 +3,7 @@ import { registry } from "@web/core/registry";
 import { rpc } from "@web/core/network/rpc";
 import { user } from "@web/core/user";
 import { _t } from "@web/core/l10n/translation";
-import { JOB_TERMINAL_STATES as TERMINAL_STATES, notifyJobUpdated, notifyUser, resolveBridgeTarget } from "./native_print_client";
+import { JOB_TERMINAL_STATES as TERMINAL_STATES, notifyJobUpdated, notifyUser, recoveryButtons, resolveBridgeTarget, safeErrorCode } from "./native_print_client";
 
 /*
  * Native Print report handler (API contract v1, docs/api-contract.md).
@@ -296,8 +296,10 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
                     notifyJobUpdated();
                     notifyUser(
                         env,
-                        _t('Printing failed on "%s" (%s). Check the printer before reprinting.', printerLabel, errorCode || state),
+                        _t('Printing failed on "%s" (%s). Check the printer before reprinting.', printerLabel, safeErrorCode(errorCode, state)),
                         "danger",
+                        undefined,
+                        recoveryButtons(),
                     );
                 }
                 if (state === "dead_letter") {
@@ -317,8 +319,10 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
     if (!TERMINAL_STATES.has(lastState)) {
         notifyUser(
             env,
-            _t('Print job "%s" is still %s; its final outcome is unconfirmed. Check Print Jobs later.', meta.reportName, lastState),
+            _t('Print job "%s" is still %s. Check Print Jobs for the final status.', meta.reportName, lastState),
             "warning",
+            undefined,
+            recoveryButtons(),
         );
     }
     return lastState;
@@ -362,6 +366,8 @@ async function handleReportSubmission(action, options, env, bridge) {
             env,
             _t("No printer is available on this device right now. The file was downloaded instead."),
             "warning",
+            undefined,
+            recoveryButtons(),
         );
         return undefined; // No printer on this PC right now.
     }
@@ -472,13 +478,25 @@ async function handleReportSubmission(action, options, env, bridge) {
                 state: "failed",
                 error_code: "BRIDGE_ERROR",
                 device: target.printer.name,
+                report_name: action.report_name,
+                source_type: "report",
+                source_model: textSource.model,
+                source_ids: textSource.ids || undefined,
+                copies: rule.copies || 1,
+                paper: rule.paper || undefined,
+                color: rule.color !== false,
+                mode: textAsEscpos ? "escpos" : "gdi",
+                pages: 1,
+                byte_size: textBytes,
             }, { silent: true }).catch(() => {});
             notifyJobUpdated();
             console.warn("Native Print: text print bridge call failed.", error);
             notifyUser(
                 env,
-                _t('Native Print could not print on "%s". The file was downloaded instead.', target.printer.name),
+                _t('Yaseir Print could not print on "%s". The file was downloaded instead.', target.printer.name),
                 "warning",
+                undefined,
+                recoveryButtons(),
             );
             return undefined; // Fall back to the standard download.
         }
@@ -584,13 +602,25 @@ async function handleReportSubmission(action, options, env, bridge) {
             state: "failed",
             error_code: "BRIDGE_ERROR",
             device: target.printer.name,
+            report_name: action.report_name,
+            source_type: "report",
+            source_model: pdfSource.model,
+            source_ids: pdfSource.ids || undefined,
+            copies: rule.copies || 1,
+            paper: rule.paper || undefined,
+            duplex: typeof rule.duplex === "boolean" ? rule.duplex : null,
+            color: rule.color !== false,
+            mode: rule.mode || undefined,
+            byte_size: bytes.length,
         }, { silent: true }).catch(() => {});
         notifyJobUpdated();
         console.warn("Native Print: PDF print bridge call failed.", error);
         notifyUser(
             env,
-            _t('Native Print could not print on "%s". The PDF was downloaded instead.', target.printer.name),
+            _t('Yaseir Print could not print on "%s". The PDF was downloaded instead.', target.printer.name),
             "warning",
+            undefined,
+            recoveryButtons(),
         );
         return undefined; // Fall back to the standard download.
     }

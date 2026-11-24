@@ -31,6 +31,9 @@ registry.
             "native_print/static/src/js/native_print_systray.js",
             "native_print/static/src/xml/native_print_systray.xml",
         ],
+        "web.assets_web_dark": [
+            "native_print/static/src/scss/native_print_dark.scss",
+        ],
         # The POS bundle only exists when point_of_sale is installed and
         # only loads inside the POS app, so the POS extension needs no
         # hard dependency on point_of_sale for backend-only users.

@@ -64,7 +64,7 @@ pub enum PdfiumError {
     BitmapFailed(u32, u32),
 }
 
-// --- FFI surface (the stable public PDFium API, fpdfview.h) ----------
+// FFI surface (the stable public PDFium API, fpdfview.h)
 
 type FpdfDocument = *mut c_void;
 type FpdfPage = *mut c_void;
@@ -249,6 +249,15 @@ impl Pdfium {
             return Err(PdfiumError::InvalidDocument {
                 code: 3,
                 detail: last_error_detail(3),
+            });
+        }
+        if bytes.len() > print_core::security::MAX_JOB_BYTES {
+            return Err(PdfiumError::InvalidDocument {
+                code: 3,
+                detail: format!(
+                    "document exceeds {} byte limit",
+                    print_core::security::MAX_JOB_BYTES
+                ),
             });
         }
         let len = c_int::try_from(bytes.len()).map_err(|_| PdfiumError::InvalidDocument {

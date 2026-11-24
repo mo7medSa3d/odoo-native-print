@@ -11,7 +11,7 @@ Consequences: Slightly more validation code; defense in depth if either Tauri or
 
 ## Amendment (2026-11-03): HTTP + IP literals only
 The desktop integration accepts only `http://<IPv4-or-IPv6-literal>[:port]`,
-including public test endpoints such as `http://68.221.27.248:8070`.
+including public test endpoints such as `http://203.0.113.10:8070`.
 HTTPS origins and DNS/domain names are rejected at configuration, startup,
 navigation, and every print IPC command. Exact scheme, host, and port
 matching remain mandatory.

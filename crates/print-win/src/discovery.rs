@@ -2,8 +2,7 @@
 //! win.rs reads the structures; the layout and conversion logic here is
 //! platform-independent and unit-tested everywhere).
 //!
-//! PRINTER_INFO_2 (winspool.h, verified 2026-11-03 — see
-//! docs/research/windows-discovery-and-status.md). On 64-bit Windows the
+//! PRINTER_INFO_2 (winspool.h). On 64-bit Windows the
 //! struct is 13 pointers followed by 8 DWORDs; Status sits at byte
 //! offset 124 and cJobs at 128. We read through a repr(C) mirror so the
 //! compiler, not a hand-computed offset, does the layout on Windows.

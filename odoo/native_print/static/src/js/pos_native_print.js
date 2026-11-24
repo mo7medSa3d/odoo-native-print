@@ -5,7 +5,7 @@ import { TicketScreen } from "@point_of_sale/app/screens/ticket_screen/ticket_sc
 import { patch } from "@web/core/utils/patch";
 import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
-import { JOB_TERMINAL_STATES as TERMINAL_STATES, notifyJobUpdated, notifyUser, resolveBridgeTarget } from "./native_print_client";
+import { JOB_TERMINAL_STATES as TERMINAL_STATES, notifyJobUpdated, notifyUser, recoveryButtons, resolveBridgeTarget, safeErrorCode } from "./native_print_client";
 
 /*
  * Native Print for POS receipts (Odoo 17, 18, and 19 compatible).
@@ -29,8 +29,6 @@ import { JOB_TERMINAL_STATES as TERMINAL_STATES, notifyJobUpdated, notifyUser, r
  */
 
 const POS_RECEIPT_SOURCE = "point_of_sale.receipt";
-// TERMINAL_STATES is imported from native_print_client (the
-// shared job-state contract).
 
 function nativeBridge() {
     return window.__NATIVE_PRINT__ || null;
@@ -59,16 +57,16 @@ function notifyPosNativeFailure(contextObj, reason) {
     // Print again. Identical repeats are deduped inside notifyUser,
     // so the two wrapper layers below can never stack this toast.
     // Append the failure reason so distinct failure classes are actionable.
-    let message = _t("Native Print could not print this receipt, and nothing was printed. Check the printer and try again.");
+    let message = _t("Receipt did not print. Check the printer and try again.");
     if (reason) {
         message += " " + reason;
     }
-    notifyUser(notificationEnv(contextObj), message, "warning");
+    notifyUser(notificationEnv(contextObj), message, "warning", undefined, recoveryButtons());
 }
 
-const posFailNoPrinter = () => _t("Reason: no printer is available on this computer.");
-const posFailNoReceipt = () => _t("Reason: the receipt is not on screen.");
-const posFailCapture = () => _t("Reason: the receipt could not be captured as an image.");
+const posFailNoPrinter = () => _t("No printer is available on this PC.");
+const posFailNoReceipt = () => _t("Receipt is not visible on screen.");
+const posFailCapture = () => _t("Receipt image capture failed.");
 
 const inFlightPosKeys = new Set();
 
@@ -658,8 +656,10 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
             if (state === "failed" || state === "dead_letter") {
                 notifyUser(
                     env,
-                    _t('Receipt printing failed on "%s" (%s). Check the printer before reprinting.', printerName || rule.printer_pattern, errorCode || state),
+                    _t('Receipt printing failed on "%s" (%s). Check the printer before reprinting.', printerName || rule.printer_pattern, safeErrorCode(errorCode, state)),
                     "danger",
+                    undefined,
+                    typeof recoveryButtons === "function" ? recoveryButtons() : null,
                 );
                 if (state === "dead_letter") {
                     break;
@@ -678,8 +678,10 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
     if (!reachedTerminal) {
         notifyUser(
             env,
-            _t('Receipt job on "%s" is taking long; its final outcome is unconfirmed. Check Print Jobs later.', printerName || rule.printer_pattern),
+            _t('Receipt print on "%s" is still pending. Check Print Jobs for the final status.', printerName || rule.printer_pattern),
             "warning",
+            undefined,
+            typeof recoveryButtons === "function" ? recoveryButtons() : null,
         );
     }
 }
@@ -882,7 +884,7 @@ function reportPosException(contextObj, error, label) {
     }
     notifyPosNativeFailure(
         contextObj,
-        _t("Reason: the print job could not be queued."),
+        _t("Print job could not be queued."),
     );
 }
 

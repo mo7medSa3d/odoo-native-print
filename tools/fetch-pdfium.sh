@@ -34,11 +34,12 @@ fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT INT TERM
 echo "downloading ${URL}"
-curl -fsSL -o "${TMP}/${TGZ}" "${URL}"
+curl --proto '=https' --tlsv1.2 --connect-timeout 30 --max-time 300 --retry 3 -fsSL -o "${TMP}/${TGZ}" "${URL}"
 printf '%s  %s\n' "${SHA256}" "${TMP}/${TGZ}" | sha256sum -c -
 tar -xzf "${TMP}/${TGZ}" -C "${TMP}"
 printf '%s  %s\n' "${LIB_SHA256}" "${TMP}/lib/libpdfium.so" | sha256sum -c -
 cp "${TMP}/lib/libpdfium.so" "${DEST}/libpdfium.so.tmp"
 mv -f "${DEST}/libpdfium.so.tmp" "${DEST}/libpdfium.so"
-cp "${TMP}/VERSION" "${DEST}/VERSION"
+cp "${TMP}/VERSION" "${DEST}/VERSION.tmp"
+mv -f "${DEST}/VERSION.tmp" "${DEST}/VERSION"
 echo "installed PDFium ${TAG} -> ${DEST}/libpdfium.so"

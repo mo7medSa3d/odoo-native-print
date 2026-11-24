@@ -1,4 +1,5 @@
 use crate::mono::MonoBitmap;
+use std::io::Write as _;
 
 /// TSPL (TSC label printers) program builder. Structure of a label job:
 /// SIZE, GAP, CLS, BITMAP commands, PRINT.
@@ -19,9 +20,7 @@ impl TsplLabel {
         let w = width_mm.max(1);
         let h = height_mm.max(1);
         let mut buf = Vec::with_capacity(64);
-        buf.extend_from_slice(format!("SIZE {w} mm,{h} mm\r\n").as_bytes());
-        buf.extend_from_slice(format!("GAP {gap_mm} mm,0 mm\r\n").as_bytes());
-        buf.extend_from_slice(b"CLS\r\n");
+        let _ = write!(buf, "SIZE {w} mm,{h} mm\r\nGAP {gap_mm} mm,0 mm\r\nCLS\r\n");
         Self { buf }
     }
     /// BITMAP x,y,width(bytes per row),height,mode(0 = overwrite),<inverted data>
@@ -33,9 +32,9 @@ impl TsplLabel {
         if expected == 0 || bm.data.len() < expected {
             return self;
         }
-        self.buf.reserve(expected.saturating_add(48));
-        self.buf
-            .extend_from_slice(format!("BITMAP {x},{y},{bpr},{},0,", bm.height_dots).as_bytes());
+        // Reserve enough headroom for BITMAP header + CRLF + subsequent PRINT command.
+        self.buf.reserve(expected.saturating_add(96));
+        let _ = write!(self.buf, "BITMAP {x},{y},{bpr},{},0,", bm.height_dots);
         self.buf.extend(bm.data[..expected].iter().map(|&b| !b));
         self.buf.extend_from_slice(b"\r\n");
         self
@@ -59,8 +58,7 @@ impl TsplLabel {
     pub fn print(mut self, sets: u32, copies: u32) -> Vec<u8> {
         let sets = sets.max(1);
         let copies = copies.max(1);
-        self.buf
-            .extend_from_slice(format!("PRINT {sets},{copies}\r\n").as_bytes());
+        let _ = write!(self.buf, "PRINT {sets},{copies}\r\n");
         self.buf
     }
 }

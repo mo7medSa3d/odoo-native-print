@@ -8,10 +8,10 @@ garbage or fail silently.**
 
 | Component | Supported | Notes |
 | --- | --- | --- |
-| Odoo | **19.0** (addon `native_print` 19.0.x) | The addon uses Odoo 19 APIs (e.g. `models.Constraint`, `res.groups.user_ids`). Older Odoo versions are not supported. |
+| Odoo | **19.0** (`odoo/native_print`, `19.0.2.24.0`) and **20.0** (`odoo20/native_print`, `20.0.1.0.0`) | Separate addon trees target Odoo 19 (`models.Constraint`, `res.groups.user_ids`) and Odoo 20 (`security/ir.access.csv`, `native_print_dark.scss`). Older Odoo versions (< 19.0) are not supported. |
 | Desktop app | Windows 10 (22H2) and Windows 11, x64 | WebView2 runtime required; the installer brings it current via the embedded bootstrapper (internet at install time, or an already-current runtime). |
 | WebView2 runtime | Evergreen (bootstrapper-updated) | The app reports the exact runtime version in the Control Center diagnostics tab. |
-| Printers | Any printer with a Windows driver (GDI), plus raw ESC/POS, ZPL, TSPL, EPL devices via spooler RAW or direct TCP 9100 / IPP | Capabilities are read from the driver at print time; nothing is stored server-side. |
+| Printers | Any printer with a Windows driver (GDI), plus raw ESC/POS, ZPL, TSPL, EPL, CPCL devices via spooler RAW or direct TCP 9100 / IPP | Capabilities are read from the driver at print time; nothing is stored server-side. |
 
 ## App ↔ addon pairing (API v1)
 
@@ -39,8 +39,8 @@ The desktop app and the Odoo addon speak **bridge API v1**
   `Cargo.toml`, `package.json` (kept identical by
   `tools/check_versions.py`, enforced in CI and the release gate).
   A release tag `vX.Y.Z` must match the app version.
-- Addon: `19.0.x.y.z` (Odoo series prefix + own sequence).
-- Print cores (`print-core`, `print-render`, `print-raw`,
+- Addons: `19.0.x.y.z` (`odoo/native_print`) and `20.0.x.y.z` (`odoo20/native_print`) — Odoo series prefix + own sequence.
+- Print cores (`print-core`, `print-render`, `print-raw`, `print-ipp`,
   `print-win`) are internal crates, versioned with the workspace.
 
 ## Upgrade policy

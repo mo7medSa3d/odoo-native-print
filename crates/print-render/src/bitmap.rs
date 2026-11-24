@@ -19,7 +19,7 @@ pub fn page_row_chunks(height: u32, rows_per_page: u32) -> Vec<(u32, u32)> {
     if height == 0 || rows_per_page == 0 {
         return Vec::new();
     }
-    let mut chunks = Vec::new();
+    let mut chunks = Vec::with_capacity(height.div_ceil(rows_per_page) as usize);
     let mut start = 0;
     while start < height {
         let rows = rows_per_page.min(height - start);
@@ -74,20 +74,50 @@ pub fn fit_mono_to_box(bm: &MonoBitmap, max_w: u32, max_h: u32) -> MonoBitmap {
     let src_h = bm.height_dots as usize;
     let dst_w = target_w as usize;
     let dst_h = target_h as usize;
-    let Some(out_len) = dst_w.checked_mul(dst_h) else {
+    let src_bpr = bm.bytes_per_row();
+    let dst_bpr = dst_w / 8;
+    let Some(data_len) = dst_bpr.checked_mul(dst_h) else {
         return bm.clone();
     };
-    let mut out = vec![255u8; out_len];
+    // Precompute source (byte, mask) per output column once instead of
+    // dividing per pixel, and pack 1-bit rows directly without an 8x
+    // intermediate grayscale buffer.
+    let sx_lut: Vec<(usize, u8)> = (0..dst_w)
+        .map(|x| {
+            let sx = ((x as f64 / scale).floor() as usize).min(src_w - 1);
+            (sx / 8, 0x80u8 >> (sx % 8))
+        })
+        .collect();
+    let mut data = vec![0u8; data_len];
     for y in 0..dst_h {
-        let sy = ((y as f64 / scale).floor() as usize).min(src_h - 1) as u32;
-        for x in 0..dst_w {
-            let sx = ((x as f64 / scale).floor() as usize).min(src_w - 1) as u32;
-            if bm.pixel_is_black(sx, sy) {
-                out[y * dst_w + x] = 0;
+        let sy = ((y as f64 / scale).floor() as usize).min(src_h - 1);
+        let dst_row = &mut data[y * dst_bpr..(y + 1) * dst_bpr];
+        let src_row = sy.checked_mul(src_bpr).and_then(|start| {
+            start
+                .checked_add(src_bpr)
+                .and_then(|end| bm.data.get(start..end))
+        });
+        if let Some(src_row) = src_row {
+            for (dst_byte, x_chunk) in dst_row.iter_mut().zip(sx_lut.chunks_exact(8)) {
+                let mut byte = 0u8;
+                for (bit, &(sx_byte, sx_mask)) in x_chunk.iter().enumerate() {
+                    if src_row[sx_byte] & sx_mask != 0 {
+                        byte |= 0x80 >> bit;
+                    }
+                }
+                *dst_byte = byte;
+            }
+        } else {
+            for (x, &(sx_byte, sx_mask)) in sx_lut.iter().enumerate() {
+                if let Some(idx) = sy.checked_mul(src_bpr).and_then(|s| s.checked_add(sx_byte)) {
+                    if bm.data.get(idx).is_some_and(|&b| b & sx_mask != 0) {
+                        dst_row[x / 8] |= 0x80 >> (x % 8);
+                    }
+                }
             }
         }
     }
-    MonoBitmap::from_grayscale(&out, target_w, target_h, 128)
+    MonoBitmap::from_packed(target_w, target_h, data)
         .expect("resampled buffer matches its dimensions")
 }
 
@@ -226,5 +256,20 @@ mod fit_tests {
         let out = fit_mono_to_box(&bm, 576, 1000);
         assert_eq!((out.width_dots, out.height_dots), (384, 200));
         assert_eq!(out.data, bm.data);
+    }
+
+    #[test]
+    fn fit_preserves_spatial_pattern_directly() {
+        // 16x4 bitmap: left half black, right half white -> 8x2: left 4px black, right 4px white.
+        let mut gray = vec![255u8; 16 * 4];
+        for y in 0..4 {
+            for x in 0..8 {
+                gray[y * 16 + x] = 0;
+            }
+        }
+        let bm = MonoBitmap::from_grayscale(&gray, 16, 4, 128).unwrap();
+        let out = fit_mono_to_box(&bm, 8, 8);
+        assert_eq!((out.width_dots, out.height_dots), (8, 2));
+        assert_eq!(out.data, vec![0b1111_0000, 0b1111_0000]);
     }
 }

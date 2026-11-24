@@ -97,8 +97,12 @@ fn is_ipv4(s: &str) -> bool {
 
 fn is_ipv6_endpoint(s: &str) -> bool {
     if let Some(rest) = s.strip_prefix('[') {
-        if let Some((ip, _)) = rest.split_once(']') {
-            return ip.parse::<std::net::Ipv6Addr>().is_ok();
+        if let Some((ip, after)) = rest.split_once(']') {
+            let valid_suffix = after.is_empty()
+                || after
+                    .strip_prefix(':')
+                    .is_some_and(|port| !port.is_empty() && port.parse::<u16>().is_ok());
+            return valid_suffix && ip.parse::<std::net::Ipv6Addr>().is_ok();
         }
     }
     s.parse::<std::net::Ipv6Addr>().is_ok()
@@ -251,11 +255,8 @@ pub fn stable_printer_id(driver: &str, port: &str) -> Option<String> {
     if !endpoint {
         return None;
     }
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for b in format!("{}|{}", driver.trim().to_ascii_lowercase(), p).as_bytes() {
-        hash ^= u64::from(*b);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
+    let key = format!("{}|{}", driver.trim().to_ascii_lowercase(), p);
+    let hash = crate::queue::fnv1a_64(key.as_bytes());
     Some(format!("spooler-{hash:016x}"))
 }
 
@@ -292,7 +293,7 @@ impl PrinterCapabilities {
             duplex: duplex.unwrap_or(false),
             color: color.unwrap_or(false),
             bins,
-            max_copies: max_copies.unwrap_or(1),
+            max_copies: max_copies.map(|c| c.max(1)).unwrap_or(1),
             custom_size_supported,
             min_custom_mm,
             max_custom_mm,
@@ -426,6 +427,9 @@ pub fn detect_protocol(
     }
     if has_word("epl") {
         return ("epl", "label");
+    }
+    if has_word("cpcl") {
+        return ("cpcl", "label");
     }
     // Office printer families must never be misclassified as thermal POS
     // even if a queue is named "Receipt LaserJet".
@@ -588,7 +592,7 @@ impl PrinterInfo {
 /// raw bytes into a document file, producing a corrupt, unopenable
 /// "PDF" instead of a page (field report, 2026-11-04).
 fn is_raw_language(v: &str) -> bool {
-    matches!(v, "escpos" | "zpl" | "tspl" | "epl")
+    matches!(v, "escpos" | "zpl" | "tspl" | "epl" | "cpcl")
 }
 
 pub fn raw_delivery_blocked(payload_kind: &str, mode: &str, printer: PrinterKind) -> bool {

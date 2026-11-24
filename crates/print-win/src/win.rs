@@ -129,7 +129,7 @@ struct DevModePrefixW {
     dm_form_name: [u16; 32],
 }
 
-// --- GDI (gdi32) for the PDF bitmap backend ---------------------------
+// GDI (gdi32) for the PDF bitmap backend
 
 type Hdc = *mut c_void;
 
@@ -524,6 +524,12 @@ pub fn print_pdf_gdi_detailed(
     if pages == 0 {
         return Err(GdiPrintError::setup("PDF has no pages".to_string()));
     }
+    if pages > print_core::security::MAX_PAGES as usize {
+        return Err(GdiPrintError::setup(format!(
+            "PDF has {pages} pages, above the supported maximum of {}",
+            print_core::security::MAX_PAGES
+        )));
+    }
     let mut page_sizes = Vec::with_capacity(pages);
     for i in 0..pages {
         page_sizes.push(
@@ -563,12 +569,22 @@ pub fn print_pdf_gdi_detailed(
                 {
                     Some(print_core::PaperMatch {
                         form: form.clone(),
-                        kind: MatchKind::Exact,
+                        kind: if form.roll {
+                            MatchKind::Roll
+                        } else {
+                            MatchKind::Exact
+                        },
                     })
                 } else if opts.scale_policy == ScalePolicy::CustomAllowed {
                     match_paper_auto(sub.size, caps).ok()
                 } else {
-                    match_paper(sub.size, &caps.forms, opts.scale_policy).ok()
+                    match match_paper(sub.size, &caps.forms, opts.scale_policy) {
+                        Ok(m) => Some(m),
+                        Err(e) if opts.scale_policy == ScalePolicy::Strict => {
+                            return Err(GdiPrintError::setup(e.to_string()));
+                        }
+                        Err(_) => None,
+                    }
                 }
             }
             (None, _) => None,
@@ -817,8 +833,7 @@ fn print_canvas_gdi_with_caps(
             canvas.height as f64 * 25.4 / 203.0,
         ),
     };
-    let capabilities =
-        printer_capabilities(printer).map_err(|e| GdiPrintError::setup(e.to_string()))?;
+    let capabilities = printer_capabilities(printer).map_err(GdiPrintError::setup)?;
     if capabilities.forms.is_empty() && !capabilities.custom_size_supported {
         return Err(GdiPrintError::setup(
             "PRINTER_MEDIA_UNAVAILABLE: Windows driver reported no supported forms or custom-size bounds"
@@ -1221,14 +1236,12 @@ unsafe fn convert_info2(info: &PrinterInfo2W) -> crate::discovery::RawPrinterInf
     }
 }
 
-/// Discover all local and per-user connected printers (EnumPrinters
-/// level 2). Two-call pattern: size query, then fill.
-/// How long a discovery snapshot is shared between callers. The
-/// worker path resolves a printer per job; 5 s keeps bursts cheap
-/// while a (dis)appearing printer is noticed quickly. UI callers
-/// layer their own longer cache on top.
-const DISCOVERY_TTL: std::time::Duration = std::time::Duration::from_secs(30);
-const CAPABILITIES_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+/// Single source of truth for printer discovery caching.
+/// Must satisfy: DISCOVERY_TTL (12 s) + UI poll (5 s) < PrinterHealth::ttl_secs (30 s)
+/// so live printers never flip to "Outdated / بيانات قديمة" during normal viewing.
+const DISCOVERY_TTL: std::time::Duration = std::time::Duration::from_secs(12);
+const CAPABILITIES_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+const CAPS_CACHE_MAX_ENTRIES: usize = 128;
 static DISCOVERY_CACHE: crate::discovery::DiscoveryCache = crate::discovery::DiscoveryCache::new();
 static CAPS_CACHE: std::sync::Mutex<
     Option<
@@ -1238,13 +1251,14 @@ static CAPS_CACHE: std::sync::Mutex<
 
 pub fn invalidate_discovery_cache() {
     DISCOVERY_CACHE.invalidate();
-    if let Ok(mut guard) = CAPS_CACHE.lock() {
-        if let Some(map) = guard.as_mut() {
-            map.clear();
-        }
+    let mut guard = CAPS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(map) = guard.as_mut() {
+        map.clear();
     }
 }
 
+/// Discover all local and per-user connected printers (EnumPrinters
+/// level 2). Two-call pattern: size query, then fill.
 pub fn discover_printers() -> Result<Vec<print_core::PrinterInfo>, String> {
     DISCOVERY_CACHE.get_or_discover(DISCOVERY_TTL, discover_printers_uncached)
 }
@@ -1576,12 +1590,40 @@ pub fn printer_capabilities(printer: &str) -> Result<print_core::PrinterCapabili
     {
         let mut guard = CAPS_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         let map = guard.get_or_insert_with(std::collections::HashMap::new);
-        map.insert(
+        insert_caps_cache(
+            map,
             printer.to_string(),
-            (std::time::Instant::now(), caps.clone()),
+            caps.clone(),
+            std::time::Instant::now(),
         );
     }
     Ok(caps)
+}
+
+fn insert_caps_cache(
+    map: &mut std::collections::HashMap<
+        String,
+        (std::time::Instant, print_core::PrinterCapabilities),
+    >,
+    printer: String,
+    caps: print_core::PrinterCapabilities,
+    now: std::time::Instant,
+) {
+    // Evict expired entries first, then the oldest entry so churning or
+    // untrusted printer names cannot grow CAPS_CACHE unboundedly.
+    if map.len() >= CAPS_CACHE_MAX_ENTRIES && !map.contains_key(&printer) {
+        map.retain(|_, (at, _)| now.saturating_duration_since(*at) < CAPABILITIES_TTL);
+        if map.len() >= CAPS_CACHE_MAX_ENTRIES {
+            if let Some(oldest) = map
+                .iter()
+                .min_by_key(|(_, (at, _))| *at)
+                .map(|(k, _)| k.clone())
+            {
+                map.remove(&oldest);
+            }
+        }
+    }
+    map.insert(printer, (now, caps));
 }
 
 fn printer_capabilities_uncached(printer: &str) -> Result<print_core::PrinterCapabilities, String> {
@@ -1807,5 +1849,55 @@ pub fn print_raw_phased(printer: &str, title: &str, bytes: &[u8]) -> Result<u32,
                 Ok(job_id)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn caps_cache_evicts_expired_then_oldest_at_limit() {
+        let mut map = std::collections::HashMap::new();
+        let base = std::time::Instant::now();
+        let empty = print_core::PrinterCapabilities::from_driver_report(
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            None,
+            Vec::new(),
+            false,
+            None,
+            None,
+        );
+        for i in 0..CAPS_CACHE_MAX_ENTRIES {
+            let ts = base + std::time::Duration::from_millis(i as u64);
+            insert_caps_cache(&mut map, format!("printer-{i}"), empty.clone(), ts);
+        }
+        assert_eq!(map.len(), CAPS_CACHE_MAX_ENTRIES);
+
+        // Updating an existing key stays at the cap without evicting others.
+        let fresh = base + std::time::Duration::from_secs(1);
+        insert_caps_cache(&mut map, "printer-0".to_string(), empty.clone(), fresh);
+        assert_eq!(map.len(), CAPS_CACHE_MAX_ENTRIES);
+        assert!(map.contains_key("printer-1"));
+
+        // Inserting a new key when all entries are fresh evicts the oldest ("printer-1").
+        insert_caps_cache(
+            &mut map,
+            "printer-overflow".to_string(),
+            empty.clone(),
+            fresh + std::time::Duration::from_millis(1),
+        );
+        assert_eq!(map.len(), CAPS_CACHE_MAX_ENTRIES);
+        assert!(!map.contains_key("printer-1"));
+        assert!(map.contains_key("printer-overflow"));
+
+        // Inserting after TTL purges expired entries instead of growing.
+        let later = fresh + CAPABILITIES_TTL + std::time::Duration::from_secs(1);
+        insert_caps_cache(&mut map, "printer-after-ttl".to_string(), empty, later);
+        assert_eq!(map.len(), 1);
+        assert!(map.contains_key("printer-after-ttl"));
     }
 }

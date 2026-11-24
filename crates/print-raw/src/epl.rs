@@ -1,4 +1,5 @@
 use crate::mono::MonoBitmap;
+use std::io::Write as _;
 
 /// EPL2 (legacy Zebra/Eltron) graphic write: GW x,y,bytesPerRow,height,<binary>
 /// inside an N ... P1 label form.
@@ -32,21 +33,17 @@ pub fn epl_label_copies_with_gap(bm: &MonoBitmap, copies: u16, gap_dots: u32) ->
         return Vec::new();
     }
     let copies = copies.max(1);
-    let mut out = Vec::with_capacity(expected + 64);
-    out.extend_from_slice(b"N\r\n");
-    out.extend_from_slice(
-        format!(
-            "q{}\r\nQ{},{gap_dots}\r\nGW0,0,{bpr},{},",
-            bm.width_dots.max(8),
-            bm.height_dots.max(1),
-            bm.height_dots
-        )
-        .as_bytes(),
+    // Header + trailer is <= 88 bytes even for max u32 dimensions; 96 B guarantees 0 reallocs.
+    let mut out = Vec::with_capacity(expected.saturating_add(96));
+    let _ = write!(
+        out,
+        "N\r\nq{}\r\nQ{},{gap_dots}\r\nGW0,0,{bpr},{},",
+        bm.width_dots.max(8),
+        bm.height_dots.max(1),
+        bm.height_dots
     );
-    for &b in &bm.data[..expected] {
-        out.push(!b);
-    }
-    out.extend_from_slice(format!("\r\nP{copies}\r\n").as_bytes());
+    out.extend(bm.data[..expected].iter().map(|&b| !b));
+    let _ = write!(out, "\r\nP{copies}\r\n");
     out
 }
 

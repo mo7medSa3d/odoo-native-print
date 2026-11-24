@@ -99,6 +99,8 @@ pub fn validate_origin(origin: &str) -> Result<String, String> {
             if crate::commands::is_blocked_metadata_ip(ip) {
                 return Err("cloud metadata address is not allowed".to_string());
             }
+        } else if crate::commands::is_blocked_metadata_host(&host) {
+            return Err("cloud metadata address is not allowed".to_string());
         }
     }
     if cfg!(not(debug_assertions)) {
@@ -225,34 +227,36 @@ mod gpo {
     }
 }
 
-pub fn load_origin(config_dir: &Path) -> Result<String, String> {
-    if let Some(po) = gpo::policy_origin() {
-        return validate_origin(&po);
-    }
-    let file = config_dir.join("config.json");
-    if let Ok(raw) = std::fs::read_to_string(&file) {
-        let parsed: FileConfig =
-            serde_json::from_str(&raw).map_err(|e| format!("config.json is invalid: {e}"))?;
-        return validate_origin(&parsed.odoo_origin);
-    }
-    if cfg!(debug_assertions) {
-        if let Ok(v) = std::env::var("NATIVE_PRINT_ODOO_ORIGIN") {
-            return validate_origin(&v);
-        }
-    }
-    Err("no Odoo address configured; set odoo_origin (HTTPS, or HTTP to an IP address)".to_string())
-}
-
 pub fn resolve_config(config_dir: &Path) -> ResolvedConfig {
+    let policy_origin = gpo::policy_origin();
+    let locked_by_policy = gpo::policy_locked() || policy_origin.is_some();
     let file = config_dir.join("config.json");
-    let locked_by_policy = gpo::policy_locked() || gpo::policy_origin().is_some();
-    let mut auto_reprint = false;
-    if let Ok(raw) = std::fs::read_to_string(&file) {
-        if let Ok(parsed) = serde_json::from_str::<FileConfig>(&raw) {
-            auto_reprint = parsed.auto_reprint;
+    let file_parsed = std::fs::read_to_string(&file).ok().map(|raw| {
+        serde_json::from_str::<FileConfig>(&raw).map_err(|e| format!("config.json is invalid: {e}"))
+    });
+    let auto_reprint = match &file_parsed {
+        Some(Ok(parsed)) => parsed.auto_reprint,
+        _ => false,
+    };
+    let origin_result = if let Some(po) = policy_origin {
+        validate_origin(&po)
+    } else if let Some(parsed) = file_parsed {
+        parsed.and_then(|cfg| validate_origin(&cfg.odoo_origin))
+    } else if cfg!(debug_assertions) {
+        match std::env::var("NATIVE_PRINT_ODOO_ORIGIN") {
+            Ok(v) if !v.trim().is_empty() => validate_origin(&v),
+            _ => Err(
+                "no Odoo address configured; set odoo_origin (HTTPS, or HTTP to an IP address)"
+                    .to_string(),
+            ),
         }
-    }
-    match load_origin(config_dir) {
+    } else {
+        Err(
+            "no Odoo address configured; set odoo_origin (HTTPS, or HTTP to an IP address)"
+                .to_string(),
+        )
+    };
+    match origin_result {
         Ok(origin) => ResolvedConfig {
             odoo_origin: Some(origin),
             locked_by_policy,
@@ -338,9 +342,11 @@ mod tests {
         assert!(validate_origin("https://192.168.1.20:8069").is_ok());
         assert!(validate_origin("https://odoo.company.local:8069").is_ok());
         assert!(validate_origin("http://8.8.8.8:8069").is_ok());
-        assert!(validate_origin("http://68.221.27.248:8070").is_ok());
+        assert!(validate_origin("http://203.0.113.10:8070").is_ok());
         assert!(validate_origin("http://odoo.company.local:8069").is_err());
         assert!(validate_origin("http://999.999.999.999:8069").is_err());
+        assert!(validate_origin("https://metadata.google.internal").is_err());
+        assert!(validate_origin("http://169.254.169.254").is_err());
         assert!(validate_origin("not a url").is_err());
     }
 

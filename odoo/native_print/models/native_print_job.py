@@ -9,15 +9,13 @@ _logger = logging.getLogger(__name__)
 
 class NativePrintJob(models.Model):
     _name = "native.print.job"
-    _description = "Native Print: job log"
+    _description = "Yaseir Print: job log"
     _order = "create_date desc, id desc"
 
     # Created with the table on a fresh install; _register_hook below adds
     # them to installs that predate these indexes.
-    _sql_constraints = [
-        ("company_state_idx", "index (company_id, state)", "company/state index"),
-        ("state_create_date_idx", "index (state, create_date)", "state/date index"),
-    ]
+    _company_state_idx = models.Index("(company_id, state)")
+    _state_create_date_idx = models.Index("(state, create_date)")
 
     @api.model
     def _register_hook(self):
@@ -95,6 +93,7 @@ class NativePrintJob(models.Model):
     name = fields.Char(
         required=True,
         index=True,
+        copy=False,
         string="Idempotency key",
     )
     state = fields.Selection(
@@ -221,9 +220,8 @@ class NativePrintJob(models.Model):
             report = found
         if not report or not ids:
             raise UserError(_(
-                "This job cannot be reprinted: the original report "
-                "or its records were not recorded for it (for "
-                "example, POS receipts are reprinted from the POS)."
+                "This job cannot be reprinted because its report or "
+                "records were not saved. Reprint POS receipts directly from POS."
             ))
         # Never trust client-reported source_model: derive model from the
         # report itself, enforce report group restrictions (expanding implied
@@ -316,7 +314,7 @@ class NativePrintJob(models.Model):
         Job = self.sudo()
         count = 0
         for _ in range(max_batches):
-            batch = Job.search(domain, limit=batch_size)
+            batch = Job.search(domain, order="create_date asc, id asc", limit=batch_size)
             if not batch:
                 break
             count += len(batch)
@@ -337,8 +335,8 @@ class NativePrintJob(models.Model):
             for rec in self:
                 if rec.state != vals["state"]:
                     raise UserError(_(
-                        "Print job status is reported by the desktop app "
-                        "and cannot be changed manually. To print again, "
-                        "print the document again from Odoo."
+                        "Print job status is synced from the desktop app "
+                        "and cannot be edited manually. Reprint the document "
+                        "from Odoo instead."
                     ))
         return super().write(vals)

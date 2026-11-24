@@ -1,0 +1,30 @@
+/* Yaseir Print — Odoo 19 Dark Mode Tokens (web.assets_web_dark) */
+.o_native_print_systray,
+.o_notification_manager .o_notification.o_native_print_notification {
+    --np-surface: rgba(15, 15, 15, 0.90);
+    --np-card: #0f0f0f;
+    --np-subtle: #181818;
+    --np-border: #26272e;
+    --np-border-strong: #323e62;
+    --np-text: #ffffff;
+    --np-text-secondary: #d9d9d9;
+    --np-text-muted: #9397a8;
+    --np-brand: #6b96ff;
+    --np-brand-fill: #2b65ff;
+    --np-brand-hover: #1d54e8;
+    --np-brand-fg: #ffffff;
+    --np-brand-soft: rgba(43, 101, 255, 0.18);
+    --np-info-bg: #000e39;
+    --np-info-border: #323e62;
+    --np-ok: #00eeba;
+    --np-ok-bg: rgba(0, 238, 186, 0.14);
+    --np-ok-border: rgba(0, 238, 186, 0.34);
+    --np-ok-ring: rgba(0, 238, 186, 0.28);
+    --np-err: #ff8559;
+    --np-err-bg: rgba(255, 108, 53, 0.16);
+    --np-err-border: rgba(255, 108, 53, 0.36);
+    --np-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+    --np-shadow: 0 22px 54px rgba(0, 0, 0, 0.80);
+    --np-brand-shadow: 0 6px 16px -6px rgba(43, 101, 255, 0.45);
+    --np-focus-ring: 0 0 0 3px rgba(46, 106, 255, 0.36);
+}

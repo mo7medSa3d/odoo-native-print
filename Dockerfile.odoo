@@ -1,7 +1,13 @@
-# Minimal non-root Odoo 19.0 image with the native_print addon pre-installed.
-FROM odoo:19.0
+# Minimal non-root Odoo 19.0 / 20.0 image with the native_print addon pre-installed.
+# Odoo 19 (default):
+#   docker build -f Dockerfile.odoo -t odoo-native-print:19.0 .
+# Odoo 20:
+#   docker build -f Dockerfile.odoo --build-arg ODOO_VERSION=20.0 --build-arg ADDON_SRC=odoo20/native_print -t odoo-native-print:20.0 .
+ARG ODOO_VERSION=19.0
+FROM odoo:${ODOO_VERSION}
 
-COPY --chown=odoo:odoo odoo/native_print /mnt/extra-addons/native_print
+ARG ADDON_SRC=odoo/native_print
+COPY --chown=odoo:odoo ${ADDON_SRC} /mnt/extra-addons/native_print
 
 USER odoo
 

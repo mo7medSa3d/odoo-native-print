@@ -25,8 +25,8 @@ alternatives:
 
 POS receipts are a separate flow in Odoo (not report actions); the
 addon patches the POS receipt printing path instead, and routes it
-through the same rules endpoint with the `point_of_sale.receipt`
-source name.
+through the same live workstation target selection with the
+`point_of_sale.receipt` source name.
 
 ## Routing model (live, per-PC)
 
@@ -48,14 +48,15 @@ server keeps only the job log.
 
 ## Failure behaviour (never hard-break printing)
 
-- No bridge (plain browser), unsupported report type, no client id,
-  or no matching rule → the handler returns `undefined` and Odoo's
-  standard download happens, unchanged.
+- No bridge (plain browser), unsupported report type, or no connected
+  printer → the handler returns `undefined` and Odoo's standard
+  download happens, unchanged.
 - Report fetch failure → same fallback; Odoo's own error reporting
   applies.
 - Bridge submission failure → the job is logged as failed
   server-side, the user gets a warning toast, and the standard
   download still happens. (Pattern copied from the QZ apps'
   documented "Download PDF instead" fallback.)
-- Printer vanished/offline → the rule cannot match an inactive
-  device, so routing falls to the next tier or the download.
+- Printer vanished/offline → the live printer inventory omits
+  disconnected devices, so routing falls back to the OS default
+  printer or standard browser download.

@@ -9,8 +9,7 @@
     "build": "tauri build",
     "check": "tauri info",
     "tauri": "tauri",
-    "test": "node --test tests/control-center.test.mjs",
-    "check-ui": "node --test tests/control-center.test.mjs"
+    "test": "node --test tests/control-center.test.mjs"
   },
   "version": "1.5.7"
 }
