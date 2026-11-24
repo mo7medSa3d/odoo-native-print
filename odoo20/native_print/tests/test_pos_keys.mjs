@@ -40,6 +40,7 @@ process.on("exit", () => {
 const tmpClient = join(tmpDir, "np_client.mjs");
 writeFileSync(tmpClient, clientSrc);
 const tmpClientUrl = pathToFileURL(tmpClient).href;
+const clientMod = await import(tmpClientUrl);
 
 class StubPosTicketPrinterPlugin {
     async printOrderReceipt(opts) {
@@ -78,6 +79,30 @@ const runnablePosSrc = posSrc
 const tmpPos = join(tmpDir, "pos_native_print_test.mjs");
 writeFileSync(tmpPos, runnablePosSrc);
 const posMod = await import(pathToFileURL(tmpPos).href);
+
+test("document direction follows session language: Arabic rtl, English ltr", () => {
+    const prevDocument = globalThis.document;
+    const listeners = [];
+    globalThis.document = {
+        documentElement: { lang: "ar_001", dir: "ltr" },
+        addEventListener: (type, fn) => listeners.push({ type, fn }),
+    };
+    try {
+        assert.equal(clientMod.directionForLang("ar"), "rtl");
+        assert.equal(clientMod.directionForLang("ar_001"), "rtl");
+        assert.equal(clientMod.directionForLang("he_IL"), "rtl");
+        assert.equal(clientMod.directionForLang("en_US"), "ltr");
+
+        assert.equal(clientMod.syncDocumentDirection(), "rtl");
+        assert.equal(globalThis.document.documentElement.dir, "rtl", "Arabic must render rtl");
+
+        globalThis.document.documentElement.lang = "en_US";
+        assert.equal(clientMod.syncDocumentDirection(), "ltr", "English must render ltr");
+        assert.equal(globalThis.document.documentElement.dir, "ltr");
+    } finally {
+        globalThis.document = prevDocument;
+    }
+});
 
 test("posReceiptKey idempotency, per-cashier scoping, tombstone rotation, and stale >15s expiry", () => {
     const store = new Map();

@@ -8,6 +8,41 @@ import { _t } from "@web/core/l10n/translation";
 const SELECTION_KEY = "native_print.selected_printer";
 const POS_SELECTION_KEY = "native_print.selected_pos_printer";
 
+// Keep the document direction tied to the session language: Arabic and
+// other RTL languages must render rtl even when a staging language record
+// was imported without its direction flag. English stays ltr.
+const RTL_LANG = /^(ar|he|fa|ur|ps|sd|yi)([_-]|$)/i;
+
+export function directionForLang(lang) {
+    return RTL_LANG.test(String(lang || "")) ? "rtl" : "ltr";
+}
+
+export function syncDocumentDirection() {
+    if (typeof document === "undefined" || !document.documentElement) {
+        return null;
+    }
+    const root = document.documentElement;
+    const globalOdoo = typeof odoo !== "undefined" ? odoo : null;
+    const lang = String(
+        root.lang ||
+            (globalOdoo && (globalOdoo.lang || globalOdoo.session_info?.lang)) ||
+            "",
+    );
+    if (!lang) {
+        return null;
+    }
+    const dir = directionForLang(lang);
+    if (root.dir !== dir) {
+        root.dir = dir;
+    }
+    return dir;
+}
+
+syncDocumentDirection();
+if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("DOMContentLoaded", syncDocumentDirection, { once: true });
+}
+
 // Shared terminal job states matching the desktop queue and server log.
 // Watchers decide whether to keep observing after retryable outcomes (failed/dead_letter).
 export const JOB_TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);
