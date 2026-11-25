@@ -45,6 +45,7 @@ object OdooWebViewFactory {
         val allowedOrigins = setOf(configuredOrigin)
 
         return WebView(context).apply {
+            initialScale = 100
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
@@ -56,7 +57,6 @@ object OdooWebViewFactory {
                 // browser chrome, which makes POS/print screens feel cut off.
                 useWideViewPort = true
                 loadWithOverviewMode = false
-                initialScale = 100
                 builtInZoomControls = true
                 displayZoomControls = false
                 mediaPlaybackRequiresUserGesture = false

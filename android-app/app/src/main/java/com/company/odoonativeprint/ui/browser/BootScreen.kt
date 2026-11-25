@@ -62,6 +62,7 @@ fun BootScreen(
     onOriginSaved: (String) -> Unit,
 ) {
     val c = LocalYaseirColors.current
+    val currentLanguage = LocalLanguage.current
     val scope = rememberCoroutineScope()
     var originInput by remember { mutableStateOf(initialOrigin) }
     var statusText by remember { mutableStateOf<String?>(null) }
@@ -153,7 +154,7 @@ fun BootScreen(
                         OriginPolicy.validateAndNormalize(originInput)
                             .onFailure {
                                 isError = true
-                                statusText = explainOriginError(it.message, LocalLanguage.current)
+                                statusText = explainOriginError(it.message, currentLanguage)
                             }
                             .onSuccess { normalized ->
                                 probing = true
@@ -183,7 +184,7 @@ fun BootScreen(
                             .onSuccess { onOriginSaved(it) }
                             .onFailure {
                                 isError = true
-                                statusText = explainOriginError(it.message, LocalLanguage.current)
+                                statusText = explainOriginError(it.message, currentLanguage)
                             }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = c.brand, contentColor = Color.White),
