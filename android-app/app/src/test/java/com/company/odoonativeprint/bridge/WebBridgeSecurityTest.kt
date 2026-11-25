@@ -118,14 +118,14 @@ class WebBridgeSecurityTest {
             handler = object : RemoteBridgeHandler {
                 override fun configuredOrigin(): String = "https://erp.company.com"
                 override fun enqueuePdf(printer: String, bytes: ByteArray, copies: Int, idempotencyKey: String?, options: org.json.JSONObject) =
-                    engine.enqueue(printer, "pdf", bytes, copies, idempotencyKey)
+                    engine.enqueue(printer, "pdf", bytes, copies, idempotencyKey = idempotencyKey)
                 override fun enqueueText(printer: String, text: String, copies: Int, idempotencyKey: String?, options: org.json.JSONObject) =
-                    engine.enqueue(printer, "text", text.toByteArray(), copies, idempotencyKey)
+                    engine.enqueue(printer, "text", text.toByteArray(), copies, idempotencyKey = idempotencyKey)
                 override fun enqueueImage(printer: String, bytes: ByteArray, copies: Int, idempotencyKey: String?, options: org.json.JSONObject) =
-                    engine.enqueue(printer, "image", bytes, copies, idempotencyKey)
+                    engine.enqueue(printer, "image", bytes, copies, idempotencyKey = idempotencyKey)
                 override fun printStatus(jobId: String): String? = engine.getJob(jobId)?.state?.wireName
                 override fun jobDetail(jobId: String) = engine.getJob(jobId)
-                override fun appOverview(force: Boolean) = com.company.odoonativeprint.core.AppOverview("1.5.7", configuredOrigin(), 0, engine.summary())
+                override fun appOverview(force: Boolean) = com.company.odoonativeprint.core.AppOverview("1.5.7", "android", configuredOrigin(), emptyList(), engine.summary(), 1L)
                 override fun listPrinters(force: Boolean) = emptyList<com.company.odoonativeprint.core.PrinterInfo>()
                 override fun printerForms(printer: String) = emptyList<String>()
                 override fun printerCapabilities(printer: String) = null
