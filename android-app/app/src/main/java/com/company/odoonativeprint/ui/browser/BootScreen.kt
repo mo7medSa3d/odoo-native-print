@@ -146,6 +146,8 @@ fun BootScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                val connectedLabel = tr("متصل")
+                val connectionFailedLabel = tr("تعذّر الاتصال")
                 OutlinedButton(
                     onClick = {
                         OriginPolicy.validateAndNormalize(originInput)
@@ -160,7 +162,7 @@ fun BootScreen(
                                     val ok = probeOrigin(normalized)
                                     probing = false
                                     isError = !ok
-                                    statusText = if (ok) tr("متصل") else tr("تعذّر الاتصال")
+                                    statusText = if (ok) connectedLabel else connectionFailedLabel
                                 }
                             }
                     },
