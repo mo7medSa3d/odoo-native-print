@@ -555,7 +555,7 @@ pub fn print_pdf_gdi_detailed(
     };
     // Monochrome printers gain 4x faster rendering and 4x smaller spool files in Grayscale.
     let effective_mode = match (&capabilities, opts.mode) {
-        (Some(caps), print_render::RenderMode::Color) if caps.color == Some(false) => {
+        (Some(caps), print_render::RenderMode::Color) if !caps.color => {
             print_render::RenderMode::Grayscale
         }
         (_, m) => m,

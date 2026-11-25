@@ -397,7 +397,6 @@ mod tests {
             entropy: 0,
         };
         assert_eq!(w.run_once("p1").unwrap(), Outcome::Failed("p-crash".into()));
-        drop(w);
         let j = q.get("p-crash").unwrap();
         assert_eq!(j.state, JobState::Failed);
         assert_eq!(j.error_code.as_deref(), Some("BACKEND_PANIC"));

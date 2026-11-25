@@ -123,7 +123,7 @@ class WebBridgeSecurityTest {
                     engine.enqueue(printer, "text", text.toByteArray(), copies, idempotencyKey)
                 override fun enqueueImage(printer: String, bytes: ByteArray, copies: Int, idempotencyKey: String?, options: org.json.JSONObject) =
                     engine.enqueue(printer, "image", bytes, copies, idempotencyKey)
-                override fun printStatus(jobId: String): String? = engine.getJob(jobId)?.state?.wire
+                override fun printStatus(jobId: String): String? = engine.getJob(jobId)?.state?.wireName
                 override fun jobDetail(jobId: String) = engine.getJob(jobId)
                 override fun appOverview(force: Boolean) = com.company.odoonativeprint.core.AppOverview("1.5.7", configuredOrigin(), 0, engine.summary())
                 override fun listPrinters(force: Boolean) = emptyList<com.company.odoonativeprint.core.PrinterInfo>()

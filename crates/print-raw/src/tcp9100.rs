@@ -43,10 +43,13 @@ fn connect_addrs(
             Some(d) => d.saturating_duration_since(Instant::now()),
             None => fallback_timeout,
         };
-        if remaining.is_zero() {
+        // Bound each dial so one unresponsive address cannot consume the entire
+        // shared budget before later addresses are tried.
+        let attempt_timeout = remaining.min(fallback_timeout);
+        if attempt_timeout.is_zero() {
             break;
         }
-        match TcpStream::connect_timeout(addr, remaining) {
+        match TcpStream::connect_timeout(addr, attempt_timeout) {
             Ok(stream) => return Ok(stream),
             Err(e) => last_err = Some(e),
         }
@@ -638,11 +641,12 @@ mod tests {
         let server = std::thread::spawn(move || {
             let _ = live.accept();
         });
-        let total = Duration::from_secs(2);
+        let total = Duration::from_secs(10);
+        let per_attempt = Duration::from_millis(500);
         let stream = connect_addrs(
             &[dead_addr, live_addr],
             Instant::now().checked_add(total),
-            total,
+            per_attempt,
         )
         .expect("second address should succeed after first fails");
         drop(stream);

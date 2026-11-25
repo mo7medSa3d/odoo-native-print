@@ -589,10 +589,10 @@ mod tests {
         let mut img = Canvas::new(5, 5);
         img.px.fill(255);
         // Pure black pixel (like barcode/QR) stays 0; dark-gray text core (110) darkens.
-        img.px[1 * 5 + 1] = 0;
+        img.px[6] = 0;
         img.px[2 * 5 + 2] = 110;
         let out = sharpen_receipt_gray(&img);
-        assert_eq!(out.px[1 * 5 + 1], 0);
+        assert_eq!(out.px[6], 0);
         assert!(out.px[2 * 5 + 2] < 110);
         assert_eq!(out.px[3 * 5 + 3], 255);
     }
