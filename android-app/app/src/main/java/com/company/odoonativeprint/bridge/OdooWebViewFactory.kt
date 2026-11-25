@@ -51,8 +51,12 @@ object OdooWebViewFactory {
                 databaseEnabled = true
                 javaScriptCanOpenWindowsAutomatically = true
                 setSupportMultipleWindows(true)
+                // Render Odoo at device width. Overview mode shrinks pages that
+                // have no viewport meta tag and hides controls behind the
+                // browser chrome, which makes POS/print screens feel cut off.
                 useWideViewPort = true
-                loadWithOverviewMode = true
+                loadWithOverviewMode = false
+                initialScale = 100
                 builtInZoomControls = true
                 displayZoomControls = false
                 mediaPlaybackRequiresUserGesture = false

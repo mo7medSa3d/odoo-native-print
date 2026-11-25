@@ -1,4 +1,5 @@
 package com.company.odoonativeprint.ui.controlcenter
+import com.company.odoonativeprint.ui.theme.tr
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
@@ -119,16 +120,16 @@ fun ControlCenterScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "رجوع", tint = c.textPrimary)
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = tr("رجوع"), tint = c.textPrimary)
             }
             Text(
-                "مركز التحكم",
+                tr("مركز التحكم"),
                 style = MaterialTheme.typography.titleMedium,
                 color = c.textPrimary,
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = { reloadData(forcePrinters = true) }) {
-                Icon(Icons.Rounded.Refresh, contentDescription = "تحديث", tint = c.brand)
+                Icon(Icons.Rounded.Refresh, contentDescription = tr("تحديث"), tint = c.brand)
             }
         }
         HorizontalDivider(thickness = 0.5.dp, color = c.border)
@@ -144,9 +145,9 @@ fun ControlCenterScreen(
                 .padding(3.dp),
         ) {
             listOf(
-                "الطابعات (${printers.size})",
-                "السجل (${jobs.size})",
-                "التشخيص",
+                tr("الطابعات (${printers.size})"),
+                tr("السجل (${jobs.size})"),
+                tr("التشخيص"),
             ).forEachIndexed { idx, label ->
                 val active = selectedTab == idx
                 val bg by animateColorAsState(if (active) c.bgSurface else Color.Transparent, label = "seg_bg")
@@ -284,7 +285,7 @@ private fun PrintersTab(
             ) {
                 Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("إضافة طابعة")
+                Text(tr("إضافة طابعة"))
             }
         }
         items(printers, key = { it.name }) { p ->
@@ -319,7 +320,7 @@ private fun PrintersTab(
                     }
                     if (p.isDefault) {
                         Text(
-                            "افتراضية",
+                            tr("افتراضية"),
                             style = MaterialTheme.typography.labelSmall,
                             color = c.okFg,
                             modifier = Modifier
@@ -339,23 +340,23 @@ private fun PrintersTab(
                         ) {
                             Icon(Icons.Rounded.Usb, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("تفعيل USB")
+                            Text(tr("تفعيل USB"))
                         }
                     } else {
                         OutlinedButton(onClick = { onTestPrint(p) }, shape = RoundedCornerShape(999.dp)) {
                             Icon(Icons.Rounded.Print, contentDescription = null, modifier = Modifier.size(15.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("اختبار")
+                            Text(tr("اختبار"))
                         }
                     }
                     OutlinedButton(onClick = { onConfigure(p) }, shape = RoundedCornerShape(999.dp)) {
                         Icon(Icons.Rounded.Tune, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("ضبط")
+                        Text(tr("ضبط"))
                     }
                     if (!p.isDefault) {
                         OutlinedButton(onClick = { onSetDefault(p) }, shape = RoundedCornerShape(999.dp)) {
-                            Text("افتراضية")
+                            Text(tr("افتراضية"))
                         }
                     }
                 }
@@ -386,7 +387,7 @@ private fun QueueTab(
                 ) {
                     Icon(Icons.Rounded.DeleteSweep, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("مسح المكتملة")
+                    Text(tr("مسح المكتملة"))
                 }
             }
         }
@@ -396,16 +397,16 @@ private fun QueueTab(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("لا توجد مهام طباعة", style = MaterialTheme.typography.bodyMedium, color = c.textMuted)
+                    Text(tr("لا توجد مهام طباعة"), style = MaterialTheme.typography.bodyMedium, color = c.textMuted)
                 }
             }
         }
         items(jobs, key = { it.id }) { job ->
             val (badgeColor, badgeBg, badgeLabel) = when (job.state) {
-                JobState.COMPLETED -> Triple(c.okFg, c.okBg, "مكتملة")
-                JobState.FAILED -> Triple(c.errFg, c.errBg, "فشلت")
-                JobState.CANCELLED -> Triple(c.textMuted, c.bgSubtle, "ملغاة")
-                else -> Triple(c.warnFg, c.warnBg, "جاري الطباعة")
+                JobState.COMPLETED -> Triple(c.okFg, c.okBg, tr("مكتملة"))
+                JobState.FAILED -> Triple(c.errFg, c.errBg, tr("فشلت"))
+                JobState.CANCELLED -> Triple(c.textMuted, c.bgSubtle, tr("ملغاة"))
+                else -> Triple(c.warnFg, c.warnBg, tr("جاري الطباعة"))
             }
             Column(
                 modifier = Modifier
@@ -447,12 +448,12 @@ private fun QueueTab(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (job.state == JobState.FAILED) {
                             OutlinedButton(onClick = { onRetry(job.id) }, shape = RoundedCornerShape(999.dp)) {
-                                Text("إعادة")
+                                Text(tr("إعادة"))
                             }
                         }
                         if (job.state.isActive) {
                             OutlinedButton(onClick = { onCancel(job.id) }, shape = RoundedCornerShape(999.dp)) {
-                                Text("إلغاء", color = c.errFg)
+                                Text(tr("إلغاء"), color = c.errFg)
                             }
                         }
                     }
@@ -484,13 +485,13 @@ private fun DiagnosticsTab(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            DiagRow("الخادم", snap.origin ?: "—")
+            DiagRow(tr("الخادم"), snap.origin ?: "—")
             HorizontalDivider(thickness = 0.5.dp, color = c.border)
-            DiagRow("الإصدار", "Android v${BuildConfig.VERSION_NAME}")
+            DiagRow(tr("الإصدار"), "Android v${BuildConfig.VERSION_NAME}")
             HorizontalDivider(thickness = 0.5.dp, color = c.border)
-            DiagRow("الطابعات", "${printers.size}")
+            DiagRow(tr("الطابعات"), "${printers.size}")
             HorizontalDivider(thickness = 0.5.dp, color = c.border)
-            DiagRow("تحديث الكاش", "#${app.discovery.capsEpoch()}")
+            DiagRow(tr("تحديث الكاش"), "#${app.discovery.capsEpoch()}")
         }
 
         Button(
@@ -501,7 +502,7 @@ private fun DiagnosticsTab(
         ) {
             Icon(Icons.Rounded.Share, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text("تصدير التشخيص")
+            Text(tr("تصدير التشخيص"))
         }
     }
 }

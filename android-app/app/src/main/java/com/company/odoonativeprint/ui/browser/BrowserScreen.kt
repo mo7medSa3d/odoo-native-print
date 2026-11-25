@@ -1,4 +1,5 @@
 package com.company.odoonativeprint.ui.browser
+import com.company.odoonativeprint.ui.theme.tr
 
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -109,7 +110,7 @@ fun BrowserScreen(
                     ) {
                         Icon(
                             Icons.AutoMirrored.Rounded.ArrowBack,
-                            contentDescription = "رجوع",
+                            contentDescription = tr("رجوع"),
                             tint = if (activeTab?.canGoBack == true) c.textPrimary else c.textMuted.copy(alpha = 0.4f),
                             modifier = Modifier.size(18.dp),
                         )
@@ -121,7 +122,7 @@ fun BrowserScreen(
                     ) {
                         Icon(
                             Icons.AutoMirrored.Rounded.ArrowForward,
-                            contentDescription = "تقدم",
+                            contentDescription = tr("تقدم"),
                             tint = if (activeTab?.canGoForward == true) c.textPrimary else c.textMuted.copy(alpha = 0.4f),
                             modifier = Modifier.size(18.dp),
                         )
@@ -132,7 +133,7 @@ fun BrowserScreen(
                     ) {
                         Icon(
                             Icons.Rounded.Refresh,
-                            contentDescription = "تحديث",
+                            contentDescription = tr("تحديث"),
                             tint = c.textPrimary,
                             modifier = Modifier.size(18.dp),
                         )
@@ -175,7 +176,7 @@ fun BrowserScreen(
                                     Spacer(Modifier.width(4.dp))
                                     Icon(
                                         Icons.Rounded.Close,
-                                        contentDescription = "إغلاق التبويب",
+                                        contentDescription = tr("إغلاق التبويب"),
                                         tint = c.textMuted,
                                         modifier = Modifier
                                             .size(14.dp)
@@ -189,7 +190,7 @@ fun BrowserScreen(
                             onClick = { tabManager.openTab(configuredOrigin) },
                             modifier = Modifier.size(28.dp),
                         ) {
-                            Icon(Icons.Rounded.Add, contentDescription = "تبويب جديد", tint = c.textSecondary, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Rounded.Add, contentDescription = tr("تبويب جديد"), tint = c.textSecondary, modifier = Modifier.size(18.dp))
                         }
                     }
 
@@ -215,7 +216,7 @@ fun BrowserScreen(
                                 .clip(CircleShape)
                                 .background(dotColor),
                         )
-                        Icon(Icons.Rounded.Print, contentDescription = "مركز التحكم", tint = c.textPrimary, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Rounded.Print, contentDescription = tr("مركز التحكم"), tint = c.textPrimary, modifier = Modifier.size(16.dp))
                         if (queueSummary.active > 0) {
                             Text(
                                 text = "${queueSummary.active}",
@@ -226,10 +227,10 @@ fun BrowserScreen(
                     }
 
                     IconButton(onClick = { fullscreenPos = true }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Rounded.Fullscreen, contentDescription = "ملء الشاشة لنقطة البيع", tint = c.textSecondary, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Rounded.Fullscreen, contentDescription = tr("ملء الشاشة لنقطة البيع"), tint = c.textSecondary, modifier = Modifier.size(18.dp))
                     }
                     IconButton(onClick = onOpenSettings, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Rounded.Settings, contentDescription = "الإعدادات", tint = c.textSecondary, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Rounded.Settings, contentDescription = tr("الإعدادات"), tint = c.textSecondary, modifier = Modifier.size(18.dp))
                     }
                 }
 
@@ -283,10 +284,10 @@ fun BrowserScreen(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 IconButton(onClick = onOpenControlCenter, modifier = Modifier.size(30.dp)) {
-                    Icon(Icons.Rounded.Print, contentDescription = "مركز التحكم", tint = c.brand, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Rounded.Print, contentDescription = tr("مركز التحكم"), tint = c.brand, modifier = Modifier.size(18.dp))
                 }
                 IconButton(onClick = { fullscreenPos = false }, modifier = Modifier.size(30.dp)) {
-                    Icon(Icons.Rounded.FullscreenExit, contentDescription = "إظهار الشريط", tint = c.textPrimary, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Rounded.FullscreenExit, contentDescription = tr("إظهار الشريط"), tint = c.textPrimary, modifier = Modifier.size(18.dp))
                 }
             }
         }

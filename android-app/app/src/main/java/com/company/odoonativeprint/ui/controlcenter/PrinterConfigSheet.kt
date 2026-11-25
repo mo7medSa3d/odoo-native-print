@@ -1,4 +1,5 @@
 package com.company.odoonativeprint.ui.controlcenter
+import com.company.odoonativeprint.ui.theme.tr
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -49,7 +50,7 @@ fun AddManualPrinterDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(22.dp),
-        title = { Text("إضافة طابعة") },
+        title = { Text(tr("إضافة طابعة")) },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -58,7 +59,7 @@ fun AddManualPrinterDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("الاسم") },
+                    label = { Text(tr("الاسم")) },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth(),
@@ -86,7 +87,7 @@ fun AddManualPrinterDialog(
                 OutlinedTextField(
                     value = address,
                     onValueChange = { address = it },
-                    label = { Text("العنوان") },
+                    label = { Text(tr("العنوان")) },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth(),
@@ -103,7 +104,7 @@ fun AddManualPrinterDialog(
                 OutlinedTextField(
                     value = paperWidth,
                     onValueChange = { paperWidth = it.filter(Char::isDigit) },
-                    label = { Text("العرض (mm)") },
+                    label = { Text(tr("العرض (mm)")) },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth(),
@@ -125,9 +126,9 @@ fun AddManualPrinterDialog(
                         )
                     }
                 },
-            ) { Text("حفظ") }
+            ) { Text(tr("حفظ")) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(tr("إلغاء")) } },
     )
 }
 
@@ -169,7 +170,7 @@ fun PrinterSettingsDialog(
                     OutlinedTextField(
                         value = paperWidth,
                         onValueChange = { paperWidth = it.filter(Char::isDigit) },
-                        label = { Text("العرض mm") },
+                        label = { Text(tr("العرض mm")) },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.weight(1f),
@@ -184,15 +185,15 @@ fun PrinterSettingsDialog(
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text("قص تلقائي", modifier = Modifier.weight(1f))
+                    Text(tr("قص تلقائي"), modifier = Modifier.weight(1f))
                     Switch(checked = cutPaper, onCheckedChange = { cutPaper = it })
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text("درج النقدية", modifier = Modifier.weight(1f))
+                    Text(tr("درج النقدية"), modifier = Modifier.weight(1f))
                     Switch(checked = openDrawer, onCheckedChange = { openDrawer = it })
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text("تحسين الصور", modifier = Modifier.weight(1f))
+                    Text(tr("تحسين الصور"), modifier = Modifier.weight(1f))
                     Switch(checked = dithering, onCheckedChange = { dithering = it })
                 }
                 if (onDelete != null) {
@@ -208,7 +209,7 @@ fun PrinterSettingsDialog(
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(Modifier.width(6.dp))
-                        Text("حذف الطابعة", color = c.errFg)
+                        Text(tr("حذف الطابعة"), color = c.errFg)
                     }
                 }
             }
@@ -227,8 +228,8 @@ fun PrinterSettingsDialog(
                         ),
                     )
                 },
-            ) { Text("حفظ") }
+            ) { Text(tr("حفظ")) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(tr("إلغاء")) } },
     )
 }

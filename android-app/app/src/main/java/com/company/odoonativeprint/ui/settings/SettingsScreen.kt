@@ -1,4 +1,5 @@
 package com.company.odoonativeprint.ui.settings
+import com.company.odoonativeprint.ui.theme.tr
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
@@ -83,9 +84,9 @@ fun SettingsScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "رجوع", tint = c.textPrimary)
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = tr("رجوع"), tint = c.textPrimary)
             }
-            Text("الإعدادات", style = MaterialTheme.typography.titleMedium, color = c.textPrimary)
+            Text(tr("الإعدادات"), style = MaterialTheme.typography.titleMedium, color = c.textPrimary)
         }
         HorizontalDivider(thickness = 0.5.dp, color = c.border)
 
@@ -106,7 +107,7 @@ fun SettingsScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("خادم Odoo", style = MaterialTheme.typography.titleSmall, color = c.textPrimary)
+                Text(tr("خادم Odoo"), style = MaterialTheme.typography.titleSmall, color = c.textPrimary)
                 OutlinedTextField(
                     value = originInput,
                     onValueChange = { originInput = it; feedback = null },
@@ -116,7 +117,7 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text("إعادة الطباعة تلقائيًا", style = MaterialTheme.typography.bodyMedium, color = c.textPrimary, modifier = Modifier.weight(1f))
+                    Text(tr("إعادة الطباعة تلقائيًا"), style = MaterialTheme.typography.bodyMedium, color = c.textPrimary, modifier = Modifier.weight(1f))
                     Switch(checked = autoReprint, onCheckedChange = { autoReprint = it })
                 }
                 if (feedback != null) {
@@ -126,24 +127,25 @@ fun SettingsScreen(
                         color = if (isError) c.errFg else c.okFg,
                     )
                 }
+                val savedLabel = tr("تم الحفظ")
                 Button(
                     onClick = {
                         configStore.saveOrigin(originInput, autoReprint)
                             .onSuccess { normalized ->
                                 isError = false
-                                feedback = "تم الحفظ"
+                                feedback = savedLabel
                                 onOriginUpdated(normalized)
                             }
                             .onFailure {
                                 isError = true
-                                feedback = explainOriginError(it.message)
+                                feedback = explainOriginError(it.message, snap.language)
                             }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = c.brand, contentColor = Color.White),
                     shape = RoundedCornerShape(999.dp),
                     modifier = Modifier.fillMaxWidth().height(44.dp),
                 ) {
-                    Text("حفظ")
+                    Text(tr("حفظ"))
                 }
             }
 
@@ -157,16 +159,16 @@ fun SettingsScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("المظهر", style = MaterialTheme.typography.titleSmall, color = c.textPrimary)
+                Text(tr("المظهر"), style = MaterialTheme.typography.titleSmall, color = c.textPrimary)
                 SegmentedPillRow(
-                    options = listOf("system" to "تلقائي", "light" to "فاتح", "dark" to "داكن"),
+                    options = listOf("system" to tr("تلقائي"), "light" to tr("فاتح"), "dark" to tr("داكن")),
                     selected = snap.themeMode,
                     onSelect = { configStore.setThemeMode(it) },
                 )
                 HorizontalDivider(thickness = 0.5.dp, color = c.border)
-                Text("اللغة", style = MaterialTheme.typography.titleSmall, color = c.textPrimary)
+                Text(tr("اللغة"), style = MaterialTheme.typography.titleSmall, color = c.textPrimary)
                 SegmentedPillRow(
-                    options = listOf("ar" to "العربية", "en" to "English"),
+                    options = listOf("ar" to tr("العربية"), "en" to "English"),
                     selected = snap.language,
                     onSelect = { configStore.setLanguage(it) },
                 )
@@ -178,7 +180,7 @@ fun SettingsScreen(
                 shape = RoundedCornerShape(999.dp),
                 modifier = Modifier.fillMaxWidth().height(46.dp),
             ) {
-                Text("مسح بيانات التصفح", color = c.errFg)
+                Text(tr("مسح بيانات التصفح"), color = c.errFg)
             }
         }
     }
@@ -187,17 +189,17 @@ fun SettingsScreen(
         AlertDialog(
             onDismissRequest = { confirmClear = false },
             shape = RoundedCornerShape(22.dp),
-            title = { Text("مسح بيانات التصفح؟") },
-            text = { Text("سيتم تسجيل خروجك من Odoo.") },
+            title = { Text(tr("مسح بيانات التصفح؟")) },
+            text = { Text(tr("سيتم تسجيل خروجك من Odoo.")) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         confirmClear = false
                         onClearWebData()
                     },
-                ) { Text("مسح", color = c.errFg) }
+                ) { Text(tr("مسح"), color = c.errFg) }
             },
-            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("إلغاء") } },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(tr("إلغاء")) } },
         )
     }
 }

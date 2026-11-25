@@ -1,4 +1,7 @@
 package com.company.odoonativeprint.ui.browser
+import com.company.odoonativeprint.ui.theme.LocalLanguage
+import com.company.odoonativeprint.ui.theme.localize
+import com.company.odoonativeprint.ui.theme.tr
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
@@ -111,7 +114,7 @@ fun BootScreen(
                     originInput = it
                     statusText = null
                 },
-                label = { Text("خادم Odoo") },
+                label = { Text(tr("خادم Odoo")) },
                 placeholder = { Text("https://erp.company.com") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -148,7 +151,7 @@ fun BootScreen(
                         OriginPolicy.validateAndNormalize(originInput)
                             .onFailure {
                                 isError = true
-                                statusText = explainOriginError(it.message)
+                                statusText = explainOriginError(it.message, LocalLanguage.current)
                             }
                             .onSuccess { normalized ->
                                 probing = true
@@ -157,7 +160,7 @@ fun BootScreen(
                                     val ok = probeOrigin(normalized)
                                     probing = false
                                     isError = !ok
-                                    statusText = if (ok) "متصل" else "تعذّر الاتصال"
+                                    statusText = if (ok) tr("متصل") else tr("تعذّر الاتصال")
                                 }
                             }
                     },
@@ -168,7 +171,7 @@ fun BootScreen(
                     if (probing) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                     } else {
-                        Text("اختبار")
+                        Text(tr("اختبار"))
                     }
                 }
 
@@ -178,26 +181,26 @@ fun BootScreen(
                             .onSuccess { onOriginSaved(it) }
                             .onFailure {
                                 isError = true
-                                statusText = explainOriginError(it.message)
+                                statusText = explainOriginError(it.message, LocalLanguage.current)
                             }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = c.brand, contentColor = Color.White),
                     shape = RoundedCornerShape(999.dp),
                     modifier = Modifier.weight(1.3f).height(46.dp),
                 ) {
-                    Text("متابعة")
+                    Text(tr("متابعة"))
                 }
             }
         }
     }
 }
 
-internal fun explainOriginError(code: String?): String = when (code) {
-    "ORIGIN_HTTP_REQUIRES_IP" -> "استخدم HTTPS للنطاقات أو HTTP لعنوان IP فقط"
-    "ORIGIN_METADATA_FORBIDDEN" -> "العنوان محظور أمنيًا"
-    "ORIGIN_CREDENTIALS_FORBIDDEN" -> "أزل بيانات الدخول من الرابط"
-    "ORIGIN_MISSING_SCHEME", "ORIGIN_UNSUPPORTED_SCHEME" -> "ابدأ بـ https:// أو http://"
-    else -> "رابط غير صالح"
+internal fun explainOriginError(code: String?, language: String = "ar"): String = when (code) {
+    "ORIGIN_HTTP_REQUIRES_IP" -> localize("استخدم HTTPS للنطاقات أو HTTP لعنوان IP فقط", language)
+    "ORIGIN_METADATA_FORBIDDEN" -> localize("العنوان محظور أمنيًا", language)
+    "ORIGIN_CREDENTIALS_FORBIDDEN" -> localize("أزل بيانات الدخول من الرابط", language)
+    "ORIGIN_MISSING_SCHEME", "ORIGIN_UNSUPPORTED_SCHEME" -> localize("ابدأ بـ https:// أو http://", language)
+    else -> localize("رابط غير صالح", language)
 }
 
 private suspend fun probeOrigin(origin: String): Boolean = withContext(Dispatchers.IO) {

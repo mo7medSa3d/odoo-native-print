@@ -34,7 +34,7 @@ object TextReceiptRenderer {
         val contentWidth = (widthDots - paddingPx * 2).coerceAtLeast(120)
         val layout = StaticLayout.Builder
             .obtain(text, 0, text.length, paint, contentWidth)
-            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setAlignment(Layout.Alignment.ALIGN_CENTER)
             .setLineSpacing(4f, 1.15f)
             .setIncludePad(true)
             .build()

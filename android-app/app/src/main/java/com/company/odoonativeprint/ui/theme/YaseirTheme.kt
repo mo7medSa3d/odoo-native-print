@@ -1,14 +1,18 @@
 package com.company.odoonativeprint.ui.theme
 
+import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.core.view.WindowInsetsControllerCompat
 
 @Composable
 fun YaseirTheme(
@@ -23,6 +27,17 @@ fun YaseirTheme(
     }
     val palette = if (isDark) YaseirDarkColors else YaseirLightColors
     val layoutDirection = if (language == "en") LayoutDirection.Ltr else LayoutDirection.Rtl
+
+    // Edge-to-edge leaves the status bar transparent. Dark icons are required
+    // on a light background, otherwise the clock/battery/icons disappear.
+    val activity = LocalContext.current as? Activity
+    LaunchedEffect(isDark) {
+        activity?.window?.let { window ->
+            val controller = WindowInsetsControllerCompat(window, window.decorView)
+            controller.isAppearanceLightStatusBars = !isDark
+            controller.isAppearanceLightNavigationBars = !isDark
+        }
+    }
 
     val materialScheme = if (isDark) {
         darkColorScheme(
@@ -55,6 +70,7 @@ fun YaseirTheme(
     CompositionLocalProvider(
         LocalYaseirColors provides palette,
         LocalLayoutDirection provides layoutDirection,
+        LocalLanguage provides language,
     ) {
         MaterialTheme(
             colorScheme = materialScheme,
