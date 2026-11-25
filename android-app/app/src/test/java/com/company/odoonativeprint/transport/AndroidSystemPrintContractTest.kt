@@ -8,10 +8,12 @@ import java.io.File
 /** Source-level contract: Android System Print must not depend on a spool file
  * after print() returns, and must accept the image receipts POS actually sends. */
 class AndroidSystemPrintContractTest {
-    private val root = File("../..").canonicalFile
-
-    private fun source(relative: String): String =
-        File(root, "app/src/main/java/com/company/odoonativeprint/$relative").readText()
+    private fun source(relative: String): String {
+        val tail = "app/src/main/java/com/company/odoonativeprint/$relative"
+        return listOf(File(tail), File("../$tail"), File("../../$tail"))
+            .first { it.isFile }
+            .readText()
+    }
 
     @Test
     fun `print adapter writes a captured byte array instead of reopening the spool file`() {
