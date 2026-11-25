@@ -1,6 +1,6 @@
 # Odoo Setup Guide (addon: native_print)
 
-Target: **Odoo 19** (`odoo/native_print`, `19.0.2.24.0`) and **Odoo 20** (`odoo20/native_print`, `20.0.1.0.0`). Older Odoo versions are not supported (see [compatibility.md](compatibility.md)).
+Target: **Odoo 19** (`odoo19/native_print`, `19.0.2.24.0`) and **Odoo 20** (`odoo20/native_print`, `20.0.1.0.0`). Older Odoo versions are not supported (see [compatibility.md](compatibility.md)).
 
 ## Client machine requirements (the Windows app)
 
@@ -14,7 +14,7 @@ Target: **Odoo 19** (`odoo/native_print`, `19.0.2.24.0`) and **Odoo 20** (`odoo2
 - A printer driver installed in Windows for every printer used.
 
 ## Install
-1. Copy `odoo/native_print` (for Odoo 19) or `odoo20/native_print` (for Odoo 20) into the server's addons path, or build `Dockerfile.odoo` with `--build-arg ODOO_VERSION=19.0 --build-arg ADDON_SRC=odoo/native_print` (default) or `--build-arg ODOO_VERSION=20.0 --build-arg ADDON_SRC=odoo20/native_print`.
+1. Copy `odoo19/native_print` (for Odoo 19) or `odoo20/native_print` (for Odoo 20) into the server's addons path, or build `Dockerfile.odoo` with `--build-arg ODOO_VERSION=19.0 --build-arg ADDON_SRC=odoo19/native_print` (default) or `--build-arg ODOO_VERSION=20.0 --build-arg ADDON_SRC=odoo20/native_print`.
 2. Restart Odoo, update the apps list, install **Yaseir Print** (`native_print`).
 3. Assign groups: internal users automatically inherit "Native Print / User";
    print administrators get "Native Print / Manager".

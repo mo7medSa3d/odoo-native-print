@@ -215,6 +215,8 @@ impl Queue {
         conn.pragma_update(None, "temp_store", "MEMORY")?;
         conn.pragma_update(None, "cache_size", -8000)?;
         conn.pragma_update(None, "wal_autocheckpoint", 1000)?;
+        // Cap persistent -wal size after large PDF bursts without weakening synchronous=FULL.
+        conn.pragma_update(None, "journal_size_limit", 16_777_216)?;
         // Run DDL and migrations inside IMMEDIATE when user_version < 2
         // so concurrent Queue::open calls cannot race on ALTER TABLE
         // and steady-state opens take no schema write lock.
@@ -1816,9 +1818,14 @@ mod tests {
                 .conn
                 .query_row("PRAGMA wal_autocheckpoint", [], |r| r.get(0))
                 .unwrap();
+            let jsl: i64 = q
+                .conn
+                .query_row("PRAGMA journal_size_limit", [], |r| r.get(0))
+                .unwrap();
             assert_eq!(fk, 1);
             assert_eq!(ts, 2);
             assert_eq!(wal, 1000);
+            assert_eq!(jsl, 16_777_216);
             // Simulate a pre-existing v2 database that lacks idx_job_events_job_id.
             q.conn
                 .execute("DROP INDEX idx_job_events_job_id", [])

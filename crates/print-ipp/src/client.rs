@@ -1,7 +1,7 @@
 use crate::proto::{self, op, tag, Attr, IppMessage, Value};
 use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 
 const MIN_IPP_TIMEOUT: Duration = Duration::from_millis(1);
@@ -192,24 +192,39 @@ pub struct IppClient {
     next_request_id: u32,
 }
 
-fn connect_any(host: &str, port: u16, timeout: Duration) -> std::io::Result<TcpStream> {
-    let addrs: Vec<_> = (host, port).to_socket_addrs()?.collect();
+fn connect_addrs(
+    addrs: &[SocketAddr],
+    deadline: Option<Instant>,
+    fallback_timeout: Duration,
+) -> std::io::Result<TcpStream> {
     if addrs.is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::AddrNotAvailable,
             "no address",
         ));
     }
-    let timeout = timeout.max(MIN_IPP_TIMEOUT);
     let mut last_err = None;
     for addr in addrs {
-        match TcpStream::connect_timeout(&addr, timeout) {
+        let remaining = match deadline {
+            Some(d) => d.saturating_duration_since(Instant::now()),
+            None => fallback_timeout,
+        };
+        if remaining.is_zero() {
+            break;
+        }
+        match TcpStream::connect_timeout(addr, remaining) {
             Ok(stream) => return Ok(stream),
             Err(e) => last_err = Some(e),
         }
     }
     Err(last_err
-        .unwrap_or_else(|| std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "no address")))
+        .unwrap_or_else(|| std::io::Error::new(std::io::ErrorKind::TimedOut, "connect timed out")))
+}
+
+fn connect_any(host: &str, port: u16, timeout: Duration) -> std::io::Result<TcpStream> {
+    let addrs: Vec<_> = (host, port).to_socket_addrs()?.collect();
+    let total = timeout.max(MIN_IPP_TIMEOUT);
+    connect_addrs(&addrs, Instant::now().checked_add(total), total)
 }
 
 impl IppClient {
@@ -1082,5 +1097,37 @@ mod tests {
         let full = [hdr.as_slice(), with_trailer.as_slice()].concat();
         assert!(http_response_complete(&full));
         assert_eq!(parse_http_response(&full).unwrap(), b"helloipp");
+    }
+
+    #[test]
+    fn connect_addrs_enforces_shared_deadline_and_falls_back() {
+        let empty_err = connect_addrs(&[], Some(Instant::now()), MIN_IPP_TIMEOUT).unwrap_err();
+        assert_eq!(empty_err.kind(), std::io::ErrorKind::AddrNotAvailable);
+
+        let live = TcpListener::bind("127.0.0.1:0").unwrap();
+        let live_addr = live.local_addr().unwrap();
+
+        // Already-expired shared deadline stops immediately without dialing live_addr.
+        let expired = Instant::now();
+        let expired_err =
+            connect_addrs(&[live_addr], Some(expired), Duration::from_secs(5)).unwrap_err();
+        assert_eq!(expired_err.kind(), std::io::ErrorKind::TimedOut);
+
+        // Closed port followed by live port falls back within the shared budget.
+        let dead = TcpListener::bind("127.0.0.1:0").unwrap();
+        let dead_addr = dead.local_addr().unwrap();
+        drop(dead);
+        let server = std::thread::spawn(move || {
+            let _ = live.accept();
+        });
+        let total = Duration::from_secs(2);
+        let stream = connect_addrs(
+            &[dead_addr, live_addr],
+            Instant::now().checked_add(total),
+            total,
+        )
+        .expect("second address should succeed after first fails");
+        drop(stream);
+        let _ = server.join();
     }
 }

@@ -319,7 +319,13 @@ pub fn calibration_thermal_for_width(width_dots: u32) -> MonoBitmap {
     // Code 39 bars under the square.
     if let Ok(runs) = code39_runs("TEST-2026") {
         let raw_units: u32 = runs.iter().map(|(_, w)| *w).sum();
-        let unit: u32 = if raw_units * 3 + 16 <= width { 3 } else { 2 };
+        let unit: u32 = if raw_units * 3 + 16 <= width {
+            3
+        } else if raw_units * 2 + 16 <= width {
+            2
+        } else {
+            1
+        };
         let total: u32 = raw_units * unit;
         let mut x = width.saturating_sub(total) / 2;
         let y = mm(44.0);
@@ -406,5 +412,9 @@ mod tests {
         let bm58 = calibration_thermal_58mm();
         assert_eq!(bm58.width_dots, 384);
         assert!(bm58.pixel_is_black(4, 4));
+        // Barcode must fit inside the border with a clean quiet zone on 58 mm paper.
+        let bar_y = (44.0 * 203.0 / 25.4) as u32;
+        assert!((8..40).all(|x| !bm58.pixel_is_black(x, bar_y)));
+        assert!((344..376).all(|x| !bm58.pixel_is_black(x, bar_y)));
     }
 }

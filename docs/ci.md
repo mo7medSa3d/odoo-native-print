@@ -15,7 +15,7 @@ build at one known toolchain).
   print-win clippy + tests (Linux stub platform), pinned PDFium fetch +
   render tests with `PDFIUM_TEST_REQUIRED=1` (a render regression fails
   CI instead of silently skipping), addon static checks for both
-  `odoo/native_print` and `odoo20/native_print` (Python compiles, all
+  `odoo19/native_print` and `odoo20/native_print` (Python compiles, all
   XML parses, every addon JS asset parses), consistency gates
   (`tools/check_command_surface.py`, `tools/check_versions.py`, Control
   Center static tests `app/tests/control-center.test.mjs`, and Odoo 19 & 20 addon node
@@ -54,7 +54,7 @@ build at one known toolchain).
   consistency gates (`tools/check_command_surface.py`,
   `tools/check_versions.py`, and all 5 `node --test` suites:
   `app/tests/control-center.test.mjs`, plus `test_live_target.mjs` and
-  `test_pos_keys.mjs` for both `odoo/native_print` and
+  `test_pos_keys.mjs` for both `odoo19/native_print` and
   `odoo20/native_print`), and builds + uploads the `source-tarball`
   archive.
 - **Windows installers**: `needs` the Linux gate; runs workspace +
@@ -69,11 +69,11 @@ build at one known toolchain).
   build job (reporting Authenticode-signed when
   `WINDOWS_CERTIFICATE_BASE64` is configured, or unsigned otherwise).
 
-## odoo.yml — manual, on release tags, and on odoo/** or odoo20/** changes
+## odoo.yml — manual, on release tags, and on odoo19/** or odoo20/** changes
 Runs on `workflow_dispatch`, on `v*` tag pushes, and on pushes/PRs to
-`main` that touch `odoo/**`, `odoo20/**`, or `.github/workflows/odoo.yml`
+`main` that touch `odoo19/**`, `odoo20/**`, or `.github/workflows/odoo.yml`
 (`ubuntu-26.04`). Uses a `fail-fast: false` matrix across both pinned
-images — `odoo:19.0` (mounting `odoo/`) and `odoo:20.0` (mounting
+images — `odoo:19.0` (mounting `odoo19/`) and `odoo:20.0` (mounting
 `odoo20/`, no fallback to floating tags) — starts `postgres:16.4`,
 installs `native_print` with
 `--test-tags /native_print --stop-after-init --without-demo=all`, and
@@ -103,7 +103,7 @@ on the company's own Windows machine (Rust **1.90.0**):
 - The app version lives in `app/package.json`,
   `app/package-lock.json`, `app/src-tauri/tauri.conf.json`, and
   `app/src-tauri/Cargo.toml` — `tools/check_versions.py` enforces
-  that all four agree. The addon versions in `odoo/native_print/__manifest__.py` (`19.0.x`)
+  that all four agree. The addon versions in `odoo19/native_print/__manifest__.py` (`19.0.x`)
   and `odoo20/native_print/__manifest__.py` (`20.0.x`) follow independent lines.
 - Rust in CI is pinned to **1.90.0** (see above); floating `@stable`
   was retired because a new stable release could change clippy/fmt

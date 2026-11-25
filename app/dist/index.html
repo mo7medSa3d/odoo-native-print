@@ -859,7 +859,6 @@
   .cmd-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
   .cmd-item-sub { font-size: 0.72rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cmd-item-actions { display: flex; align-items: center; gap: 0.25rem; flex-shrink: 0; }
-  .cmd-ws-row { display: flex; gap: 0.45rem; padding: 0 0.25rem; }
   .cmd-group-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--border-strong); }
   .cmd-group-dot.g-blue { background: var(--chart-1); }
   .cmd-group-dot.g-teal { background: var(--chart-2); }
@@ -1860,7 +1859,7 @@
     for (const id of ids) {
       uiLocks.delete(id);
       const el = document.getElementById(id);
-      if (el) el.disabled = false;
+      if (el) el.disabled = lastNativeControlsEnabled === false;
     }
   }
 
@@ -2180,18 +2179,22 @@
   }
 
   async function clearWebData() {
+    if (uiLocks.has("btnClearWebData")) return;
     const api = bridge();
     if (!api || typeof api.clearWebData !== "function") {
       showToast(I18N[currentLang].native_bridge_unavailable, true);
       return;
     }
-    const sure = await confirmDialog(I18N[currentLang].confirm_clear_web_data, { danger: true });
-    if (!sure) return;
+    lockControls(["btnClearWebData"]);
     try {
+      const sure = await confirmDialog(I18N[currentLang].confirm_clear_web_data, { danger: true });
+      if (!sure) return;
       await api.clearWebData();
       showToast(currentLang === "ar" ? "تم المسح. أعد تسجيل الدخول." : "Web data cleared. Sign in again.");
     } catch (error) {
       showToast(I18N[currentLang].toast_failed, true);
+    } finally {
+      unlockControls(["btnClearWebData"]);
     }
   }
 
@@ -2675,7 +2678,7 @@
 
         ${printerSettingsHtml(p)}
 
-        <div id="forms-box-${idx}" class="forms-box${openFormsPrinter === p.name ? "" : " hidden"}" data-printer="${escapeHtml(p.name)}">${openFormsPrinter === p.name ? (openFormsHtmlCache.get(p.name) || "") : ""}</div>
+        <div id="forms-box-${idx}" class="forms-box${openFormsPrinter === p.name ? "" : " hidden"}" data-printer="${escapeHtml(p.name)}">${openFormsPrinter === p.name ? (openFormsHtmlCache.get(p.name) === null ? escapeHtml(currentLang === "ar" ? "لا توجد نماذج ورق مسجلة من التعريف." : "No forms reported by driver.") : (openFormsHtmlCache.get(p.name) || "")) : ""}</div>
 
         <div class="printer-actions">
           <button type="button" class="btn btn-sm btn-primary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="pdf-a4">
@@ -2944,7 +2947,7 @@
         <div class="cmd-item">
           <div class="cmd-item-main">
             <span class="cmd-item-title">${escapeHtml(w.name)}</span>
-            <span class="cmd-item-sub">(${(w.urls || []).length} ${ar ? "تبويبات" : "tabs"})</span>
+            <span class="cmd-item-sub">(${Array.isArray(w.urls) ? w.urls.length : 0} ${ar ? "تبويبات" : "tabs"})</span>
           </div>
           <div class="cmd-item-actions">
             <button type="button" class="btn btn-sm btn-primary" data-action="restore-workspace" data-ws-idx="${origIdx}">${ar ? "فتح" : "Open"}</button>
@@ -3081,6 +3084,7 @@
   }
 
   async function runPrinterTest(printerName, kind, options) {
+    if (uiLocks.has("btnCustomTestPrint")) return false;
     if (isRawTestKind(kind) && isVirtualPrinterName(printerName)) {
       showToast(I18N[currentLang].cal_virtual_warning, true);
       return false;
@@ -3106,7 +3110,9 @@
       showToast(friendlyError(e), true);
     } finally {
       unlockControls(["btnCustomTestPrint", "previewTestPrintBtn"]);
-      testBtns.forEach((x) => { x.disabled = false; });
+      testBtns.forEach((x) => {
+        if (x.id !== "btnCustomTestPrint" && x.id !== "previewTestPrintBtn") x.disabled = lastNativeControlsEnabled === false;
+      });
     }
   }
 
@@ -3289,13 +3295,15 @@
       box.textContent = I18N[currentLang].native_bridge_unavailable;
       return;
     }
+    const epoch = capsEpoch;
     try {
       const forms = await b.printerForms(printerName);
+      if (epoch !== capsEpoch) return;
       const current = document.getElementById(`forms-box-${idx}`);
       if (!current || current.dataset.printer !== printerName) return;
       if (!forms || !forms.length) {
         const emptyMsg = currentLang === "ar" ? "لا توجد نماذج ورق مسجلة من التعريف." : "No forms reported by driver.";
-        openFormsHtmlCache.set(printerName, escapeHtml(emptyMsg));
+        openFormsHtmlCache.set(printerName, null);
         current.textContent = emptyMsg;
         return;
       }
@@ -3345,18 +3353,22 @@
   }
 
   async function clearFinishedJobs() {
+    if (uiLocks.has("btnClearFinished")) return;
     const b = bridge();
     if (!b || typeof b.clearFinished !== "function") {
       showToast(I18N[currentLang].native_bridge_unavailable, true);
       return;
     }
-    if (!(await confirmDialog(I18N[currentLang].confirm_clear_done, { danger: true }))) return;
+    lockControls(["btnClearFinished"]);
     try {
+      if (!(await confirmDialog(I18N[currentLang].confirm_clear_done, { danger: true }))) return;
       const n = await b.clearFinished();
       showToast(currentLang === "ar" ? `تم مسح ${n} مهمة مكتملة` : `Cleared ${n} finished job(s)`);
       await refreshAll();
     } catch (e) {
       showToast(friendlyError(e), true);
+    } finally {
+      unlockControls(["btnClearFinished"]);
     }
   }
 
@@ -3420,10 +3432,11 @@
     error.classList.toggle("hidden", valid || !value);
     if (warning) warning.classList.toggle("hidden", !(valid && value.toLowerCase().startsWith("http://")));
     const locked = !!(overviewState && overviewState.lockedByPolicy);
+    const bridgeDown = lastNativeControlsEnabled === false;
     const save = document.getElementById("btnSaveOrigin");
     const saveOpen = document.getElementById("btnSaveAndOpen");
-    if (save && !uiLocks.has("btnSaveOrigin")) save.disabled = locked || !valid;
-    if (saveOpen && !uiLocks.has("btnSaveAndOpen")) saveOpen.disabled = locked || !valid;
+    if (save && !uiLocks.has("btnSaveOrigin")) save.disabled = bridgeDown || locked || !valid;
+    if (saveOpen && !uiLocks.has("btnSaveAndOpen")) saveOpen.disabled = bridgeDown || locked || !valid;
     return valid;
   }
 

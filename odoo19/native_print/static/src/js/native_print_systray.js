@@ -4,7 +4,7 @@ import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
 import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
-import { formatFormsSummary, getSelectedPosPrinter, getSelectedPrinter, JOB_UPDATED_EVENT, setSelectedPosPrinter, setSelectedPrinter } from "./native_print_client";
+import { detectPrinterType, formatFormsSummary, getSelectedPosPrinter, getSelectedPrinter, JOB_UPDATED_EVENT, setSelectedPosPrinter, setSelectedPrinter } from "./native_print_client";
 
 // One-line source description for a discovered printer:
 // where it is attached and what it is, from the
@@ -15,7 +15,8 @@ import { formatFormsSummary, getSelectedPosPrinter, getSelectedPrinter, JOB_UPDA
 function printerMeta(p) {
     if (!p) return "";
     const kind = String(p.kind || "");
-    const port = String(p.port || "");
+    const port = String(p.port || p.address || "");
+    const transport = String(p.transport || "").toLowerCase();
     const classes = {
         thermal: _t("Thermal"), label: _t("Label"),
         office: _t("Office"), virtual: _t("Virtual"),
@@ -23,11 +24,14 @@ function printerMeta(p) {
     const parts = [];
     if (kind === "virtual" || /^nul:/i.test(port)) {
         parts.push(_t("Virtual"));
-    } else if (/^USB/i.test(port)) {
+    } else if (transport === "bluetooth_spp") {
+        parts.push("Bluetooth");
+    } else if (transport === "usb_otg" || /^USB/i.test(port)) {
         parts.push("USB");
     } else if (/^\\\\/.test(port)) {
         parts.push(_t("Shared"));
-    } else if (kind === "network" || /^(IP_|WSD|TCP)/i.test(port) ||
+    } else if (transport === "tcp9100" || transport === "ipp" ||
+               kind === "network" || /^(IP_|WSD|TCP)/i.test(port) ||
                /^\d{1,3}(\.\d{1,3}){3}/.test(port)) {
         parts.push(_t("Network"));
         const addr = port.replace(/^IP_/i, "");
@@ -41,7 +45,8 @@ function printerMeta(p) {
     }
     const cls = classes[String(p.printer_class || p.printerClass || "")] || "";
     if (cls && parts[0] !== cls) parts.push(cls);
-    const proto = String(p.protocol || "").toUpperCase();
+    const rawProto = String(p.protocol || "").toLowerCase();
+    const proto = rawProto && rawProto !== "auto" ? rawProto.toUpperCase() : "";
     if (proto) parts.push(proto);
     return parts.join(" · ");
 }
@@ -178,9 +183,14 @@ export class NativePrintSystray extends Component {
             if (this._unmounted || syncSeq !== this._printerSyncSeq) return;
             const printers = Array.isArray(local && local.printers) ? local.printers : [];
             this.state.printersCount = printers.length;
-            this.state.defaultPrinter = local && local.defaultPrinter || null;
-            this.state.discoveredPrinters = printers.map(
-                (p) => ({ ...p, printer_class: p.printer_class || p.printerClass || "", meta: printerMeta(p) }));
+            const defaultEntry = printers.find((p) => p && (p.is_default || p.isDefault));
+            this.state.defaultPrinter = (local && local.defaultPrinter) || (defaultEntry && defaultEntry.name) || null;
+            this.state.discoveredPrinters = printers.map((p) => {
+                const inferred = detectPrinterType(p);
+                const printerClass = p.printer_class || p.printerClass || inferred.printerClass || "";
+                const proto = p.protocol && String(p.protocol).toLowerCase() !== "auto" ? p.protocol : inferred.mode;
+                return { ...p, printer_class: printerClass, meta: printerMeta({ ...p, printer_class: printerClass, protocol: proto }) };
+            });
             this.state.selectedPrinter = getSelectedPrinter();
             this.state.selectedPosPrinter = getSelectedPosPrinter();
             this.maybeSyncDeviceCaps(printers, showNotice).catch(() => {});
@@ -219,8 +229,10 @@ export class NativePrintSystray extends Component {
         } catch (_e) { store = {}; }
         const prev = store[target.name] || {};
         const now = Date.now();
-        const printerClass = target.printer_class || target.printerClass || null;
-        const metaKey = `${target.protocol || ""}|${printerClass || ""}`;
+        const inferred = detectPrinterType(target);
+        const printerClass = target.printer_class || target.printerClass || inferred.printerClass || null;
+        const protocol = target.protocol && String(target.protocol).toLowerCase() !== "auto" ? target.protocol : inferred.mode;
+        const metaKey = `${protocol || ""}|${printerClass || ""}`;
         // Skip querying Windows driver capabilities on 60s background polls
         // when this printer's capabilities were already synced within 6 hours
         // and its protocol/class did not change. Manual refresh passes force=true.
@@ -233,11 +245,11 @@ export class NativePrintSystray extends Component {
             const forms = formatFormsSummary(caps.forms, _t("Roll"));
             const trays = Array.isArray(caps.bins) ? caps.bins.slice() : [];
             const hash = JSON.stringify(
-                [target.protocol, printerClass, forms, trays]);
+                [protocol, printerClass, forms, trays]);
             if (!force && prev.hash === hash && now - (prev.at || 0) < 6 * 3600 * 1000) return;
             const res = await rpc("/native_print/sync_device", {
                 name: target.name,
-                protocol: target.protocol || null,
+                protocol: protocol || null,
                 printer_class: printerClass,
                 forms, trays,
             }, { silent: true });

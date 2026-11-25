@@ -356,28 +356,59 @@
       if (next !== null) { ev.preventDefault(); activateTab(navBtns[next]); navBtns[next].focus(); }
     });
   });
+  var identityEpoch = 0;
+  var hasOdooOrigin = false;
+  var actionLocks = Object.create(null);
+  function runLocked(key, btn, fn) {
+    if (actionLocks[key] || (btn && btn.disabled)) return;
+    actionLocks[key] = true;
+    if (btn) btn.disabled = true;
+    var p;
+    try { p = fn(); } catch (e) {
+      actionLocks[key] = false;
+      if (btn) btn.disabled = key === "odoo" ? !hasOdooOrigin : false;
+      return;
+    }
+    Promise.resolve(p).finally(function () {
+      actionLocks[key] = false;
+      if (btn) btn.disabled = key === "odoo" ? !hasOdooOrigin : false;
+    });
+  }
   function syncIdentity() {
+    var epoch = ++identityEpoch;
     invoke("app_identity", {}).then(function (id) {
+      if (epoch !== identityEpoch) return;
       if (id && id.appVersion) document.getElementById("appVersion").textContent = "v" + id.appVersion;
-      var hasOrigin = !!(id && id.odooOrigin);
-      document.getElementById("btnOpenOdoo").disabled = !hasOrigin;
-      document.getElementById("odooHint").classList.toggle("show", !hasOrigin);
+      hasOdooOrigin = !!(id && id.odooOrigin);
+      if (!actionLocks.odoo) document.getElementById("btnOpenOdoo").disabled = !hasOdooOrigin;
+      document.getElementById("odooHint").classList.toggle("show", !hasOdooOrigin);
     }).catch(function () {
+      if (epoch !== identityEpoch) return;
+      hasOdooOrigin = false;
       document.getElementById("btnOpenOdoo").disabled = true;
     });
   }
   syncIdentity();
   document.addEventListener("visibilitychange", function () { if (!document.hidden) syncIdentity(); });
-  document.getElementById("btnOpenCc").addEventListener("click", function () {
-    invoke("open_control_center", {}).catch(function () {});
+  var btnOpenCc = document.getElementById("btnOpenCc");
+  btnOpenCc.addEventListener("click", function () {
+    runLocked("cc", btnOpenCc, function () {
+      return invoke("open_control_center", {}).catch(function () {});
+    });
   });
-  document.getElementById("btnOpenDiagnostics").addEventListener("click", function () {
-    try { localStorage.setItem("np_cc_open_tab", "diagnostics"); } catch (e) {}
-    invoke("open_control_center", {}).catch(function () {});
+  var btnOpenDiagnostics = document.getElementById("btnOpenDiagnostics");
+  btnOpenDiagnostics.addEventListener("click", function () {
+    runLocked("diag", btnOpenDiagnostics, function () {
+      try { localStorage.setItem("np_cc_open_tab", "diagnostics"); } catch (e) {}
+      return invoke("open_control_center", {}).catch(function () {});
+    });
   });
-  document.getElementById("btnOpenOdoo").addEventListener("click", function () {
-    invoke("open_odoo_origin", {}).catch(function () {
-      document.getElementById("odooHint").classList.add("show");
+  var btnOpenOdoo = document.getElementById("btnOpenOdoo");
+  btnOpenOdoo.addEventListener("click", function () {
+    runLocked("odoo", btnOpenOdoo, function () {
+      return invoke("open_odoo_origin", {}).catch(function () {
+        document.getElementById("odooHint").classList.add("show");
+      });
     });
   });
   window.addEventListener("storage", applyPrefs);

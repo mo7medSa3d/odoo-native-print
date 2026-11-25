@@ -576,19 +576,23 @@
       invoke("tab_open", { url: last.url }).then(refresh).catch(function () {});
     }
   }
+  var closingLabels = Object.create(null);
   function closeTabWithHistory(tab) {
+    if (!tab || !tab.label || closingLabels[tab.label]) return;
+    closingLabels[tab.label] = true;
     rememberClosedTab(tab);
-    if (tab && tab.label) {
-      var pinned = readPinned();
-      var nextPins = pinned.filter(function (l) { return l !== tab.label; });
-      if (nextPins.length !== pinned.length) writeJson("np_pinned_tabs", nextPins);
-      var groups = readGroups();
-      if (Object.prototype.hasOwnProperty.call(groups, tab.label)) {
-        delete groups[tab.label];
-        writeJson("np_tab_groups", groups);
-      }
+    var pinned = readPinned();
+    var nextPins = pinned.filter(function (l) { return l !== tab.label; });
+    if (nextPins.length !== pinned.length) writeJson("np_pinned_tabs", nextPins);
+    var groups = readGroups();
+    if (Object.prototype.hasOwnProperty.call(groups, tab.label)) {
+      delete groups[tab.label];
+      writeJson("np_tab_groups", groups);
     }
-    invoke("tab_close", { label: tab.label }).then(refresh).catch(function () {});
+    invoke("tab_close", { label: tab.label })
+      .then(refresh)
+      .catch(function () {})
+      .finally(function () { delete closingLabels[tab.label]; });
   }
 
   function render(tabs) {
@@ -606,7 +610,9 @@
     writeJson("np_open_tabs", tabs);
     var strip = document.getElementById("tabs");
     var activeEl = document.activeElement;
-    var focusedLabel = activeEl && strip.contains(activeEl) && activeEl.getAttribute ? activeEl.getAttribute("data-label") : null;
+    var focusedInStrip = !!(activeEl && strip.contains(activeEl));
+    var focusedNewTab = focusedInStrip && activeEl.id === "btnNewTab";
+    var focusedLabel = focusedInStrip && activeEl.getAttribute ? activeEl.getAttribute("data-label") : null;
     strip.innerHTML = "";
     tabs.forEach(function (t, tabIndex) {
       var el = document.createElement("div");
@@ -751,11 +757,14 @@
       });
     });
     strip.appendChild(add);
-    if (focusedLabel) {
+    var active = strip.querySelector(".tab.active");
+    if (focusedNewTab) {
+      if (add.focus) add.focus();
+    } else if (focusedLabel) {
       var restore = strip.querySelector('.tab[data-label="' + focusedLabel.replace(/["\\]/g, "\\$&") + '"]');
       if (restore && restore.focus) restore.focus();
+      else if (active && active.focus) active.focus();
     }
-    var active = strip.querySelector(".tab.active");
     if (active && active.scrollIntoView) {
       active.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
@@ -893,6 +902,16 @@
   });
 
   window.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && (ptrDrag || dragLabel)) {
+      if (ev.preventDefault) ev.preventDefault();
+      finishPointerDrag(false);
+      if (dragLabel) {
+        dragLabel = null;
+        stripEl.querySelectorAll(".tab.dragging").forEach(function (n) { n.classList.remove("dragging"); });
+        clearDropHints(stripEl);
+      }
+      return;
+    }
     if (!(ev.ctrlKey || ev.metaKey)) return;
     var k = String(ev.key || "").toLowerCase();
     if (k === "k") {
@@ -927,11 +946,17 @@
   document.getElementById("btnReload").addEventListener("click", function () {
     invoke("nav_reload", {}).catch(function () {});
   });
+  var navLocks = Object.create(null);
+  function runNavLocked(key, cmd) {
+    if (navLocks[key]) return;
+    navLocks[key] = true;
+    invoke(cmd, {}).then(refresh).catch(function () {}).finally(function () { navLocks[key] = false; });
+  }
   document.getElementById("btnSettings").addEventListener("click", function () {
-    invoke("open_settings", {}).then(refresh).catch(function () {});
+    runNavLocked("settings", "open_settings");
   });
   document.getElementById("btnCc").addEventListener("click", function () {
-    invoke("open_control_center", {}).then(refresh).catch(function () {});
+    runNavLocked("cc", "open_control_center");
   });
   window.addEventListener("storage", function (ev) {
     applyPrefs();

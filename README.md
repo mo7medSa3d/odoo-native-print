@@ -101,3 +101,15 @@ Additional CI suites:
 - [Security Threat Model](docs/security/threat-model.md)
 - [PDFium Bundling](docs/pdfium.md), [CI Workflows](docs/ci.md), & [Release Checklist](docs/release-checklist.md)
 - [Changelog](CHANGELOG.md)
+
+
+## Android Companion App (`android-app/`)
+
+`android-app/` is the native Kotlin + Jetpack Compose companion browser and silent printing app for Android phones and POS tablets (`minSdk 26`, `targetSdk 35`), matching the Windows desktop app's `window.__NATIVE_PRINT__` v1 contract, Light/Dark theme, and `Thmanyah Sans` typography with zero changes required in `odoo19/native_print` or `odoo20/native_print`.
+
+- **Printers supported:** TCP 9100 raw (`ESC/POS`, `ZPL`, `TSPL`, `EPL`, `CPCL`), IPP/Mopria (`mDNS/NSD`), Classic Bluetooth SPP (`RFCOMM`), USB Host OTG (Printer Class `0x07`), and Android `PrintManager` fallback.
+- **Build & Test:** Open `android-app/` in Android Studio or run:
+  ```bash
+  cd android-app
+  gradle :app:testDebugUnitTest :app:assembleDebug
+  ```

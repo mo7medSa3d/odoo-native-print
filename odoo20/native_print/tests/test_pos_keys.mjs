@@ -537,7 +537,7 @@ test("PosTicketPrinterPlugin.printOrderReceipt cleans up late iframe on generate
     const prevSetTimeout = globalThis.setTimeout;
     const prevClearTimeout = globalThis.clearTimeout;
     const prevDateNow = Date.now;
-    Date.now = () => prevDateNow() + 10_000;
+    Date.now = () => prevDateNow() + 125_000;
     const store = new Map();
     const notices = [];
     const printTextCalls = [];
@@ -787,5 +787,226 @@ test("Odoo 20 builds POS receipt data before rendering the QWeb template", async
         globalThis.window = prevWindow;
         globalThis.sessionStorage = prevStorage;
         globalThis.setTimeout = prevSetTimeout;
+    }
+});
+
+test("PosTicketPrinterPlugin.printOrderReceipt bypasses stale empty printer cache with force: true on retry", async () => {
+    const prevWindow = globalThis.window;
+    const prevStorage = globalThis.sessionStorage;
+    const prevSetTimeout = globalThis.setTimeout;
+    const store = new Map();
+    const listArgs = [];
+    const printImageCalls = [];
+    globalThis.sessionStorage = {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)),
+        removeItem: (k) => store.delete(k),
+    };
+    globalThis.setTimeout = (fn, ms) => (ms <= 2000 ? (fn(), 0) : prevSetTimeout(fn, ms));
+    globalThis.window = {
+        localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+        dispatchEvent: () => true,
+        __NATIVE_PRINT__: {
+            listPrinters: async (opts) => {
+                listArgs.push(opts || null);
+                // First two calls (initial + immediate force) empty; 700ms retry with force: true finds printer.
+                return listArgs.length >= 3 && opts && opts.force
+                    ? [{ name: "EPSON TM-T88VII", driver: "EPSON", kind: "local", is_default: true }]
+                    : [];
+            },
+            printerCapabilities: async () => ({ forms: [], color: false }),
+            printImage: async (req) => { printImageCalls.push(req); return req.idempotencyKey; },
+            jobDetail: async () => ({ state: "done", attempts: 1 }),
+        },
+    };
+    try {
+        const plugin = new StubPosTicketPrinterPlugin();
+        plugin.pos = { getCashier: () => ({ id: 55 }) };
+        plugin.notification = { add() {} };
+        plugin.generateIframe = async () => ({
+            contentDocument: { getElementById: () => ({ offsetWidth: 300 }) },
+            remove() {},
+        });
+        plugin.generateImage = async () => ({
+            width: 300,
+            toBlob(cb) { cb({ arrayBuffer: async () => new Uint8Array([137, 80, 78, 71]).buffer }); },
+        });
+        assert.strictEqual(await plugin.printOrderReceipt({ order: { uuid: "ord-20-force" } }), true);
+        assert.strictEqual(printImageCalls.length, 1, "700ms retry with force: true recovers from stale empty cache");
+        assert.strictEqual(Boolean(listArgs[2] && listArgs[2].force), true, "700ms retry passes force: true");
+    } finally {
+        globalThis.window = prevWindow;
+        globalThis.sessionStorage = prevStorage;
+        globalThis.setTimeout = prevSetTimeout;
+    }
+});
+
+test("Android v1.5.7 POS printing passes explicit printer, polls by returned UUID, and normalizes wire states", async () => {
+    const prevWindow = globalThis.window;
+    const prevStorage = globalThis.sessionStorage;
+    const prevSetTimeout = globalThis.setTimeout;
+    const store = new Map();
+    const printImageCalls = [];
+    const printTextCalls = [];
+    const polledIds = [];
+    let pollIdx = 0;
+
+    globalThis.sessionStorage = {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)),
+        removeItem: (k) => store.delete(k),
+    };
+    globalThis.setTimeout = (fn, ms) => (ms <= 2000 ? (fn(), 0) : prevSetTimeout(fn, ms));
+    globalThis.__rpcCalls.length = 0;
+    globalThis.window = {
+        localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+        dispatchEvent: () => true,
+        __NATIVE_PRINT__: {
+            listPrinters: async () => [
+                { name: "Star BT", transport: "bluetooth_spp", protocol: "escpos", is_default: true },
+            ],
+            printerCapabilities: async () => ({ forms: ["80mm Roll"], paper_width_mm: 80, supports_color: false }),
+            printImage: async (req) => { printImageCalls.push(req); return { id: "android-pos-img-uuid-1", state: "queued" }; },
+            printText: async (req) => { printTextCalls.push(req); return { id: "android-pos-txt-uuid-2", state: "queued" }; },
+            jobDetail: async (id) => {
+                polledIds.push(id);
+                const seq = ["in_progress", "completed"];
+                return { id, state: seq[Math.min(pollIdx++, seq.length - 1)], attempts: 1 };
+            },
+        },
+    };
+
+    try {
+        // 1. Image path on Android
+        const order1 = { uuid: "ord-android-img", _printed: false };
+        const plugin = new StubPosTicketPrinterPlugin();
+        plugin.pos = { getCashier: () => ({ id: 61 }), getOrder: () => order1 };
+        plugin.notification = { add() {} };
+        plugin.generateIframe = async () => ({
+            contentDocument: { getElementById: () => ({ offsetWidth: 300, innerText: "Android Receipt" }) },
+            remove() {},
+        });
+        plugin.generateImage = async () => ({
+            width: 300,
+            toBlob(cb) { cb({ arrayBuffer: async () => new Uint8Array([137, 80, 78, 71]).buffer }); },
+        });
+        plugin.markReceiptAsPrinted = async () => {};
+
+        assert.strictEqual(await plugin.printOrderReceipt({ order: order1 }), true);
+        await new Promise((r) => prevSetTimeout(r, 15));
+        assert.strictEqual(printImageCalls.length, 1);
+        assert.strictEqual(printImageCalls[0].printer, "Star BT", "printImage passes explicit printer name");
+        assert.strictEqual(printImageCalls[0].printerPattern, "Star BT", "printImage keeps printerPattern");
+        assert.strictEqual(printImageCalls[0].mediaRollWidthMm, 80, "Android roll width forwarded");
+        assert.strictEqual(polledIds[0], "android-pos-img-uuid-1", "watchPosJob polls Android UUID");
+        assert.strictEqual(order1._printed, true, "completed state marks order printed");
+        assert.strictEqual(
+            globalThis.__rpcCalls.some(
+                (c) => c.url === "/native_print/job_status" &&
+                    c.params.idempotency_key === printImageCalls[0].idempotencyKey &&
+                    c.params.state === "printing",
+            ),
+            true,
+            "in_progress normalized to printing under idempotency_key",
+        );
+        assert.strictEqual(
+            globalThis.__rpcCalls.some(
+                (c) => c.url === "/native_print/job_status" &&
+                    c.params.idempotency_key === printImageCalls[0].idempotencyKey &&
+                    c.params.state === "done",
+            ),
+            true,
+            "completed normalized to done under idempotency_key",
+        );
+
+        // 2. Text fallback path on Android
+        polledIds.length = 0;
+        pollIdx = 0;
+        const order2 = { uuid: "ord-android-txt", _printed: false };
+        plugin.generateImage = async () => { throw new Error("canvas unavailable"); };
+        assert.strictEqual(await plugin.printOrderReceipt({ order: order2 }), true);
+        await new Promise((r) => prevSetTimeout(r, 15));
+        assert.strictEqual(printTextCalls.length, 1);
+        assert.strictEqual(printTextCalls[0].printer, "Star BT", "printText passes explicit printer name");
+        assert.strictEqual(polledIds[0], "android-pos-txt-uuid-2", "text fallback polls Android UUID");
+    } finally {
+        globalThis.window = prevWindow;
+        globalThis.sessionStorage = prevStorage;
+        globalThis.setTimeout = prevSetTimeout;
+    }
+});
+
+test("visibleReceiptToPngBytes rasterizes SVG natively at 3x scaled dimensions via viewBox", async () => {
+    const prevWindow = globalThis.window;
+    const prevDocument = globalThis.document;
+    const prevImage = globalThis.Image;
+    const prevXMLSerializer = globalThis.XMLSerializer;
+    let loadedSrc = "";
+    let canvasSize = { w: 0, h: 0 };
+
+    const el = {
+        offsetWidth: 300,
+        offsetHeight: 400,
+        scrollHeight: 400,
+        children: [],
+        getBoundingClientRect: () => ({ width: 300, height: 400 }),
+        cloneNode() {
+            return {
+                children: [],
+                attrs: {},
+                setAttribute(k, v) { this.attrs[k] = v; },
+            };
+        },
+    };
+    globalThis.window = {
+        getComputedStyle: () => ({ length: 0, getPropertyValue: () => "" }),
+    };
+    globalThis.document = {
+        createElement(tag) {
+            if (tag === "canvas") {
+                const c = {
+                    width: 0,
+                    height: 0,
+                    getContext: () => ({
+                        fillStyle: "",
+                        imageSmoothingEnabled: false,
+                        imageSmoothingQuality: "",
+                        fillRect() {},
+                        drawImage() { canvasSize = { w: c.width, h: c.height }; },
+                    }),
+                    toBlob: (cb) => cb({ arrayBuffer: async () => new Uint8Array([137, 80, 78, 71]).buffer }),
+                };
+                return c;
+            }
+            return {};
+        },
+    };
+    globalThis.XMLSerializer = class { serializeToString() { return "<div>ok</div>"; } };
+    globalThis.Image = class {
+        set src(v) {
+            loadedSrc = v;
+            Promise.resolve().then(() => this.onload && this.onload());
+        }
+    };
+    try {
+        const fnSrc = extract("visibleReceiptToPngBytes");
+        const helperSrc = [
+            "const POS_CAPTURE_TIMEOUT_MS = 5000;",
+            extract("canvasToPngBytes"),
+            fnSrc,
+            "globalThis.__testO20VisibleCapture = visibleReceiptToPngBytes;",
+        ].join("\n");
+        eval(helperSrc);
+        const bytes = await globalThis.__testO20VisibleCapture(el);
+        assert.deepStrictEqual(bytes, [137, 80, 78, 71]);
+        const svg = decodeURIComponent(loadedSrc);
+        assert.ok(svg.includes('width="900" height="1200" viewBox="0 0 300 400"'), "Odoo 20 visible fallback uses 3x viewBox");
+        assert.deepStrictEqual(canvasSize, { w: 900, h: 1200 });
+    } finally {
+        globalThis.window = prevWindow;
+        globalThis.document = prevDocument;
+        globalThis.Image = prevImage;
+        globalThis.XMLSerializer = prevXMLSerializer;
+        delete globalThis.__testO20VisibleCapture;
     }
 });

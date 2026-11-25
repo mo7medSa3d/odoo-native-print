@@ -29,6 +29,14 @@ def main():
     pkg = json.loads((ROOT / "app/package.json").read_text(encoding="utf-8"))
     lock = json.loads((ROOT / "app/package-lock.json").read_text(encoding="utf-8"))
     cargo = tomllib.loads((ROOT / "app/src-tauri/Cargo.toml").read_text(encoding="utf-8"))
+    android_gradle = ROOT / "android-app/app/build.gradle.kts"
+    android_ver = None
+    if android_gradle.exists():
+        m = re.search(r'versionName\s*=\s*"([^"]+)"', android_gradle.read_text(encoding="utf-8"))
+        if not m:
+            sys.exit("FAIL: could not parse versionName from android-app/app/build.gradle.kts")
+        android_ver = m.group(1)
+
     versions = {
         "tauri.conf.json": conf["version"],
         "package.json": pkg["version"],
@@ -36,6 +44,8 @@ def main():
         "package-lock packages['']": (lock.get("packages") or {}).get("", {}).get("version"),
         "Cargo.toml": (cargo.get("package") or {}).get("version"),
     }
+    if android_ver is not None:
+        versions["android-app/app/build.gradle.kts"] = android_ver
     for label, rel, prefix in (
         ("odoo19", "odoo19/native_print/__manifest__.py", "19.0."),
         ("odoo20", "odoo20/native_print/__manifest__.py", "20.0."),

@@ -343,7 +343,7 @@ fn build_printer_devmode(
                 std::ptr::null(),
                 DM_OUT_BUFFER,
             );
-            if got < 0 {
+            if got <= 0 {
                 None
             } else {
                 let dm = &mut *(buf.as_mut_ptr() as *mut DevModePrefixW);
@@ -447,10 +447,15 @@ fn build_printer_devmode(
                     buf.as_ptr() as *const u8,
                     DM_IN_BUFFER | DM_OUT_BUFFER,
                 );
-                if merged < 0 {
+                if merged <= 0 {
                     None
                 } else {
-                    Some(out_buf)
+                    let out_dm = &*(out_buf.as_ptr() as *const DevModePrefixW);
+                    if (out_dm.dm_size as usize) < std::mem::size_of::<DevModePrefixW>() {
+                        None
+                    } else {
+                        Some(out_buf)
+                    }
                 }
             }
         }
@@ -548,6 +553,13 @@ pub fn print_pdf_gdi_detailed(
             None
         }
     };
+    // Monochrome printers gain 4x faster rendering and 4x smaller spool files in Grayscale.
+    let effective_mode = match (&capabilities, opts.mode) {
+        (Some(caps), print_render::RenderMode::Color) if caps.color == Some(false) => {
+            print_render::RenderMode::Grayscale
+        }
+        (_, m) => m,
+    };
     let name = wide(printer);
     let mut total_sent = 0usize;
 
@@ -625,7 +637,14 @@ pub fn print_pdf_gdi_detailed(
         prepared_subjobs.push((sub, match_kind, devmode));
     }
 
-    for _copy in 0..opts.copies.max(1) {
+    // Pre-render pages once when printing multiple copies of small/medium reports
+    // so PDFium is not invoked repeatedly for identical copies.
+    let total_copies = opts.copies.max(1);
+    let mut cached_pages: std::collections::HashMap<usize, crate::dib::DibImage> =
+        std::collections::HashMap::new();
+    let cache_enabled = total_copies > 1 && pages <= 20;
+
+    for _copy in 0..total_copies {
         for (sub, base_match_kind, devmode) in &prepared_subjobs {
             // A failure inside the copies loop is a setup failure
             // only when no earlier copy/sub-job reached paper yet.
@@ -670,8 +689,13 @@ pub fn print_pdf_gdi_detailed(
                 sub.page_count,
                 sub.size,
                 match_kind,
-                opts.mode,
+                effective_mode,
                 opts.dpi,
+                if cache_enabled {
+                    Some(&mut cached_pages)
+                } else {
+                    None
+                },
             );
             match sub_result {
                 Ok(sent) => total_sent += sent,
@@ -1077,6 +1101,7 @@ fn print_subjob_gdi(
     match_kind: MatchKind,
     mode: print_render::RenderMode,
     dpi: u32,
+    mut page_cache: Option<&mut std::collections::HashMap<usize, crate::dib::DibImage>>,
 ) -> Result<usize, GdiPrintError> {
     let doc_name = wide(title);
     let info = DocInfoW {
@@ -1094,7 +1119,16 @@ fn print_subjob_gdi(
     let mut sent = 0usize;
     let mut failure: Option<String> = None;
     for i in start_page..(start_page + page_count) {
-        match print_one_page(dc, doc, i, page_size, match_kind, mode, dpi) {
+        match print_one_page(
+            dc,
+            doc,
+            i,
+            page_size,
+            match_kind,
+            mode,
+            dpi,
+            page_cache.as_deref_mut(),
+        ) {
             Ok(()) => sent += 1,
             Err(e) => {
                 failure = Some(format!("page {}: {e}", i + 1));
@@ -1124,7 +1158,24 @@ fn print_one_page(
     match_kind: MatchKind,
     mode: print_render::RenderMode,
     dpi: u32,
+    page_cache: Option<&mut std::collections::HashMap<usize, crate::dib::DibImage>>,
 ) -> Result<(), String> {
+    if let Some(cache) = page_cache {
+        if let Some(dib) = cache.get(&index) {
+            return blit_dib_page(dc, dib, Some(page_size), match_kind);
+        }
+        let page = doc
+            .render_page(index, mode, dpi)
+            .map_err(|e| e.to_string())?;
+        let dib = crate::dib::build_dib_owned(page);
+        let res = blit_dib_page(dc, &dib, Some(page_size), match_kind);
+        const MAX_PAGE_CACHE_BYTES: usize = 128 * 1024 * 1024;
+        let cached_bytes: usize = cache.values().map(|d| d.bits.len()).sum();
+        if cached_bytes.saturating_add(dib.bits.len()) <= MAX_PAGE_CACHE_BYTES {
+            cache.insert(index, dib);
+        }
+        return res;
+    }
     let page = doc
         .render_page(index, mode, dpi)
         .map_err(|e| e.to_string())?;
@@ -1240,7 +1291,7 @@ unsafe fn convert_info2(info: &PrinterInfo2W) -> crate::discovery::RawPrinterInf
 /// Must satisfy: DISCOVERY_TTL (12 s) + UI poll (5 s) < PrinterHealth::ttl_secs (30 s)
 /// so live printers never flip to "Outdated / بيانات قديمة" during normal viewing.
 const DISCOVERY_TTL: std::time::Duration = std::time::Duration::from_secs(12);
-const CAPABILITIES_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+const CAPABILITIES_TTL: std::time::Duration = std::time::Duration::from_secs(300);
 const CAPS_CACHE_MAX_ENTRIES: usize = 128;
 static DISCOVERY_CACHE: crate::discovery::DiscoveryCache = crate::discovery::DiscoveryCache::new();
 static CAPS_CACHE: std::sync::Mutex<
@@ -1282,7 +1333,7 @@ fn discover_printers_uncached() -> Result<Vec<print_core::PrinterInfo>, String> 
         // spooler; a FAILED probe is an error and must not masquerade
         // as "no printers installed". (Audit L8.)
         if probe_ok == 0 {
-            return Err(last_error());
+            return Err(format!("EnumPrintersW: {}", last_error()));
         }
         return Ok(Vec::new());
     }
@@ -1311,7 +1362,7 @@ fn discover_printers_uncached() -> Result<Vec<print_core::PrinterInfo>, String> 
         if code == ERROR_INSUFFICIENT_BUFFER && needed > cap && attempt < 2 {
             continue;
         }
-        return Err(format!("win32 error {code}"));
+        return Err(format!("EnumPrintersW: win32 error {code}"));
     }
     let buf_bytes = buf.len() * std::mem::size_of::<u64>();
     let stride = std::mem::size_of::<PrinterInfo2W>();
@@ -1349,14 +1400,14 @@ pub fn printer_health(printer: &str) -> Result<print_core::PrinterHealth, String
     let mut raw_handle: Handle = std::ptr::null_mut();
     let ok = unsafe { OpenPrinterW(name.as_ptr(), &mut raw_handle, std::ptr::null_mut()) };
     if ok == 0 || raw_handle.is_null() {
-        return Err(last_error());
+        return Err(format!("OpenPrinterW for {printer:?}: {}", last_error()));
     }
     let handle = PrinterHandle(raw_handle);
     unsafe {
         let mut needed: u32 = 0;
         GetPrinterW(handle.0, 2, std::ptr::null_mut(), 0, &mut needed);
         if needed == 0 {
-            return Err(last_error());
+            return Err(format!("GetPrinterW for {printer:?}: {}", last_error()));
         }
         let mut buf = Vec::new();
         for attempt in 0..3 {
@@ -1373,7 +1424,7 @@ pub fn printer_health(printer: &str) -> Result<print_core::PrinterHealth, String
             if code == ERROR_INSUFFICIENT_BUFFER && needed > cap && attempt < 2 {
                 continue;
             }
-            return Err(format!("win32 error {code}"));
+            return Err(format!("GetPrinterW for {printer:?}: win32 error {code}"));
         }
         let buf_bytes = buf.len() * std::mem::size_of::<u64>();
         if (needed as usize) < std::mem::size_of::<PrinterInfo2W>()
@@ -1424,7 +1475,7 @@ pub fn default_printer_name() -> Result<String, String> {
     let mut size: u32 = 0;
     unsafe { GetDefaultPrinterW(std::ptr::null_mut(), &mut size) };
     if size == 0 {
-        return Err(last_error());
+        return Err(format!("GetDefaultPrinterW: {}", last_error()));
     }
     let mut buf = Vec::new();
     for attempt in 0..3 {
@@ -1443,7 +1494,7 @@ pub fn default_printer_name() -> Result<String, String> {
         if code == ERROR_INSUFFICIENT_BUFFER && size > cap && attempt < 2 {
             continue;
         }
-        return Err(format!("win32 error {code}"));
+        return Err(format!("GetDefaultPrinterW: win32 error {code}"));
     }
     Ok(decode_wide_slice(&buf))
 }
@@ -1463,7 +1514,10 @@ pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
         )
     };
     if count < 0 {
-        return Err(last_error());
+        return Err(format!(
+            "DeviceCapabilitiesW(DC_PAPERS) for {printer:?}: {}",
+            last_error()
+        ));
     }
     if count == 0 {
         return Ok(Vec::new());
@@ -1494,7 +1548,10 @@ pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
         )
     };
     if size_count < 0 {
-        return Err(last_error());
+        return Err(format!(
+            "DeviceCapabilitiesW(DC_PAPERSIZE) for {printer:?}: {}",
+            last_error()
+        ));
     }
     if size_count == 0 {
         return Ok(Vec::new());
@@ -1516,7 +1573,10 @@ pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
         )
     };
     if got < 0 {
-        return Err(last_error());
+        return Err(format!(
+            "DeviceCapabilitiesW(DC_PAPERSIZE) for {printer:?}: {}",
+            last_error()
+        ));
     }
     if got == 0 {
         return Ok(Vec::new());
@@ -1575,7 +1635,7 @@ pub fn paper_forms(printer: &str) -> Result<Vec<Form>, String> {
 }
 
 /// Query capabilities reported by the installed Windows printer driver
-/// (cached per printer for 60s to avoid ~15 synchronous DeviceCapabilitiesW
+/// (cached per printer for 300s to avoid ~15 synchronous DeviceCapabilitiesW
 /// RPCs on every print job).
 pub fn printer_capabilities(printer: &str) -> Result<print_core::PrinterCapabilities, String> {
     {
@@ -1775,7 +1835,10 @@ pub fn print_raw_phased(printer: &str, title: &str, bytes: &[u8]) -> Result<u32,
     let mut raw_handle: Handle = std::ptr::null_mut();
     let ok = unsafe { OpenPrinterW(name.as_ptr(), &mut raw_handle, std::ptr::null_mut()) };
     if ok == 0 || raw_handle.is_null() {
-        return Err(pre(last_error()));
+        return Err(pre(format!(
+            "OpenPrinterW for {printer:?}: {}",
+            last_error()
+        )));
     }
     let handle = PrinterHandle(raw_handle);
     unsafe {
@@ -1788,13 +1851,16 @@ pub fn print_raw_phased(printer: &str, title: &str, bytes: &[u8]) -> Result<u32,
         };
         let job_id = StartDocPrinterW(handle.0, 1, &doc);
         if job_id == 0 {
-            Err(pre(last_error()))
+            Err(pre(format!(
+                "StartDocPrinterW for {printer:?}: {}",
+                last_error()
+            )))
         } else if StartPagePrinter(handle.0) == 0 {
             // Capture the error BEFORE AbortPrinter can clobber it.
             // No payload byte was written yet: still pre-write.
             let err = last_error();
             AbortPrinter(handle.0);
-            Err(pre(err))
+            Err(pre(format!("StartPagePrinter for {printer:?}: {err}")))
         } else {
             // WritePrinter may accept fewer bytes than requested;
             // loop until the whole payload is in the spooler. On any

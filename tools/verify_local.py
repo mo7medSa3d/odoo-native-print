@@ -2,15 +2,17 @@
 """One-command offline local verifier for odoo-native-print.
 
 Runs version/command-surface gates, shell syntax, Node tests, Odoo ESM syntax,
-Python compile, XML/ADMX/ADML well-formedness, TOML/JSON syntax, GitHub Actions
-workflow YAML validation (when PyYAML is installed), and ar.po msgid checks in
-parallel with deterministic output order, per-step timings, and a PASS/FAIL
-summary. Zero required third-party dependencies.
+Android bridge JS syntax, Android Kotlin static checks, Python compile,
+XML/ADMX/ADML well-formedness, TOML/JSON syntax, GitHub Actions workflow YAML
+validation (when PyYAML is installed), and ar.po msgid checks in parallel with
+deterministic output order, per-step timings, and a PASS/FAIL summary. Zero
+required third-party dependencies.
 """
 import ast
 import json
 import os
 import py_compile
+import re
 import shutil
 import subprocess
 import sys
@@ -27,7 +29,17 @@ except ImportError:
     yaml = None
 
 ROOT = Path(__file__).resolve().parent.parent
-SKIP_DIRS = {".git", "node_modules", "target", "__pycache__"}
+SKIP_DIRS = {".git", "node_modules", "target", "__pycache__", ".gradle", "build"}
+_KT_PKG_RE = re.compile(r"^\s*package\s+([A-Za-z_][A-Za-z0-9_.]*)\s*$")
+_KT_IMPORT_RE = re.compile(
+    r"^\s*import\s+(com\.company\.odoonativeprint\.[A-Za-z0-9_.*]+)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?\s*$"
+)
+_KT_DECL_RE = re.compile(
+    r"(?:^|\s)(?:class|interface|object|typealias)\s+([A-Za-z_][A-Za-z0-9_]*)"
+    r"|(?:^|\s)(?:fun|val|var)\s+(?:<[^>\n]+>\s+)?(?:[A-Za-z_][A-Za-z0-9_?.*<>]*\.)?([A-Za-z_][A-Za-z0-9_]*)"
+)
+_KT_TODO_RE = re.compile(r"\b(?:TODO|FIXME)\b")
+_ANDROID_GENERATED_SYMBOLS = {"com.company.odoonativeprint": {"R", "BuildConfig"}}
 
 
 def _iter_files(suffixes):
@@ -84,6 +96,7 @@ def check_js_esm(text, label="<stdin>"):
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     if proc.returncode != 0:
         out = (proc.stderr or proc.stdout).strip()
@@ -108,6 +121,78 @@ def _check_odoo_esm_syntax():
     failures = [err for ok, err in results if not ok]
     if failures:
         return False, "\n".join(failures)
+    return True, f"{len(files)} files"
+
+
+def check_android_kotlin(root=ROOT):
+    """Verify Android .kt package paths, zero TODO/FIXME markers, and internal imports."""
+    root = Path(root)
+    android_root = root / "android-app"
+    files = (
+        [p for p in sorted(android_root.rglob("*.kt")) if p.is_file() and not (SKIP_DIRS & set(p.parts))]
+        if android_root.is_dir()
+        else []
+    )
+    if not files:
+        return False, "no Kotlin files found"
+
+    symbols_by_pkg = {pkg: set(syms) for pkg, syms in _ANDROID_GENERATED_SYMBOLS.items()}
+    known_packages = set(symbols_by_pkg)
+    internal_imports = []
+    errors = []
+
+    for f in files:
+        rel = str(f.relative_to(root))
+        lines = f.read_text(encoding="utf-8").splitlines()
+        pkg = None
+        for lineno, line in enumerate(lines, 1):
+            if _KT_TODO_RE.search(line):
+                errors.append(f"{rel}:{lineno}: contains TODO/FIXME")
+            stripped = line.lstrip()
+            if stripped.startswith("//"):
+                continue
+            if pkg is None:
+                m_pkg = _KT_PKG_RE.match(line)
+                if m_pkg:
+                    pkg = m_pkg.group(1)
+                    known_packages.add(pkg)
+                    symbols_by_pkg.setdefault(pkg, set())
+                    continue
+            m_imp = _KT_IMPORT_RE.match(line)
+            if m_imp:
+                internal_imports.append((rel, lineno, m_imp.group(1)))
+                continue
+            if pkg is not None:
+                for m_decl in _KT_DECL_RE.finditer(line):
+                    sym = m_decl.group(1) or m_decl.group(2)
+                    if sym:
+                        symbols_by_pkg[pkg].add(sym)
+
+        parts = f.relative_to(android_root).parts[:-1]
+        src_idx = next((i for i, part in enumerate(parts) if part in ("java", "kotlin")), None)
+        expected_pkg = ".".join(parts[src_idx + 1 :]) if src_idx is not None else None
+        if pkg is None:
+            errors.append(f"{rel}: missing package declaration")
+        elif expected_pkg is not None and pkg != expected_pkg:
+            errors.append(f"{rel}: package '{pkg}' does not match path '{expected_pkg}'")
+
+    for rel, lineno, imp in internal_imports:
+        target_pkg, symbol = imp.rsplit(".", 1)
+        if symbol == "*":
+            resolved = target_pkg in known_packages or (
+                "." in target_pkg
+                and target_pkg.rsplit(".", 1)[1] in symbols_by_pkg.get(target_pkg.rsplit(".", 1)[0], ())
+            )
+        else:
+            resolved = symbol in symbols_by_pkg.get(target_pkg, ()) or (
+                "." in target_pkg
+                and target_pkg.rsplit(".", 1)[1] in symbols_by_pkg.get(target_pkg.rsplit(".", 1)[0], ())
+            )
+        if not resolved:
+            errors.append(f"{rel}:{lineno}: unresolved internal import '{imp}'")
+
+    if errors:
+        return False, "\n".join(errors[:15])
     return True, f"{len(files)} files"
 
 
@@ -228,6 +313,32 @@ def _self_test():
     ok, err = check_js_esm("export const = ;\n", "bad.js")
     assert not ok and "bad.js" in err, (ok, err)
 
+    with tempfile.TemporaryDirectory(prefix="np-kt-test-") as kt_tmp:
+        base = Path(kt_tmp) / "android-app/app/src/main/java/com/company/odoonativeprint"
+        (base / "core").mkdir(parents=True)
+        (base / "core/Good.kt").write_text(
+            "package com.company.odoonativeprint.core\nclass Good\n", encoding="utf-8"
+        )
+        (base / "App.kt").write_text(
+            "package com.company.odoonativeprint\n"
+            "import com.company.odoonativeprint.R\n"
+            "import com.company.odoonativeprint.core.Good\n"
+            "class App\n",
+            encoding="utf-8",
+        )
+        ok, detail = check_android_kotlin(kt_tmp)
+        assert ok and detail == "2 files", (ok, detail)
+
+        (base / "core/Bad.kt").write_text(
+            "package com.company.odoonativeprint.wrong\n"
+            "import com.company.odoonativeprint.core.Missing\n"
+            "// TODO: clean up\n"
+            "class Bad\n",
+            encoding="utf-8",
+        )
+        ok, err = check_android_kotlin(kt_tmp)
+        assert not ok and "does not match path" in err and "TODO/FIXME" in err and "Missing" in err, (ok, err)
+
     if yaml is not None:
         ok, err = check_yaml_text("name: CI\non:\n  push:\n")
         assert ok and not err, (ok, err)
@@ -287,6 +398,8 @@ def main():
             ("node:odoo20_pos_keys", lambda: _run_cmd(["node", "--test", "odoo20/native_print/tests/test_pos_keys.mjs"], sub_env)),
             ("node:odoo20_live_target", lambda: _run_cmd(["node", "--test", "odoo20/native_print/tests/test_live_target.mjs"], sub_env)),
             ("node:odoo_esm_syntax", _check_odoo_esm_syntax),
+            ("node:android_bridge_js", lambda: _run_cmd(["node", "--check", "android-app/app/src/main/assets/bridge.js"], sub_env)),
+            ("android:kotlin_static", check_android_kotlin),
             ("python:py_compile", _check_py_compile),
             ("xml/admx/adml", _check_xml),
             ("toml/json", _check_toml_json),

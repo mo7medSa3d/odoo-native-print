@@ -189,6 +189,8 @@
   function setCardState(state) {
     viewState = state;
     if (cardEl) cardEl.setAttribute("data-state", state);
+    var titles = { connecting: T.connecting, down: T.downTitle, redirected: T.redirTitle, initFail: T.initFailTitle };
+    document.title = "Yaseir Print — " + (titles[state] || T.connecting);
   }
   function setPrimaryAction(id) {
     ["retry", "anyway", "cc"].forEach(function (btnId) {
@@ -208,7 +210,7 @@
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
     document.documentElement.setAttribute("data-theme", savedTheme === "dark" ? "dark" : "light");
-    document.title = "Yaseir Print — " + T.connecting;
+    setCardState(viewState);
     document.getElementById("retry").textContent = T.retryBtn;
     document.getElementById("anyway").textContent = T.anywayBtn;
     document.getElementById("cc").textContent = T.ccBtn;
@@ -280,6 +282,7 @@
     document.getElementById("actions").classList.add("show");
     document.getElementById("retry").style.display = "none";
     document.getElementById("anyway").style.display = "none";
+    document.getElementById("count").textContent = "";
   }
   function startCountdown() {
     stopCountdown();

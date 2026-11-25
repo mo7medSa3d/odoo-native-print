@@ -509,7 +509,7 @@ try {
             {
                 report_type: "qweb-pdf",
                 report_name: "account.report_invoice",
-                context: { active_ids: [6] },
+                context: { active_model: "account.move", active_ids: [6] },
             },
             {},
             testEnv,
@@ -519,11 +519,33 @@ try {
         eq(textFallbackPrint !== null, true, "text version is sent to the printer");
         eq(textFallbackPrint.mode, "gdi", "text version is rendered as a GDI image");
         eq(textFallbackPrint.bytes.length > 0, true, "PNG bytes are produced locally");
-        eq(
-            rpcCalls.some((c) => c.params.state === "queued"),
-            true,
-            "the fallback job is logged to Odoo",
-        );
+        const noPdfQueued = rpcCalls.find((c) => c.params.state === "queued");
+        eq(Boolean(noPdfQueued), true, "the fallback job is logged to Odoo");
+        eq(noPdfQueued.params.source_model, "account.move", "no-PDF queued post includes source_model");
+        eq(noPdfQueued.params.source_ids, "6", "no-PDF queued post includes source_ids");
+
+        // Failed enqueue on no-PDF-engine fallback must still post source_ids so Reprint works.
+        rpcCalls.length = 0;
+        const prevPrintImage = globalThis.window.__NATIVE_PRINT__.printImage;
+        globalThis.window.__NATIVE_PRINT__.printImage = async () => { throw new Error("NO_PDF_ENQUEUE_FAIL"); };
+        try {
+            const noPdfFailRes = await registeredHandler(
+                {
+                    report_type: "qweb-pdf",
+                    report_name: "account.report_invoice",
+                    context: { active_model: "account.move", active_ids: [8] },
+                },
+                {},
+                testEnv,
+            );
+            eq(noPdfFailRes, undefined, "failed no-PDF-engine fallback falls back to download");
+            const noPdfFailed = rpcCalls.find((c) => c.params.state === "failed" && c.params.error_code === "BRIDGE_ERROR");
+            eq(Boolean(noPdfFailed), true, "failed no-PDF-engine fallback posts BRIDGE_ERROR");
+            eq(noPdfFailed.params.source_model, "account.move", "no-PDF failed post includes source_model");
+            eq(noPdfFailed.params.source_ids, "8", "no-PDF failed post includes source_ids");
+        } finally {
+            globalThis.window.__NATIVE_PRINT__.printImage = prevPrintImage;
+        }
         eq(
             notices.some((n) => /no PDF engine/i.test(n.msg)),
             true,
@@ -966,6 +988,103 @@ try {
     } finally {
         globalThis.document = prevDoc2;
         globalThis.localStorage = prevLs2;
+        delete globalThis.window.__NATIVE_PRINT__;
+    }
+}
+
+// 9. Android v1.5.7 bridge contract & qweb-text fetch rejection regression tests.
+{
+    // 9a. normalizeBridgeJobState & resolveBridgeJobId
+    eq(m.normalizeBridgeJobState("completed"), "done", "Android completed -> done");
+    eq(m.normalizeBridgeJobState("cancelled"), "canceled", "Android cancelled -> canceled");
+    eq(m.normalizeBridgeJobState("submitted"), "printing", "Android submitted -> printing");
+    eq(m.normalizeBridgeJobState("in_progress"), "printing", "Android in_progress -> printing");
+    eq(m.normalizeBridgeJobState("not_found"), null, "Android not_found -> null");
+    eq(m.resolveBridgeJobId({ id: "uuid-123" }, "idem-1"), "uuid-123", "Android object id extracted");
+    eq(m.resolveBridgeJobId("idem-1", "fallback"), "idem-1", "Desktop string id preserved");
+    eq(m.resolveBridgeJobId(null, "fallback"), "fallback", "Null enqueue result falls back to key");
+
+    // 9b. Android PrinterInfo / PrinterCapabilities shapes
+    eq(m.detectPrinterType({ name: "BT Thermal", protocol: "escpos" }).printerClass, "thermal", "escpos without printer_class infers thermal");
+    eq(m.detectPrinterType({ name: "Zebra BT", protocol: "zpl" }).printerClass, "label", "zpl without printer_class infers label");
+    eq(m.detectPrinterType({ name: "Office IPP", protocol: "pdf" }).mode, "gdi", "Android pdf protocol maps to gdi");
+    eq(m.detectPrinterType({ name: "EPSON TM-T88VII", protocol: "auto" }).mode, "escpos", "Android auto protocol falls through to heuristic");
+    eq(m.formatFormsSummary(["80mm Roll", "A4"], "Roll")[0], "80mm Roll", "Android string forms preserved");
+    eq(m.rollWidthMm({ forms: ["80mm Roll", "A4"] }), 80, "Android string roll width parsed");
+    eq(m.rollWidthMm({ forms: [], paper_width_mm: 58 }), 58, "Android paper_width_mm fallback");
+    eq(m.rollWidthMm({ forms: [], paper_width_mm: 210 }), null, "A4 paper_width_mm is not a roll");
+
+    // 9c. resolveBridgeTarget forwards { force: true } and respects supports_color: false
+    let receivedForce = null;
+    const androidBridge = {
+        listPrinters: async (opts) => {
+            receivedForce = Boolean(opts && opts.force);
+            return [{ name: "Star BT", transport: "bluetooth_spp", protocol: "escpos", is_default: true }];
+        },
+        printerCapabilities: async () => ({ forms: ["80mm Roll"], paper_width_mm: 80, supports_color: false }),
+    };
+    const androidTarget = await m.resolveBridgeTarget(androidBridge, { isPos: true, preferClasses: ["thermal"], force: true });
+    eq(receivedForce, true, "resolveBridgeTarget forwards force: true to listPrinters");
+    eq(androidTarget.rule.color, false, "supports_color: false sets rule.color to false");
+    eq(androidTarget.rule.media.roll_width_mm, 80, "Android roll_width_mm populated");
+
+    // 9c-retry. Non-forced empty listPrinters() retries once with { force: true }; forced empty does not retry.
+    const retryCalls = [];
+    const retryBridge = {
+        listPrinters: async (opts) => {
+            retryCalls.push(Boolean(opts && opts.force));
+            return opts && opts.force
+                ? [{ name: "Recovered Printer", driver: "HP PCL", kind: "local", is_default: true }]
+                : [];
+        },
+        printerCapabilities: async () => ({ forms: [], color: true }),
+    };
+    const recoveredTarget = await m.resolveBridgeTarget(retryBridge);
+    eq(JSON.stringify(retryCalls), JSON.stringify([false, true]), "non-forced empty listPrinters retries once with force: true");
+    eq(recoveredTarget && recoveredTarget.printer.name, "Recovered Printer", "retry resolves printer from forced refresh");
+
+    let forcedEmptyCalls = 0;
+    const forcedEmptyTarget = await m.resolveBridgeTarget(
+        { listPrinters: async () => { forcedEmptyCalls++; return []; } },
+        { force: true },
+    );
+    eq(forcedEmptyTarget, null, "forced empty listPrinters returns null");
+    eq(forcedEmptyCalls, 1, "already-forced empty listPrinters does not retry");
+
+    // 9d. PDF print on Android passes `printer`, polls by returned UUID, and syncs canonical `done` under idempotencyKey.
+    const origFetch9 = globalThis.fetch;
+    const origSetTimeout9 = globalThis.setTimeout;
+    globalThis.setTimeout = (fn) => { fn(); return 0; };
+    try {
+        rpcCalls.length = 0;
+        let sentPdfReq = null;
+        let polledIds = [];
+        globalThis.window.__NATIVE_PRINT__ = {
+            listPrinters: async () => [{ name: "Android IPP", transport: "ipp", address: "192.168.1.20", protocol: "pdf", is_default: true }],
+            printerCapabilities: async () => ({ forms: ["A4"], supports_color: true }),
+            printPdf: async (req) => { sentPdfReq = req; return { id: "android-uuid-99", state: "queued" }; },
+            jobDetail: async (id) => { polledIds.push(id); return { id, state: "completed", pages: 1, attempts: 1 }; },
+        };
+        globalThis.fetch = async () => ({
+            ok: true,
+            arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]).buffer,
+        });
+        const okRes = await registeredHandler({ report_type: "qweb-pdf", report_name: "account.report_invoice" }, {}, testEnv);
+        await new Promise((r) => origSetTimeout9(r, 15));
+        eq(okRes, true, "Android PDF print succeeds");
+        eq(sentPdfReq.printer, "Android IPP", "printPdf passes explicit printer name for Android");
+        eq(polledIds[0], "android-uuid-99", "watchJobToCompletion polls Android UUID");
+        const doneRpc = rpcCalls.find((c) => c.url === "/native_print/job_status" && c.params.state === "done");
+        eq(Boolean(doneRpc), true, "Android completed state normalized and posted as done");
+        eq(doneRpc.params.idempotency_key, sentPdfReq.idempotencyKey, "done RPC preserves original idempotency_key");
+
+        // 9e. qweb-text fetch rejection falls back to undefined instead of throwing.
+        globalThis.fetch = async () => { throw new Error("NETWORK_DOWN"); };
+        const txtRejectRes = await registeredHandler({ report_type: "qweb-text", report_name: "r.netfail" }, {}, testEnv);
+        eq(txtRejectRes, undefined, "rejected qweb-text fetch falls back cleanly to undefined");
+    } finally {
+        globalThis.fetch = origFetch9;
+        globalThis.setTimeout = origSetTimeout9;
         delete globalThis.window.__NATIVE_PRINT__;
     }
 }

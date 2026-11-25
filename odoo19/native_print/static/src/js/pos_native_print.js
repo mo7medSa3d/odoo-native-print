@@ -5,7 +5,7 @@ import { TicketScreen } from "@point_of_sale/app/screens/ticket_screen/ticket_sc
 import { patch } from "@web/core/utils/patch";
 import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
-import { JOB_TERMINAL_STATES as TERMINAL_STATES, notifyJobUpdated, notifyUser, recoveryButtons, resolveBridgeTarget, safeErrorCode } from "./native_print_client";
+import { JOB_TERMINAL_STATES as TERMINAL_STATES, normalizeBridgeJobState, notifyJobUpdated, notifyUser, recoveryButtons, resolveBridgeJobId, resolveBridgeTarget, safeErrorCode } from "./native_print_client";
 
 /*
  * Native Print for POS receipts (Odoo 17, 18, and 19 compatible).
@@ -324,7 +324,7 @@ async function withConnectedElement(element, fn) {
     }
 }
 
-async function elementToPngBytes(element, scale = 2) {
+async function elementToPngBytes(element, scale = 3) {
     return await withConnectedElement(element, async () => {
         const width = element.offsetWidth || 320;
         const height = element.offsetHeight || element.scrollHeight || 480;
@@ -336,6 +336,8 @@ async function elementToPngBytes(element, scale = 2) {
             0.5,
             Math.min(scale, 14000 / height, 4096 / width),
         );
+        const scaledW = Math.max(1, Math.ceil(width * effectiveScale));
+        const scaledH = Math.max(1, Math.ceil(height * effectiveScale));
         const clone = element.cloneNode(true);
         const bgTargets = inlineStyles(element, clone);
         await inlineMedia(element, clone, bgTargets);
@@ -356,9 +358,11 @@ async function elementToPngBytes(element, scale = 2) {
         const serializedClone = new XMLSerializer()
             .serializeToString(clone)
             .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+        // Rasterize SVG natively at scaledW x scaledH via viewBox so Chromium/WebView2
+        // renders crisp high-DPI vector text instead of upscaling a 1x bitmap.
         const svg =
-            `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
-            `<foreignObject width="100%" height="100%">` +
+            `<svg xmlns="http://www.w3.org/2000/svg" width="${scaledW}" height="${scaledH}" viewBox="0 0 ${width} ${height}">` +
+            `<foreignObject width="${width}" height="${height}">` +
             serializedClone +
             `</foreignObject></svg>`;
         const img = new Image();
@@ -386,13 +390,14 @@ async function elementToPngBytes(element, scale = 2) {
             await img.decode().catch(() => {});
         }
         const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.ceil(width * effectiveScale));
-        canvas.height = Math.max(1, Math.ceil(height * effectiveScale));
+        canvas.width = scaledW;
+        canvas.height = scaledH;
         const ctx = canvas.getContext("2d");
         ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.scale(effectiveScale, effectiveScale);
-        ctx.drawImage(img, 0, 0, width, height);
+        ctx.fillRect(0, 0, scaledW, scaledH);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(img, 0, 0, scaledW, scaledH);
         return await canvasToPngBytes(canvas);
     });
 }
@@ -400,7 +405,7 @@ async function elementToPngBytes(element, scale = 2) {
 // Pure 2D canvas fallback when SVG foreignObject capture is blocked by a
 // WebView/CSP quirk: draws images/QR codes, horizontal rules, and positioned
 // text runs directly without SVG so receipts still print on every printer.
-async function renderReceiptCanvasFallback(element, scale = 2) {
+async function renderReceiptCanvasFallback(element, scale = 3) {
     return await withConnectedElement(element, async () => {
         const rootRect = element.getBoundingClientRect();
         const width = Math.ceil(element.offsetWidth || rootRect.width || 320);
@@ -536,7 +541,9 @@ function finishPosReceiptAttempt(safeRef, userId) {
     } catch (_err) { /* ignore */ }
 }
 
-async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, env, userId, order) {
+async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, env, userId, order, bridgeJobId = null) {
+    const pollJobId = bridgeJobId || jobId;
+    const normState = (s) => (typeof normalizeBridgeJobState === "function" ? normalizeBridgeJobState(s) : s);
     // Same watch policy as report jobs: poll until terminal, giving
     // up only after 5 minutes without any state progress (a busy
     // queue legitimately takes longer), 30-minute absolute cap.
@@ -580,14 +587,14 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
             let errorCode = null;
             let attempts = lastSeenAttempts;
             if (typeof bridge.jobDetail === "function") {
-                const detail = await bridge.jobDetail(jobId);
+                const detail = await bridge.jobDetail(pollJobId);
                 if (detail) {
-                    state = detail.state;
+                    state = normState(detail.state);
                     errorCode = detail.errorCode || detail.error_code || null;
                     attempts = detail.attempts || attempts;
                 }
             } else if (typeof bridge.printStatus === "function") {
-                state = await bridge.printStatus(jobId);
+                state = normState(await bridge.printStatus(pollJobId));
             }
             consecutiveErrors = 0;
             if (!state) {
@@ -610,20 +617,21 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
             // succeeded on retry, avoid flashing a false red toast.
             if (state === "failed" && (state + ":" + attempts) !== lastOutcomeKey && typeof bridge.jobDetail === "function") {
                 await new Promise((resolve) => setTimeout(resolve, 900));
-                const recheck = await bridge.jobDetail(jobId).catch(() => null);
-                if (recheck && recheck.state && !TERMINAL_STATES.has(recheck.state)) {
-                    lastSeenState = recheck.state;
+                const recheck = await bridge.jobDetail(pollJobId).catch(() => null);
+                const recheckState = recheck && normState(recheck.state);
+                if (recheckState && !TERMINAL_STATES.has(recheckState)) {
+                    lastSeenState = recheckState;
                     lastSeenAttempts = recheck.attempts || attempts;
                     lastProgressAt = Date.now();
                     await syncJobStatus(
-                        recheck.state,
+                        recheckState,
                         recheck.errorCode || recheck.error_code || null,
                         lastSeenAttempts,
                     );
                     continue;
                 }
-                if (recheck && recheck.state) {
-                    state = recheck.state;
+                if (recheckState) {
+                    state = recheckState;
                     errorCode = recheck.errorCode || recheck.error_code || errorCode;
                     attempts = recheck.attempts || attempts;
                 }
@@ -762,7 +770,7 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
         if (!target) {
             await new Promise((resolve) => setTimeout(resolve, 700));
             target = await resolveBridgeTarget(
-                bridge, { isPos: true, preferClasses: ["thermal", "label"] },
+                bridge, { isPos: true, preferClasses: ["thermal", "label"], force: true },
             ).catch(() => null);
         }
         if (!target) {
@@ -784,15 +792,15 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
         let bytes = null;
         let fallbackText = null;
         try {
-            bytes = await elementToPngBytes(element, 2);
+            bytes = await elementToPngBytes(element, 3);
         } catch (firstCaptureError) {
-            console.warn("Native Print: POS SVG capture (scale 2) failed, retrying at scale 1.", firstCaptureError);
+            console.warn("Native Print: POS SVG capture (scale 3) failed, retrying at scale 2.", firstCaptureError);
             try {
-                bytes = await elementToPngBytes(element, 1);
+                bytes = await elementToPngBytes(element, 2);
             } catch (secondCaptureError) {
-                console.warn("Native Print: POS SVG capture (scale 1) failed, trying 2D canvas fallback.", secondCaptureError);
+                console.warn("Native Print: POS SVG capture (scale 2) failed, trying 2D canvas fallback.", secondCaptureError);
                 try {
-                    bytes = await renderReceiptCanvasFallback(element, 2);
+                    bytes = await renderReceiptCanvasFallback(element, 3);
                 } catch (canvasFallbackError) {
                     console.warn("Native Print: POS 2D canvas fallback failed.", canvasFallbackError);
                     if (effectiveMode === "escpos" && typeof bridge.printText === "function") {
@@ -810,20 +818,24 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
         const payloadByteSize = fallbackText
             ? new TextEncoder().encode(fallbackText).length
             : bytes.length;
+        let bridgeJobId = idempotencyKey;
         try {
+            let enqueueRes;
             if (fallbackText) {
-                await bridge.printText({
+                enqueueRes = await bridge.printText({
                     idempotencyKey,
                     reportName: POS_RECEIPT_SOURCE,
+                    printer: target.printer.name,
                     printerPattern: rule.printer_pattern,
                     text: fallbackText,
                     cut: true,
                     copies: rule.copies || 1,
                 });
             } else {
-                await bridge.printImage({
+                enqueueRes = await bridge.printImage({
                     idempotencyKey,
                     reportName: POS_RECEIPT_SOURCE,
+                    printer: target.printer.name,
                     printerPattern: rule.printer_pattern,
                     mode: effectiveMode,
                     mediaRollWidthMm:
@@ -833,6 +845,7 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
                     bytes,
                 });
             }
+            bridgeJobId = resolveBridgeJobId(enqueueRes, idempotencyKey);
         } catch (err) {
             if (safeRef) { finishPosReceiptAttempt(safeRef, userId); }
             try {
@@ -861,7 +874,7 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
         ).catch(() => {});
         watchPosJob(
             bridge, idempotencyKey, rule, payloadByteSize, safeRef,
-            target.printer.name, notificationEnv(contextObj), userId, order,
+            target.printer.name, notificationEnv(contextObj), userId, order, bridgeJobId,
         ).catch(() => {});
         if (order) {
             order._printed = true;

@@ -3,7 +3,7 @@ import { registry } from "@web/core/registry";
 import { rpc } from "@web/core/network/rpc";
 import { user } from "@web/core/user";
 import { _t } from "@web/core/l10n/translation";
-import { JOB_TERMINAL_STATES as TERMINAL_STATES, notifyJobUpdated, notifyUser, recoveryButtons, resolveBridgeTarget, safeErrorCode } from "./native_print_client";
+import { JOB_TERMINAL_STATES as TERMINAL_STATES, normalizeBridgeJobState, notifyJobUpdated, notifyUser, recoveryButtons, resolveBridgeJobId, resolveBridgeTarget, safeErrorCode } from "./native_print_client";
 
 /*
  * Native Print report handler (API contract v1, docs/api-contract.md).
@@ -192,12 +192,6 @@ export function reportHtmlToPlainText(markup) {
     let root = null;
     if (typeof DOMParser === "function") {
         root = new DOMParser().parseFromString(raw, "text/html").body;
-    } else if (typeof document !== "undefined" && document.createElement) {
-        const probe = document.createElement("div");
-        if (typeof probe.querySelectorAll === "function" && typeof probe.insertAdjacentText === "function") {
-            probe.innerHTML = raw;
-            root = probe;
-        }
     }
     if (!root) {
         return normalise(stripWithRegex());
@@ -250,6 +244,7 @@ export async function textReportToPngBytes(text) {
 }
 
 export async function watchJobToCompletion(bridge, jobId, meta, env) {
+    const pollJobId = (meta && meta.bridgeJobId) || jobId;
     let lastState = "queued";
     let lastPages = meta.pages || 1;
     let lastAttempts = 1;
@@ -274,15 +269,15 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
             let pages = lastPages;
             let attempts = lastAttempts;
             if (typeof bridge.jobDetail === "function") {
-                const detail = await bridge.jobDetail(jobId);
+                const detail = await bridge.jobDetail(pollJobId);
                 if (detail) {
-                    state = detail.state;
+                    state = normalizeBridgeJobState(detail.state);
                     errorCode = detail.errorCode || detail.error_code || null;
                     pages = detail.pages || pages;
                     attempts = detail.attempts || attempts;
                 }
             } else if (typeof bridge.printStatus === "function") {
-                state = await bridge.printStatus(jobId);
+                state = normalizeBridgeJobState(await bridge.printStatus(pollJobId));
             }
             consecutiveErrors = 0;
             if (!state) {
@@ -295,9 +290,10 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
             // silent and the server log always receives the final state.
             if (state === "failed" && notifiedFailure !== state + ":" + attempts && typeof bridge.jobDetail === "function") {
                 await new Promise((resolve) => setTimeout(resolve, 900));
-                const recheck = await bridge.jobDetail(jobId).catch(() => null);
-                if (recheck && recheck.state) {
-                    state = recheck.state;
+                const recheck = await bridge.jobDetail(pollJobId).catch(() => null);
+                const recheckState = recheck && normalizeBridgeJobState(recheck.state);
+                if (recheckState) {
+                    state = recheckState;
                     errorCode = recheck.errorCode || recheck.error_code || null;
                     pages = recheck.pages || pages;
                     attempts = recheck.attempts || attempts;
@@ -456,10 +452,12 @@ async function printReportTextWhenPdfEngineMissing(action, options, env, bridge,
         pages: 1,
     };
     try {
+        let enqueueRes;
         if (asEscpos) {
-            await bridge.printText({
+            enqueueRes = await bridge.printText({
                 idempotencyKey: key,
                 reportName: action.report_name,
+                printer: target.printer.name,
                 printerPattern: rule.printer_pattern,
                 text,
                 cut: true,
@@ -467,9 +465,10 @@ async function printReportTextWhenPdfEngineMissing(action, options, env, bridge,
             });
         } else {
             const pngBytes = await textReportToPngBytes(text);
-            await bridge.printImage({
+            enqueueRes = await bridge.printImage({
                 idempotencyKey: key,
                 reportName: action.report_name,
+                printer: target.printer.name,
                 printerPattern: rule.printer_pattern,
                 mode: "gdi",
                 sourceWidthMm: 210,
@@ -477,17 +476,18 @@ async function printReportTextWhenPdfEngineMissing(action, options, env, bridge,
                 bytes: pngBytes,
             });
         }
+        const bridgeJobId = resolveBridgeJobId(enqueueRes, key);
         rpc("/native_print/job_status", Object.assign({
             idempotency_key: key,
             state: "queued",
             device: target.printer.name,
             report_name: action.report_name,
             byte_size: textBytes,
-        }, source.model ? { source_model: source.model } : {}), { silent: true }).catch(() => {});
+        }, source.model ? { source_model: source.model } : {}, source.ids ? { source_ids: source.ids } : {}), { silent: true }).catch(() => {});
         watchJobToCompletion(
             bridge,
             key,
-            Object.assign({}, meta, { byteSize: textBytes }),
+            Object.assign({}, meta, { byteSize: textBytes, bridgeJobId }),
             env,
         ).catch(() => {});
     } catch (error) {
@@ -498,7 +498,7 @@ async function printReportTextWhenPdfEngineMissing(action, options, env, bridge,
             device: target.printer.name,
             report_name: action.report_name,
             byte_size: textBytes,
-        }, source.model ? { source_model: source.model } : {}), { silent: true }).catch(() => {});
+        }, source.model ? { source_model: source.model } : {}, source.ids ? { source_ids: source.ids } : {}), { silent: true }).catch(() => {});
         notifyJobUpdated();
         console.warn("Native Print: text fallback for a report without a PDF engine failed.", error);
         return undefined;
@@ -557,21 +557,13 @@ async function handleReportSubmission(action, options, env, bridge) {
 
     if (action.report_type === "qweb-text") {
         const textUrl = buildReportUrl(action, "text", env);
-        const textPromise = fetchReportBody(textUrl, (resp) => resp.text());
+        const textPromise = fetchReportBody(textUrl, (resp) => resp.text()).catch(() => null);
         const [rawTarget, text] = await Promise.all([targetPromise, textPromise]);
         const resolved = applyPrefillAndFinishTarget(rawTarget);
         if (!resolved) return undefined;
         const { target, rule } = resolved;
-        try {
-            if (text === null) {
-                // Let Odoo's default flow handle (and report) it.
-                return undefined;
-            }
-        } catch (_fetchError) {
-            // Network failure / server restart mid-click: the
-            // fallback contract is "return undefined and Odoo
-            // downloads as usual" — a rejected fetch must not escape
-            // the handler as an exception.
+        if (text === null) {
+            // Let Odoo's default flow handle (and report) it.
             return undefined;
         }
         // Byte size means UTF-8 bytes (what actually crosses the
@@ -590,10 +582,12 @@ async function handleReportSubmission(action, options, env, bridge) {
         const textKey = buildReportIdempotencyKey("odoo-txt", action);
         const textSource = reportSource(action);
         try {
+            let textEnqueueRes;
             if (textAsEscpos) {
-                await bridge.printText({
+                textEnqueueRes = await bridge.printText({
                     idempotencyKey: textKey,
                     reportName: action.report_name,
+                    printer: target.printer.name,
                     printerPattern: rule.printer_pattern,
                     text,
                     cut: true,
@@ -601,9 +595,10 @@ async function handleReportSubmission(action, options, env, bridge) {
                 });
             } else {
                 const pngBytes = await textReportToPngBytes(text);
-                await bridge.printImage({
+                textEnqueueRes = await bridge.printImage({
                     idempotencyKey: textKey,
                     reportName: action.report_name,
+                    printer: target.printer.name,
                     printerPattern: rule.printer_pattern,
                     mode: "gdi",
                     sourceWidthMm: 210,
@@ -611,6 +606,7 @@ async function handleReportSubmission(action, options, env, bridge) {
                     bytes: pngBytes,
                 });
             }
+            const textBridgeJobId = resolveBridgeJobId(textEnqueueRes, textKey);
             // Log queued state to Odoo asynchronously AFTER local enqueue so WAN RTT never delays printing.
             rpc("/native_print/job_status", {
                 idempotency_key: textKey,
@@ -631,6 +627,7 @@ async function handleReportSubmission(action, options, env, bridge) {
                 bridge,
                 textKey,
                 {
+                    bridgeJobId: textBridgeJobId,
                     reportName: action.report_name,
                     printerPattern: rule.printer_pattern,
                     printerName: target.printer.name,
@@ -725,9 +722,10 @@ async function handleReportSubmission(action, options, env, bridge) {
     const idempotencyKey = buildReportIdempotencyKey("odoo", action);
     const pdfSource = reportSource(action);
     try {
-        await bridge.printPdf({
+        const pdfEnqueueRes = await bridge.printPdf({
             idempotencyKey,
             reportName: action.report_name,
+            printer: target.printer.name,
             printerPattern: rule.printer_pattern,
             mode: rule.mode,
             paper: rule.paper || null,
@@ -743,6 +741,7 @@ async function handleReportSubmission(action, options, env, bridge) {
                 (rule.media && rule.media.roll_width_mm) || undefined,
             bytes,
         });
+        const pdfBridgeJobId = resolveBridgeJobId(pdfEnqueueRes, idempotencyKey);
         // Log queued state to Odoo asynchronously AFTER local enqueue so WAN RTT never delays printing.
         rpc("/native_print/job_status", {
             idempotency_key: idempotencyKey,
@@ -763,6 +762,7 @@ async function handleReportSubmission(action, options, env, bridge) {
             bridge,
             idempotencyKey,
             {
+                bridgeJobId: pdfBridgeJobId,
                 reportName: action.report_name,
                 printerPattern: rule.printer_pattern,
                 printerName: target.printer.name,

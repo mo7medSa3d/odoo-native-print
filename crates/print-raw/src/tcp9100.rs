@@ -1,6 +1,6 @@
 use std::io::{ErrorKind, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::time::{Duration, Instant};
 
 const WRITE_CHUNK_SIZE: usize = 16 * 1024;
 const MIN_IO_TIMEOUT: Duration = Duration::from_millis(1);
@@ -26,24 +26,39 @@ impl std::fmt::Display for SendPhaseError {
 
 impl std::error::Error for SendPhaseError {}
 
-fn connect_any(host: &str, port: u16, timeout: Duration) -> std::io::Result<TcpStream> {
-    let bare_host = host.trim().trim_start_matches('[').trim_end_matches(']');
-    let addrs: Vec<_> = (bare_host, port).to_socket_addrs()?.collect();
+fn connect_addrs(
+    addrs: &[SocketAddr],
+    deadline: Option<Instant>,
+    fallback_timeout: Duration,
+) -> std::io::Result<TcpStream> {
     if addrs.is_empty() {
         return Err(std::io::Error::new(
             ErrorKind::AddrNotAvailable,
             "no address",
         ));
     }
-    let timeout = timeout.max(MIN_IO_TIMEOUT);
     let mut last_err = None;
     for addr in addrs {
-        match TcpStream::connect_timeout(&addr, timeout) {
+        let remaining = match deadline {
+            Some(d) => d.saturating_duration_since(Instant::now()),
+            None => fallback_timeout,
+        };
+        if remaining.is_zero() {
+            break;
+        }
+        match TcpStream::connect_timeout(addr, remaining) {
             Ok(stream) => return Ok(stream),
             Err(e) => last_err = Some(e),
         }
     }
-    Err(last_err.unwrap_or_else(|| std::io::Error::new(ErrorKind::AddrNotAvailable, "no address")))
+    Err(last_err.unwrap_or_else(|| std::io::Error::new(ErrorKind::TimedOut, "connect timed out")))
+}
+
+fn connect_any(host: &str, port: u16, timeout: Duration) -> std::io::Result<TcpStream> {
+    let bare_host = host.trim().trim_start_matches('[').trim_end_matches(']');
+    let addrs: Vec<_> = (bare_host, port).to_socket_addrs()?.collect();
+    let total = timeout.max(MIN_IO_TIMEOUT);
+    connect_addrs(&addrs, Instant::now().checked_add(total), total)
 }
 
 /// Raw TCP 9100 (JetDirect) transport: connect, write all bytes, close.
@@ -600,5 +615,37 @@ mod tests {
             .expect("persistent socket answers all 3 frames");
         assert_eq!(res, None);
         assert_eq!(accepts.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn connect_addrs_enforces_shared_deadline_and_falls_back() {
+        let empty_err = connect_addrs(&[], Some(Instant::now()), MIN_IO_TIMEOUT).unwrap_err();
+        assert_eq!(empty_err.kind(), ErrorKind::AddrNotAvailable);
+
+        let live = TcpListener::bind("127.0.0.1:0").unwrap();
+        let live_addr = live.local_addr().unwrap();
+
+        // Already-expired shared deadline stops immediately without dialing live_addr.
+        let expired = Instant::now();
+        let expired_err =
+            connect_addrs(&[live_addr], Some(expired), Duration::from_secs(5)).unwrap_err();
+        assert_eq!(expired_err.kind(), ErrorKind::TimedOut);
+
+        // Closed port followed by live port falls back within the shared budget.
+        let dead = TcpListener::bind("127.0.0.1:0").unwrap();
+        let dead_addr = dead.local_addr().unwrap();
+        drop(dead);
+        let server = std::thread::spawn(move || {
+            let _ = live.accept();
+        });
+        let total = Duration::from_secs(2);
+        let stream = connect_addrs(
+            &[dead_addr, live_addr],
+            Instant::now().checked_add(total),
+            total,
+        )
+        .expect("second address should succeed after first fails");
+        drop(stream);
+        let _ = server.join();
     }
 }

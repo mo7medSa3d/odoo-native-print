@@ -68,7 +68,7 @@ fn repack_rows(src: &[u8], src_row_bytes: usize, w: u32, h: u32, bit_count: u16)
     if w == 0 || h == 0 || i32::try_from(w).is_err() || i32::try_from(h).is_err() {
         return Vec::new();
     }
-    let Some(dst_row) = checked_dib_row_bytes(w, bit_count) else {
+    let Some(dst_row) = checked_dib_row_bytes(w, bit_count).filter(|&r| r > 0) else {
         return Vec::new();
     };
     let Some(total) = dst_row.checked_mul(h as usize) else {
@@ -78,7 +78,7 @@ fn repack_rows(src: &[u8], src_row_bytes: usize, w: u32, h: u32, bit_count: u16)
         return src[..total].to_vec();
     }
     let mut out = vec![0u8; total];
-    for row in 0..h as usize {
+    for (row, dst_slice) in out.chunks_exact_mut(dst_row).enumerate() {
         let Some(src_start) = row.checked_mul(src_row_bytes) else {
             break;
         };
@@ -86,8 +86,7 @@ fn repack_rows(src: &[u8], src_row_bytes: usize, w: u32, h: u32, bit_count: u16)
             break;
         }
         let copy_len = (src.len() - src_start).min(src_row_bytes).min(dst_row);
-        out[row * dst_row..row * dst_row + copy_len]
-            .copy_from_slice(&src[src_start..src_start + copy_len]);
+        dst_slice[..copy_len].copy_from_slice(&src[src_start..src_start + copy_len]);
     }
     out
 }
@@ -160,25 +159,65 @@ pub fn build_dib(page: &RenderedPage) -> DibImage {
     }
 }
 
-/// Build the DIB taking ownership of `page.pixels` so 32-bpp pages avoid
-/// cloning ~35 MB per A4 page when the stride already matches DIB layout.
+/// Build the DIB taking ownership of `page.pixels` so stride-aligned pages
+/// (32-bpp Color, 4px-aligned 8-bpp Grayscale, and 32px-aligned 1-bpp Threshold)
+/// avoid cloning multi-megabyte buffers per page.
+/// Fast single-pass check: true when every BGRA pixel is monochrome/grayscale
+/// (B == G == R). Bails out on the first colored pixel in nanoseconds.
+fn is_bgra_grayscale(pixels: &[u8]) -> bool {
+    pixels
+        .chunks_exact(4)
+        .all(|px| px[0] == px[1] && px[1] == px[2])
+}
+
 pub fn build_dib_owned(mut page: RenderedPage) -> DibImage {
-    if page.mode == RenderMode::Color {
-        let (w, h) = (page.width_px, page.height_px);
-        let dst_row = dib_row_bytes(w, 32);
-        if let (Some(src_row), Some(total)) =
-            ((w as usize).checked_mul(4), dst_row.checked_mul(h as usize))
-        {
-            if src_row == dst_row && dst_row > 0 && page.pixels.len() >= total {
-                page.pixels.truncate(total);
-                return DibImage {
-                    width: w,
-                    height: h,
-                    header: header(w, h, 32, total),
-                    palette: Vec::new(),
-                    bits: page.pixels,
-                    bit_count: 32,
-                };
+    let (w, h) = (page.width_px, page.height_px);
+    if w > 0 && h > 0 && i32::try_from(w).is_ok() && i32::try_from(h).is_ok() {
+        // Pure-B&W invoices/reports rendered in Color mode shrink 4x (34.8 MB -> 8.7 MB
+        // per 300 DPI A4 page) when packed as an 8-bit grayscale DIB with zero visual loss.
+        if page.mode == RenderMode::Color {
+            if let Some(expected) = (w as usize)
+                .checked_mul(h as usize)
+                .and_then(|n| n.checked_mul(4))
+            {
+                if page.pixels.len() >= expected && is_bgra_grayscale(&page.pixels[..expected]) {
+                    let gray_pixels: Vec<u8> = page.pixels[..expected]
+                        .chunks_exact(4)
+                        .map(|px| px[0])
+                        .collect();
+                    return build_dib_owned(RenderedPage {
+                        width_px: w,
+                        height_px: h,
+                        mode: RenderMode::Grayscale,
+                        dpi: page.dpi,
+                        pixels: gray_pixels,
+                    });
+                }
+            }
+        }
+        let (bit_count, src_row) = match page.mode {
+            RenderMode::Color => (32u16, (w as usize).checked_mul(4)),
+            RenderMode::Grayscale => (8u16, Some(w as usize)),
+            RenderMode::Threshold => (1u16, Some((w as usize).div_ceil(8))),
+        };
+        if let (Some(src_row), Some(dst_row)) = (src_row, checked_dib_row_bytes(w, bit_count)) {
+            if let Some(total) = dst_row.checked_mul(h as usize) {
+                if src_row == dst_row && dst_row > 0 && page.pixels.len() >= total {
+                    page.pixels.truncate(total);
+                    let palette = match page.mode {
+                        RenderMode::Color => Vec::new(),
+                        RenderMode::Grayscale => GRAYSCALE_PALETTE.to_vec(),
+                        RenderMode::Threshold => vec![255, 255, 255, 0, 0, 0, 0, 0],
+                    };
+                    return DibImage {
+                        width: w,
+                        height: h,
+                        header: header(w, h, bit_count, total),
+                        palette,
+                        bits: page.pixels,
+                        bit_count,
+                    };
+                }
             }
         }
     }
@@ -289,12 +328,69 @@ mod tests {
 
     #[test]
     fn owned_color_dib_moves_buffer_without_copy() {
-        let pixels = vec![42u8; 4 * 3 * 4];
+        let mut pixels = vec![42u8; 4 * 3 * 4];
+        // Include a real colored pixel (B != G != R) so auto-grayscale stays 32-bit.
+        pixels[0] = 10;
+        pixels[1] = 20;
+        pixels[2] = 30;
         let ptr = pixels.as_ptr();
         let p = page(RenderMode::Color, 4, 3, pixels);
         let d = build_dib_owned(p);
         assert_eq!(d.bit_count, 32);
         assert_eq!(d.bits.len(), 48);
         assert_eq!(d.bits.as_ptr(), ptr);
+    }
+
+    #[test]
+    fn owned_color_dib_auto_downgrades_pure_grayscale_pages_to_8bpp() {
+        // 4x2 pure grayscale BGRA pixels -> packed as 8-bit DIB (4x smaller)
+        let gray_bgra = vec![
+            0x20, 0x20, 0x20, 0xFF, 0x80, 0x80, 0x80, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00,
+            0x00, 0xFF, 0x40, 0x40, 0x40, 0xFF, 0x60, 0x60, 0x60, 0xFF, 0xA0, 0xA0, 0xA0, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF,
+        ];
+        let dib = build_dib_owned(page(RenderMode::Color, 4, 2, gray_bgra));
+        assert_eq!(dib.bit_count, 8);
+        assert_eq!(dib.bits.len(), 8);
+
+        // One colored pixel keeps full 32-bit BGRA
+        let mut colored_bgra = vec![0xFF; 4 * 2 * 4];
+        colored_bgra[0] = 0x10; // B != G != R
+        colored_bgra[1] = 0x80;
+        colored_bgra[2] = 0xE0;
+        let dib_color = build_dib_owned(page(RenderMode::Color, 4, 2, colored_bgra));
+        assert_eq!(dib_color.bit_count, 32);
+    }
+
+    #[test]
+    fn owned_color_dib_rejects_signed_dimension_overflow() {
+        let p = page(RenderMode::Color, (i32::MAX as u32) + 1, 0, vec![0u8; 4]);
+        let d = build_dib_owned(p);
+        assert!(d.bits.is_empty());
+        assert_eq!(i32::from_le_bytes(d.header[4..8].try_into().unwrap()), 0);
+    }
+
+    #[test]
+    fn owned_grayscale_and_threshold_dib_move_aligned_buffers_without_copy() {
+        let gray_pixels = vec![123u8; 8 * 3];
+        let gray_ptr = gray_pixels.as_ptr();
+        let gray = build_dib_owned(page(RenderMode::Grayscale, 8, 3, gray_pixels));
+        assert_eq!(gray.bit_count, 8);
+        assert_eq!(gray.palette.len(), 1024);
+        assert_eq!(gray.bits.len(), 24);
+        assert_eq!(gray.bits.as_ptr(), gray_ptr);
+
+        let mono_pixels = vec![0xAAu8; 4 * 2];
+        let mono_ptr = mono_pixels.as_ptr();
+        let mono = build_dib_owned(page(RenderMode::Threshold, 32, 2, mono_pixels));
+        assert_eq!(mono.bit_count, 1);
+        assert_eq!(mono.palette.len(), 8);
+        assert_eq!(mono.bits.len(), 8);
+        assert_eq!(mono.bits.as_ptr(), mono_ptr);
+
+        // Unaligned grayscale width still falls back to 4-byte padded repacking.
+        let unaligned = build_dib_owned(page(RenderMode::Grayscale, 5, 2, vec![77u8; 10]));
+        assert_eq!(unaligned.bits.len(), 16);
+        assert_eq!(unaligned.bits[5], 0);
     }
 }

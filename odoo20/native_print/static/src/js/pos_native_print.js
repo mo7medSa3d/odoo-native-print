@@ -5,9 +5,11 @@ import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
 import {
     JOB_TERMINAL_STATES as TERMINAL_STATES,
+    normalizeBridgeJobState,
     notifyJobUpdated,
     notifyUser,
     recoveryButtons,
+    resolveBridgeJobId,
     resolveBridgeTarget,
     safeErrorCode,
 } from "./native_print_client";
@@ -141,12 +143,14 @@ async function resolveLivePosTarget(bridge) {
     let target = await resolveBridgeTarget(bridge, opts).catch(() => null);
     if (!target) {
         await new Promise((resolve) => setTimeout(resolve, 700));
-        target = await resolveBridgeTarget(bridge, opts).catch(() => null);
+        target = await resolveBridgeTarget(bridge, { ...opts, force: true }).catch(() => null);
     }
     return target;
 }
 
-async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, env, userId, order) {
+async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, env, userId, order, bridgeJobId = null) {
+    const pollJobId = bridgeJobId || jobId;
+    const normState = (s) => (typeof normalizeBridgeJobState === "function" ? normalizeBridgeJobState(s) : s);
     const absoluteDeadline = Date.now() + 30 * 60 * 1000;
     let lastProgressAt = Date.now();
     let lastSeenState = "queued";
@@ -183,14 +187,14 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
             let errorCode = null;
             let attempts = lastSeenAttempts;
             if (typeof bridge.jobDetail === "function") {
-                const detail = await bridge.jobDetail(jobId);
+                const detail = await bridge.jobDetail(pollJobId);
                 if (detail) {
-                    state = detail.state;
+                    state = normState(detail.state);
                     errorCode = detail.errorCode || detail.error_code || null;
                     attempts = detail.attempts || attempts;
                 }
             } else if (typeof bridge.printStatus === "function") {
-                state = await bridge.printStatus(jobId);
+                state = normState(await bridge.printStatus(pollJobId));
             }
             consecutiveErrors = 0;
             if (!state) {
@@ -211,20 +215,21 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
             // Quiet retry check: avoid flashing a red toast if the worker already re-queued.
             if (state === "failed" && (state + ":" + attempts) !== lastOutcomeKey && typeof bridge.jobDetail === "function") {
                 await new Promise((resolve) => setTimeout(resolve, 900));
-                const recheck = await bridge.jobDetail(jobId).catch(() => null);
-                if (recheck && recheck.state && !TERMINAL_STATES.has(recheck.state)) {
-                    lastSeenState = recheck.state;
+                const recheck = await bridge.jobDetail(pollJobId).catch(() => null);
+                const recheckState = recheck && normState(recheck.state);
+                if (recheckState && !TERMINAL_STATES.has(recheckState)) {
+                    lastSeenState = recheckState;
                     lastSeenAttempts = recheck.attempts || attempts;
                     lastProgressAt = Date.now();
                     await syncJobStatus(
-                        recheck.state,
+                        recheckState,
                         recheck.errorCode || recheck.error_code || null,
                         lastSeenAttempts,
                     );
                     continue;
                 }
-                if (recheck && recheck.state) {
-                    state = recheck.state;
+                if (recheckState) {
+                    state = recheckState;
                     errorCode = recheck.errorCode || recheck.error_code || errorCode;
                     attempts = recheck.attempts || attempts;
                 }
@@ -472,7 +477,7 @@ function findVisibleReceiptElement() {
 // Last-resort capture of the receipt Odoo already rendered on screen.
 // The clone carries inlined computed styles; external url() references
 // are stripped so the SVG cannot taint the canvas in WebView2.
-async function visibleReceiptToPngBytes(element) {
+async function visibleReceiptToPngBytes(element, scale = 3) {
     const width = element.offsetWidth || element.getBoundingClientRect?.().width || 300;
     const height =
         element.offsetHeight ||
@@ -482,6 +487,9 @@ async function visibleReceiptToPngBytes(element) {
     if (!width || !height) {
         throw new Error("visible receipt has no size");
     }
+    const effectiveScale = Math.max(0.5, Math.min(scale, 14000 / height, 4096 / width));
+    const scaledW = Math.max(1, Math.ceil(width * effectiveScale));
+    const scaledH = Math.max(1, Math.ceil(height * effectiveScale));
     const clone = element.cloneNode(true);
     const inlineStyles = (source, target) => {
         try {
@@ -513,8 +521,8 @@ async function visibleReceiptToPngBytes(element) {
         .serializeToString(clone)
         .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
     const svg =
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
-        `<foreignObject width="100%" height="100%">${serialized}</foreignObject></svg>`;
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${scaledW}" height="${scaledH}" viewBox="0 0 ${width} ${height}">` +
+        `<foreignObject width="${width}" height="${height}">${serialized}</foreignObject></svg>`;
     const image = new Image();
     const loaded = new Promise((resolve, reject) => {
         const timer = setTimeout(
@@ -533,12 +541,14 @@ async function visibleReceiptToPngBytes(element) {
     image.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
     await loaded;
     const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = scaledW;
+    canvas.height = scaledH;
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, width, height);
-    ctx.drawImage(image, 0, 0);
+    ctx.fillRect(0, 0, scaledW, scaledH);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(image, 0, 0, scaledW, scaledH);
     return canvasToPngBytes(canvas);
 }
 
@@ -662,20 +672,24 @@ async function printPosReceiptNatively(plugin, { order, basic = false, simplifie
         const payloadByteSize = fallbackText
             ? new TextEncoder().encode(fallbackText).length
             : bytes.length;
+        let bridgeJobId = idempotencyKey;
         try {
+            let enqueueRes;
             if (fallbackText) {
-                await bridge.printText({
+                enqueueRes = await bridge.printText({
                     idempotencyKey,
                     reportName: POS_RECEIPT_SOURCE,
+                    printer: target.printer.name,
                     printerPattern: rule.printer_pattern,
                     text: fallbackText,
                     cut: true,
                     copies: rule.copies || 1,
                 });
             } else {
-                await bridge.printImage({
+                enqueueRes = await bridge.printImage({
                     idempotencyKey,
                     reportName: POS_RECEIPT_SOURCE,
+                    printer: target.printer.name,
                     printerPattern: rule.printer_pattern,
                     mode: effectiveMode,
                     mediaRollWidthMm: (rule.media && rule.media.roll_width_mm) || undefined,
@@ -684,6 +698,7 @@ async function printPosReceiptNatively(plugin, { order, basic = false, simplifie
                     bytes,
                 });
             }
+            bridgeJobId = resolveBridgeJobId(enqueueRes, idempotencyKey);
         } catch (err) {
             console.warn("Native Print: POS receipt print failed.", err);
             return {
@@ -713,7 +728,7 @@ async function printPosReceiptNatively(plugin, { order, basic = false, simplifie
         ).catch(() => {});
         watchPosJob(
             bridge, idempotencyKey, rule, payloadByteSize, safeRef,
-            target.printer.name, notificationEnv(plugin), userId, order,
+            target.printer.name, notificationEnv(plugin), userId, order, bridgeJobId,
         ).catch(() => {});
         if (order) {
             order._printed = true;

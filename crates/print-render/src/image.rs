@@ -144,11 +144,12 @@ pub fn receipt_png_to_escpos_width(
         return Err(ImageError::DimensionsTooLarge(target_width_dots, 1));
     }
     let img = decode_png(png_bytes)?;
-    let mono = if img.width <= target_width_dots {
-        img.to_mono(RECEIPT_THRESHOLD)
+    let prepared = if img.width <= target_width_dots {
+        sharpen_receipt_gray(&img)
     } else {
-        scale_to_width(&img, target_width_dots).to_mono(RECEIPT_THRESHOLD)
+        sharpen_receipt_gray(&scale_to_width(&img, target_width_dots))
     };
+    let mono = prepared.to_mono(RECEIPT_THRESHOLD);
     Ok(EscPos::new()
         .raster(&mono)
         .feed_lines(3)
@@ -274,27 +275,37 @@ pub fn scale_to_width(img: &Canvas, target_width: u32) -> Canvas {
     };
     let mut px = vec![255u8; out_len];
     let src_w = img.width as usize;
+    let src_h = img.height as usize;
+    // Exact fractional-coverage area averaging (proper box filter): boundary
+    // source pixels contribute proportionally to their overlap instead of
+    // smearing thin text strokes equally across 2x2 blocks at non-integer ratios.
     for oy in 0..out_height {
-        let y0 = ((oy as f64 * ratio) as u32).min(img.height - 1);
-        let y1 = (((oy as f64 + 1.0) * ratio).ceil() as u32)
-            .max(y0.saturating_add(1))
-            .min(img.height);
+        let sy0 = (oy as f64) * ratio;
+        let sy1 = (((oy + 1) as f64) * ratio).min(img.height as f64);
+        let y0 = (sy0.floor() as usize).min(src_h - 1);
+        let y1 = (sy1.ceil() as usize).max(y0 + 1).min(src_h);
         for ox in 0..target_width {
-            let x0 = ((ox as f64 * ratio) as u32).min(img.width - 1);
-            let x1 = (((ox as f64 + 1.0) * ratio).ceil() as u32)
-                .max(x0.saturating_add(1))
-                .min(img.width);
-            let mut sum: u64 = 0;
-            let mut count: u64 = 0;
+            let sx0 = (ox as f64) * ratio;
+            let sx1 = (((ox + 1) as f64) * ratio).min(img.width as f64);
+            let x0 = (sx0.floor() as usize).min(src_w - 1);
+            let x1 = (sx1.ceil() as usize).max(x0 + 1).min(src_w);
+            let mut sum = 0.0f64;
+            let mut weight = 0.0f64;
             for y in y0..y1 {
-                if let Some(row_off) = (y as usize).checked_mul(src_w) {
-                    for x in x0..x1 {
-                        if let Some(val) =
-                            row_off.checked_add(x as usize).and_then(|i| img.px.get(i))
-                        {
-                            sum += *val as u64;
-                            count += 1;
-                        }
+                let wy = (sy1.min((y + 1) as f64) - sy0.max(y as f64)).max(0.0);
+                if wy == 0.0 {
+                    continue;
+                }
+                let row_off = y * src_w;
+                for x in x0..x1 {
+                    let wx = (sx1.min((x + 1) as f64) - sx0.max(x as f64)).max(0.0);
+                    if wx == 0.0 {
+                        continue;
+                    }
+                    if let Some(&val) = img.px.get(row_off + x) {
+                        let w = wx * wy;
+                        sum += (val as f64) * w;
+                        weight += w;
                     }
                 }
             }
@@ -303,7 +314,11 @@ pub fn scale_to_width(img: &Canvas, target_width: u32) -> Canvas {
                 .and_then(|r| r.checked_add(ox as usize))
                 .and_then(|i| px.get_mut(i))
             {
-                *dst = (sum / count.max(1)) as u8;
+                *dst = if weight > 0.0 {
+                    (sum / weight).round().clamp(0.0, 255.0) as u8
+                } else {
+                    255
+                };
             }
         }
     }
@@ -311,6 +326,46 @@ pub fn scale_to_width(img: &Canvas, target_width: u32) -> Canvas {
         width: target_width,
         height: out_height,
         px,
+    }
+}
+
+/// Light 3x3 unsharp mask for thermal receipt text before 1-bit thresholding:
+/// pure black (0) and pure white (255) pixels (barcodes, QR codes) stay exact,
+/// while anti-aliased gray edges snap cleanly toward black or white.
+fn sharpen_receipt_gray(img: &Canvas) -> Canvas {
+    let w = img.width as usize;
+    let h = img.height as usize;
+    if w < 3 || h < 3 || img.px.len() < w.saturating_mul(h) {
+        return Canvas {
+            width: img.width,
+            height: img.height,
+            px: img.px.clone(),
+        };
+    }
+    let mut out = img.px.clone();
+    for y in 1..(h - 1) {
+        let up = (y - 1) * w;
+        let mid = y * w;
+        let dn = (y + 1) * w;
+        for x in 1..(w - 1) {
+            let c = img.px[mid + x] as i32;
+            if c == 0 || c == 255 {
+                continue;
+            }
+            // 4-neighbor Laplacian unsharp (amount = 0.5): keeps thin strokes crisp.
+            let avg = (img.px[up + x] as i32
+                + img.px[dn + x] as i32
+                + img.px[mid + x - 1] as i32
+                + img.px[mid + x + 1] as i32)
+                / 4;
+            let sharpened = c + (c - avg) / 2;
+            out[mid + x] = sharpened.clamp(0, 255) as u8;
+        }
+    }
+    Canvas {
+        width: img.width,
+        height: img.height,
+        px: out,
     }
 }
 
@@ -512,5 +567,33 @@ mod tests {
         assert_eq!(receipt_dots_for_paper("580mm"), None);
         assert_eq!(receipt_dots_for_paper(""), None);
         assert_eq!(receipt_dots_for_paper("112mm"), Some(832));
+    }
+
+    #[test]
+    fn scale_fractional_ratio_keeps_thin_stroke_crisp() {
+        // 600 -> 576 (ratio ~1.0417): a 2px black vertical stroke must stay dark
+        // instead of washing out equally across neighboring white pixels.
+        let mut img = Canvas::new(600, 4);
+        img.px.fill(255);
+        for y in 0..4 {
+            img.px[y * 600 + 100] = 0;
+            img.px[y * 600 + 101] = 0;
+        }
+        let out = scale_to_width(&img, 576);
+        let darkest = (90..105).map(|x| out.px[x]).min().unwrap();
+        assert!(darkest <= 20, "thin stroke washed out to {darkest}");
+    }
+
+    #[test]
+    fn sharpen_preserves_pure_bw_and_tightens_gray_strokes() {
+        let mut img = Canvas::new(5, 5);
+        img.px.fill(255);
+        // Pure black pixel (like barcode/QR) stays 0; dark-gray text core (110) darkens.
+        img.px[1 * 5 + 1] = 0;
+        img.px[2 * 5 + 2] = 110;
+        let out = sharpen_receipt_gray(&img);
+        assert_eq!(out.px[1 * 5 + 1], 0);
+        assert!(out.px[2 * 5 + 2] < 110);
+        assert_eq!(out.px[3 * 5 + 3], 255);
     }
 }

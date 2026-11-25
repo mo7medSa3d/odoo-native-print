@@ -2,6 +2,10 @@ target/
 __pycache__/
 *.pyc
 node_modules/
+android-app/.gradle/
+android-app/build/
+android-app/app/build/
+android-app/local.properties
 
 # Downloaded PDFium binaries (tools/fetch-pdfium.sh): large, platform
 # specific, and reproducible — never commit them. The old ignore file
@@ -13,6 +17,8 @@ tools/pdfium/
 *.p12
 *.pem
 *.key
+*.jks
+*.keystore
 .env
 .env.*
 !.env.example

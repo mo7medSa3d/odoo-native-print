@@ -135,7 +135,27 @@ impl<'a, B: PrintBackend> Worker<'a, B> {
                 Err(e) => return Err(e),
             }
         }
-        match self.backend.print(&job) {
+        let print_result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.backend.print(&job)
+        })) {
+            Ok(res) => res,
+            Err(panic_payload) => {
+                let msg = panic_payload
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic_payload.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("unknown panic");
+                eprintln!(
+                    "native-print: print backend panicked for job {}: {msg}",
+                    job.id
+                );
+                // A panic mid-print is ambiguous (ADR-0004): mark Failed and never auto-retry.
+                self.queue
+                    .set_state(&job.id, JobState::Failed, Some("BACKEND_PANIC"))?;
+                return Ok(Outcome::Failed(job.id));
+            }
+        };
+        match print_result {
             Ok(()) => {
                 self.queue.set_state(&job.id, JobState::Done, None)?;
                 // The job printed and is Done: a payload-purge failure
@@ -358,5 +378,28 @@ mod tests {
         // First transient error after manual retry must retry, not instantly dead-letter.
         assert_eq!(w.run_once("p1").unwrap(), Outcome::Retried("dl1".into()));
         assert_eq!(w.run_once("p1").unwrap(), Outcome::Done("dl1".into()));
+    }
+
+    #[test]
+    fn backend_panic_fails_job_without_leaving_printing() {
+        struct PanicBackend;
+        impl PrintBackend for PanicBackend {
+            fn print(&mut self, _job: &Job) -> Result<(), BackendError> {
+                panic!("simulated backend crash");
+            }
+        }
+        let mut q = Queue::in_memory().unwrap();
+        q.enqueue(&job("p-crash")).unwrap();
+        let mut w = Worker {
+            queue: &mut q,
+            backend: PanicBackend,
+            cfg: WorkerConfig::default(),
+            entropy: 0,
+        };
+        assert_eq!(w.run_once("p1").unwrap(), Outcome::Failed("p-crash".into()));
+        drop(w);
+        let j = q.get("p-crash").unwrap();
+        assert_eq!(j.state, JobState::Failed);
+        assert_eq!(j.error_code.as_deref(), Some("BACKEND_PANIC"));
     }
 }

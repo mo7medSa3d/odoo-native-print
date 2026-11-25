@@ -111,6 +111,17 @@ t = await m.resolveBridgeTarget(bridge);
 eq(t.printer.name, "HP LaserJet", "stale selection falls back to default");
 t = await m.resolveBridgeTarget({ listPrinters: async () => [] });
 eq(t, null, "no printers -> null");
+// Stale empty printer cache must be bypassed once with { force: true }.
+const forceCalls = [];
+t = await m.resolveBridgeTarget({
+    listPrinters: async (opts) => {
+        forceCalls.push(opts || null);
+        return opts && opts.force ? [printers[0]] : [];
+    },
+    printerCapabilities: async () => ({ forms: [], color: true }),
+});
+eq(t && t.printer.name, "HP LaserJet", "empty cached list retries with force: true");
+eq(Boolean(forceCalls[1] && forceCalls[1].force), true, "second listPrinters call passes force: true");
 
 // Duplex is a choice, not a capability: even a
 // duplex-CAPABLE printer's rule must leave duplex unset, so the
@@ -423,6 +434,10 @@ try {
     const bigRes = await registeredHandler({ report_type: "qweb-text", report_name: "r.big" }, {}, testEnv);
     eq(bigRes, undefined, "oversized >1MiB qweb-text falls back");
     eq(textPrintCalls, 0, "oversized qweb-text never calls printText");
+
+    globalThis.fetch = async () => { throw new Error("network reset"); };
+    const netErrRes = await registeredHandler({ report_type: "qweb-text", report_name: "r.neterr" }, {}, testEnv);
+    eq(netErrRes, undefined, "rejected qweb-text fetch falls back cleanly to undefined");
 
     // 4. Dynamic report with long non-ASCII report_name produces a valid <=128-char ASCII key.
     let capturedKey = null;
@@ -888,6 +903,148 @@ try {
     eq(ipSandbox.isIpLiteral("1:"), false, "isIpLiteral rejects trailing single colon");
     eq(ipSandbox.isIpLiteral("::1"), true, "isIpLiteral accepts ::1");
     eq(m.printerPatternFor({ name: "Label", port: ":::" }, "zpl"), "Label", 'printerPatternFor rejects ":::" as IP literal');
+}
+
+// 8. Android v1.5.7 bridge parity regression tests: wire states, UUID polling,
+// explicit printer routing, PrinterInfo/PrinterCapabilities, and systray metadata.
+{
+    // 8a. normalizeBridgeJobState & resolveBridgeJobId
+    eq(m.normalizeBridgeJobState("completed"), "done", "Android completed -> done");
+    eq(m.normalizeBridgeJobState("cancelled"), "canceled", "Android cancelled -> canceled");
+    eq(m.normalizeBridgeJobState("submitted"), "printing", "Android submitted -> printing");
+    eq(m.normalizeBridgeJobState("in_progress"), "printing", "Android in_progress -> printing");
+    eq(m.normalizeBridgeJobState("not_found"), null, "Android not_found -> null");
+    eq(m.normalizeBridgeJobState("  COMPLETED "), "done", "wire state trims and lowercases");
+    eq(m.normalizeBridgeJobState(null), null, "non-string state -> null");
+    eq(m.resolveBridgeJobId({ id: "uuid-123" }, "idem-1"), "uuid-123", "Android object id extracted");
+    eq(m.resolveBridgeJobId({ job_id: "uuid-456" }, "idem-1"), "uuid-456", "Android job_id extracted");
+    eq(m.resolveBridgeJobId({ jobId: "uuid-789" }, "idem-1"), "uuid-789", "Android jobId extracted");
+    eq(m.resolveBridgeJobId("idem-1", "fallback"), "idem-1", "Desktop string id preserved");
+    eq(m.resolveBridgeJobId(null, "fallback"), "fallback", "Null enqueue result falls back to key");
+
+    // 8b. Android PrinterInfo / PrinterCapabilities shapes
+    eq(m.detectPrinterType({ name: "BT Thermal", protocol: "escpos" }).printerClass, "thermal", "escpos without printer_class infers thermal");
+    eq(m.detectPrinterType({ name: "Zebra BT", protocol: "zpl" }).printerClass, "label", "zpl without printer_class infers label");
+    eq(m.detectPrinterType({ name: "Mobile BT", protocol: "cpcl" }).printerClass, "label", "cpcl without printer_class infers label");
+    eq(m.detectPrinterType({ name: "Office IPP", protocol: "pdf" }).mode, "gdi", "Android pdf protocol maps to gdi");
+    eq(m.detectPrinterType({ name: "EPSON TM-T88VII", protocol: "auto" }).mode, "escpos", "Android auto protocol falls through to heuristic");
+    eq(m.formatFormsSummary(["80mm Roll", "A4"], "Roll")[0], "80mm Roll", "Android string forms preserved");
+    eq(m.rollWidthMm({ forms: ["80mm Roll", "A4"] }), 80, "Android string roll width parsed");
+    eq(m.rollWidthMm({ forms: [], paper_width_mm: 58 }), 58, "Android paper_width_mm fallback");
+    eq(m.rollWidthMm({ forms: [], paper_width_mm: 210 }), null, "A4 paper_width_mm is not a roll");
+
+    // 8c. resolveBridgeTarget forwards { force: true } and respects supports_color: false
+    m.setSelectedPrinter("");
+    m.setSelectedPosPrinter("");
+    let receivedForce = null;
+    const androidBridge = {
+        listPrinters: async (opts) => {
+            receivedForce = Boolean(opts && opts.force);
+            return [{ name: "Star BT", transport: "bluetooth_spp", protocol: "escpos", is_default: true }];
+        },
+        printerCapabilities: async () => ({ forms: ["80mm Roll"], paper_width_mm: 80, supports_color: false }),
+    };
+    const androidTarget = await m.resolveBridgeTarget(androidBridge, { isPos: true, preferClasses: ["thermal"], force: true });
+    eq(receivedForce, true, "resolveBridgeTarget forwards force: true to listPrinters");
+    eq(androidTarget.rule.color, false, "supports_color: false sets rule.color to false");
+    eq(androidTarget.rule.media.roll_width_mm, 80, "Android roll_width_mm populated");
+
+    // 8d. PDF & text report handlers pass `printer`, poll by returned UUID, and normalize wire states.
+    const origFetch8 = globalThis.fetch;
+    const origSetTimeout8 = globalThis.setTimeout;
+    globalThis.setTimeout = (fn) => { fn(); return 0; };
+    try {
+        rpcCalls.length = 0;
+        let sentPdfReq = null;
+        const polledPdfIds = [];
+        let pdfPollIdx = 0;
+        globalThis.window.__NATIVE_PRINT__ = {
+            listPrinters: async () => [{ name: "Android IPP", transport: "ipp", address: "192.168.1.20", protocol: "pdf", is_default: true }],
+            printerCapabilities: async () => ({ forms: ["A4"], supports_color: true }),
+            printPdf: async (req) => { sentPdfReq = req; return { id: "android-uuid-99", state: "queued" }; },
+            jobDetail: async (id) => {
+                polledPdfIds.push(id);
+                const states = ["submitted", "in_progress", "completed"];
+                return { id, state: states[Math.min(pdfPollIdx++, states.length - 1)], pages: 1, attempts: 1 };
+            },
+        };
+        globalThis.fetch = async () => ({
+            ok: true,
+            arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]).buffer,
+        });
+        const okPdf = await registeredHandler({ report_type: "qweb-pdf", report_name: "account.report_invoice" }, {}, testEnv);
+        await new Promise((r) => origSetTimeout8(r, 15));
+        eq(okPdf, true, "Android PDF print succeeds");
+        eq(sentPdfReq.printer, "Android IPP", "printPdf passes explicit printer name for Android");
+        eq(sentPdfReq.printerPattern, "Android IPP", "printPdf preserves printerPattern");
+        eq(polledPdfIds[0], "android-uuid-99", "watchJobToCompletion polls Android UUID");
+        const printingRpc = rpcCalls.find((c) => c.url === "/native_print/job_status" && c.params.state === "printing");
+        const doneRpc = rpcCalls.find((c) => c.url === "/native_print/job_status" && c.params.state === "done");
+        eq(Boolean(printingRpc), true, "Android submitted/in_progress normalized to printing");
+        eq(Boolean(doneRpc), true, "Android completed normalized to done");
+        eq(doneRpc.params.idempotency_key, sentPdfReq.idempotencyKey, "done RPC preserves original idempotency_key");
+
+        // qweb-text on Android passes `printer`, polls by UUID, normalizes `cancelled` -> `canceled`.
+        rpcCalls.length = 0;
+        let sentTextReq = null;
+        const polledTextIds = [];
+        globalThis.window.__NATIVE_PRINT__ = {
+            listPrinters: async () => [{ name: "BT Thermal", transport: "bluetooth_spp", protocol: "escpos", is_default: true }],
+            printerCapabilities: async () => ({ forms: ["80mm Roll"], paper_width_mm: 80, supports_color: false }),
+            printText: async (req) => { sentTextReq = req; return { id: "android-txt-uuid-7", state: "queued" }; },
+            jobDetail: async (id) => { polledTextIds.push(id); return { id, state: "cancelled", pages: 1, attempts: 1 }; },
+        };
+        globalThis.fetch = async () => ({ ok: true, text: async () => "Hello Android" });
+        const okTxt = await registeredHandler({ report_type: "qweb-text", report_name: "stock.report_label" }, {}, testEnv);
+        await new Promise((r) => origSetTimeout8(r, 15));
+        eq(okTxt, true, "Android text print succeeds");
+        eq(sentTextReq.printer, "BT Thermal", "printText passes explicit printer name for Android");
+        eq(polledTextIds[0], "android-txt-uuid-7", "text watchJobToCompletion polls Android UUID");
+        const canceledRpc = rpcCalls.find((c) => c.url === "/native_print/job_status" && c.params.state === "canceled");
+        eq(Boolean(canceledRpc), true, "Android cancelled normalized to canceled");
+        eq(canceledRpc.params.idempotency_key, sentTextReq.idempotencyKey, "canceled RPC preserves idempotency_key");
+    } finally {
+        globalThis.fetch = origFetch8;
+        globalThis.setTimeout = origSetTimeout8;
+        delete globalThis.window.__NATIVE_PRINT__;
+    }
+
+    // 8e. Systray handles Android PrinterInfo (transport, address, protocol: "auto", is_default) & string forms.
+    const prevDoc8 = globalThis.document;
+    const prevLs8 = globalThis.localStorage;
+    globalThis.localStorage = globalThis.window.localStorage;
+    globalThis.document = { hidden: false, addEventListener: () => {}, removeEventListener: () => {} };
+    try {
+        const sMod8 = await import(pathToFileURL(join(tmpDir, "np_systray_test.mjs")).href + "?v8");
+        globalThis.__npSystrayRpcs.length = 0;
+        globalThis.window.__NATIVE_PRINT__ = {
+            appOverview: async () => ({
+                printers: [
+                    { name: "EPSON TM-T88VII", transport: "bluetooth_spp", protocol: "auto", is_default: true },
+                    { name: "Android IPP", transport: "ipp", address: "192.168.1.20", protocol: "pdf" },
+                ],
+            }),
+            printerCapabilities: async () => ({ forms: ["80mm Roll", "A4"], bins: [] }),
+        };
+        const comp8 = new sMod8.NativePrintSystray();
+        comp8.setup();
+        await comp8.syncDiscoveredPrinters(false);
+        eq(comp8.state.defaultPrinter, "EPSON TM-T88VII", "systray falls back to is_default when defaultPrinter is omitted");
+        eq(comp8.state.discoveredPrinters[0].printer_class, "thermal", "systray infers thermal class for protocol: auto");
+        eq(comp8.state.discoveredPrinters[0].meta.includes("Bluetooth"), true, "systray formats bluetooth_spp transport");
+        eq(comp8.state.discoveredPrinters[0].meta.includes("ESCPOS"), true, "systray resolves auto protocol for meta");
+        eq(comp8.state.discoveredPrinters[1].meta.includes("Network"), true, "systray formats ipp transport as Network");
+        eq(comp8.state.discoveredPrinters[1].meta.includes("192.168.1.20"), true, "systray displays Android address field");
+        const syncDev = globalThis.__npSystrayRpcs.find((c) => c.url === "/native_print/sync_device" && c.params.name === "EPSON TM-T88VII");
+        eq(Boolean(syncDev), true, "systray syncs Android printer capabilities");
+        eq(syncDev.params.protocol, "escpos", "sync_device sends resolved protocol instead of auto");
+        eq(syncDev.params.printer_class, "thermal", "sync_device sends inferred printer_class");
+        eq(syncDev.params.forms[0], "80mm Roll", "sync_device preserves Android string forms");
+    } finally {
+        globalThis.document = prevDoc8;
+        globalThis.localStorage = prevLs8;
+        delete globalThis.window.__NATIVE_PRINT__;
+    }
 }
 
 console.log("JS LIVE TARGET TESTS: ALL PASS");

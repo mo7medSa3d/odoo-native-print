@@ -1,0 +1,196 @@
+package com.company.odoonativeprint.worker
+
+import android.app.Activity
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import com.company.odoonativeprint.core.AppConfigStore
+import com.company.odoonativeprint.core.PayloadLimits
+import com.company.odoonativeprint.core.PrintJobRecord
+import com.company.odoonativeprint.core.PrinterInfo
+import com.company.odoonativeprint.core.PrinterProtocol
+import com.company.odoonativeprint.core.PrinterSettings
+import com.company.odoonativeprint.core.PrinterTransportType
+import com.company.odoonativeprint.protocol.CpclEncoder
+import com.company.odoonativeprint.protocol.EplEncoder
+import com.company.odoonativeprint.protocol.EscPosEncoder
+import com.company.odoonativeprint.protocol.TsplEncoder
+import com.company.odoonativeprint.protocol.ZplEncoder
+import com.company.odoonativeprint.render.CalibrationPages
+import com.company.odoonativeprint.render.MonoBitmap
+import com.company.odoonativeprint.render.PdfPageRenderer
+import com.company.odoonativeprint.render.TextReceiptRenderer
+import com.company.odoonativeprint.transport.AndroidPrintManagerAdapter
+import com.company.odoonativeprint.transport.BluetoothSppTransport
+import com.company.odoonativeprint.transport.IppTransport
+import com.company.odoonativeprint.transport.PrinterDiscoveryService
+import com.company.odoonativeprint.transport.Tcp9100Transport
+import com.company.odoonativeprint.transport.TransportResult
+import com.company.odoonativeprint.transport.UsbOtgTransport
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.File
+
+/**
+ * Bridges queued PrintJobRecords through rendering -> protocol encoding -> physical transport.
+ */
+class AndroidJobExecutor(
+    private val context: Context,
+    private val configStore: AppConfigStore,
+    private val discovery: PrinterDiscoveryService,
+    private val tcp9100: Tcp9100Transport,
+    private val ipp: IppTransport,
+    private val bluetoothSpp: BluetoothSppTransport,
+    private val usbOtg: UsbOtgTransport,
+    private val activityProvider: () -> Activity? = { null },
+) : JobExecutor {
+
+    override suspend fun execute(job: PrintJobRecord): TransportResult {
+        val printer = discovery.findPrinter(job.printerName)
+            ?: return TransportResult.Failure(
+                "PRINTER_NOT_FOUND",
+                "Printer '${job.printerName}' not found",
+                retryable = false,
+            )
+        val settings = configStore.getPrinterSettings(printer.name)
+        val payloadFile = File(job.payloadPath)
+        if (!payloadFile.exists()) {
+            return TransportResult.Failure("PAYLOAD_MISSING", "Spool payload file is missing", retryable = false)
+        }
+
+        // Fast path: Android System PrintManager for PDFs
+        if (printer.transport == PrinterTransportType.ANDROID_SYSTEM) {
+            if (job.sourceKind != "pdf") {
+                return TransportResult.Failure(
+                    "SYSTEM_PRINT_PDF_ONLY",
+                    "Android System Print supports PDF documents only",
+                    retryable = false,
+                )
+            }
+            return withContext(Dispatchers.Main) {
+                val activity = activityProvider()
+                    ?: return@withContext TransportResult.Failure(
+                        "NO_ACTIVE_ACTIVITY",
+                        "Open Yaseir Print to use Android System Print",
+                        retryable = true,
+                    )
+                AndroidPrintManagerAdapter.printPdfFile(activity, payloadFile, "Yaseir Print #${job.id.take(8)}")
+            }
+        }
+
+        // Fast path: IPP direct PDF submission
+        if (printer.transport == PrinterTransportType.IPP && job.sourceKind == "pdf") {
+            val opts = runCatching { JSONObject(job.optionsJson) }.getOrDefault(JSONObject())
+            val duplex = opts.optBoolean("duplex", false)
+            return ipp.sendDocument(
+                printer = printer,
+                documentBytes = payloadFile.readBytes(),
+                mimeType = "application/pdf",
+                jobName = "Yaseir-${job.id.take(8)}",
+                copies = job.copies,
+                sides = if (duplex) "two-sided-long-edge" else "one-sided",
+            )
+        }
+
+        // Render to Bitmap(s) and encode into target raw printer protocol.
+        // Match standard 203-dpi thermal head widths (58mm->384, 80mm->576, 112mm->832),
+        // rounded to whole raster bytes so GS v 0 never overflows the head.
+        val widthDots = when {
+            settings.dpi == 203 && settings.paperWidthMm in 54..62 -> 384
+            settings.dpi == 203 && settings.paperWidthMm in 72..84 -> 576
+            settings.dpi == 203 && settings.paperWidthMm in 104..120 -> 832
+            else -> (((settings.paperWidthMm - 8).coerceAtLeast(32) * settings.dpi / 25.4 / 8.0).toInt() * 8)
+                .coerceIn(256, 1664)
+        }
+        val bitmaps: List<Bitmap> = try {
+            when (job.sourceKind) {
+                "pdf" -> PdfPageRenderer.renderAllPages(
+                    pdfFile = payloadFile,
+                    targetWidthDots = widthDots,
+                    offsetXDots = (settings.offsetXMm * settings.dpi / 25.4f),
+                    offsetYDots = (settings.offsetYMm * settings.dpi / 25.4f),
+                )
+                "image" -> listOf(decodeValidatedImage(payloadFile, widthDots))
+                "text" -> {
+                    val text = payloadFile.readText(Charsets.UTF_8)
+                    listOf(TextReceiptRenderer.render(context, text, widthDots = widthDots))
+                }
+                "test" -> listOf(CalibrationPages.thermalTestReceipt(context, printer.displayName, settings.paperWidthMm, settings.dpi))
+                else -> return TransportResult.Failure("UNSUPPORTED_KIND", "Unsupported kind: ${job.sourceKind}", retryable = false)
+            }
+        } catch (e: Exception) {
+            return TransportResult.Failure("RENDER_FAILED", e.message ?: "Failed to render payload", retryable = false)
+        }
+
+        val protocol = resolveProtocol(printer, settings)
+        val encodedStream = ByteArrayOutputStream()
+        try {
+            val encodedPages = bitmaps.map { bmp ->
+                val mono = MonoBitmap.fromAndroidBitmap(bmp, dither = settings.dithering)
+                when (protocol) {
+                    PrinterProtocol.ZPL -> ZplEncoder.encode(mono, copies = job.copies)
+                    PrinterProtocol.TSPL -> TsplEncoder.encode(
+                        mono,
+                        widthMm = settings.paperWidthMm,
+                        heightMm = settings.labelHeightMm.takeIf { it > 0 } ?: 100,
+                        copies = job.copies,
+                    )
+                    PrinterProtocol.EPL -> EplEncoder.encode(mono, copies = job.copies)
+                    PrinterProtocol.CPCL -> CpclEncoder.encode(mono, copies = job.copies)
+                    else -> EscPosEncoder.encodeRaster(
+                        mono = mono,
+                        cut = settings.cutPaper,
+                        openDrawer = settings.openCashDrawer,
+                    )
+                }
+            }
+            val copies = if (protocol == PrinterProtocol.ESCPOS) job.copies else 1
+            repeat(copies) {
+                for (pageBytes in encodedPages) {
+                    encodedStream.write(pageBytes)
+                }
+            }
+        } finally {
+            bitmaps.forEach { it.recycle() }
+        }
+
+        val rawBytes = encodedStream.toByteArray()
+        return when (printer.transport) {
+            PrinterTransportType.TCP_9100 -> tcp9100.sendRaw(printer, rawBytes, settings)
+            PrinterTransportType.BLUETOOTH_SPP -> bluetoothSpp.sendRaw(printer, rawBytes, settings)
+            PrinterTransportType.USB_OTG -> usbOtg.sendRaw(printer, rawBytes, settings)
+            PrinterTransportType.IPP -> ipp.sendDocument(printer, rawBytes, mimeType = "application/octet-stream", copies = 1)
+            PrinterTransportType.ANDROID_SYSTEM -> TransportResult.Failure("UNSUPPORTED_TRANSPORT", "Unsupported transport", retryable = false)
+        }
+    }
+
+    private fun resolveProtocol(printer: PrinterInfo, settings: PrinterSettings): PrinterProtocol =
+        if (settings.protocol != PrinterProtocol.AUTO) {
+            settings.protocol
+        } else if (printer.protocol != PrinterProtocol.AUTO) {
+            printer.protocol
+        } else {
+            PrinterProtocol.ESCPOS
+        }
+
+    private fun decodeValidatedImage(file: File, targetWidthDots: Int): Bitmap {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        require(bounds.outWidth > 0 && bounds.outHeight > 0) { "IMAGE_DECODE_FAILED" }
+        require(bounds.outWidth <= PayloadLimits.MAX_IMAGE_SIDE && bounds.outHeight <= PayloadLimits.MAX_IMAGE_SIDE) {
+            "IMAGE_DIMENSION_EXCEEDED"
+        }
+        require(bounds.outWidth.toLong() * bounds.outHeight.toLong() <= PayloadLimits.MAX_IMAGE_PIXELS) {
+            "IMAGE_PIXEL_LIMIT_EXCEEDED"
+        }
+        val decoded = BitmapFactory.decodeFile(file.absolutePath)
+            ?: throw IllegalArgumentException("IMAGE_DECODE_FAILED")
+        if (decoded.width == targetWidthDots) return decoded
+        val targetH = ((decoded.height.toLong() * targetWidthDots) / decoded.width).toInt().coerceAtLeast(1)
+        val scaled = Bitmap.createScaledBitmap(decoded, targetWidthDots, targetH, true)
+        if (scaled !== decoded) decoded.recycle()
+        return scaled
+    }
+}

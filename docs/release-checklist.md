@@ -9,7 +9,7 @@
 - [x] Win32 GDI & Spooler backend (`print-win`): `DocumentPropertiesW` 3-step `DEVMODEW` initialization (orientation, matched form / `DMPAPER_USER` custom size, duplex, color), mixed-size PDF sub-job splitting (`split_subjobs`), `NearestLargerCentered` 100%-scale centering, and `DC_PAPERS`/`DC_PAPERSIZE`/`DC_PAPERNAMES` roll detection
 - [x] Raw printer protocols (`print-raw`): ESC/POS `GS v 0` with automatic `256`-dot slice chunking for long receipts, ZPL II (`^XA^PW...^LL...^LH...^FO0,0^GFA...^FS^PQ...^XZ`), TSPL2 (`BITMAP` with `0=black, 1=white` polarity inversion), EPL2 (`GW` with `0=black, 1=white` polarity inversion + `q`/`Q`/`P<copies>`), CPCL (`CG` compressed graphics + `FORM`/`PRINT`), and TCP 9100 + `DLE EOT` status sensor
 - [x] Driverless IPP 1.1 client (`print-ipp`): `Get-Printer-Attributes` format negotiation and `Print-Job` submission without duplicate `document-format` attributes (CUPS #1457)
-- [x] Odoo 19 addon (`odoo/native_print` v19.0.2.24.0):
+- [x] Odoo 19 addon (`odoo19/native_print` v19.0.2.24.0):
   - Report handler (`native_print_handler.js`) supporting `qweb-pdf` and `qweb-text`, wizard `action.data` (`?options=...&context=...`), `active_id`/`res_id` fallbacks, and `close_on_report_download` modal closing via `ir.actions.act_window_close`
   - POS receipt interceptor (`pos_native_print.js`) supporting Odoo 18/19 (`PosStore.prototype.printReceipt`) and Odoo 17 (`ReceiptScreen.prototype.printReceipt`), 2x SVG `foreignObject` PNG capture, and status polling
   - OWL 2 Navbar Systray widget (`NativePrintSystray`) + Odoo 19 compliant Kanban (`<t t-name="card">`), List, Form, Search, Graph, and Pivot views

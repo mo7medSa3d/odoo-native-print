@@ -18,7 +18,7 @@ use print_core::{
 use print_raw::MonoBitmap;
 use print_render::RenderMode;
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -95,6 +95,37 @@ const TCP_WRITE_TIMEOUT: Duration = Duration::from_secs(20);
 /// enough for a healthy printer to answer, short enough to
 /// never noticeably delay the job it guards.
 const DLE_PROBE_TIMEOUT: Duration = Duration::from_millis(700);
+/// TTL for skipping DLE EOT probes on silent or briefly unreachable TCP 9100
+/// printers: long enough to avoid per-receipt stalls, short enough that a
+/// printer coming back online recovers live hardware health checks.
+const DLE_SILENT_TTL: Duration = Duration::from_secs(300);
+const DLE_SILENT_MAX_ENTRIES: usize = 256;
+
+fn dle_silent_is_active(map: &mut HashMap<String, Instant>, key: &str, now: Instant) -> bool {
+    if let Some(&marked_at) = map.get(key) {
+        if now.saturating_duration_since(marked_at) < DLE_SILENT_TTL {
+            return true;
+        }
+        map.remove(key);
+    }
+    false
+}
+
+fn dle_silent_record(map: &mut HashMap<String, Instant>, key: String, now: Instant) {
+    if !map.contains_key(&key) && map.len() >= DLE_SILENT_MAX_ENTRIES {
+        map.retain(|_, ts| now.saturating_duration_since(*ts) < DLE_SILENT_TTL);
+        if map.len() >= DLE_SILENT_MAX_ENTRIES {
+            if let Some(oldest) = map
+                .iter()
+                .min_by_key(|(_, ts)| **ts)
+                .map(|(k, _)| k.clone())
+            {
+                map.remove(&oldest);
+            }
+        }
+    }
+    map.insert(key, now);
+}
 /// Cap expanded multi-copy raw byte streams to prevent OOM on large payloads * copies.
 const MAX_RAW_EXPANDED_BYTES: usize = 100 * 1024 * 1024;
 
@@ -552,21 +583,10 @@ pub async fn print_pdf(
                 if !has_magic {
                     return Err(parse_err.to_string());
                 }
-                if let Ok(pdfium) = print_render::Pdfium::load() {
-                    let doc = pdfium
-                        .load_document(&req.bytes)
-                        .map_err(|e| e.to_string())?;
-                    let count = doc.page_count() as u32;
-                    if count == 0 {
-                        return Err("empty_document".to_string());
-                    }
-                    if count > print_core::security::MAX_PAGES {
-                        return Err("TooManyPages".to_string());
-                    }
-                    count
-                } else {
-                    1
-                }
+                // Defer PDFium document load to the worker thread so enqueue returns
+                // immediately without contending on PDFium's global lock; the worker
+                // enforces page count > 0 and <= MAX_PAGES before rendering.
+                1
             }
         };
         let job = Job {
@@ -1343,12 +1363,109 @@ pub fn clear_finished_cmd(
     queue.clear_finished().map_err(|e| e.to_string())
 }
 
+/// Strip scheme, credentials, host/port, query string, and fragment from any
+/// URI embedded in diagnostic error strings, preserving only the path.
+fn redact_urls_in_text(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
+    let mut pos = 0;
+    while let Some(rel) = input[pos..].find("://") {
+        let sep = pos + rel;
+        let mut scheme_start = sep;
+        while scheme_start > pos {
+            let b = bytes[scheme_start - 1];
+            if b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.') {
+                scheme_start -= 1;
+            } else {
+                break;
+            }
+        }
+        if scheme_start == sep || !bytes[scheme_start].is_ascii_alphabetic() {
+            out.push_str(&input[pos..sep + 3]);
+            pos = sep + 3;
+            continue;
+        }
+        out.push_str(&input[pos..scheme_start]);
+        let after_scheme = sep + 3;
+        let url_end = input[after_scheme..]
+            .find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | ')' | '>' | ']'))
+            .map(|i| after_scheme + i)
+            .unwrap_or(input.len());
+        let rest = &input[after_scheme..url_end];
+        let cut = rest.find(['?', '#']).unwrap_or(rest.len());
+        let no_query = &rest[..cut];
+        out.push_str("[redacted-origin]");
+        if let Some(slash) = no_query.find('/') {
+            out.push_str(&no_query[slash..]);
+        }
+        pos = url_end;
+    }
+    out.push_str(&input[pos..]);
+    out
+}
+
+/// Allowlist and redact environment probe fields before exporting diagnostics
+/// so `href`, server origin, query tokens, and unexpected remote keys never leak.
+fn redact_environment_for_diagnostics(env: &serde_json::Value) -> serde_json::Value {
+    let Some(obj) = env.as_object() else {
+        return serde_json::json!({});
+    };
+    let mut clean = serde_json::Map::new();
+    for key in [
+        "secureContext",
+        "online",
+        "es2022",
+        "structuredClone",
+        "randomUUID",
+        "localStorage",
+        "sessionStorage",
+        "cookies",
+        "webSocket",
+    ] {
+        if let Some(v) = obj.get(key).and_then(|v| v.as_bool()) {
+            clean.insert(key.to_string(), serde_json::Value::Bool(v));
+        }
+    }
+    if let Some(ua) = obj.get("userAgent").and_then(|v| v.as_str()) {
+        clean.insert(
+            "userAgent".to_string(),
+            serde_json::Value::String(ua.chars().take(300).collect()),
+        );
+    }
+    if let Some(path) = obj.get("pathname").and_then(|v| v.as_str()) {
+        let stripped = path.split(['?', '#']).next().unwrap_or("/");
+        clean.insert(
+            "pathname".to_string(),
+            serde_json::Value::String(stripped.chars().take(200).collect()),
+        );
+    }
+    if let Some(errs) = obj.get("errors").and_then(|v| v.as_array()) {
+        let redacted: Vec<serde_json::Value> = errs
+            .iter()
+            .take(10)
+            .filter_map(|e| e.as_str())
+            .map(|s| {
+                let truncated: String = s.chars().take(300).collect();
+                serde_json::Value::String(redact_urls_in_text(&truncated))
+            })
+            .collect();
+        clean.insert("errors".to_string(), serde_json::Value::Array(redacted));
+    }
+    serde_json::Value::Object(clean)
+}
+
 #[tauri::command]
-pub fn export_diagnostics(
+pub async fn export_diagnostics(
     webview: tauri::Webview,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     check_local_only(&webview)?;
+    let pdfium = match PDFIUM_READY.get().copied() {
+        Some(ready) => ready,
+        None => tauri::async_runtime::spawn_blocking(pdfium_ready)
+            .await
+            .map_err(|e| e.to_string())?,
+    };
     let bundle = {
         let queue = lock_queue(&state.queue);
         build_bundle_from_queue(&queue).map_err(|e| e.to_string())?
@@ -1362,12 +1479,12 @@ pub fn export_diagnostics(
     value["arch"] = serde_json::json!(std::env::consts::ARCH);
     value["uptime_secs"] = serde_json::json!(state.started_at.elapsed().as_secs());
     value["open_tab_count"] = serde_json::json!(read_lock(&state.tabs).order.len());
-    value["pdfium_ready"] = serde_json::json!(pdfium_ready());
+    value["pdfium_ready"] = serde_json::json!(pdfium);
     value["locked_by_policy"] = serde_json::json!(state.locked_by_policy);
     value["auto_reprint"] = serde_json::json!(*read_lock(&state.auto_reprint));
     value["origin_configured"] = serde_json::json!(read_lock(&state.configured_origin).is_some());
     if let Some(env) = read_lock(&state.environment).clone() {
-        value["environment"] = env;
+        value["environment"] = redact_environment_for_diagnostics(&env);
     }
     Ok(value.to_string())
 }
@@ -2735,15 +2852,17 @@ impl PrintBackend for NativePrintBackend {
             // answer the status protocol is NOT blocked: the probe
             // may veto only on positive evidence, never on silence.
             if opts.mode == "escpos" {
-                // Remember TCP hosts that ignore DLE EOT so we don't stall 700ms on every receipt.
-                static DLE_SILENT: std::sync::OnceLock<Mutex<HashSet<String>>> =
+                // Temporarily skip TCP hosts that ignore DLE EOT (or were transiently unreachable)
+                // so we don't stall 700ms on every receipt, while expiring entries after DLE_SILENT_TTL
+                // so recovered printers regain live hardware health checks.
+                static DLE_SILENT: std::sync::OnceLock<Mutex<HashMap<String, Instant>>> =
                     std::sync::OnceLock::new();
-                let silent_set = DLE_SILENT.get_or_init(|| Mutex::new(HashSet::new()));
+                let silent_map = DLE_SILENT.get_or_init(|| Mutex::new(HashMap::new()));
                 let addr_key = format!("{host}:{port}");
-                let skip_probe = silent_set
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .contains(&addr_key);
+                let skip_probe = {
+                    let mut map = silent_map.lock().unwrap_or_else(|e| e.into_inner());
+                    dle_silent_is_active(&mut map, &addr_key, Instant::now())
+                };
                 if !skip_probe {
                     match print_raw::tcp9100::query_blocking_condition(
                         &host,
@@ -2755,10 +2874,8 @@ impl PrintBackend for NativePrintBackend {
                         }
                         Ok(None) => {}
                         Err(_) => {
-                            let mut set = silent_set.lock().unwrap_or_else(|e| e.into_inner());
-                            if set.len() < 256 {
-                                set.insert(addr_key);
-                            }
+                            let mut map = silent_map.lock().unwrap_or_else(|e| e.into_inner());
+                            dle_silent_record(&mut map, addr_key, Instant::now());
                         }
                     }
                 }
@@ -3681,5 +3798,74 @@ mod tests {
             outcome_log_fields(&Outcome::DeadLetter("j4".into())),
             Some(("dead_letter", "j4"))
         );
+    }
+
+    #[test]
+    fn diagnostics_environment_redacts_origin_and_tokens() {
+        let raw = serde_json::json!({
+            "href": "https://erp.secret.local/odoo?access_token=tok123#frag",
+            "pathname": "/odoo?access_token=tok123",
+            "userAgent": "Edg/130.0",
+            "secureContext": true,
+            "es2022": true,
+            "injectedKey": "should-be-dropped",
+            "errors": [
+                "load: https://user:pw@erp.secret.local:8069/web/assets/bundle.js?token=abc failed to load",
+                "error: plain TypeError"
+            ]
+        });
+        let redacted = redact_environment_for_diagnostics(&raw);
+        let serialized = redacted.to_string();
+        assert!(!serialized.contains("erp.secret.local"));
+        assert!(!serialized.contains("tok123"));
+        assert!(!serialized.contains("token=abc"));
+        assert!(!serialized.contains("user:pw"));
+        assert!(!serialized.contains("injectedKey"));
+        assert_eq!(redacted["pathname"], "/odoo");
+        assert_eq!(redacted["secureContext"], true);
+        assert_eq!(
+            redacted["errors"][0],
+            "load: [redacted-origin]/web/assets/bundle.js failed to load"
+        );
+        assert_eq!(redacted["errors"][1], "error: plain TypeError");
+    }
+
+    #[test]
+    fn dle_silent_cache_expires_and_bounds_entries() {
+        let mut map = HashMap::new();
+        let t0 = Instant::now();
+        assert!(!dle_silent_is_active(&mut map, "192.168.1.50:9100", t0));
+
+        dle_silent_record(&mut map, "192.168.1.50:9100".to_string(), t0);
+        assert!(dle_silent_is_active(
+            &mut map,
+            "192.168.1.50:9100",
+            t0 + Duration::from_secs(60)
+        ));
+        // Expires at TTL and removes stale entry so live probing resumes.
+        assert!(!dle_silent_is_active(
+            &mut map,
+            "192.168.1.50:9100",
+            t0 + DLE_SILENT_TTL
+        ));
+        assert!(!map.contains_key("192.168.1.50:9100"));
+
+        // Capacity stays bounded at DLE_SILENT_MAX_ENTRIES, evicting oldest when full.
+        for i in 0..DLE_SILENT_MAX_ENTRIES {
+            dle_silent_record(
+                &mut map,
+                format!("10.0.0.{i}:9100"),
+                t0 + Duration::from_secs(i as u64),
+            );
+        }
+        assert_eq!(map.len(), DLE_SILENT_MAX_ENTRIES);
+        dle_silent_record(
+            &mut map,
+            "10.0.1.1:9100".to_string(),
+            t0 + Duration::from_secs(DLE_SILENT_MAX_ENTRIES as u64),
+        );
+        assert_eq!(map.len(), DLE_SILENT_MAX_ENTRIES);
+        assert!(map.contains_key("10.0.1.1:9100"));
+        assert!(!map.contains_key("10.0.0.0:9100"));
     }
 }

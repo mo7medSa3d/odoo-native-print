@@ -48,6 +48,35 @@ if (typeof document !== "undefined" && typeof document.addEventListener === "fun
 // Watchers decide whether to keep observing after retryable outcomes (failed/dead_letter).
 export const JOB_TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);
 
+// Map Android bridge wire states onto the canonical Odoo/desktop job states.
+const BRIDGE_STATE_ALIASES = {
+    completed: "done",
+    cancelled: "canceled",
+    submitted: "printing",
+    in_progress: "printing",
+};
+
+export function normalizeBridgeJobState(state) {
+    if (typeof state !== "string") return null;
+    const norm = state.trim().toLowerCase();
+    if (!norm || norm === "not_found") return null;
+    return BRIDGE_STATE_ALIASES[norm] || norm;
+}
+
+// Desktop enqueue returns the idempotencyKey string; Android returns a PrintJobRecord object with a UUID `id`.
+export function resolveBridgeJobId(enqueueResult, fallbackKey) {
+    if (enqueueResult && typeof enqueueResult === "object") {
+        const id = enqueueResult.id || enqueueResult.job_id || enqueueResult.jobId;
+        if (typeof id === "string" && id.trim()) {
+            return id.trim();
+        }
+    }
+    if (typeof enqueueResult === "string" && enqueueResult.trim()) {
+        return enqueueResult.trim();
+    }
+    return fallbackKey;
+}
+
 /** Allow only short machine error codes in UI toasts so raw traces never leak. */
 export function safeErrorCode(code, fallback = "error") {
     const text = typeof code === "string" ? code.trim() : "";
@@ -118,11 +147,22 @@ export function detectPrinterType(printer) {
     // Rust print-core detection is authoritative for non-virtual
     // printers; the name heuristic below is only a fallback for older
     // bridge payloads that do not include protocol/class fields.
-    if (printer && printer.protocol) {
+    const rawProto =
+        printer && typeof printer.protocol === "string"
+            ? printer.protocol.trim().toLowerCase()
+            : "";
+    if (rawProto && rawProto !== "auto") {
+        const mode = rawProto === "pdf" ? "gdi" : rawProto;
+        const inferredClass =
+            mode === "escpos"
+                ? "thermal"
+                : (mode === "zpl" || mode === "tspl" || mode === "epl" || mode === "cpcl")
+                    ? "label"
+                    : "office";
         return {
-            mode: printer.protocol,
+            mode,
             printerClass:
-                printer.printer_class || printer.printerClass || "office",
+                printer.printer_class || printer.printerClass || inferredClass,
         };
     }
     const signature =
@@ -194,6 +234,9 @@ function isIpLiteral(value) {
 /** Format driver forms into one-line summaries (accepts nested f.size or flat fields). */
 export function formatFormsSummary(forms, rollLabel) {
     return (forms || []).map((f) => {
+        if (typeof f === "string") {
+            return f.trim() || "Form";
+        }
         const size = (f && (f.size || f)) || {};
         const dim = (v) => (v != null && v !== "" && Number.isFinite(Number(v)) ? Math.round(Number(v)) : "?");
         const w = dim(size.width_mm);
@@ -220,11 +263,22 @@ export function printerPatternFor(printer, mode) {
 export function rollWidthMm(capabilities) {
     const forms = (capabilities && capabilities.forms) || [];
     for (const form of forms) {
+        if (typeof form === "string") {
+            const match = form.match(/(\d+(?:\.\d+)?)\s*mm\s+roll/i);
+            if (match && Number(match[1]) > 0) {
+                return Number(match[1]);
+            }
+            continue;
+        }
         const size = form && (form.size || form);
         const w = size && Number(size.width_mm);
         if (form && form.roll && Number.isFinite(w) && w > 0) {
             return w;
         }
+    }
+    const paperWidth = capabilities && Number(capabilities.paper_width_mm);
+    if (Number.isFinite(paperWidth) && paperWidth > 0 && paperWidth <= 112) {
+        return paperWidth;
     }
     return null;
 }
@@ -254,7 +308,7 @@ function findPrinterByName(printers, wantedName) {
  * else the first healthy printer. Returns null when this PC has
  * no printer at the moment — callers then keep Odoo's normal flow.
  */
-const CAPABILITIES_MEMO_TTL_MS = 10_000;
+const CAPABILITIES_MEMO_TTL_MS = 120_000;
 const capabilitiesMemo = new WeakMap();
 
 async function cachedPrinterCapabilities(bridge, printerName) {
@@ -282,7 +336,10 @@ async function cachedPrinterCapabilities(bridge, printerName) {
 
 export async function resolveBridgeTarget(bridge, options = {}) {
     if (!bridge || typeof bridge.listPrinters !== "function") return null;
-    const printers = await bridge.listPrinters();
+    let printers = await bridge.listPrinters(options.force ? { force: true } : undefined);
+    if ((!Array.isArray(printers) || !printers.length) && !options.force) {
+        printers = await bridge.listPrinters({ force: true });
+    }
     if (!Array.isArray(printers) || !printers.length) return null;
     const prefer = options.preferClasses || [];
     const classOf = (p) => detectPrinterType(p).printerClass;
@@ -339,7 +396,7 @@ export async function resolveBridgeTarget(bridge, options = {}) {
             tray: null,
             // Tri-state: null leaves saved per-printer or driver default in charge.
             duplex: null,
-            color: !capabilities || capabilities.color !== false,
+            color: !capabilities || (capabilities.color !== false && capabilities.supports_color !== false),
             scale_policy: "custom_allowed",
             media: { roll_width_mm: rollWidthMm(capabilities) },
         },

@@ -1766,3 +1766,285 @@ test("stale-printer root-cause fix: single discovery cache invariant, force-refr
   assert.equal(gridHtmlAfter.includes("STALE_FORM_OLD"), false, "stale in-flight capabilities must be discarded by capsEpoch");
   assert.equal(gridHtmlAfter.includes("80mm Fresh"), true, "fresh capabilities must render after manualRefresh");
 });
+
+test("audit regression: double-submit guards, bridge-down validation, inspectForms i18n/epoch, and boot title sync", async () => {
+  // 1. Control Center: double-submit guards + inspectForms empty-state i18n + bridge-down validateOriginField
+  const { windowObj, document, MiniEl } = createMiniDom(html);
+  let clearFinishedCalls = 0;
+  let clearWebDataCalls = 0;
+  let testPrintCalls = 0;
+  let resolveClearFinished = null;
+  let resolveTestPrint = null;
+  let bridgeEnabled = true;
+
+  windowObj.__NATIVE_PRINT__ = {
+    async appOverview() {
+      if (!bridgeEnabled) throw new Error("bridge_down");
+      return {
+        appVersion: "1.5.7",
+        odooOrigin: "https://odoo.example.com",
+        defaultPrinter: "HP OfficeJet",
+        pdfiumReady: true,
+        lockedByPolicy: false,
+        autoReprint: false,
+        stateCounts: [["done", 1]],
+        printers: [{ name: "HP OfficeJet", kind: "physical", is_default: true, status: "ready", port: "USB001", driver: "HP", protocol: "gdi", printer_class: "office" }],
+        recentJobs: [],
+        environment: { es2022: true, localStorage: true, cookies: true, webSocket: true, secureContext: true, errors: [] },
+      };
+    },
+    async printerCapabilities() { return { forms: [], bins: [], duplex: false, color: false }; },
+    async getPrinterSettings() { return {}; },
+    async printerForms() { return []; },
+    async clearFinished() {
+      clearFinishedCalls++;
+      return new Promise((res) => { resolveClearFinished = res; });
+    },
+    async clearWebData() { clearWebDataCalls++; return true; },
+    async runTestPrint() {
+      testPrintCalls++;
+      return new Promise((res) => { resolveTestPrint = res; });
+    },
+  };
+
+  const ctx = vm.createContext({
+    ...windowObj,
+    setInterval: windowObj.setInterval,
+    clearInterval: windowObj.clearInterval,
+    setTimeout: windowObj.setTimeout,
+    clearTimeout: windowObj.clearTimeout,
+    localStorage: windowObj.localStorage,
+    URL,
+    Blob,
+    Set,
+    Map,
+    Promise,
+    Array,
+    Object,
+    Number,
+    String,
+    Boolean,
+    RegExp,
+    Error,
+    encodeURIComponent,
+    decodeURIComponent,
+  });
+  ctx.window = ctx;
+  ctx.self = ctx;
+  ctx.globalThis = ctx;
+  new vm.Script(script).runInContext(ctx);
+  await new Promise((r) => setTimeout(r, 15));
+
+  // Double-submit guard on clearFinishedJobs
+  const pClear1 = ctx.clearFinishedJobs();
+  const pClear2 = ctx.clearFinishedJobs();
+  assert.equal(document.getElementById("btnClearFinished").disabled, true);
+  ctx.settleConfirm(true);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(clearFinishedCalls, 1, "concurrent clearFinishedJobs must be blocked while in-flight");
+  resolveClearFinished(1);
+  await Promise.all([pClear1, pClear2]);
+  assert.equal(document.getElementById("btnClearFinished").disabled, false);
+
+  // Double-submit guard on runPrinterTest
+  const pTest1 = ctx.runPrinterTest("HP OfficeJet", "pdf-a4");
+  const pTest2 = ctx.runPrinterTest("HP OfficeJet", "pdf-a4");
+  await new Promise((r) => setImmediate(r));
+  assert.equal(testPrintCalls, 1, "concurrent runPrinterTest must be blocked while in-flight");
+  resolveTestPrint("job-1");
+  await Promise.all([pTest1, pTest2]);
+
+  // inspectForms empty-state re-localizes when language switches
+  const formsBox = new MiniEl("DIV", "forms-box-0");
+  formsBox.classList.add("hidden");
+  document.body.appendChild(formsBox);
+  await ctx.inspectForms("HP OfficeJet", 0);
+  assert.ok(formsBox.textContent.includes("لا توجد نماذج"), "Arabic empty forms message");
+  ctx.toggleLang();
+  assert.ok(document.getElementById("printersGrid").innerHTML.includes("No forms reported by driver."), "English empty forms message after language switch");
+
+  // validateOriginField must keep save buttons disabled when native bridge is unavailable
+  ctx.__NATIVE_PRINT__ = null;
+  await ctx.refreshAll({ silent: true });
+  document.getElementById("inputOdooOrigin").value = "https://odoo.example.com";
+  ctx.validateOriginField();
+  assert.equal(document.getElementById("btnSaveOrigin").disabled, true, "Save must remain disabled when bridge is unavailable");
+  assert.equal(document.getElementById("btnSaveAndOpen").disabled, true, "Save & Open must remain disabled when bridge is unavailable");
+
+  // 2. boot.html: document.title syncs with viewState and showInitFail clears count
+  const bootHtml = readFileSync(new URL("../dist/boot.html", import.meta.url), "utf8");
+  const bootScript = bootHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
+  const bootDom = createMiniDom(bootHtml);
+  bootDom.windowObj.__TAURI_INTERNALS__ = {
+    async invoke(cmd) {
+      if (cmd === "app_identity") return { odooOrigin: "http://192.168.1.20:8069" };
+      if (cmd === "probe_origin") return false;
+    },
+  };
+  const bootCtx = vm.createContext({ ...bootDom.windowObj, setInterval: bootDom.windowObj.setInterval, clearInterval: bootDom.windowObj.clearInterval, setTimeout: bootDom.windowObj.setTimeout, clearTimeout: bootDom.windowObj.clearTimeout, localStorage: bootDom.windowObj.localStorage });
+  new vm.Script(bootScript).runInContext(bootCtx);
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(bootDom.document.title, "Yaseir Print — تعذّر الوصول إلى Odoo", "boot.html title must reflect down state");
+  bootCtx.showInitFail();
+  assert.equal(bootDom.document.getElementById("count").textContent, "", "showInitFail must clear countdown text");
+  assert.equal(bootDom.document.title, "Yaseir Print — تعذّر بدء الاتصال", "boot.html title must reflect initFail state");
+});
+
+test("settings.html and tabbar.html audit regressions: re-entrancy locks, identity epoch, Escape drag cancel, and focus restore", async () => {
+  // 1. settings.html: double-submit guards on action buttons + syncIdentity epoch race guard
+  {
+    const settingsHtml = readFileSync(new URL("../dist/settings.html", import.meta.url), "utf8");
+    const settingsScript = settingsHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
+    const { windowObj, document } = createMiniDom(settingsHtml);
+    const identityResolvers = [];
+    let ccCalls = 0;
+    let odooCalls = 0;
+    let resolveCc = null;
+    let resolveOdoo = null;
+
+    windowObj.__TAURI_INTERNALS__ = {
+      async invoke(cmd) {
+        if (cmd === "app_identity") {
+          return new Promise((res) => identityResolvers.push(res));
+        }
+        if (cmd === "open_control_center") {
+          ccCalls++;
+          return new Promise((res) => { resolveCc = res; });
+        }
+        if (cmd === "open_odoo_origin") {
+          odooCalls++;
+          return new Promise((res) => { resolveOdoo = res; });
+        }
+        return {};
+      },
+    };
+    const ctx = vm.createContext({ ...windowObj, localStorage: windowObj.localStorage });
+    new vm.Script(settingsScript).runInContext(ctx);
+    assert.equal(identityResolvers.length, 1);
+
+    // Trigger a newer visibilitychange syncIdentity() before the first resolves
+    document.hidden = false;
+    document.dispatch("visibilitychange");
+    assert.equal(identityResolvers.length, 2);
+
+    // Newer response resolves first with v2.0.0 and valid origin
+    identityResolvers[1]({ appVersion: "2.0.0", odooOrigin: "https://odoo.example.com" });
+    await new Promise((r) => setImmediate(r));
+    assert.equal(document.getElementById("appVersion").textContent, "v2.0.0");
+    assert.equal(document.getElementById("btnOpenOdoo").disabled, false);
+
+    // Older stale response resolves second with v1.0.0 and no origin -> must be ignored
+    identityResolvers[0]({ appVersion: "1.0.0", odooOrigin: "" });
+    await new Promise((r) => setImmediate(r));
+    assert.equal(document.getElementById("appVersion").textContent, "v2.0.0", "stale app_identity must not overwrite version");
+    assert.equal(document.getElementById("btnOpenOdoo").disabled, false, "stale app_identity must not disable btnOpenOdoo");
+
+    // Double-submit guard on btnOpenCc
+    const btnCc = document.getElementById("btnOpenCc");
+    btnCc.dispatch("click");
+    btnCc.dispatch("click");
+    assert.equal(ccCalls, 1, "concurrent btnOpenCc clicks must be blocked while in-flight");
+    assert.equal(btnCc.disabled, true, "btnOpenCc must be disabled while in-flight");
+    resolveCc({});
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    assert.equal(btnCc.disabled, false, "btnOpenCc must re-enable after settlement");
+
+    // Double-submit guard on btnOpenOdoo
+    const btnOdoo = document.getElementById("btnOpenOdoo");
+    btnOdoo.dispatch("click");
+    btnOdoo.dispatch("click");
+    assert.equal(odooCalls, 1, "concurrent btnOpenOdoo clicks must be blocked while in-flight");
+    assert.equal(btnOdoo.disabled, true, "btnOpenOdoo must be disabled while in-flight");
+    resolveOdoo({});
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    assert.equal(btnOdoo.disabled, false, "btnOpenOdoo must restore enabled state when origin is configured");
+  }
+
+  // 2. tabbar.html: Escape cancels pointer drag, double-close/nav locks, and focus restore
+  {
+    const tabHtml = readFileSync(new URL("../dist/tabbar.html", import.meta.url), "utf8");
+    const tabScript = tabHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
+    const { windowObj, document } = createMiniDom(tabHtml);
+    let closeCalls = 0;
+    let settingsCalls = 0;
+    let moveCalls = 0;
+    let resolveClose = null;
+    let resolveSettings = null;
+    let currentFixture = [
+      { label: "t1", title: "Odoo", url: "https://odoo.example.com", active: true, is_pos: false },
+      { label: "t2", title: "POS", url: "https://odoo.example.com/pos", active: false, is_pos: true },
+    ];
+
+    windowObj.__TAURI_INTERNALS__ = {
+      async invoke(cmd) {
+        if (cmd === "tab_list") return currentFixture;
+        if (cmd === "tab_close") {
+          closeCalls++;
+          return new Promise((res) => { resolveClose = res; });
+        }
+        if (cmd === "open_settings") {
+          settingsCalls++;
+          return new Promise((res) => { resolveSettings = res; });
+        }
+        if (cmd === "tab_move") {
+          moveCalls++;
+          return {};
+        }
+        return {};
+      },
+    };
+    const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, localStorage: windowObj.localStorage });
+    new vm.Script(tabScript).runInContext(ctx);
+    await new Promise((r) => setImmediate(r));
+
+    const strip = document.getElementById("tabs");
+    const tabEls = strip.children.filter((c) => c.classList.contains("tab"));
+    tabEls[0].getBoundingClientRect = () => ({ left: 100, width: 100 });
+    tabEls[1].getBoundingClientRect = () => ({ left: 0, width: 100 });
+
+    // Start pointer drag and press Escape -> must roll back without invoking tab_move
+    tabEls[0].dispatch("pointerdown", { button: 0, clientX: 150, pointerId: 1 });
+    windowObj.dispatch("pointermove", { clientX: 20 });
+    assert.equal(tabEls[0].classList.contains("dragging"), true);
+    windowObj.dispatch("keydown", { key: "Escape" });
+    assert.equal(tabEls[0].classList.contains("dragging"), false, "Escape must clear dragging state");
+    assert.equal(moveCalls, 0, "Escape must cancel drag without invoking tab_move");
+
+    // Double-click close button on t2 -> only 1 tab_close in-flight
+    const closeBtn = tabEls[1].children.find((c) => c.classList.contains("t-close"));
+    closeBtn.dispatch("click");
+    closeBtn.dispatch("click");
+    assert.equal(closeCalls, 1, "concurrent closeTabWithHistory for same tab must be blocked");
+    resolveClose({});
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    // Double-click btnSettings -> only 1 open_settings in-flight
+    const btnSettings = document.getElementById("btnSettings");
+    btnSettings.dispatch("click");
+    btnSettings.dispatch("click");
+    assert.equal(settingsCalls, 1, "concurrent btnSettings clicks must be blocked while in-flight");
+    resolveSettings({});
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    // Focus restoration: focusing #btnNewTab survives a re-render
+    document.getElementById("btnNewTab").focus();
+    ctx.render([
+      { label: "t1", title: "Odoo Updated", url: "https://odoo.example.com", active: true, is_pos: false },
+      { label: "t2", title: "POS", url: "https://odoo.example.com/pos", active: false, is_pos: true },
+    ]);
+    assert.equal(document.activeElement.id, "btnNewTab", "render() must preserve focus on #btnNewTab");
+
+    // Focus restoration: closing the focused tab falls back to the active tab
+    const freshTabs = strip.children.filter((c) => c.classList.contains("tab"));
+    freshTabs[1].focus();
+    ctx.render([
+      { label: "t1", title: "Odoo Updated", url: "https://odoo.example.com", active: true, is_pos: false },
+    ]);
+    assert.equal(document.activeElement.getAttribute("data-label"), "t1", "render() must fall back focus to active tab when focused tab is removed");
+  }
+});

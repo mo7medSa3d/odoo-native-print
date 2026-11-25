@@ -293,6 +293,10 @@ assert.strictEqual(
         assert.deepStrictEqual(bytes, [137, 80, 78, 71], "SVG capture produces PNG bytes");
         assert.strictEqual(createObjectUrlCalled, false, "must never use URL.createObjectURL for foreignObject SVG");
         assert.ok(loadedImgSrc.startsWith("data:image/svg+xml;charset=utf-8,"), "uses data:image/svg+xml URI");
+        const decodedSvg = decodeURIComponent(loadedImgSrc);
+        const expW = srcRoot.offsetWidth || 320;
+        const expH = srcRoot.offsetHeight || srcRoot.scrollHeight || 480;
+        assert.ok(decodedSvg.includes(`width="${expW * 2}" height="${expH * 2}" viewBox="0 0 ${expW} ${expH}"`), "SVG rasterizes natively at scaled dimensions via viewBox");
         assert.ok(!decodeURIComponent(loadedImgSrc).includes("mask.svg"), "external CSS url(...) stripped");
         assert.ok(decodeURIComponent(loadedImgSrc).includes("data:image/png;base64,AA=="), "data: CSS url preserved");
         assert.ok(removedAttrs.includes("srcset"), "srcset stripped from cloned img");
@@ -438,6 +442,56 @@ assert.strictEqual(
         globalThis.setTimeout = prevSetTimeout;
         delete globalThis.__posRpcCalls;
         delete globalThis.__posNotices;
+    }
+}
+
+// Android v1.5.7 POS watcher: polls by bridgeJobId and normalizes `completed` -> `done`.
+{
+    const rpcCalls = [];
+    const polled = [];
+    const prevWindow = globalThis.window;
+    const prevSetTimeout = globalThis.setTimeout;
+    globalThis.window = { dispatchEvent: () => true };
+    globalThis.setTimeout = (fn) => { fn(); return 0; };
+    try {
+        const helpers = [
+            'const POS_RECEIPT_SOURCE = "point_of_sale.receipt";',
+            'const TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);',
+            'const normalizeBridgeJobState = (s) => ({ completed: "done", cancelled: "canceled", submitted: "printing", in_progress: "printing" }[String(s || "").toLowerCase()] || s);',
+            'const _t = (s, ...args) => args.reduce((acc, v) => acc.replace("%s", String(v)), s);',
+            'const notifyUser = () => {};',
+            'const safeErrorCode = (c, f = "error") => c || f;',
+            'const notifyJobUpdated = () => {};',
+            'const rpc = async (url, params) => { globalThis.__andPosRpcs.push({ url, params }); return { ok: true }; };',
+            extract("finishPosReceiptAttempt"),
+            extract("watchPosJob"),
+            "globalThis.__andWatchPos = watchPosJob;",
+        ].join("\n");
+        globalThis.__andPosRpcs = rpcCalls;
+        eval(helpers);
+
+        const order = { _printed: false };
+        await globalThis.__andWatchPos(
+            { jobDetail: async (id) => { polled.push(id); return { id, state: "completed", attempts: 1 }; } },
+            "pos-Order_And-20261125-u7-a1",
+            { printer_pattern: "BT Printer", copies: 1, mode: "escpos" },
+            64,
+            "Order_And",
+            "BT Printer",
+            null,
+            "7",
+            order,
+            "android-pos-uuid-1",
+        );
+        assert.strictEqual(polled[0], "android-pos-uuid-1", "watchPosJob polls Android bridgeJobId");
+        assert.strictEqual(order._printed, true, "Android completed marks order._printed = true");
+        assert.strictEqual(rpcCalls.length, 1, "watchPosJob posts one terminal status");
+        assert.strictEqual(rpcCalls[0].params.idempotency_key, "pos-Order_And-20261125-u7-a1", "RPC keeps idempotency_key");
+        assert.strictEqual(rpcCalls[0].params.state, "done", "Android completed synced as done");
+    } finally {
+        globalThis.window = prevWindow;
+        globalThis.setTimeout = prevSetTimeout;
+        delete globalThis.__andPosRpcs;
     }
 }
 

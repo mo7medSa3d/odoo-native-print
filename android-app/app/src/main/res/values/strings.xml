@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Yaseir Print</string>
+    <string name="notification_channel_printing">Silent Printing</string>
+    <string name="notification_printing_title">Yaseir Print</string>
+    <string name="notification_printing_active">Printing %1$d job(s)…</string>
+</resources>

@@ -2,7 +2,7 @@
 
 Canonical reference for the visual tokens implemented across:
 - **Desktop Control Center:** [`app/dist/theme.css`](../app/dist/theme.css)
-- **Odoo 19 Systray Popover:** [`odoo/native_print/static/src/scss/native_print.scss`, `odoo/native_print/static/src/scss/native_print_dark.scss`](../odoo/native_print/static/src/scss/native_print.scss)
+- **Odoo 19 Systray Popover:** [`odoo19/native_print/static/src/scss/native_print.scss`](../odoo19/native_print/static/src/scss/native_print.scss) & [`odoo19/native_print/static/src/scss/native_print_dark.scss`](../odoo19/native_print/static/src/scss/native_print_dark.scss)
 - **Odoo 20 Systray Popover:** [`odoo20/native_print/static/src/scss/native_print.scss`](../odoo20/native_print/static/src/scss/native_print.scss) & [`odoo20/native_print/static/src/scss/native_print_dark.scss`](../odoo20/native_print/static/src/scss/native_print_dark.scss)
 
 ## 1. Color Tokens (Light & Dark)

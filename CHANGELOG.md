@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to **Odoo Native Print** are documented in this file.
-The desktop client (`app/`), the Odoo 19 addon (`odoo/native_print/`), and the Odoo 20 addon (`odoo20/native_print/`) follow independent version lines.
+The desktop client (`app/`), the Odoo 19 addon (`odoo19/native_print/`), and the Odoo 20 addon (`odoo20/native_print/`) follow independent version lines.
 
 ## Desktop Client `1.5.7` / Odoo 19 Addon `19.0.2.24.0` / Odoo 20 Addon `20.0.1.0.0` — 2026-11-20
 

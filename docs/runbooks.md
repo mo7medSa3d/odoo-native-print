@@ -10,7 +10,7 @@
    bootstrapper downloads it during install (requires internet at install
    time unless a current runtime is already present). To check manually:
    `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`.
-3. Install the Odoo addon (`odoo/native_print` for Odoo 19 or `odoo20/native_print` for Odoo 20; see [docs/odoo-setup.md](odoo-setup.md)). No server-side profiles or routing rules are needed (see [docs/zero-config.md](zero-config.md)).
+3. Install the Odoo addon (`odoo19/native_print` for Odoo 19 or `odoo20/native_print` for Odoo 20; see [docs/odoo-setup.md](odoo-setup.md)). No server-side profiles or routing rules are needed (see [docs/zero-config.md](zero-config.md)).
 4. First run: sign in to Odoo inside the app, print the calibration page
    for each printer (app includes the generator), file the hardware kit.
 
