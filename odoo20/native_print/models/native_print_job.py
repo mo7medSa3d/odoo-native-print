@@ -313,7 +313,7 @@ class NativePrintJob(models.Model):
         ]
         Job = self.sudo()
         count = 0
-        for _ in range(max_batches):
+        for _batch in range(max_batches):
             batch = Job.search(domain, order="create_date asc, id asc", limit=batch_size)
             if not batch:
                 break
