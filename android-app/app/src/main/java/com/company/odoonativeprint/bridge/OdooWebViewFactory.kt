@@ -45,7 +45,7 @@ object OdooWebViewFactory {
         val allowedOrigins = setOf(configuredOrigin)
 
         return WebView(context).apply {
-            initialScale = 100
+            setInitialScale(100)
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
