@@ -16,6 +16,7 @@ import com.company.odoonativeprint.protocol.EplEncoder
 import com.company.odoonativeprint.protocol.EscPosEncoder
 import com.company.odoonativeprint.protocol.TsplEncoder
 import com.company.odoonativeprint.protocol.ZplEncoder
+import com.company.odoonativeprint.render.BitmapToPdfWriter
 import com.company.odoonativeprint.render.CalibrationPages
 import com.company.odoonativeprint.render.MonoBitmap
 import com.company.odoonativeprint.render.PdfPageRenderer
@@ -60,23 +61,58 @@ class AndroidJobExecutor(
             return TransportResult.Failure("PAYLOAD_MISSING", "Spool payload file is missing", retryable = false)
         }
 
-        // Fast path: Android System PrintManager for PDFs
+        // Render width is shared by raw protocols and by the PDF fallback.
+        // Match standard 203-dpi thermal head widths (58mm->384, 80mm->576, 112mm->832),
+        // rounded to whole raster bytes so GS v 0 never overflows the head.
+        val widthDots = when {
+            settings.dpi == 203 && settings.paperWidthMm in 54..62 -> 384
+            settings.dpi == 203 && settings.paperWidthMm in 72..84 -> 576
+            settings.dpi == 203 && settings.paperWidthMm in 104..120 -> 832
+            else -> (((settings.paperWidthMm - 8).coerceAtLeast(32) * settings.dpi / 25.4 / 8.0).toInt() * 8)
+                .coerceIn(256, 1664)
+        }
+
+        // Android System Print accepts PDFs only. The POS sends receipts as
+        // images, so convert the payload to a PDF here instead of rejecting it.
+        // The bytes are snapshotted by the adapter: onWrite runs after the user
+        // picks a destination, when the spool file may already be deleted.
         if (printer.transport == PrinterTransportType.ANDROID_SYSTEM) {
-            if (job.sourceKind != "pdf") {
+            val pdfBytes = try {
+                when (job.sourceKind) {
+                    "pdf" -> {
+                        val bytes = payloadFile.readBytes()
+                        require(bytes.isNotEmpty() && bytes.size <= PayloadLimits.MAX_PDF_BYTES) { "PDF_SIZE_INVALID" }
+                        bytes
+                    }
+                    else -> {
+                        val pages = renderPayload(job, printer, payloadFile, settings, widthDots)
+                        try {
+                            BitmapToPdfWriter.encode(pages, settings.paperWidthMm.toFloat())
+                        } finally {
+                            pages.forEach { it.recycle() }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
                 return TransportResult.Failure(
-                    "SYSTEM_PRINT_PDF_ONLY",
-                    "Android System Print supports PDF documents only",
+                    "SYSTEM_PRINT_PDF_FAILED",
+                    e.message ?: "Could not prepare a PDF for Android System Print",
                     retryable = false,
                 )
             }
+            val activity = activityProvider()
+                ?: return TransportResult.Failure(
+                    "NO_ACTIVE_ACTIVITY",
+                    "Open Yaseir Print to use Android System Print",
+                    retryable = true,
+                )
             return withContext(Dispatchers.Main) {
-                val activity = activityProvider()
-                    ?: return@withContext TransportResult.Failure(
-                        "NO_ACTIVE_ACTIVITY",
-                        "Open Yaseir Print to use Android System Print",
-                        retryable = true,
-                    )
-                AndroidPrintManagerAdapter.printPdfFile(activity, payloadFile, "Yaseir Print #${job.id.take(8)}")
+                AndroidPrintManagerAdapter.printPdfBytes(
+                    activity = activity,
+                    pdfBytes = pdfBytes,
+                    documentName = "Yaseir-${job.id.take(8)}.pdf",
+                    jobName = "Yaseir Print #${job.id.take(8)}",
+                )
             }
         }
 
@@ -94,32 +130,8 @@ class AndroidJobExecutor(
             )
         }
 
-        // Render to Bitmap(s) and encode into target raw printer protocol.
-        // Match standard 203-dpi thermal head widths (58mm->384, 80mm->576, 112mm->832),
-        // rounded to whole raster bytes so GS v 0 never overflows the head.
-        val widthDots = when {
-            settings.dpi == 203 && settings.paperWidthMm in 54..62 -> 384
-            settings.dpi == 203 && settings.paperWidthMm in 72..84 -> 576
-            settings.dpi == 203 && settings.paperWidthMm in 104..120 -> 832
-            else -> (((settings.paperWidthMm - 8).coerceAtLeast(32) * settings.dpi / 25.4 / 8.0).toInt() * 8)
-                .coerceIn(256, 1664)
-        }
         val bitmaps: List<Bitmap> = try {
-            when (job.sourceKind) {
-                "pdf" -> PdfPageRenderer.renderAllPages(
-                    pdfFile = payloadFile,
-                    targetWidthDots = widthDots,
-                    offsetXDots = (settings.offsetXMm * settings.dpi / 25.4f),
-                    offsetYDots = (settings.offsetYMm * settings.dpi / 25.4f),
-                )
-                "image" -> listOf(decodeValidatedImage(payloadFile, widthDots))
-                "text" -> {
-                    val text = payloadFile.readText(Charsets.UTF_8)
-                    listOf(TextReceiptRenderer.render(context, text, widthDots = widthDots))
-                }
-                "test" -> listOf(CalibrationPages.thermalTestReceipt(context, printer.displayName, settings.paperWidthMm, settings.dpi))
-                else -> return TransportResult.Failure("UNSUPPORTED_KIND", "Unsupported kind: ${job.sourceKind}", retryable = false)
-            }
+            renderPayload(job, printer, payloadFile, settings, widthDots)
         } catch (e: Exception) {
             return TransportResult.Failure("RENDER_FAILED", e.message ?: "Failed to render payload", retryable = false)
         }
@@ -164,6 +176,33 @@ class AndroidJobExecutor(
             PrinterTransportType.IPP -> ipp.sendDocument(printer, rawBytes, mimeType = "application/octet-stream", copies = 1)
             PrinterTransportType.ANDROID_SYSTEM -> TransportResult.Failure("UNSUPPORTED_TRANSPORT", "Unsupported transport", retryable = false)
         }
+    }
+
+    private suspend fun renderPayload(
+        job: PrintJobRecord,
+        printer: PrinterInfo,
+        payloadFile: File,
+        settings: PrinterSettings,
+        widthDots: Int,
+    ): List<Bitmap> = when (job.sourceKind) {
+        "pdf" -> PdfPageRenderer.renderAllPages(
+            pdfFile = payloadFile,
+            targetWidthDots = widthDots,
+            offsetXDots = (settings.offsetXMm * settings.dpi / 25.4f),
+            offsetYDots = (settings.offsetYMm * settings.dpi / 25.4f),
+        )
+        "image" -> listOf(decodeValidatedImage(payloadFile, widthDots))
+        "text" -> listOf(
+            TextReceiptRenderer.render(
+                context,
+                payloadFile.readText(Charsets.UTF_8),
+                widthDots = widthDots,
+            )
+        )
+        "test" -> listOf(
+            CalibrationPages.thermalTestReceipt(context, printer.displayName, settings.paperWidthMm, settings.dpi)
+        )
+        else -> throw IllegalArgumentException("Unsupported kind: ${job.sourceKind}")
     }
 
     private fun resolveProtocol(printer: PrinterInfo, settings: PrinterSettings): PrinterProtocol =
