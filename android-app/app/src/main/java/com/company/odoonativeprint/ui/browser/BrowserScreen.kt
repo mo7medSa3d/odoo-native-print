@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -84,153 +85,104 @@ fun BrowserScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             if (!fullscreenPos) {
-                // Compact desktop-style tab + toolbar chrome
-                Row(
+                BoxWithConstraints(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(c.bgSurface)
-                        .border(0.5.dp, c.border)
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .border(0.5.dp, c.border),
                 ) {
-                    Image(
-                        painter = painterResource(R.drawable.ic_yaseir_logo),
-                        contentDescription = "Yaseir Print",
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable(onClick = onOpenControlCenter),
-                    )
-                    Spacer(Modifier.width(4.dp))
-
-                    IconButton(
-                        onClick = { tabManager.goBack() },
-                        enabled = activeTab?.canGoBack == true,
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Rounded.ArrowBack,
-                            contentDescription = tr("رجوع"),
-                            tint = if (activeTab?.canGoBack == true) c.textPrimary else c.textMuted.copy(alpha = 0.4f),
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                    IconButton(
-                        onClick = { tabManager.goForward() },
-                        enabled = activeTab?.canGoForward == true,
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Rounded.ArrowForward,
-                            contentDescription = tr("تقدم"),
-                            tint = if (activeTab?.canGoForward == true) c.textPrimary else c.textMuted.copy(alpha = 0.4f),
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                    IconButton(
-                        onClick = { tabManager.reload() },
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(
-                            Icons.Rounded.Refresh,
-                            contentDescription = tr("تحديث"),
-                            tint = c.textPrimary,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-
-                    // Scrollable pill tabs
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        tabState.tabs.forEach { tab ->
-                            val selected = tab.id == tabState.activeTabId
-                            Row(
+                    val isCompact = maxWidth < 600.dp
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Image(
+                                painter = painterResource(R.drawable.ic_yaseir_logo),
+                                contentDescription = "Yaseir Print",
                                 modifier = Modifier
-                                    .widthIn(min = 84.dp, max = 164.dp)
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(if (selected) c.bgHover else c.bgSubtle)
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (selected) c.brand else c.border,
-                                        shape = RoundedCornerShape(999.dp),
-                                    )
-                                    .clickable { tabManager.switchTab(tab.id) }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable(onClick = onOpenControlCenter),
+                            )
+                            Spacer(Modifier.width(4.dp))
+
+                            IconButton(
+                                onClick = { tabManager.goBack() },
+                                enabled = activeTab?.canGoBack == true,
+                                modifier = Modifier.size(32.dp),
                             ) {
-                                Text(
-                                    text = tab.title.ifBlank { "Odoo" },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (selected) c.textPrimary else c.textSecondary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f, fill = false),
+                                Icon(
+                                    Icons.AutoMirrored.Rounded.ArrowBack,
+                                    contentDescription = tr("رجوع"),
+                                    tint = if (activeTab?.canGoBack == true) c.textPrimary else c.textMuted.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(18.dp),
                                 )
-                                if (tabState.tabs.size > 1) {
-                                    Spacer(Modifier.width(4.dp))
-                                    Icon(
-                                        Icons.Rounded.Close,
-                                        contentDescription = tr("إغلاق التبويب"),
-                                        tint = c.textMuted,
-                                        modifier = Modifier
-                                            .size(14.dp)
-                                            .clickable { tabManager.closeTab(tab.id) },
-                                    )
-                                }
+                            }
+                            IconButton(
+                                onClick = { tabManager.goForward() },
+                                enabled = activeTab?.canGoForward == true,
+                                modifier = Modifier.size(32.dp),
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Rounded.ArrowForward,
+                                    contentDescription = tr("تقدم"),
+                                    tint = if (activeTab?.canGoForward == true) c.textPrimary else c.textMuted.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                            IconButton(
+                                onClick = { tabManager.reload() },
+                                modifier = Modifier.size(32.dp),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Refresh,
+                                    contentDescription = tr("تحديث"),
+                                    tint = c.textPrimary,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+
+                            if (isCompact) {
+                                Spacer(Modifier.weight(1f))
+                            } else {
+                                BrowserTabStrip(
+                                    tabs = tabState.tabs,
+                                    activeTabId = tabState.activeTabId,
+                                    onSelect = { tabManager.switchTab(it) },
+                                    onClose = { tabManager.closeTab(it) },
+                                    onNewTab = { tabManager.openTab(configuredOrigin) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+
+                            PrinterStatusPill(
+                                queueSummary = queueSummary,
+                                onClick = onOpenControlCenter,
+                            )
+
+                            IconButton(onClick = { fullscreenPos = true }, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Rounded.Fullscreen, contentDescription = tr("ملء الشاشة لنقطة البيع"), tint = c.textSecondary, modifier = Modifier.size(18.dp))
+                            }
+                            IconButton(onClick = onOpenSettings, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Rounded.Settings, contentDescription = tr("الإعدادات"), tint = c.textSecondary, modifier = Modifier.size(18.dp))
                             }
                         }
 
-                        IconButton(
-                            onClick = { tabManager.openTab(configuredOrigin) },
-                            modifier = Modifier.size(28.dp),
-                        ) {
-                            Icon(Icons.Rounded.Add, contentDescription = tr("تبويب جديد"), tint = c.textSecondary, modifier = Modifier.size(18.dp))
-                        }
-                    }
-
-                    // Live Printer / Queue Status Pill -> opens Control Center
-                    val dotColor = when {
-                        queueSummary.failed > 0 -> c.errFg
-                        queueSummary.active > 0 -> c.warnFg
-                        else -> c.okFg
-                    }
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(c.bgSubtle)
-                            .border(1.dp, c.border, RoundedCornerShape(999.dp))
-                            .clickable(onClick = onOpenControlCenter)
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(dotColor),
-                        )
-                        Icon(Icons.Rounded.Print, contentDescription = tr("مركز التحكم"), tint = c.textPrimary, modifier = Modifier.size(16.dp))
-                        if (queueSummary.active > 0) {
-                            Text(
-                                text = "${queueSummary.active}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = c.brandText,
+                        if (isCompact) {
+                            BrowserTabStrip(
+                                tabs = tabState.tabs,
+                                activeTabId = tabState.activeTabId,
+                                onSelect = { tabManager.switchTab(it) },
+                                onClose = { tabManager.closeTab(it) },
+                                onNewTab = { tabManager.openTab(configuredOrigin) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 8.dp, end = 8.dp, bottom = 6.dp),
                             )
                         }
-                    }
-
-                    IconButton(onClick = { fullscreenPos = true }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Rounded.Fullscreen, contentDescription = tr("ملء الشاشة لنقطة البيع"), tint = c.textSecondary, modifier = Modifier.size(18.dp))
-                    }
-                    IconButton(onClick = onOpenSettings, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Rounded.Settings, contentDescription = tr("الإعدادات"), tint = c.textSecondary, modifier = Modifier.size(18.dp))
                     }
                 }
 
@@ -290,6 +242,109 @@ fun BrowserScreen(
                     Icon(Icons.Rounded.FullscreenExit, contentDescription = tr("إظهار الشريط"), tint = c.textPrimary, modifier = Modifier.size(18.dp))
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun BrowserTabStrip(
+    tabs: List<BrowserTab>,
+    activeTabId: String?,
+    onSelect: (String) -> Unit,
+    onClose: (String) -> Unit,
+    onNewTab: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val c = LocalYaseirColors.current
+    Row(
+        modifier = modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        tabs.forEach { tab ->
+            val selected = tab.id == activeTabId
+            Row(
+                modifier = Modifier
+                    .widthIn(min = 72.dp, max = 164.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (selected) c.bgHover else c.bgSubtle)
+                    .border(
+                        width = 1.dp,
+                        color = if (selected) c.brand else c.border,
+                        shape = RoundedCornerShape(999.dp),
+                    )
+                    .clickable { onSelect(tab.id) }
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = tab.title.ifBlank { "Odoo" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (selected) c.textPrimary else c.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (tabs.size > 1) {
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        Icons.Rounded.Close,
+                        contentDescription = tr("إغلاق التبويب"),
+                        tint = c.textMuted,
+                        modifier = Modifier
+                            .size(14.dp)
+                            .clickable { onClose(tab.id) },
+                    )
+                }
+            }
+        }
+
+        IconButton(
+            onClick = onNewTab,
+            modifier = Modifier.size(28.dp),
+        ) {
+            Icon(Icons.Rounded.Add, contentDescription = tr("تبويب جديد"), tint = c.textSecondary, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+@Composable
+private fun PrinterStatusPill(
+    queueSummary: QueueSummary,
+    onClick: () -> Unit,
+) {
+    val c = LocalYaseirColors.current
+    val dotColor = when {
+        queueSummary.failed > 0 -> c.errFg
+        queueSummary.active > 0 -> c.warnFg
+        else -> c.okFg
+    }
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(c.bgSubtle)
+            .border(1.dp, c.border, RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(dotColor),
+        )
+        Icon(Icons.Rounded.Print, contentDescription = tr("مركز التحكم"), tint = c.textPrimary, modifier = Modifier.size(16.dp))
+        if (queueSummary.active > 0) {
+            Text(
+                text = "${queueSummary.active}",
+                style = MaterialTheme.typography.labelSmall,
+                color = c.brandText,
+                maxLines = 1,
+            )
         }
     }
 }

@@ -16,9 +16,11 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.AlertDialog
@@ -90,10 +92,16 @@ fun SettingsScreen(
         }
         HorizontalDivider(thickness = 0.5.dp, color = c.border)
 
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(rememberScrollState()),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = 720.dp)
+                .fillMaxWidth()
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
@@ -183,6 +191,7 @@ fun SettingsScreen(
                 Text(tr("مسح بيانات التصفح"), color = c.errFg)
             }
         }
+        }
     }
 
     if (confirmClear) {
@@ -228,7 +237,7 @@ private fun SegmentedPillRow(
                     .clip(RoundedCornerShape(999.dp))
                     .background(bg)
                     .clickable { onSelect(key) }
-                    .padding(vertical = 8.dp),
+                    .padding(horizontal = 6.dp, vertical = 8.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -237,6 +246,8 @@ private fun SegmentedPillRow(
                         fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                     ),
                     color = if (active) c.textPrimary else c.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

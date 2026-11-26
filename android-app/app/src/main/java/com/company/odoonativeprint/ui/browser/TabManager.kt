@@ -2,6 +2,7 @@ package com.company.odoonativeprint.ui.browser
 
 import android.content.Context
 import android.net.Uri
+import android.view.ViewGroup
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -105,6 +106,7 @@ class TabManager(
         val idx = current.indexOfFirst { it.id == id }
         if (idx == -1) return
         webViews.remove(id)?.apply {
+            (parent as? ViewGroup)?.removeView(this)
             stopLoading()
             destroy()
         }
@@ -140,6 +142,7 @@ class TabManager(
     fun destroyAll() {
         webViews.values.forEach { wv ->
             runCatching {
+                (wv.parent as? ViewGroup)?.removeView(wv)
                 wv.stopLoading()
                 wv.destroy()
             }

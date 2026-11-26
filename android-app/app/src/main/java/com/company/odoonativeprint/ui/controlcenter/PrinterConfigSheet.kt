@@ -3,6 +3,8 @@ import com.company.odoonativeprint.ui.theme.tr
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,6 +38,7 @@ import com.company.odoonativeprint.core.PrinterSettings
 import com.company.odoonativeprint.core.PrinterTransportType
 import com.company.odoonativeprint.ui.theme.LocalYaseirColors
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AddManualPrinterDialog(
     onDismiss: () -> Unit,
@@ -64,7 +67,10 @@ fun AddManualPrinterDialog(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     listOf(
                         PrinterTransportType.TCP_9100 to "TCP 9100",
                         PrinterTransportType.IPP to "IPP",
@@ -92,7 +98,10 @@ fun AddManualPrinterDialog(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     listOf(PrinterProtocol.ESCPOS, PrinterProtocol.ZPL, PrinterProtocol.TSPL, PrinterProtocol.PDF).forEach { p ->
                         FilterChip(
                             selected = protocol == p,
@@ -113,6 +122,7 @@ fun AddManualPrinterDialog(
         },
         confirmButton = {
             TextButton(
+                enabled = name.isNotBlank() && address.isNotBlank(),
                 onClick = {
                     if (name.isNotBlank() && address.isNotBlank()) {
                         onSave(
@@ -132,6 +142,7 @@ fun AddManualPrinterDialog(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PrinterSettingsDialog(
     printer: PrinterInfo,
@@ -157,7 +168,10 @@ fun PrinterSettingsDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     listOf(PrinterProtocol.AUTO, PrinterProtocol.ESCPOS, PrinterProtocol.ZPL, PrinterProtocol.TSPL).forEach { p ->
                         FilterChip(
                             selected = protocol == p,

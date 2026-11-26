@@ -45,18 +45,17 @@ object OdooWebViewFactory {
         val allowedOrigins = setOf(configuredOrigin)
 
         return WebView(context).apply {
-            setInitialScale(100)
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 databaseEnabled = true
                 javaScriptCanOpenWindowsAutomatically = true
                 setSupportMultipleWindows(true)
-                // Render Odoo at device width. Overview mode shrinks pages that
-                // have no viewport meta tag and hides controls behind the
-                // browser chrome, which makes POS/print screens feel cut off.
+                // Respect viewport meta tags and scale down wide content on narrow phones
+                // instead of forcing 100% physical-pixel scale and clipping horizontally.
                 useWideViewPort = true
-                loadWithOverviewMode = false
+                loadWithOverviewMode = true
+                layoutAlgorithm = WebSettings.LayoutAlgorithm.TEXT_AUTOSIZING
                 builtInZoomControls = true
                 displayZoomControls = false
                 mediaPlaybackRequiresUserGesture = false
@@ -131,17 +130,24 @@ object OdooWebViewFactory {
                 ): Boolean {
                     val href = view?.hitTestResult?.extra
                     if (!href.isNullOrBlank()) {
-                        if (OriginPolicy.isSameOrigin(configuredOrigin, href)) {
-                            callbacks.onOpenNewTab(href)
-                        } else {
-                            runCatching {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, Uri.parse(href)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                                )
+                        routePopupUrl(context, configuredOrigin, href, callbacks)
+                        return false
+                    }
+                    val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+                    val temp = WebView(context)
+                    temp.webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest): Boolean {
+                            val url = request.url?.toString()
+                            if (!url.isNullOrBlank()) {
+                                routePopupUrl(context, configuredOrigin, url, callbacks)
                             }
+                            v.destroy()
+                            return true
                         }
                     }
-                    return false
+                    transport.webView = temp
+                    resultMsg.sendToTarget()
+                    return true
                 }
 
                 override fun onShowFileChooser(
@@ -149,6 +155,23 @@ object OdooWebViewFactory {
                     filePathCallback: ValueCallback<Array<Uri>>,
                     fileChooserParams: FileChooserParams,
                 ): Boolean = callbacks.onShowFileChooser(filePathCallback, fileChooserParams)
+            }
+        }
+    }
+
+    private fun routePopupUrl(
+        context: Context,
+        configuredOrigin: String,
+        url: String,
+        callbacks: WebViewCallbacks,
+    ) {
+        if (OriginPolicy.isSameOrigin(configuredOrigin, url)) {
+            callbacks.onOpenNewTab(url)
+        } else {
+            runCatching {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
             }
         }
     }

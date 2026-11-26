@@ -8,6 +8,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,10 +21,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
@@ -55,6 +60,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.company.odoonativeprint.BuildConfig
 import com.company.odoonativeprint.YaseirPrintApp
@@ -135,8 +142,10 @@ fun ControlCenterScreen(
         HorizontalDivider(thickness = 0.5.dp, color = c.border)
 
         // iOS-style Segmented Pill Control
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Row(
             modifier = Modifier
+                .widthIn(max = 760.dp)
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .clip(RoundedCornerShape(999.dp))
@@ -160,7 +169,7 @@ fun ControlCenterScreen(
                             selectedTab = idx
                             if (idx == 1) reloadData()
                         }
-                        .padding(vertical = 8.dp),
+                        .padding(horizontal = 6.dp, vertical = 8.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -169,9 +178,12 @@ fun ControlCenterScreen(
                             fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                         ),
                         color = if (active) c.textPrimary else c.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
+        }
         }
 
         when (selectedTab) {
@@ -262,6 +274,7 @@ fun ControlCenterScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PrintersTab(
     printers: List<PrinterInfo>,
@@ -272,8 +285,9 @@ private fun PrintersTab(
     onSetDefault: (PrinterInfo) -> Unit,
 ) {
     val c = LocalYaseirColors.current
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        modifier = Modifier.widthIn(max = 760.dp).fillMaxSize().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
@@ -331,7 +345,10 @@ private fun PrintersTab(
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     if (needsUsbPerm) {
                         Button(
                             onClick = { onRequestUsbPermission(p) },
@@ -364,8 +381,10 @@ private fun PrintersTab(
         }
         item { Spacer(Modifier.height(16.dp)) }
     }
+    }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun QueueTab(
     jobs: List<PrintJobRecord>,
@@ -374,8 +393,9 @@ private fun QueueTab(
     onClearFinished: () -> Unit,
 ) {
     val c = LocalYaseirColors.current
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        modifier = Modifier.widthIn(max = 760.dp).fillMaxSize().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         if (jobs.any { it.state.isTerminal }) {
@@ -445,7 +465,10 @@ private fun QueueTab(
                 }
                 if (job.state == JobState.FAILED || job.state.isActive) {
                     Spacer(Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         if (job.state == JobState.FAILED) {
                             OutlinedButton(onClick = { onRetry(job.id) }, shape = RoundedCornerShape(999.dp)) {
                                 Text(tr("إعادة"))
@@ -462,6 +485,7 @@ private fun QueueTab(
         }
         item { Spacer(Modifier.height(16.dp)) }
     }
+    }
 }
 
 @Composable
@@ -472,8 +496,14 @@ private fun DiagnosticsTab(
 ) {
     val c = LocalYaseirColors.current
     val snap = app.configStore.current()
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        contentAlignment = Alignment.TopCenter,
+    ) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        modifier = Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Column(
@@ -504,14 +534,33 @@ private fun DiagnosticsTab(
             Spacer(Modifier.width(6.dp))
             Text(tr("تصدير التشخيص"))
         }
+        Spacer(Modifier.height(16.dp))
+    }
     }
 }
 
 @Composable
 private fun DiagRow(label: String, value: String) {
     val c = LocalYaseirColors.current
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MaterialTheme.typography.bodySmall, color = c.textMuted)
-        Text(value, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium), color = c.textPrimary)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = c.textMuted,
+            modifier = Modifier.padding(end = 12.dp),
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+            color = c.textPrimary,
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.End,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
