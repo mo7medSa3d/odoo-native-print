@@ -820,35 +820,6 @@ try {
         await comp.maybeSyncDeviceCaps([{ name: "HP LaserJet", protocol: "escpos", printer_class: "thermal" }], false);
         eq(capCalls, 3, "protocol/class change triggers fresh printerCapabilities query");
 
-        // Manual refresh during an in-flight background poll queues a forced follow-up sync.
-        {
-            const overviewArgs = [];
-            let resolveBg = null;
-            const prevCapCalls = capCalls;
-            const prevOverview = globalThis.window.__NATIVE_PRINT__.appOverview;
-            globalThis.window.__NATIVE_PRINT__.appOverview = (opts) => {
-                overviewArgs.push(opts || null);
-                if (overviewArgs.length === 1) {
-                    return new Promise((r) => { resolveBg = r; });
-                }
-                return Promise.resolve({ printers: printerList, defaultPrinter: "HP LaserJet" });
-            };
-            try {
-                const bgPromise = comp.syncDiscoveredPrinters(false);
-                await comp.syncDiscoveredPrinters(true);
-                eq(comp._pendingForceSync, true, "manual refresh during background poll sets _pendingForceSync");
-                resolveBg({ printers: printerList, defaultPrinter: "HP LaserJet" });
-                await bgPromise;
-                await new Promise((r) => setTimeout(r, 10));
-                eq(overviewArgs.length, 2, "queued manual refresh runs after background poll finishes");
-                eq(Boolean(overviewArgs[1] && overviewArgs[1].force), true, "queued follow-up passes force: true");
-                eq(comp._pendingForceSync, false, "_pendingForceSync cleared after follow-up runs");
-            } finally {
-                globalThis.window.__NATIVE_PRINT__.appOverview = prevOverview;
-                capCalls = prevCapCalls;
-            }
-        }
-
         unmountHook();
         eq(listeners.length, 0, "onWillUnmount removes click and job_updated listeners");
         // After unmount, dispatching native_print:job_updated must not call /native_print/overview.
@@ -865,6 +836,35 @@ try {
         globalThis.localStorage.setItem("npCapsSyncV1", "null");
         await comp.maybeSyncDeviceCaps(printerList, false);
         eq(capCalls, 4, "corrupted null npCapsSyncV1 storage recovers safely");
+
+        // Manual refresh during an in-flight background poll queues a forced follow-up sync.
+        {
+            const comp2 = new sMod.NativePrintSystray();
+            comp2.setup();
+            const overviewArgs = [];
+            let resolveBg = null;
+            const prevOverview = globalThis.window.__NATIVE_PRINT__.appOverview;
+            globalThis.window.__NATIVE_PRINT__.appOverview = (opts) => {
+                overviewArgs.push(opts || null);
+                if (overviewArgs.length === 1) {
+                    return new Promise((r) => { resolveBg = r; });
+                }
+                return Promise.resolve({ printers: printerList, defaultPrinter: "HP LaserJet" });
+            };
+            try {
+                const bgPromise = comp2.syncDiscoveredPrinters(false);
+                await comp2.syncDiscoveredPrinters(true);
+                eq(comp2._pendingForceSync, true, "manual refresh during background poll sets _pendingForceSync");
+                resolveBg({ printers: printerList, defaultPrinter: "HP LaserJet" });
+                await bgPromise;
+                await new Promise((r) => setTimeout(r, 10));
+                eq(overviewArgs.length, 2, "queued manual refresh runs after background poll finishes");
+                eq(Boolean(overviewArgs[1] && overviewArgs[1].force), true, "queued follow-up passes force: true");
+                eq(comp2._pendingForceSync, false, "_pendingForceSync cleared after follow-up runs");
+            } finally {
+                globalThis.window.__NATIVE_PRINT__.appOverview = prevOverview;
+            }
+        }
 
         // Escape key closes open systray dropdown.
         comp.state.isOpen = true;

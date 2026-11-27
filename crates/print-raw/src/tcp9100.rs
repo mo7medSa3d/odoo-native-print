@@ -659,8 +659,12 @@ mod tests {
         use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
         assert!(is_blocked_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254))));
         assert!(is_blocked_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 0, 1))));
-        assert!(is_blocked_ip(IpAddr::V6("fe80::1".parse::<Ipv6Addr>().unwrap())));
-        assert!(is_blocked_ip(IpAddr::V6("febf::1".parse::<Ipv6Addr>().unwrap())));
+        assert!(is_blocked_ip(IpAddr::V6(
+            "fe80::1".parse::<Ipv6Addr>().unwrap()
+        )));
+        assert!(is_blocked_ip(IpAddr::V6(
+            "febf::1".parse::<Ipv6Addr>().unwrap()
+        )));
         assert!(is_blocked_ip(IpAddr::V6(
             "::ffff:169.254.169.254".parse::<Ipv6Addr>().unwrap()
         )));
@@ -668,8 +672,12 @@ mod tests {
         assert!(!is_blocked_ip(IpAddr::V4(Ipv4Addr::LOCALHOST)));
         assert!(!is_blocked_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10))));
         assert!(!is_blocked_ip(IpAddr::V6(Ipv6Addr::LOCALHOST)));
-        assert!(!is_blocked_ip(IpAddr::V6("fd00::1".parse::<Ipv6Addr>().unwrap())));
-        assert!(!is_blocked_ip(IpAddr::V6("fec0::1".parse::<Ipv6Addr>().unwrap())));
+        assert!(!is_blocked_ip(IpAddr::V6(
+            "fd00::1".parse::<Ipv6Addr>().unwrap()
+        )));
+        assert!(!is_blocked_ip(IpAddr::V6(
+            "fec0::1".parse::<Ipv6Addr>().unwrap()
+        )));
         assert!(!is_blocked_ip(IpAddr::V6(
             "::ffff:127.0.0.1".parse::<Ipv6Addr>().unwrap()
         )));

@@ -2352,6 +2352,7 @@ dependencies = [
 name = "print-ipp"
 version = "0.1.0"
 dependencies = [
+ "print-core",
  "thiserror 2.0.21",
 ]
 
@@ -2359,6 +2360,7 @@ dependencies = [
 name = "print-raw"
 version = "0.1.0"
 dependencies = [
+ "print-core",
  "thiserror 2.0.21",
 ]
 

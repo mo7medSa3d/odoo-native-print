@@ -643,8 +643,7 @@ mod tests {
         }
         assert!(match_paper(PageSize::a5(), &forms, ScalePolicy::Strict).is_err());
         // Width within roll tolerance clamps to the roll's physical width.
-        let clamped =
-            match_paper(PageSize::new(81.5, 250.0), &forms, ScalePolicy::Strict).unwrap();
+        let clamped = match_paper(PageSize::new(81.5, 250.0), &forms, ScalePolicy::Strict).unwrap();
         assert_eq!(clamped.kind, MatchKind::Roll);
         assert_eq!(clamped.form.size.width_mm, 80.0);
         assert_eq!(clamped.form.size.height_mm, 250.0);

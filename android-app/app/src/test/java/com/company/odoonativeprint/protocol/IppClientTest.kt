@@ -130,9 +130,7 @@ class IppClientTest {
             server.enqueue(MockResponse().setResponseCode(200).setBody(Buffer().write(okIpp)))
             server.start()
 
-            val pdfBytes = "%PDF-1.4
-%%EOF
-".toByteArray()
+            val pdfBytes = "%PDF-1.4\n%%EOF\n".toByteArray()
             val tmp = File.createTempFile("ipp-stream-test", ".pdf").apply {
                 writeBytes(pdfBytes)
                 deleteOnExit()

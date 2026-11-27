@@ -3589,7 +3589,8 @@ pub fn spawn_worker_loop(
                                     .remove(&self.printer);
                                 if self.normal_exit {
                                     let (lock, cvar) = &*self.wake;
-                                    let mut pending = lock.lock().unwrap_or_else(|p| p.into_inner());
+                                    let mut pending =
+                                        lock.lock().unwrap_or_else(|p| p.into_inner());
                                     *pending = true;
                                     cvar.notify_one();
                                 } else {

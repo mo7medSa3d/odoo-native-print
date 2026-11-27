@@ -158,9 +158,7 @@ impl JobOptions {
         }
         if let Some(g) = self.label_gap_mm {
             if !g.is_finite() || g < 0.0 {
-                return Err(QueueError::BadOptions(format!(
-                    "invalid label_gap_mm: {g}"
-                )));
+                return Err(QueueError::BadOptions(format!("invalid label_gap_mm: {g}")));
             }
         }
         if let Some(w) = self.source_width_mm {
@@ -2220,8 +2218,13 @@ mod tests {
             ("p-fresh", "k-pf", STALE_PRINTING_THRESHOLD_SECS - 60),
             ("p-wedged", "k-pw", STALE_PRINTING_THRESHOLD_SECS + 60),
         ] {
-            q.enqueue_with_payload(&job(id, key, "P1", 0), "pdf", b"data", &JobOptions::default())
-                .unwrap();
+            q.enqueue_with_payload(
+                &job(id, key, "P1", 0),
+                "pdf",
+                b"data",
+                &JobOptions::default(),
+            )
+            .unwrap();
             q.claim_next("P1").unwrap();
             q.set_state(id, JobState::Spooling, None).unwrap();
             q.set_state(id, JobState::Printing, None).unwrap();
@@ -2253,8 +2256,13 @@ mod tests {
         // Seed old done, old canceled, fresh done, and an old __queue__ event.
         let old_ts = now_unix() - 7200;
         for (id, key) in [("d-old", "k-do"), ("c-old", "k-co"), ("d-new", "k-dn")] {
-            q.enqueue_with_payload(&job(id, key, "P1", 0), "pdf", b"data", &JobOptions::default())
-                .unwrap();
+            q.enqueue_with_payload(
+                &job(id, key, "P1", 0),
+                "pdf",
+                b"data",
+                &JobOptions::default(),
+            )
+            .unwrap();
         }
         for id in ["d-old", "d-new"] {
             for s in [
@@ -2269,10 +2277,16 @@ mod tests {
         q.cancel_job("c-old").unwrap();
         for id in ["d-old", "c-old"] {
             q.conn
-                .execute("UPDATE jobs SET updated_at=?1 WHERE id=?2", params![old_ts, id])
+                .execute(
+                    "UPDATE jobs SET updated_at=?1 WHERE id=?2",
+                    params![old_ts, id],
+                )
                 .unwrap();
             q.conn
-                .execute("UPDATE job_events SET ts=?1 WHERE job_id=?2", params![old_ts, id])
+                .execute(
+                    "UPDATE job_events SET ts=?1 WHERE job_id=?2",
+                    params![old_ts, id],
+                )
                 .unwrap();
         }
         q.conn
@@ -2294,18 +2308,23 @@ mod tests {
         assert!(q.get("c-old").is_err());
         assert!(q.get("d-new").is_ok());
         let events = q.recent_events(50).unwrap();
-        assert!(!events.iter().any(|e| e.job_id == "d-old" || e.job_id == "c-old"));
-        assert_eq!(
-            events.iter().filter(|e| e.job_id == "__queue__").count(),
-            1
-        );
+        assert!(!events
+            .iter()
+            .any(|e| e.job_id == "d-old" || e.job_id == "c-old"));
+        assert_eq!(events.iter().filter(|e| e.job_id == "__queue__").count(), 1);
 
         // Calling purge_stale_failed_jobs with a non-negative window also prunes old finished jobs.
         q.conn
-            .execute("UPDATE jobs SET updated_at=?1 WHERE id='d-new'", params![old_ts])
+            .execute(
+                "UPDATE jobs SET updated_at=?1 WHERE id='d-new'",
+                params![old_ts],
+            )
             .unwrap();
         q.conn
-            .execute("UPDATE job_events SET ts=?1 WHERE job_id='d-new'", params![old_ts])
+            .execute(
+                "UPDATE job_events SET ts=?1 WHERE job_id='d-new'",
+                params![old_ts],
+            )
             .unwrap();
         assert_eq!(q.purge_stale_failed_jobs(3600).unwrap(), 0);
         assert!(q.get("d-new").is_err());
@@ -2385,9 +2404,9 @@ mod tests {
         assert!(events.iter().any(|e| e.job_id == "a1"
             && e.event == "state:rendering"
             && e.detail.as_deref() == Some("attempt=1")));
-        assert!(events.iter().any(|e| e.job_id == "a1"
-            && e.event == "state:queued"
-            && e.detail.is_none()));
+        assert!(events
+            .iter()
+            .any(|e| e.job_id == "a1" && e.event == "state:queued" && e.detail.is_none()));
         assert!(events.iter().any(|e| e.job_id == "a1"
             && e.event == "state:rendering"
             && e.detail.as_deref() == Some("attempt=2")));
