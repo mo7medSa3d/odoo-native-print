@@ -133,8 +133,10 @@ pub struct AppState {
     pub queue: Arc<Mutex<Queue>>,
     pub configured_origin: RwLock<Option<String>>,
     pub config_dir: PathBuf,
+    pub data_dir: PathBuf,
     pub locked_by_policy: bool,
     pub auto_reprint: RwLock<bool>,
+    pub allow_exit: Arc<AtomicBool>,
     pub worker_wake: Arc<(Mutex<bool>, Condvar)>,
     pub worker_stop: Arc<AtomicBool>,
     pub printer_settings: Arc<RwLock<config::PrinterSettingsMap>>,
@@ -635,6 +637,8 @@ pub struct PrintTextRequest {
     pub text: String,
     pub cut: bool,
     #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
     pub copies: Option<u16>,
 }
 
@@ -669,15 +673,30 @@ pub fn print_text(
         print_core::PageSize::roll_80(200.0),
     )
     .map_err(|e| format!("{e:?}"))?;
-    let mut stream = print_raw::EscPos::new();
-    for line in req.text.lines() {
-        stream = stream.text_line(line);
-    }
-    stream = stream.feed_lines(3);
-    if req.cut {
-        stream = stream.cut_partial();
-    }
-    let bytes = stream.bytes().to_vec();
+    let requested_mode = req
+        .mode
+        .as_deref()
+        .map(|m| m.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| "escpos".to_string());
+    let raw_label_mode = matches!(requested_mode.as_str(), "zpl" | "tspl" | "epl" | "cpcl");
+    let bytes = if raw_label_mode {
+        req.text.as_bytes().to_vec()
+    } else {
+        let mut stream = print_raw::EscPos::new();
+        for line in req.text.lines() {
+            stream = stream.text_line(line);
+        }
+        stream = stream.feed_lines(3);
+        if req.cut {
+            stream = stream.cut_partial();
+        }
+        stream.bytes().to_vec()
+    };
+    let mode = if raw_label_mode {
+        requested_mode
+    } else {
+        "escpos".to_string()
+    };
     let job = Job {
         id: req.idempotency_key.clone(),
         idempotency_key: req.idempotency_key.clone(),
@@ -691,19 +710,19 @@ pub fn print_text(
         error_code: None,
     };
     let opts = JobOptions {
-        mode: "escpos".to_string(),
+        mode: mode.clone(),
         paper: None,
         copies: copies.max(1),
         scale_policy: None,
         duplex: None,
         color: false,
-        cut: req.cut,
+        cut: if raw_label_mode { false } else { req.cut },
         tray: None,
         media_roll_width_mm: None,
         label_gap_mm: None,
         source_width_mm: None,
     };
-    let id = enqueue_idempotent(&state.queue, &job, "escpos", &bytes, &opts)?;
+    let id = enqueue_idempotent(&state.queue, &job, &mode, &bytes, &opts)?;
     state.notify_worker();
     Ok(id)
 }
@@ -1528,6 +1547,7 @@ fn persist_session_cookie(webview: &tauri::Webview, state: &AppState) {
 pub struct AppIdentity {
     pub app_version: String,
     pub odoo_origin: Option<String>,
+    pub startup_url: Option<String>,
 }
 
 #[tauri::command]
@@ -1537,9 +1557,13 @@ pub fn app_identity(
 ) -> Result<AppIdentity, String> {
     check_local_only(&webview)?;
     let origin = read_lock(&state.configured_origin).clone();
+    let startup_url = origin
+        .as_deref()
+        .and_then(|o| config::load_last_url(&state.data_dir, o));
     Ok(AppIdentity {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         odoo_origin: origin,
+        startup_url,
     })
 }
 
@@ -1856,6 +1880,7 @@ pub async fn clear_web_data_cmd(
             wv.clear_all_browsing_data().map_err(|e| e.to_string())?;
         }
     }
+    config::clear_last_url(&state.data_dir);
     let origin = read_lock(&state.configured_origin).clone();
     if let Some(origin) = origin {
         let url = origin.parse::<tauri::Url>().map_err(|e| e.to_string())?;
@@ -1898,6 +1923,7 @@ pub fn save_origin_cmd(
     // Keep open remote tabs synchronized when the Odoo server URL changes so they
     // never get stranded on a stale origin that fails IPC origin checks.
     if prev_origin.as_deref() != Some(validated.as_str()) {
+        config::clear_last_url(&state.data_dir);
         if let Ok(target_url) = validated.parse::<tauri::Url>() {
             let snapshot = read_lock(&state.tabs).snapshot();
             for tab in snapshot.iter().filter(|t| !t.is_local) {
@@ -2167,12 +2193,50 @@ impl NativePrintBackend {
     /// `receipt_dots_for_paper`) to the device's reported render
     /// resolution. A 300-dpi head prints each ESC/POS dot smaller,
     /// so the unscaled dot count would come out physically narrow;
-    /// the driver-reported resolution is the best evidence
-    /// available. With no reported resolutions this is the
-    /// identity (203 dpi).
+    /// >300 dpi (e.g. 600 dpi from Windows Generic / Text Only) is a
+    /// GDI pseudo-resolution and stays at 203 dpi. Always align to a
+    /// whole byte (multiple of 8 dots) within 256..=2048 so GS v 0
+    /// raster encoding never rejects a scaled width.
     fn scale_head_dots(dots: u32, caps: &print_core::printer::PrinterCapabilities) -> u32 {
         let dpi = print_core::printer::preferred_raw_render_dpi(&caps.resolutions_dpi);
-        ((dots as u64 * dpi as u64 + 101) / 203) as u32
+        let scaled = if dpi > 300 {
+            dots
+        } else {
+            ((dots as u64 * dpi as u64 + 101) / 203) as u32
+        };
+        (((scaled + 4) / 8) * 8).clamp(256, 2048)
+    }
+
+    fn is_office_sheet_or_envelope(name: &str) -> bool {
+        let lower = name.trim().to_ascii_lowercase();
+        [
+            "letter",
+            "legal",
+            "tabloid",
+            "ledger",
+            "folio",
+            "executive",
+            "statement",
+            "fanfold",
+            "envelope",
+            "monarch",
+            "a3",
+            "a4",
+            "a5",
+            "b4",
+            "b5",
+            "b6",
+        ]
+        .iter()
+        .any(|tok| lower.contains(tok))
+    }
+
+    fn map_image_error(err: print_render::ImageError) -> BackendError {
+        let code = match err {
+            print_render::ImageError::DimensionsTooLarge(_, _) => "IMAGE_DIMENSIONS_ERROR",
+            _ => "IMAGE_DECODE_ERROR",
+        };
+        BackendError::fatal(code, &err.to_string())
     }
 
     /// Apply Control Center per-printer defaults, scoped so a default
@@ -2275,6 +2339,7 @@ impl NativePrintBackend {
                 .or_else(|| {
                     caps.forms
                         .iter()
+                        .filter(|form| !Self::is_office_sheet_or_envelope(&form.name))
                         .map(|form| form.size.width_mm)
                         .filter(|w| (40.0..=220.0).contains(w))
                         .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
@@ -2536,14 +2601,11 @@ impl NativePrintBackend {
         }
         match mode {
             "escpos" => {
+                // Default PDF reports on Generic/Text or raw-TCP thermal printers to 80 mm (576 dots)
+                // when the driver reports no roll media instead of failing with AUTO_MEDIA_UNAVAILABLE.
                 let target_w = target_width_dots
                     .or_else(|| paper.and_then(print_render::receipt_dots_for_paper))
-                    .ok_or_else(|| {
-                        BackendError::fatal(
-                            "AUTO_MEDIA_UNAVAILABLE",
-                            "No driver-reported roll width is available for ESC/POS rendering.",
-                        )
-                    })?;
+                    .unwrap_or(576);
                 let mut stream = print_raw::EscPos::new();
                 for i in 0..count {
                     let page = doc
@@ -2663,8 +2725,7 @@ impl NativePrintBackend {
         } = render;
         match mode {
             "zpl" => {
-                let canvas = print_render::decode_png(png_bytes)
-                    .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
+                let canvas = print_render::decode_png(png_bytes).map_err(Self::map_image_error)?;
                 let mono = canvas.to_mono(print_render::image::RECEIPT_THRESHOLD);
                 let mono = match label_box {
                     Some((w, h)) => print_render::bitmap::fit_mono_to_box(&mono, w, h),
@@ -2673,8 +2734,7 @@ impl NativePrintBackend {
                 Ok(print_raw::zpl_label_with_options(&mono, 0, 0, copies).into_bytes())
             }
             "tspl" => {
-                let canvas = print_render::decode_png(png_bytes)
-                    .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
+                let canvas = print_render::decode_png(png_bytes).map_err(Self::map_image_error)?;
                 let mono = canvas.to_mono(print_render::image::RECEIPT_THRESHOLD);
                 let mono = match label_box {
                     Some((w, h)) => print_render::bitmap::fit_mono_to_box(&mono, w, h),
@@ -2695,8 +2755,7 @@ impl NativePrintBackend {
                 .print(1, copies.max(1) as u32))
             }
             "epl" | "cpcl" => {
-                let canvas = print_render::decode_png(png_bytes)
-                    .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
+                let canvas = print_render::decode_png(png_bytes).map_err(Self::map_image_error)?;
                 let mono = canvas.to_mono(print_render::image::RECEIPT_THRESHOLD);
                 let mono = match label_box {
                     Some((w, h)) => print_render::bitmap::fit_mono_to_box(&mono, w, h),
@@ -2728,7 +2787,7 @@ impl NativePrintBackend {
                     })?;
                 let single =
                     print_render::receipt_png_to_escpos_width(png_bytes, target_width_dots)
-                        .map_err(|e| BackendError::fatal("IMAGE_DECODE_ERROR", &e.to_string()))?;
+                        .map_err(Self::map_image_error)?;
                 Self::repeat_raw_copies(&single, copies)
             }
             _ => Err(BackendError::fatal(
@@ -3572,6 +3631,25 @@ mod tests {
             NativePrintBackend::form_width_dots(Some(100.0), None),
             Some(728)
         );
+        // 300-dpi head aligns to whole bytes; 600-dpi Generic/Text pseudo-res stays 203 dpi.
+        let caps300 = print_core::PrinterCapabilities {
+            resolutions_dpi: vec![300],
+            ..Default::default()
+        };
+        let scaled300 = NativePrintBackend::scale_head_dots(576, &caps300);
+        assert_eq!(scaled300 % 8, 0);
+        assert_eq!(scaled300, 848);
+        let caps600 = print_core::PrinterCapabilities {
+            resolutions_dpi: vec![600],
+            ..Default::default()
+        };
+        assert_eq!(NativePrintBackend::scale_head_dots(576, &caps600), 576);
+        assert!(NativePrintBackend::is_office_sheet_or_envelope(
+            "Envelope #9"
+        ));
+        assert!(!NativePrintBackend::is_office_sheet_or_envelope(
+            "80mm Roll"
+        ));
     }
 
     #[test]

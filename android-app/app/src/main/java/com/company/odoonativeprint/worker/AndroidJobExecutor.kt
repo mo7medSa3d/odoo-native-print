@@ -33,6 +33,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
+import kotlin.math.roundToInt
 
 /**
  * Bridges queued PrintJobRecords through rendering -> protocol encoding -> physical transport.
@@ -116,13 +117,48 @@ class AndroidJobExecutor(
             }
         }
 
-        // Fast path: IPP direct PDF submission
-        if (printer.transport == PrinterTransportType.IPP && job.sourceKind == "pdf") {
-            val opts = runCatching { JSONObject(job.optionsJson) }.getOrDefault(JSONObject())
-            val duplex = opts.optBoolean("duplex", false)
+        val protocol = resolveProtocol(printer, settings)
+
+        // Pass explicit raw label commands (e.g. Odoo ZPL qweb-text) straight to the printer
+        // instead of rasterizing literal ^XA...^XZ source code through TextReceiptRenderer.
+        val jobOpts = runCatching { JSONObject(job.optionsJson) }.getOrDefault(JSONObject())
+        val requestedMode = jobOpts.optString("mode", "").lowercase()
+        if (job.sourceKind == "text" &&
+            protocol in setOf(PrinterProtocol.ZPL, PrinterProtocol.TSPL, PrinterProtocol.EPL, PrinterProtocol.CPCL) &&
+            requestedMode == protocol.wireName
+        ) {
+            val single = payloadFile.readBytes()
+            val out = ByteArrayOutputStream(single.size * job.copies.coerceAtLeast(1))
+            repeat(job.copies.coerceAtLeast(1)) { out.write(single) }
+            return sendRawPayload(printer, out.toByteArray(), settings)
+        }
+
+        // IPP printers expect PDF (never raw ESC/POS unless the user explicitly forced a raw protocol).
+        if (printer.transport == PrinterTransportType.IPP &&
+            (job.sourceKind == "pdf" || protocol == PrinterProtocol.PDF)
+        ) {
+            val duplex = jobOpts.optBoolean("duplex", false)
+            val pdfBytes = if (job.sourceKind == "pdf") {
+                payloadFile.readBytes()
+            } else {
+                try {
+                    val pages = renderPayload(job, printer, payloadFile, settings, widthDots)
+                    try {
+                        BitmapToPdfWriter.encode(pages, settings.paperWidthMm.toFloat())
+                    } finally {
+                        pages.forEach { it.recycle() }
+                    }
+                } catch (e: Exception) {
+                    return TransportResult.Failure(
+                        "RENDER_FAILED",
+                        e.message ?: "Failed to render PDF for IPP printer",
+                        retryable = false,
+                    )
+                }
+            }
             return ipp.sendDocument(
                 printer = printer,
-                documentBytes = payloadFile.readBytes(),
+                documentBytes = pdfBytes,
                 mimeType = "application/pdf",
                 jobName = "Yaseir-${job.id.take(8)}",
                 copies = job.copies,
@@ -136,7 +172,6 @@ class AndroidJobExecutor(
             return TransportResult.Failure("RENDER_FAILED", e.message ?: "Failed to render payload", retryable = false)
         }
 
-        val protocol = resolveProtocol(printer, settings)
         val encodedStream = ByteArrayOutputStream()
         try {
             val encodedPages = bitmaps.map { bmp ->
@@ -146,7 +181,8 @@ class AndroidJobExecutor(
                     PrinterProtocol.TSPL -> TsplEncoder.encode(
                         mono,
                         widthMm = settings.paperWidthMm,
-                        heightMm = settings.labelHeightMm.takeIf { it > 0 } ?: 100,
+                        heightMm = settings.labelHeightMm.takeIf { it > 0 }
+                            ?: (mono.height * 25.4f / settings.dpi).roundToInt().coerceIn(20, 600),
                         copies = job.copies,
                     )
                     PrinterProtocol.EPL -> EplEncoder.encode(mono, copies = job.copies)
@@ -168,14 +204,19 @@ class AndroidJobExecutor(
             bitmaps.forEach { it.recycle() }
         }
 
-        val rawBytes = encodedStream.toByteArray()
-        return when (printer.transport) {
-            PrinterTransportType.TCP_9100 -> tcp9100.sendRaw(printer, rawBytes, settings)
-            PrinterTransportType.BLUETOOTH_SPP -> bluetoothSpp.sendRaw(printer, rawBytes, settings)
-            PrinterTransportType.USB_OTG -> usbOtg.sendRaw(printer, rawBytes, settings)
-            PrinterTransportType.IPP -> ipp.sendDocument(printer, rawBytes, mimeType = "application/octet-stream", copies = 1)
-            PrinterTransportType.ANDROID_SYSTEM -> TransportResult.Failure("UNSUPPORTED_TRANSPORT", "Unsupported transport", retryable = false)
-        }
+        return sendRawPayload(printer, encodedStream.toByteArray(), settings)
+    }
+
+    private suspend fun sendRawPayload(
+        printer: PrinterInfo,
+        rawBytes: ByteArray,
+        settings: PrinterSettings,
+    ): TransportResult = when (printer.transport) {
+        PrinterTransportType.TCP_9100 -> tcp9100.sendRaw(printer, rawBytes, settings)
+        PrinterTransportType.BLUETOOTH_SPP -> bluetoothSpp.sendRaw(printer, rawBytes, settings)
+        PrinterTransportType.USB_OTG -> usbOtg.sendRaw(printer, rawBytes, settings)
+        PrinterTransportType.IPP -> ipp.sendDocument(printer, rawBytes, mimeType = "application/octet-stream", copies = 1)
+        PrinterTransportType.ANDROID_SYSTEM -> TransportResult.Failure("UNSUPPORTED_TRANSPORT", "Unsupported transport", retryable = false)
     }
 
     private suspend fun renderPayload(

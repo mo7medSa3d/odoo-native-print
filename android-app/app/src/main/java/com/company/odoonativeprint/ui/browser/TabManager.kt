@@ -41,6 +41,7 @@ class TabManager(
     private val dispatcher: BridgeDispatcher,
     private val bridgeScope: CoroutineScope,
     private val onShowFileChooser: (ValueCallback<Array<Uri>>, WebChromeClient.FileChooserParams) -> Boolean,
+    private val onActiveUrlChanged: ((String) -> Unit)? = null,
 ) {
     private val webViews = LinkedHashMap<String, WebView>()
     private val _state = MutableStateFlow(TabManagerState())
@@ -48,13 +49,13 @@ class TabManager(
 
     private var activeOrigin: String? = null
 
-    fun ensureInitialized(origin: String) {
+    fun ensureInitialized(origin: String, initialUrl: String? = null) {
         if (activeOrigin != origin) {
             destroyAll()
             activeOrigin = origin
         }
         if (_state.value.tabs.isEmpty()) {
-            openTab(origin)
+            openTab(initialUrl?.takeIf { it.isNotBlank() } ?: origin)
         }
     }
 
@@ -76,7 +77,12 @@ class TabManager(
             bridgeScope = bridgeScope,
             callbacks = WebViewCallbacks(
                 onTitleChanged = { title -> updateTab(id) { it.copy(title = title) } },
-                onUrlChanged = { newUrl -> updateTab(id) { it.copy(url = newUrl) } },
+                onUrlChanged = { newUrl ->
+                    updateTab(id) { it.copy(url = newUrl) }
+                    if (_state.value.activeTabId == id) {
+                        onActiveUrlChanged?.invoke(newUrl)
+                    }
+                },
                 onProgressChanged = { p -> updateTab(id) { it.copy(progress = p) } },
                 onNavigationStateChanged = { back, fwd ->
                     updateTab(id) { it.copy(canGoBack = back, canGoForward = fwd) }
@@ -96,8 +102,10 @@ class TabManager(
     }
 
     fun switchTab(id: String) {
-        if (_state.value.tabs.any { it.id == id }) {
-            _state.value = _state.value.copy(activeTabId = id)
+        val target = _state.value.tabs.firstOrNull { it.id == id } ?: return
+        _state.value = _state.value.copy(activeTabId = id)
+        if (target.url.isNotBlank()) {
+            onActiveUrlChanged?.invoke(target.url)
         }
     }
 

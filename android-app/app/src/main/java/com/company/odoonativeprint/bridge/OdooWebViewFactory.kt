@@ -100,6 +100,12 @@ object OdooWebViewFactory {
                     callbacks.onNavigationStateChanged(view.canGoBack(), view.canGoForward())
                 }
 
+                override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+                    super.doUpdateVisitedHistory(view, url, isReload)
+                    if (!url.isNullOrBlank()) callbacks.onUrlChanged(url)
+                    callbacks.onNavigationStateChanged(view.canGoBack(), view.canGoForward())
+                }
+
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     val uri = request.url ?: return false
                     val scheme = uri.scheme?.lowercase() ?: return false

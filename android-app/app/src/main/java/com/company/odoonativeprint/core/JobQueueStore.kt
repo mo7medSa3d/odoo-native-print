@@ -113,13 +113,13 @@ class JobQueueEngine(
 
     fun nextReadyJobForPrinter(printerName: String): PrintJobRecord? = synchronized(lock) {
         val now = clock()
-        persistence.listAll(PayloadLimits.MAX_ACTIVE_GLOBAL)
+        persistence.listAll(PayloadLimits.MAX_ACTIVE_GLOBAL + PayloadLimits.MAX_RETAINED_FINISHED)
             .filter { it.printerName == printerName && it.state == JobState.QUEUED && it.nextRetryAtMs <= now }
             .minByOrNull { it.createdAtMs }
     }
 
     fun printersWithQueuedJobs(): Set<String> = synchronized(lock) {
-        persistence.listAll(PayloadLimits.MAX_ACTIVE_GLOBAL)
+        persistence.listAll(PayloadLimits.MAX_ACTIVE_GLOBAL + PayloadLimits.MAX_RETAINED_FINISHED)
             .filter { it.state == JobState.QUEUED }
             .map { it.printerName }
             .toSet()
@@ -146,6 +146,8 @@ class JobQueueEngine(
         if (newState == JobState.COMPLETED) {
             // Keep spool file only if failed (so user can retry); completed jobs free disk immediately.
             File(updated.payloadPath).delete()
+        }
+        if (newState.isTerminal) {
             pruneFinishedLocked()
         }
         return updated
@@ -195,7 +197,7 @@ class JobQueueEngine(
     fun reconcileInterruptedJobs(autoReprint: Boolean): Int = synchronized(lock) {
         val now = clock()
         var recovered = 0
-        for (job in persistence.listAll(PayloadLimits.MAX_ACTIVE_GLOBAL)) {
+        for (job in persistence.listAll(PayloadLimits.MAX_ACTIVE_GLOBAL + PayloadLimits.MAX_RETAINED_FINISHED)) {
             when (job.state) {
                 JobState.RENDERING, JobState.SPOOLING -> {
                     val next = if (job.attempts < job.maxAttempts && File(job.payloadPath).exists()) {

@@ -30,6 +30,32 @@ import { JOB_TERMINAL_STATES as TERMINAL_STATES, normalizeBridgeJobState, notify
 
 const POS_RECEIPT_SOURCE = "point_of_sale.receipt";
 
+const RECEIPT_LAYOUT_FIX_CSS =
+    ".pos-receipt{padding-bottom:16px !important}" +
+    ".pos-receipt,.pos-receipt *{float:none !important;position:static !important;direction:ltr !important;line-height:1.35 !important;box-sizing:border-box !important}" +
+    ".pos-receipt *:not(img):not(canvas):not(svg){height:auto !important;min-height:0 !important;max-height:none !important;block-size:auto !important;overflow:visible !important}" +
+    ".pos-receipt span:not(.pos-receipt-right-align),.pos-receipt .cashier,.pos-receipt .cashier>div{width:auto !important;inline-size:auto !important}" +
+    ".pos-receipt .pos-receipt-amount,.pos-receipt .paymentlines,.pos-receipt .pos-receipt-taxes>div{display:flex !important;justify-content:space-between !important;gap:0.75em !important;align-items:baseline !important}" +
+    ".pos-receipt .ms-auto{margin-left:auto !important;margin-inline-start:auto !important;white-space:nowrap !important;flex-shrink:0 !important}" +
+    ".pos-receipt .pos-receipt-contact,.pos-receipt .pos-receipt-customer{display:flex !important;flex-direction:column !important;align-items:center !important}" +
+    ".pos-receipt .pos-receipt-right-align{display:inline-block !important;margin-left:auto !important;margin-inline-start:auto !important;text-align:right !important;white-space:nowrap !important;flex-shrink:0 !important}" +
+    ".pos-receipt .pos-receipt-qr{display:flex !important;flex-direction:row !important;align-items:flex-start !important;gap:0.75em !important}" +
+    ".pos-receipt .pos-receipt-qr>div:first-child{flex:0 0 auto !important;width:auto !important;inline-size:auto !important}" +
+    ".pos-receipt .pos-receipt-qr>div:last-child{flex:1 1 0% !important;min-width:0 !important;width:auto !important;inline-size:auto !important}" +
+    ".pos-receipt .portal-url,.pos-receipt .text-break{overflow-wrap:anywhere !important;word-break:break-word !important;max-width:100% !important}";
+
+// Odoo floats receipt amounts right and aligns rows to `start`; both the SVG
+// capture and the 2D-canvas fallback draw stacked/overlapping text because of
+// it. Install the fix on the live page so both capture paths inherit it.
+(function installReceiptLayoutFix() {
+    if (typeof document === "undefined" || !document.head || typeof document.createElement !== "function") return;
+    if (typeof document.getElementById === "function" && document.getElementById("np-receipt-layout-fix")) return;
+    const style = document.createElement("style");
+    style.id = "np-receipt-layout-fix";
+    style.textContent = RECEIPT_LAYOUT_FIX_CSS;
+    document.head.appendChild(style);
+})();
+
 function nativeBridge() {
     return window.__NATIVE_PRINT__ || null;
 }
@@ -324,10 +350,10 @@ async function withConnectedElement(element, fn) {
     }
 }
 
-async function elementToPngBytes(element, scale = 3) {
+async function elementToPngBytes(element, scale = 2) {
     return await withConnectedElement(element, async () => {
         const width = element.offsetWidth || 320;
-        const height = element.offsetHeight || element.scrollHeight || 480;
+        const height = Math.max(element.offsetHeight || 0, element.scrollHeight || 0) || 480;
         if (!width || !height) {
             throw new Error("receipt element has no size");
         }
@@ -340,6 +366,17 @@ async function elementToPngBytes(element, scale = 3) {
         const scaledH = Math.max(1, Math.ceil(height * effectiveScale));
         const clone = element.cloneNode(true);
         const bgTargets = inlineStyles(element, clone);
+        // Float + `text-align: start` + frozen computed pixel heights stack/overlap
+        // wrapped lines in <foreignObject>; reset box heights and enforce flex rows.
+        const layoutFix = typeof document.createElementNS === "function"
+            ? document.createElementNS("http://www.w3.org/1999/xhtml", "style")
+            : document.createElement("style");
+        layoutFix.textContent = RECEIPT_LAYOUT_FIX_CSS;
+        if (typeof clone.insertBefore === "function") {
+            clone.insertBefore(layoutFix, clone.firstChild);
+        } else if (typeof clone.appendChild === "function") {
+            clone.appendChild(layoutFix);
+        }
         await inlineMedia(element, clone, bgTargets);
         // Reset root positioning/overflow so the receipt fills the foreignObject
         // cleanly, and preserve direction/lang for RTL Arabic rendering.
@@ -405,7 +442,7 @@ async function elementToPngBytes(element, scale = 3) {
 // Pure 2D canvas fallback when SVG foreignObject capture is blocked by a
 // WebView/CSP quirk: draws images/QR codes, horizontal rules, and positioned
 // text runs directly without SVG so receipts still print on every printer.
-async function renderReceiptCanvasFallback(element, scale = 3) {
+async function renderReceiptCanvasFallback(element, scale = 2) {
     return await withConnectedElement(element, async () => {
         const rootRect = element.getBoundingClientRect();
         const width = Math.ceil(element.offsetWidth || rootRect.width || 320);
@@ -792,15 +829,15 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
         let bytes = null;
         let fallbackText = null;
         try {
-            bytes = await elementToPngBytes(element, 3);
+            bytes = await elementToPngBytes(element, 2);
         } catch (firstCaptureError) {
-            console.warn("Native Print: POS SVG capture (scale 3) failed, retrying at scale 2.", firstCaptureError);
+            console.warn("Native Print: POS SVG capture (scale 2) failed, retrying at scale 1.", firstCaptureError);
             try {
-                bytes = await elementToPngBytes(element, 2);
+                bytes = await elementToPngBytes(element, 1);
             } catch (secondCaptureError) {
-                console.warn("Native Print: POS SVG capture (scale 2) failed, trying 2D canvas fallback.", secondCaptureError);
+                console.warn("Native Print: POS SVG capture (scale 1) failed, trying 2D canvas fallback.", secondCaptureError);
                 try {
-                    bytes = await renderReceiptCanvasFallback(element, 3);
+                    bytes = await renderReceiptCanvasFallback(element, 2);
                 } catch (canvasFallbackError) {
                     console.warn("Native Print: POS 2D canvas fallback failed.", canvasFallbackError);
                     if (effectiveMode === "escpos" && typeof bridge.printText === "function") {

@@ -6,7 +6,17 @@ use print_core::security::origin_is_allowed;
 use print_core::Queue;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Manager, WebviewUrl};
+
+fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
 
 /// Bridge injected into the webview. Maps `window.__NATIVE_PRINT__` calls
 /// onto Tauri IPC commands (which re-validate the caller's origin in Rust
@@ -228,37 +238,6 @@ const BRIDGE_JS: &str = r#"
     var host = window.location.hostname;
     return (proto === "tauri:" && host === "localhost")
       || ((proto === "http:" || proto === "https:") && host === "tauri.localhost");
-  }
-  // Unencrypted-origin warning: HTTP to an IP address is allowed by
-  // the owner's policy (ADR-0002), but credentials and documents cross
-  // the network unencrypted. A slim strip says so on every HTTP page
-  // until dismissed for the session; it never blocks work.
-  function npHttpWarning() {
-    if (window.location.protocol !== 'http:') { return; }
-    if (npIsLocalPage()) { return; }
-    try {
-      if (window.sessionStorage.getItem('np_http_warned') === '1') { return; }
-    } catch (e) { /* storage blocked: still warn */ }
-    var show = function () {
-      if (document.getElementById('np-http-warning')) { return; }
-      var bar = document.createElement('div');
-      bar.id = 'np-http-warning';
-      bar.setAttribute('style', 'position:fixed;bottom:0;left:0;right:0;z-index:2147483646;background:#8a6d00;color:#fff;font:13px/1.5 system-ui,sans-serif;padding:6px 12px;display:flex;justify-content:space-between;align-items:center;direction:rtl;');
-      var text = document.createElement('span');
-      text.textContent = 'تنبيه: الاتصال بخادم Odoo غير مشفّر (HTTP) — بيانات الدخول والمستندات تمر دون تشفير على الشبكة.';
-      var btn = document.createElement('button');
-      btn.textContent = 'حسنًا';
-      btn.setAttribute('style', 'background:transparent;border:1px solid #fff;color:#fff;border-radius:999px;padding:2px 14px;cursor:pointer;font:inherit;');
-      btn.addEventListener('click', function () {
-        try { window.sessionStorage.setItem('np_http_warned', '1'); } catch (e) {}
-        bar.remove();
-      });
-      bar.appendChild(text);
-      bar.appendChild(btn);
-      document.body.appendChild(bar);
-    };
-    if (document.body) { show(); }
-    else { document.addEventListener('DOMContentLoaded', show, { once: true }); }
   }
 
   function npProbeEnvironment() {
@@ -486,11 +465,9 @@ const BRIDGE_JS: &str = r#"
     } catch (e) { /* ignore */ }
     // Arm immediately at init-script evaluation: a page whose
     // DOMContentLoaded stalls (a hung render-blocking asset) still
-    // gets its watchdog and environment report. Only the HTTP strip
-    // needs document.body, and it waits for it itself.
+    // gets its watchdog and environment report.
     npReportEnvironment();
     npBootWatchdog();
-    npHttpWarning();
     // Odoo is an SPA: it soft-navigates between actions and can
     // soft-navigate from a non-backend landing page into /odoo
     // without a new document load. Re-check on history transitions;
@@ -723,10 +700,23 @@ pub fn create_tab_webview(
             tauri::webview::NewWindowResponse::Deny
         })
         .on_page_load(move |_webview, payload| match payload.event() {
-            tauri::webview::PageLoadEvent::Started | tauri::webview::PageLoadEvent::Finished => {
+            tauri::webview::PageLoadEvent::Started => {
                 let st = load_handle.state::<AppState>();
                 let mut tabs = commands::write_lock(&st.tabs);
                 tabs.set_url(&load_label, payload.url().as_str());
+            }
+            tauri::webview::PageLoadEvent::Finished => {
+                let st = load_handle.state::<AppState>();
+                {
+                    let mut tabs = commands::write_lock(&st.tabs);
+                    tabs.set_url(&load_label, payload.url().as_str());
+                }
+                if !is_local_app_url(payload.url()) {
+                    let cfg_origin = commands::read_lock(&st.configured_origin).clone();
+                    if let Some(cfg_origin) = cfg_origin.as_deref() {
+                        config::save_last_url(&st.data_dir, cfg_origin, payload.url().as_str());
+                    }
+                }
             }
         });
     let (width, height) = {
@@ -762,7 +752,16 @@ fn acquire_single_instance_guard() -> bool {
         ) -> *mut std::ffi::c_void;
         fn GetLastError() -> u32;
     }
+    #[link(name = "user32")]
+    extern "system" {
+        fn FindWindowW(class_name: *const u16, window_name: *const u16) -> *mut std::ffi::c_void;
+        fn ShowWindow(hwnd: *mut std::ffi::c_void, cmd_show: i32) -> i32;
+        fn SetForegroundWindow(hwnd: *mut std::ffi::c_void) -> i32;
+        fn IsIconic(hwnd: *mut std::ffi::c_void) -> i32;
+    }
     const ERROR_ALREADY_EXISTS: u32 = 183;
+    const SW_SHOW: i32 = 5;
+    const SW_RESTORE: i32 = 9;
     let wide_name: Vec<u16> = "Local\\YaseirPrintSingleInstance\0"
         .encode_utf16()
         .collect();
@@ -770,7 +769,22 @@ fn acquire_single_instance_guard() -> bool {
     if handle.is_null() {
         return true;
     }
-    unsafe { GetLastError() != ERROR_ALREADY_EXISTS }
+    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        // Restore an existing window that may be hidden in the system tray.
+        let title: Vec<u16> = "Yaseir Print\0".encode_utf16().collect();
+        let hwnd = unsafe { FindWindowW(std::ptr::null(), title.as_ptr()) };
+        if !hwnd.is_null() {
+            unsafe {
+                ShowWindow(hwnd, SW_SHOW);
+                if IsIconic(hwnd) != 0 {
+                    ShowWindow(hwnd, SW_RESTORE);
+                }
+                SetForegroundWindow(hwnd);
+            }
+        }
+        return false;
+    }
+    true
 }
 
 #[cfg(not(windows))]
@@ -826,16 +840,19 @@ pub fn run() {
                     let _ = print_win::discover_printers();
                 });
 
+            let allow_exit = Arc::new(AtomicBool::new(false));
             let initial_origin = resolved.odoo_origin.clone();
             app.manage(AppState {
                 queue: queue_arc,
                 configured_origin: RwLock::new(initial_origin.clone()),
                 config_dir,
+                data_dir,
                 environment,
                 tabs: RwLock::new(TabsState::default()),
                 started_at: std::time::Instant::now(),
                 locked_by_policy: resolved.locked_by_policy,
                 auto_reprint: RwLock::new(resolved.auto_reprint),
+                allow_exit: Arc::clone(&allow_exit),
                 worker_wake,
                 worker_stop,
                 printer_settings,
@@ -890,9 +907,44 @@ pub fn run() {
             }
             create_tab_webview(app.handle(), "tab-1", start_url)?;
 
+            let open_item =
+                MenuItem::with_id(app, "tray-open", "فتح Yaseir Print", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "tray-quit", "إنهاء", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+            let mut tray_builder = TrayIconBuilder::with_id("yaseir-tray")
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .tooltip("Yaseir Print")
+                .on_menu_event(|app_handle, event| match event.id().as_ref() {
+                    "tray-open" => show_main_window(app_handle),
+                    "tray-quit" => {
+                        if let Some(st) = app_handle.try_state::<AppState>() {
+                            st.allow_exit.store(true, Ordering::Release);
+                        }
+                        app_handle.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main_window(tray.app_handle());
+                    }
+                });
+            if let Some(icon) = app.default_window_icon().cloned() {
+                tray_builder = tray_builder.icon(icon);
+            }
+            let _tray = tray_builder.build(app)?;
+
             // Keep the tab bar and the active tab fitted to the
-            // window on every resize.
-            let resize_handle = app.handle().clone();
+            // window on every resize, and hide to tray on window close
+            // so the Odoo/POS session stays warm in memory.
+            let win_handle = app.handle().clone();
+            let close_allow_exit = Arc::clone(&allow_exit);
             window.on_window_event(move |event| match event {
                 tauri::WindowEvent::ScaleFactorChanged {
                     scale_factor,
@@ -900,13 +952,21 @@ pub fn run() {
                     ..
                 } if scale_factor.is_finite() && *scale_factor > 0.0 => {
                     layout_webviews_with_size(
-                        &resize_handle,
+                        &win_handle,
                         new_inner_size.width as f64 / *scale_factor,
                         new_inner_size.height as f64 / *scale_factor,
                     );
                 }
                 tauri::WindowEvent::Resized(_) => {
-                    layout_webviews(&resize_handle);
+                    layout_webviews(&win_handle);
+                }
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    if !close_allow_exit.load(Ordering::Acquire) {
+                        api.prevent_close();
+                        if let Some(w) = win_handle.get_window("main") {
+                            let _ = w.hide();
+                        }
+                    }
                 }
                 _ => {}
             });

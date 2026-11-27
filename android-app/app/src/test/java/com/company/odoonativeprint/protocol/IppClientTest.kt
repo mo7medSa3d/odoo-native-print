@@ -35,4 +35,11 @@ class IppClientTest {
         assertFalse(parsed.isSuccess)
         assertEquals(0x0406, parsed.statusCode)
     }
+
+    @Test
+    fun `normalizes ipp ipps and schemeless urls`() {
+        assertEquals("http://192.168.1.50:631/ipp/print", IppClient.normalizeHttpUrl("ipp://192.168.1.50:631/ipp/print"))
+        assertEquals("https://printer.local:443/ipp/print", IppClient.normalizeHttpUrl("ipps://printer.local:443/ipp/print"))
+        assertEquals("http://[::1]:631/ipp/print", IppClient.normalizeHttpUrl("[::1]:631/ipp/print"))
+    }
 }

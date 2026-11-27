@@ -88,7 +88,6 @@ class YaseirPrintApp : Application() {
             onActiveCountChanged = { active -> PrintForegroundService.sync(this, active) },
         )
         worker.start(autoReprint = configStore.current().autoReprint)
-        discovery.startMdnsDiscovery()
 
         bridgeDispatcher = BridgeDispatcher(object : RemoteBridgeHandler {
             override fun configuredOrigin(): String? = configStore.current().origin

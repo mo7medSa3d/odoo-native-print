@@ -74,6 +74,7 @@ assert.strictEqual(
     const helpers = [
         "const MEDIA_FETCH_TIMEOUT_MS = 8000;",
         'const TRANSPARENT_PIXEL = "data:image/png;base64,TRANSPARENT";',
+        (src.match(/const RECEIPT_LAYOUT_FIX_CSS = [\s\S]*?;/)?.[0] || 'const RECEIPT_LAYOUT_FIX_CSS = "";'),
         extract("inlineStyles"),
         extract("fetchAsDataUrl"),
         extract("inlineMedia"),
@@ -175,6 +176,7 @@ assert.strictEqual(
     const helpers = [
         "const MEDIA_FETCH_TIMEOUT_MS = 8000;",
         'const TRANSPARENT_PIXEL = "data:image/png;base64,TRANSPARENT";',
+        (src.match(/const RECEIPT_LAYOUT_FIX_CSS = [\s\S]*?;/)?.[0] || 'const RECEIPT_LAYOUT_FIX_CSS = "";'),
         extract("inlineStyles"),
         extract("fetchAsDataUrl"),
         extract("inlineMedia"),

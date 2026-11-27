@@ -3,6 +3,7 @@ package com.company.odoonativeprint.transport
 import com.company.odoonativeprint.core.PrinterInfo
 import com.company.odoonativeprint.protocol.IppClient
 import java.io.IOException
+import java.net.MalformedURLException
 import java.net.SocketTimeoutException
 
 class IppTransport {
@@ -36,6 +37,8 @@ class IppTransport {
                     retryable = retryable,
                 )
             }
+        } catch (e: MalformedURLException) {
+            TransportResult.Failure("BAD_PRINTER_ADDRESS", e.message ?: "Invalid IPP URL", retryable = false)
         } catch (e: SocketTimeoutException) {
             TransportResult.Failure("IPP_TIMEOUT", e.message ?: "IPP request timed out", retryable = true)
         } catch (e: IOException) {

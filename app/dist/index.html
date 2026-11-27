@@ -947,12 +947,6 @@
     </div>
 
     <div class="topbar-actions">
-      <button type="button" class="btn btn-glass" id="btnCmdPalette" data-action="open-cmd-palette" title="Ctrl+K" aria-label="Ctrl+K">
-        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-        <span data-i18n="btn_cmd_palette">بحث سريع</span>
-        <kbd class="kbd">Ctrl+K</kbd>
-      </button>
-
       <button type="button" class="btn btn-primary" id="btnOpenOdoo" data-action="open-odoo">
         <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
@@ -1009,7 +1003,6 @@
     <div class="sidebar-tabs-box">
       <div class="sidebar-tabs-head">
         <span data-i18n="sidebar_tabs_title">التبويبات المفتوحة</span>
-        <button type="button" class="btn btn-sm btn-glass" data-action="open-cmd-palette" data-i18n="btn_manage_tabs">إدارة</button>
       </div>
       <div class="sidebar-tabs-list" id="sidebarTabsList"></div>
     </div>
@@ -1346,35 +1339,6 @@
   </div>
 
   <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="false"></div>
-
-  <div id="cmdOverlay" class="cmd-overlay hidden" data-action="cmd-overlay-close">
-    <div class="cmd-card" id="cmdDialog" role="dialog" aria-modal="true" aria-label="بحث سريع">
-      <div class="cmd-head">
-        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-        <input type="search" id="cmdInput" class="cmd-input" placeholder="ابحث في التبويبات، مساحات العمل، أو الأوامر…" aria-label="ابحث في التبويبات، مساحات العمل، أو الأوامر…" autocomplete="off" />
-        <button type="button" class="btn btn-sm btn-glass" id="cmdCloseBtn" data-action="close-cmd-palette">Esc</button>
-      </div>
-      <div class="cmd-body" id="cmdResults">
-        <div>
-          <div class="cmd-section-title">
-            <span data-i18n="cmd_open_tabs">التبويبات المفتوحة والمجموعات</span>
-            <button type="button" class="btn btn-sm btn-glass" data-action="cmd-reopen-tab" data-i18n="cmd_reopen_closed">إعادة فتح المغلق</button>
-          </div>
-          <div class="cmd-list" id="cmdTabsList"></div>
-        </div>
-        <div>
-          <div class="cmd-section-title">
-            <span data-i18n="cmd_workspaces">مساحات العمل (الجلسات المحفوظة)</span>
-          </div>
-          <div class="cmd-list" id="cmdWorkspacesList"></div>
-        </div>
-        <div>
-          <div class="cmd-section-title"><span data-i18n="cmd_quick_actions">أوامر سريعة</span></div>
-          <div class="cmd-list" id="cmdActionsList"></div>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <div id="confirmOverlay" class="modal-overlay hidden">
     <div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
@@ -2859,8 +2823,7 @@
     if (action === "cmd-run-action") {
       const targetAct = btn.getAttribute("data-run");
       closeCommandPalette();
-      if (targetAct === "cmd-new-tab") sendTabCmd({ action: "open", url: "" });
-      else if (targetAct === "toggle-theme") toggleTheme();
+      if (targetAct === "toggle-theme") toggleTheme();
       else if (targetAct === "toggle-lang") toggleLang();
       else if (targetAct === "manual-refresh") manualRefresh();
       return true;
@@ -2958,7 +2921,6 @@
     const actEl = document.getElementById("cmdActionsList");
     if (actEl) {
       const actions = [
-        { label: ar ? "فتح تبويب Odoo جديد (Ctrl+T)" : "New Odoo Tab (Ctrl+T)", act: "cmd-new-tab" },
         { label: ar ? "تبديل الوضع الليلي / النهاري" : "Toggle Light / Dark Theme", act: "toggle-theme" },
         { label: ar ? "تبديل اللغة (العربية / English)" : "Switch Language (Arabic / English)", act: "toggle-lang" },
         { label: ar ? "تحديث الطابعات والطابور" : "Refresh Printers & Queue", act: "manual-refresh" }
@@ -3155,7 +3117,20 @@
   function allowedTestKinds() {
     const all = Object.keys(TEST_KIND_I18N);
     const sel = document.getElementById("customPrinterSelect");
-    if (!sel || !sel.value || sel.value === "__uri__" || sel.value.includes("://")) return all;
+    if (!sel || !sel.value) return all;
+    const uri = sel.value === "__uri__"
+        ? (document.getElementById("customPrinterUri")?.value || "").trim()
+        : sel.value;
+    if (uri.includes("://")) {
+        const scheme = uri.split("://")[0].toLowerCase();
+        const portMatch = uri.match(/:(\d+)/);
+        const port = portMatch ? Number(portMatch[1]) : null;
+        if (scheme === "ipp" || scheme === "http" || scheme === "https" || port === 631) return ["pdf-a4"];
+        if (scheme === "tcp" || scheme === "raw" || port === 9100) {
+            return ["thermal-80mm", "thermal-58mm", "zpl-label", "tspl-label", "epl-label"];
+        }
+        return all;
+    }
     const list = (overviewState && overviewState.printers) || [];
     const p = list.find((x) => x.name === sel.value);
     if (!p) return all;
@@ -3455,7 +3430,14 @@
       error.classList.add("hidden");
       return true;
     }
-    const valid = isAllowedPrinterUri(input.value);
+    let valid = isAllowedPrinterUri(input.value);
+    const raw = input.value.trim();
+    const scheme = raw.split("://")[0].toLowerCase();
+    const portMatch = raw.match(/:(\d+)/);
+    const port = portMatch ? Number(portMatch[1]) : null;
+    // IPP talks on 631; raw 9100 sockets only accept printer languages.
+    if (valid && (scheme === "ipp" || scheme === "http" || scheme === "https") && port === 9100) valid = false;
+    if (valid && (scheme === "tcp" || scheme === "raw") && port === 631) valid = false;
     input.classList.toggle("invalid", !valid);
     input.setAttribute("aria-invalid", valid ? "false" : "true");
     error.textContent = valid ? "" : I18N[currentLang].custom_printer_uri_invalid;
@@ -3613,7 +3595,7 @@
   });
   document.getElementById("inputAutoReprint").addEventListener("change", () => { formState.settingsDirty = true; });
   document.getElementById("customPrinterSelect").addEventListener("change", () => { formState.testDirty = true; });
-  document.getElementById("customPrinterUri").addEventListener("input", () => { formState.testDirty = true; validateCustomPrinterUriField(); });
+  document.getElementById("customPrinterUri").addEventListener("input", () => { formState.testDirty = true; validateCustomPrinterUriField(); rebuildTestKindOptions(); });
   const navTabsContainer = document.getElementById("navTabs");
   if (navTabsContainer) {
     navTabsContainer.addEventListener("keydown", (ev) => {
@@ -3660,14 +3642,6 @@
       return;
     }
     const pvOv = document.getElementById("previewOverlay");
-    if ((ev.ctrlKey || ev.metaKey) && String(ev.key || "").toLowerCase() === "k") {
-      ev.preventDefault();
-      if (pvOv && !pvOv.classList.contains("hidden")) closePrintPreview();
-      const ov = document.getElementById("cmdOverlay");
-      if (ov && ov.classList.contains("hidden")) openCommandPalette();
-      else closeCommandPalette();
-      return;
-    }
     if (pvOv && !pvOv.classList.contains("hidden")) {
       if (ev.key === "Escape") { closePrintPreview(); return; }
       if (ev.key === "Tab") {

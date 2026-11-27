@@ -232,6 +232,7 @@
   }
 
   var origin = null;
+  var startupUrl = null;
   var timer = null;
   var left = 0;
   var probing = false;
@@ -312,6 +313,14 @@
       return (parsed.protocol === "https:" || parsed.protocol === "http:") && parsed.hostname.length > 0 && !parsed.username && !parsed.password;
     } catch (e) { return false; }
   }
+  function targetUrl() {
+    if (isHttpOrigin(startupUrl)) {
+      try {
+        if (new URL(startupUrl).origin === new URL(origin).origin) return startupUrl;
+      } catch (e) {}
+    }
+    return origin;
+  }
   function tryProbe() {
     if (probing) return;
     probing = true;
@@ -324,7 +333,7 @@
     invoke("probe_origin", {}).then(function (ok) {
       probing = false;
       if (retryBtn) retryBtn.disabled = false;
-      if (ok && isHttpOrigin(origin)) { stopCountdown(); document.getElementById("count").textContent = ""; armNavWatchdog(); window.location.replace(origin); }
+      if (ok && isHttpOrigin(origin)) { stopCountdown(); document.getElementById("count").textContent = ""; armNavWatchdog(); window.location.replace(targetUrl()); }
       else { showDown(false); }
     }).catch(function () {
       probing = false;
@@ -337,7 +346,7 @@
     stopCountdown(); document.getElementById("count").textContent = ""; tryProbe();
   });
   document.getElementById("anyway").addEventListener("click", function () {
-    if (isHttpOrigin(origin)) { stopCountdown(); document.getElementById("count").textContent = ""; armNavWatchdog(); window.location.replace(origin); }
+    if (isHttpOrigin(origin)) { stopCountdown(); document.getElementById("count").textContent = ""; armNavWatchdog(); window.location.replace(targetUrl()); }
   });
   document.getElementById("cc").addEventListener("click", function () {
     disarmNavWatchdog(); stopCountdown();
@@ -351,6 +360,7 @@
   // Use lightweight app_identity instead of heavyweight app_overview so startup never blocks on PDFium/spooler.
   invoke("app_identity", {}).then(function (ov) {
     origin = ov && (ov.odooOrigin || ov.odoo_origin) ? (ov.odooOrigin || ov.odoo_origin) : null;
+    startupUrl = ov && (ov.startupUrl || ov.startup_url) ? (ov.startupUrl || ov.startup_url) : null;
     if (!isHttpOrigin(origin)) { window.location.replace("index.html"); return; }
     document.getElementById("origin").textContent = origin;
     tryProbe();

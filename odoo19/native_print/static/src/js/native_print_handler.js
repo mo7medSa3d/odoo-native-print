@@ -570,11 +570,11 @@ async function handleReportSubmission(action, options, env, bridge) {
         // bridge), not UTF-16 code units: text.length undercounts
         // Arabic/CJK content for the job log and the size guard.
         const textBytes = new TextEncoder().encode(text).length;
-        // Only thermal targets accept ESC/POS; office/label/virtual targets
-        // receive a GDI-rendered PNG so they never get raw bytes.
-        const textAsEscpos = rule.mode === "escpos";
-        const maxTextBytes = textAsEscpos ? MAX_NATIVE_TEXT_BYTES : MAX_NATIVE_PAYLOAD_BYTES;
-        if ((textAsEscpos && textBytes === 0) || textBytes > maxTextBytes) {
+        // Thermal and label targets accept raw text streams (ESC/POS or
+        // ZPL/TSPL/EPL/CPCL); office/virtual targets receive a GDI PNG.
+        const textAsRaw = ["escpos", "zpl", "tspl", "epl", "cpcl"].includes(rule.mode);
+        const maxTextBytes = textAsRaw ? MAX_NATIVE_TEXT_BYTES : MAX_NATIVE_PAYLOAD_BYTES;
+        if ((textAsRaw && textBytes === 0) || textBytes > maxTextBytes) {
             // Empty or oversized for the desktop queue: keep Odoo's standard
             // download rather than a doomed enqueue.
             return undefined;
@@ -583,14 +583,15 @@ async function handleReportSubmission(action, options, env, bridge) {
         const textSource = reportSource(action);
         try {
             let textEnqueueRes;
-            if (textAsEscpos) {
+            if (textAsRaw) {
                 textEnqueueRes = await bridge.printText({
                     idempotencyKey: textKey,
                     reportName: action.report_name,
                     printer: target.printer.name,
                     printerPattern: rule.printer_pattern,
+                    mode: rule.mode,
                     text,
-                    cut: true,
+                    cut: rule.mode === "escpos",
                     copies: rule.copies || 1,
                 });
             } else {
@@ -619,7 +620,7 @@ async function handleReportSubmission(action, options, env, bridge) {
                 copies: rule.copies || 1,
                 paper: rule.paper || undefined,
                 color: rule.color !== false,
-                mode: textAsEscpos ? "escpos" : "gdi",
+                mode: textAsRaw ? rule.mode : "gdi",
                 pages: 1,
                 byte_size: textBytes,
             }, { silent: true }).catch(() => {});
@@ -637,7 +638,7 @@ async function handleReportSubmission(action, options, env, bridge) {
                     copies: rule.copies || 1,
                     paper: rule.paper || undefined,
                     color: rule.color !== false,
-                    mode: textAsEscpos ? "escpos" : "gdi",
+                    mode: textAsRaw ? rule.mode : "gdi",
                     byteSize: textBytes,
                     pages: 1,
                 },
@@ -660,7 +661,7 @@ async function handleReportSubmission(action, options, env, bridge) {
                 copies: rule.copies || 1,
                 paper: rule.paper || undefined,
                 color: rule.color !== false,
-                mode: textAsEscpos ? "escpos" : "gdi",
+                mode: textAsRaw ? rule.mode : "gdi",
                 pages: 1,
                 byte_size: textBytes,
             }, { silent: true }).catch(() => {});

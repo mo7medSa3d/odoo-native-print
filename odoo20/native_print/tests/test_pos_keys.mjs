@@ -936,7 +936,7 @@ test("Android v1.5.7 POS printing passes explicit printer, polls by returned UUI
     }
 });
 
-test("visibleReceiptToPngBytes rasterizes SVG natively at 3x scaled dimensions via viewBox", async () => {
+test("visibleReceiptToPngBytes rasterizes SVG natively at 2x scaled dimensions via viewBox", async () => {
     const prevWindow = globalThis.window;
     const prevDocument = globalThis.document;
     const prevImage = globalThis.Image;
@@ -992,6 +992,7 @@ test("visibleReceiptToPngBytes rasterizes SVG natively at 3x scaled dimensions v
         const fnSrc = extract("visibleReceiptToPngBytes");
         const helperSrc = [
             "const POS_CAPTURE_TIMEOUT_MS = 5000;",
+            (posSrc.match(/const RECEIPT_LAYOUT_FIX_CSS = [\s\S]*?;/)?.[0] || 'const RECEIPT_LAYOUT_FIX_CSS = "";'),
             extract("canvasToPngBytes"),
             fnSrc,
             "globalThis.__testO20VisibleCapture = visibleReceiptToPngBytes;",
@@ -1000,8 +1001,8 @@ test("visibleReceiptToPngBytes rasterizes SVG natively at 3x scaled dimensions v
         const bytes = await globalThis.__testO20VisibleCapture(el);
         assert.deepStrictEqual(bytes, [137, 80, 78, 71]);
         const svg = decodeURIComponent(loadedSrc);
-        assert.ok(svg.includes('width="900" height="1200" viewBox="0 0 300 400"'), "Odoo 20 visible fallback uses 3x viewBox");
-        assert.deepStrictEqual(canvasSize, { w: 900, h: 1200 });
+        assert.ok(svg.includes('width="600" height="800" viewBox="0 0 300 400"'), "Odoo 20 visible fallback uses 2x viewBox");
+        assert.deepStrictEqual(canvasSize, { w: 600, h: 800 });
     } finally {
         globalThis.window = prevWindow;
         globalThis.document = prevDocument;

@@ -56,4 +56,16 @@ class JobQueueStoreTest {
         assertEquals(JobState.FAILED, engine.getJob(midPrint.id)?.state)
         assertEquals("APP_RESTARTED_DURING_PRINT", engine.getJob(midPrint.id)?.errorCode)
     }
+
+    @Test
+    fun `prunes failed terminal jobs and never hides older queued jobs`(@TempDir tempDir: File) {
+        val engine = JobQueueEngine(InMemoryJobPersistence(), tempDir)
+        val queued = engine.enqueue("POS-1", "text", "KEEP".toByteArray())
+        repeat(PayloadLimits.MAX_RETAINED_FINISHED + 5) { idx ->
+            val j = engine.enqueue("POS-2", "text", "F$idx".toByteArray())
+            engine.transition(j.id, JobState.FAILED, errorCode = "OFFLINE")
+        }
+        assertEquals(queued.id, engine.nextReadyJobForPrinter("POS-1")?.id)
+        assertEquals(setOf("POS-1"), engine.printersWithQueuedJobs())
+    }
 }

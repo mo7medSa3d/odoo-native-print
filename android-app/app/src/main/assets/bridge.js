@@ -165,33 +165,6 @@
   // Suppress browser print dialog so all Odoo reports flow through Native Print
   try { window.print = function () {}; } catch (e) {}
 
-  function npHttpWarning() {
-    if (window.location.protocol !== "http:") return;
-    try {
-      if (window.sessionStorage.getItem("np_http_warned") === "1") return;
-    } catch (e) {}
-    var show = function () {
-      if (document.getElementById("np-http-warning")) return;
-      var bar = document.createElement("div");
-      bar.id = "np-http-warning";
-      bar.setAttribute("style", "position:fixed;bottom:0;left:0;right:0;z-index:2147483646;background:#8c4a00;color:#fff;font:13px/1.5 system-ui,sans-serif;padding:6px 12px;display:flex;justify-content:space-between;align-items:center;direction:rtl;");
-      var text = document.createElement("span");
-      text.textContent = "تنبيه: الاتصال بخادم Odoo غير مشفّر (HTTP) — بيانات الدخول والمستندات تمر دون تشفير على الشبكة.";
-      var btn = document.createElement("button");
-      btn.textContent = "حسنًا";
-      btn.setAttribute("style", "background:transparent;border:1px solid #fff;color:#fff;border-radius:999px;padding:2px 14px;cursor:pointer;font:inherit;");
-      btn.addEventListener("click", function () {
-        try { window.sessionStorage.setItem("np_http_warned", "1"); } catch (e) {}
-        bar.remove();
-      });
-      bar.appendChild(text);
-      bar.appendChild(btn);
-      document.body.appendChild(bar);
-    };
-    if (document.body) show();
-    else document.addEventListener("DOMContentLoaded", show, { once: true });
-  }
-
   function npProbeEnvironment() {
     var env = {
       userAgent: navigator.userAgent || "",
@@ -295,7 +268,6 @@
 
   npReportEnvironment();
   npBootWatchdog();
-  npHttpWarning();
   try {
     var npPushState = window.history.pushState;
     window.history.pushState = function () {

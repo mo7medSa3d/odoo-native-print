@@ -36,6 +36,8 @@ eq(m.detectPrinterType({ name: "Microsoft Print to PDF", kind: "virtual" }).prin
 eq(m.detectPrinterType({ name: "Microsoft Print to PDF", kind: "virtual", protocol: "escpos", printer_class: "thermal" }).mode, "gdi", "virtual overrides conflicting raw protocol");
 eq(m.detectPrinterType({ name: "Microsoft XPS Document Writer", kind: "virtual", protocol: "zpl", printer_class: "label" }).printerClass, "virtual", "virtual overrides conflicting label class");
 eq(m.printerPatternFor({ name: "EPSON TM-T88VII", port: "192.168.1.50" }, "escpos"), "tcp://192.168.1.50:9100", "tcp pattern");
+eq(m.printerPatternFor({ name: "EPSON TM-T88VII", port: "IP_192.168.1.50" }, "escpos"), "tcp://192.168.1.50:9100", "windows IP_ tcp pattern");
+eq(m.printerPatternFor({ name: "EPSON TM-T88VII", port: "127.0.0.1:9100" }, "escpos"), "tcp://127.0.0.1:9100", "host:port tcp pattern");
 eq(m.printerPatternFor({ name: "HP LaserJet", port: "192.168.1.51" }, "gdi"), "HP LaserJet", "spooler pattern");
 // IP/protocol hardening: IPv6 ports are bracketed, invalid IPv4
 // octets are not IPs, and protocol tokens match on word boundaries.

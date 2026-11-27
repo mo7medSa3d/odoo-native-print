@@ -93,11 +93,12 @@ class MainActivity : ComponentActivity() {
                     false
                 }
             },
+            onActiveUrlChanged = { url -> app.configStore.saveLastUrl(url) },
         )
 
         val initialOrigin = app.configStore.current().origin
         if (!initialOrigin.isNullOrBlank()) {
-            tabManager.ensureInitialized(initialOrigin)
+            tabManager.ensureInitialized(initialOrigin, app.configStore.resolveStartupUrl())
             activeScreen = AppScreen.BROWSER
         }
 
@@ -111,7 +112,8 @@ class MainActivity : ComponentActivity() {
                         activeScreen = if (app.configStore.current().origin != null) AppScreen.BROWSER else AppScreen.BOOT
                     }
                     AppScreen.BROWSER -> {
-                        if (!tabManager.goBack()) finish()
+                        // Keep the WebView and Odoo SPA session alive in background instead of destroying on Back.
+                        if (!tabManager.goBack()) moveTaskToBack(true)
                     }
                     AppScreen.BOOT -> finish()
                 }
@@ -180,6 +182,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        app.discovery.startMdnsDiscovery()
+    }
+
+    override fun onStop() {
+        app.discovery.stopMdnsDiscovery()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         runCatching { unregisterReceiver(hardwareReceiver) }
         tabManager.destroyAll()
@@ -187,6 +199,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun clearWebBrowsingData() {
+        app.configStore.saveLastUrl(null)
         tabManager.destroyAll()
         CookieManager.getInstance().removeAllCookies(null)
         CookieManager.getInstance().flush()

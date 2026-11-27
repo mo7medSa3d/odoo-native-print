@@ -7,12 +7,16 @@ import android.content.Context
 import android.hardware.usb.UsbManager
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import com.company.odoonativeprint.core.AppConfigStore
 import com.company.odoonativeprint.core.PrinterCapabilities
 import com.company.odoonativeprint.core.PrinterInfo
 import com.company.odoonativeprint.core.PrinterProtocol
 import com.company.odoonativeprint.core.PrinterTransportType
+import com.company.odoonativeprint.protocol.IppClient
+import com.company.odoonativeprint.protocol.IppPrinterAttributes
+import java.net.Inet4Address
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
@@ -74,6 +78,12 @@ class PrinterDiscoveryService(
     private val nsdInfoCallbacks = ConcurrentHashMap<String, Any>()
     private val nsdExecutor = Executors.newSingleThreadExecutor()
     private val nsdManager: NsdManager? = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
+    private val multicastLock: WifiManager.MulticastLock? = runCatching {
+        (context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager)
+            ?.createMulticastLock("yaseir-print-mdns")
+            ?.apply { setReferenceCounted(false) }
+    }.getOrNull()
+    private val ippCapsCache = ConcurrentHashMap<String, Pair<Long, IppPrinterAttributes>>()
 
     private val cache = PrinterDiscoveryCache(probe = ::probeAll)
 
@@ -98,12 +108,21 @@ class PrinterDiscoveryService(
         val printer = findPrinter(printerName) ?: return null
         val settings = configStore.getPrinterSettings(printer.name)
         val effectiveProtocol = if (settings.protocol == PrinterProtocol.AUTO) printer.protocol else settings.protocol
-        val forms = when (effectiveProtocol) {
-            PrinterProtocol.ESCPOS -> listOf("80mm Roll", "58mm Roll")
-            PrinterProtocol.ZPL, PrinterProtocol.TSPL, PrinterProtocol.EPL, PrinterProtocol.CPCL ->
-                listOf("100x150mm", "100x100mm", "50x30mm", "40x25mm")
-            else -> listOf("A4", "Letter", "80mm Roll", "100x150mm")
+        val ippAttrs = if (printer.transport == PrinterTransportType.IPP) {
+            cachedIppAttributes(printer.address)
+        } else {
+            null
         }
+        val forms = ippAttrs?.mediaSupported
+            ?.mapNotNull(::formatIppMediaLabel)
+            ?.distinct()
+            ?.takeIf { it.isNotEmpty() }
+            ?: when (effectiveProtocol) {
+                PrinterProtocol.ESCPOS -> listOf("80mm Roll", "58mm Roll")
+                PrinterProtocol.ZPL, PrinterProtocol.TSPL, PrinterProtocol.EPL, PrinterProtocol.CPCL ->
+                    listOf("100x150mm", "100x100mm", "50x30mm", "40x25mm")
+                else -> listOf("A4", "Letter", "80mm Roll", "100x150mm")
+            }
         return PrinterCapabilities(
             printer = printer.name,
             transport = printer.transport,
@@ -111,8 +130,10 @@ class PrinterDiscoveryService(
             dpi = settings.dpi,
             paperWidthMm = settings.paperWidthMm,
             forms = forms,
-            supportsColor = printer.transport == PrinterTransportType.IPP || printer.transport == PrinterTransportType.ANDROID_SYSTEM,
-            supportsDuplex = printer.transport == PrinterTransportType.IPP,
+            supportsColor = ippAttrs?.colorSupported
+                ?: (printer.transport == PrinterTransportType.IPP || printer.transport == PrinterTransportType.ANDROID_SYSTEM),
+            supportsDuplex = ippAttrs?.sidesSupported?.any { it.startsWith("two-sided") }
+                ?: (printer.transport == PrinterTransportType.IPP),
             supportsRaw = printer.transport != PrinterTransportType.ANDROID_SYSTEM,
             supportsPdf = true,
             supportsCut = effectiveProtocol == PrinterProtocol.ESCPOS,
@@ -121,6 +142,32 @@ class PrinterDiscoveryService(
         )
     }
 
+    private fun cachedIppAttributes(address: String): IppPrinterAttributes? {
+        val now = System.currentTimeMillis()
+        val hit = ippCapsCache[address]
+        if (hit != null && (now - hit.first) < 60_000L) {
+            return hit.second
+        }
+        val fresh = IppClient.getPrinterAttributes(address) ?: return hit?.second
+        ippCapsCache[address] = now to fresh
+        return fresh
+    }
+
+    private fun formatIppMediaLabel(media: String): String? {
+        val lower = media.trim().lowercase()
+        return when {
+            lower.isEmpty() -> null
+            lower.contains("a4") -> "A4"
+            lower.contains("a5") -> "A5"
+            lower.contains("letter") -> "Letter"
+            lower.contains("legal") -> "Legal"
+            lower.contains("roll") && lower.contains("80") -> "80mm Roll"
+            lower.contains("roll") && lower.contains("58") -> "58mm Roll"
+            else -> media.trim()
+        }
+    }
+
+    @Synchronized
     fun startMdnsDiscovery() {
         val mgr = nsdManager ?: return
         stopMdnsDiscovery()
@@ -150,6 +197,9 @@ class PrinterDiscoveryService(
                 nsdListeners += listener
             }
         }
+        if (nsdListeners.isNotEmpty()) {
+            runCatching { multicastLock?.acquire() }
+        }
     }
 
     private fun resolveNsdService(mgr: NsdManager, service: NsdServiceInfo, serviceType: String) {
@@ -157,8 +207,10 @@ class PrinterDiscoveryService(
             val cb = object : NsdManager.ServiceInfoCallback {
                 override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) = Unit
                 override fun onServiceUpdated(info: NsdServiceInfo) {
-                    val host = info.hostAddresses.firstOrNull()?.hostAddress ?: return
-                    recordResolvedService(info.serviceName, host, info.port, serviceType)
+                    val host = (info.hostAddresses.firstOrNull { it is Inet4Address } ?: info.hostAddresses.firstOrNull())?.hostAddress ?: return
+                    val pdl = info.attributes["pdl"]?.decodeToString().orEmpty()
+                    val ty = info.attributes["ty"]?.decodeToString().orEmpty()
+                    recordResolvedService(info.serviceName, host, info.port, serviceType, "$pdl $ty")
                 }
 
                 override fun onServiceLost() {
@@ -186,11 +238,26 @@ class PrinterDiscoveryService(
         }
     }
 
-    private fun recordResolvedService(serviceName: String, host: String, port: Int, serviceType: String) {
+    private fun recordResolvedService(
+        serviceName: String,
+        host: String,
+        port: Int,
+        serviceType: String,
+        txtHints: String = "",
+    ) {
         val isIpp = serviceType.startsWith("_ipp")
         val transport = if (isIpp) PrinterTransportType.IPP else PrinterTransportType.TCP_9100
-        val address = if (isIpp) "ipp://$host:$port/ipp/print" else "$host:$port"
-        val protocol = if (isIpp) PrinterProtocol.PDF else PrinterProtocol.ESCPOS
+        val uriHost = if (host.contains(':')) "[$host]" else host
+        val address = if (isIpp) "ipp://$uriHost:$port/ipp/print" else "$uriHost:$port"
+        val hint = "${serviceName.lowercase()} ${txtHints.lowercase()}"
+        val protocol = when {
+            isIpp -> PrinterProtocol.PDF
+            hint.contains("zpl") || hint.contains("zebra") -> PrinterProtocol.ZPL
+            hint.contains("tspl") || hint.contains("tsc") -> PrinterProtocol.TSPL
+            hint.contains("epl") -> PrinterProtocol.EPL
+            hint.contains("cpcl") -> PrinterProtocol.CPCL
+            else -> PrinterProtocol.ESCPOS
+        }
         val name = serviceName.trim().ifEmpty { "Network Printer ($host)" }
         nsdDiscovered[name] = PrinterInfo(
             name = name,
@@ -204,8 +271,10 @@ class PrinterDiscoveryService(
         cache.invalidate()
     }
 
+    @Synchronized
     fun stopMdnsDiscovery() {
         val mgr = nsdManager ?: return
+        runCatching { if (multicastLock?.isHeld == true) multicastLock.release() }
         nsdListeners.forEach { runCatching { mgr.stopServiceDiscovery(it) } }
         nsdListeners.clear()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {

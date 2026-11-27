@@ -15,6 +15,29 @@ import {
 } from "./native_print_client";
 
 const POS_RECEIPT_SOURCE = "point_of_sale.receipt";
+const RECEIPT_LAYOUT_FIX_CSS =
+    ".pos-receipt{padding-bottom:16px !important}" +
+    ".pos-receipt,.pos-receipt *{float:none !important;position:static !important;direction:ltr !important;line-height:1.35 !important;box-sizing:border-box !important}" +
+    ".pos-receipt *:not(img):not(canvas):not(svg){height:auto !important;min-height:0 !important;max-height:none !important;block-size:auto !important;overflow:visible !important}" +
+    ".pos-receipt span:not(.pos-receipt-right-align),.pos-receipt .cashier,.pos-receipt .cashier>div{width:auto !important;inline-size:auto !important}" +
+    ".pos-receipt .pos-receipt-amount,.pos-receipt .paymentlines,.pos-receipt .pos-receipt-taxes>div{display:flex !important;justify-content:space-between !important;gap:0.75em !important;align-items:baseline !important}" +
+    ".pos-receipt .ms-auto{margin-left:auto !important;margin-inline-start:auto !important;white-space:nowrap !important;flex-shrink:0 !important}" +
+    ".pos-receipt .pos-receipt-contact,.pos-receipt .pos-receipt-customer{display:flex !important;flex-direction:column !important;align-items:center !important}" +
+    ".pos-receipt .pos-receipt-right-align{display:inline-block !important;margin-left:auto !important;margin-inline-start:auto !important;text-align:right !important;white-space:nowrap !important;flex-shrink:0 !important}" +
+    ".pos-receipt .pos-receipt-qr{display:flex !important;flex-direction:row !important;align-items:flex-start !important;gap:0.75em !important}" +
+    ".pos-receipt .pos-receipt-qr>div:first-child{flex:0 0 auto !important;width:auto !important;inline-size:auto !important}" +
+    ".pos-receipt .pos-receipt-qr>div:last-child{flex:1 1 0% !important;min-width:0 !important;width:auto !important;inline-size:auto !important}" +
+    ".pos-receipt .portal-url,.pos-receipt .text-break{overflow-wrap:anywhere !important;word-break:break-word !important;max-width:100% !important}";
+
+(function installReceiptLayoutFix() {
+    if (typeof document === "undefined" || !document.head || typeof document.createElement !== "function") return;
+    if (typeof document.getElementById === "function" && document.getElementById("np-receipt-layout-fix")) return;
+    const style = document.createElement("style");
+    style.id = "np-receipt-layout-fix";
+    style.textContent = RECEIPT_LAYOUT_FIX_CSS;
+    document.head.appendChild(style);
+})();
+
 export const POS_CAPTURE_TIMEOUT_MS = 15_000;
 const inFlightPosKeys = new Set();
 
@@ -477,7 +500,7 @@ function findVisibleReceiptElement() {
 // Last-resort capture of the receipt Odoo already rendered on screen.
 // The clone carries inlined computed styles; external url() references
 // are stripped so the SVG cannot taint the canvas in WebView2.
-async function visibleReceiptToPngBytes(element, scale = 3) {
+async function visibleReceiptToPngBytes(element, scale = 2) {
     const width = element.offsetWidth || element.getBoundingClientRect?.().width || 300;
     const height =
         element.offsetHeight ||
@@ -516,6 +539,17 @@ async function visibleReceiptToPngBytes(element, scale = 3) {
         }
     };
     inlineStyles(element, clone);
+    // Float + `text-align: start` + frozen computed pixel heights stack/overlap
+    // wrapped lines in <foreignObject>; reset box heights and enforce flex rows.
+    const layoutFix = typeof document.createElementNS === "function"
+        ? document.createElementNS("http://www.w3.org/1999/xhtml", "style")
+        : document.createElement("style");
+    layoutFix.textContent = RECEIPT_LAYOUT_FIX_CSS;
+    if (typeof clone.insertBefore === "function") {
+        clone.insertBefore(layoutFix, clone.firstChild);
+    } else if (typeof clone.appendChild === "function") {
+        clone.appendChild(layoutFix);
+    }
     clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
     const serialized = new XMLSerializer()
         .serializeToString(clone)

@@ -329,6 +329,52 @@ pub fn save_printer_settings(
     atomic_write(&file, &json)
 }
 
+pub fn is_restorable_url(origin: &str, url: &str) -> bool {
+    let Ok(parsed) = tauri::Url::parse(url.trim()) else {
+        return false;
+    };
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return false;
+    }
+    let parsed_origin = parsed.origin().ascii_serialization();
+    if !print_core::security::origin_is_allowed(origin, &parsed_origin) {
+        return false;
+    }
+    let path = parsed.path();
+    !path.starts_with("/web/login") && !path.starts_with("/web/session/logout")
+}
+
+pub fn load_last_url(data_dir: &Path, origin: &str) -> Option<String> {
+    let raw = std::fs::read_to_string(data_dir.join("last_url.txt")).ok()?;
+    let trimmed = raw.trim();
+    if is_restorable_url(origin, trimmed) {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
+pub fn save_last_url(data_dir: &Path, origin: &str, url: &str) {
+    let trimmed = url.trim();
+    if !is_restorable_url(origin, trimmed) {
+        return;
+    }
+    let path = data_dir.join("last_url.txt");
+    if std::fs::read_to_string(&path)
+        .ok()
+        .as_deref()
+        .map(str::trim)
+        == Some(trimmed)
+    {
+        return;
+    }
+    let _ = atomic_write(&path, trimmed);
+}
+
+pub fn clear_last_url(data_dir: &Path) {
+    let _ = std::fs::remove_file(data_dir.join("last_url.txt"));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,6 +441,28 @@ mod tests {
             Some("http://192.168.1.20:8069")
         );
         assert!(resolved.auto_reprint);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn last_url_roundtrip_and_guards() {
+        let dir = std::env::temp_dir().join(format!("np-lasturl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let origin = "http://127.0.0.1:8069";
+        save_last_url(&dir, origin, "http://127.0.0.1:8069/pos/ui?config_id=1");
+        assert_eq!(
+            load_last_url(&dir, origin).as_deref(),
+            Some("http://127.0.0.1:8069/pos/ui?config_id=1")
+        );
+        // Login/logout and off-origin URLs must not overwrite or restore.
+        save_last_url(&dir, origin, "http://127.0.0.1:8069/web/login");
+        save_last_url(&dir, origin, "https://evil.example.com/pos/ui");
+        assert_eq!(
+            load_last_url(&dir, origin).as_deref(),
+            Some("http://127.0.0.1:8069/pos/ui?config_id=1")
+        );
+        clear_last_url(&dir);
+        assert_eq!(load_last_url(&dir, origin), None);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

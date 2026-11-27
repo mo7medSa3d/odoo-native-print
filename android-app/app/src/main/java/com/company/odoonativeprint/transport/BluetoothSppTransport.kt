@@ -49,12 +49,14 @@ class BluetoothSppTransport(private val context: Context) : RawByteTransport {
             // Cancel active BT discovery before RFCOMM connect to avoid severe slowdown/failure.
             runCatching { adapter.cancelDiscovery() }
             val primary = device.createRfcommSocketToServiceRecord(SPP_UUID)
-            socket = try {
+            socket = primary
+            try {
                 primary.connect()
-                primary
             } catch (_: IOException) {
                 runCatching { primary.close() }
-                device.createInsecureRfcommSocketToServiceRecord(SPP_UUID).also { it.connect() }
+                val fallback = device.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
+                socket = fallback
+                fallback.connect()
             }
             val out = socket.outputStream
             val pacingMs = settings.bluetoothPacingMs.toLong()

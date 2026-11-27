@@ -10,6 +10,7 @@ import org.json.JSONObject
 
 data class AppConfigSnapshot(
     val origin: String? = null,
+    val lastUrl: String? = null,
     val autoReprint: Boolean = false,
     val themeMode: String = "system",
     val language: String = "ar",
@@ -38,12 +39,40 @@ class AppConfigStore(context: Context) {
     fun saveOrigin(rawOrigin: String, autoReprint: Boolean): Result<String> {
         val validated = OriginPolicy.validateAndNormalize(rawOrigin)
         val normalized = validated.getOrElse { return Result.failure(it) }
-        prefs.edit()
+        val originChanged = _state.value.origin != normalized
+        val editor = prefs.edit()
             .putString(KEY_ORIGIN, normalized)
             .putBoolean(KEY_AUTO_REPRINT, autoReprint)
-            .apply()
-        _state.value = _state.value.copy(origin = normalized, autoReprint = autoReprint)
+        if (originChanged) editor.remove(KEY_LAST_URL)
+        editor.apply()
+        _state.value = _state.value.copy(
+            origin = normalized,
+            lastUrl = if (originChanged) null else _state.value.lastUrl,
+            autoReprint = autoReprint,
+        )
         return Result.success(normalized)
+    }
+
+    fun saveLastUrl(url: String?) {
+        val origin = _state.value.origin
+        val safe = url?.trim()?.takeIf { isRestorableUrl(origin, it) }
+        if (url != null && safe == null) return
+        if (_state.value.lastUrl == safe) return
+        prefs.edit().apply {
+            if (safe == null) remove(KEY_LAST_URL) else putString(KEY_LAST_URL, safe)
+        }.apply()
+        _state.value = _state.value.copy(lastUrl = safe)
+    }
+
+    fun resolveStartupUrl(): String? {
+        val origin = _state.value.origin ?: return null
+        val last = _state.value.lastUrl
+        return if (last != null && isRestorableUrl(origin, last)) last else origin
+    }
+
+    private fun isRestorableUrl(origin: String?, url: String): Boolean {
+        if (origin.isNullOrBlank() || !OriginPolicy.isSameOrigin(origin, url)) return false
+        return !url.contains("/web/login") && !url.contains("/web/session/logout")
     }
 
     fun setThemeMode(mode: String) {
@@ -114,6 +143,7 @@ class AppConfigStore(context: Context) {
         }
         return AppConfigSnapshot(
             origin = prefs.getString(KEY_ORIGIN, null),
+            lastUrl = prefs.getString(KEY_LAST_URL, null),
             autoReprint = prefs.getBoolean(KEY_AUTO_REPRINT, false),
             themeMode = prefs.getString(KEY_THEME, "system") ?: "system",
             language = prefs.getString(KEY_LANG, "ar") ?: "ar",
@@ -126,6 +156,7 @@ class AppConfigStore(context: Context) {
     companion object {
         private const val PREFS_NAME = "yaseir_print_config"
         private const val KEY_ORIGIN = "origin"
+        private const val KEY_LAST_URL = "last_url"
         private const val KEY_AUTO_REPRINT = "auto_reprint"
         private const val KEY_THEME = "theme_mode"
         private const val KEY_LANG = "language"

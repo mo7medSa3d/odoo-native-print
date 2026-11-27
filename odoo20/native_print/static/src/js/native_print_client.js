@@ -19,6 +19,9 @@ export function directionForLang(lang) {
 }
 
 export function syncDocumentDirection() {
+    if (typeof document !== "undefined" && typeof document.getElementById === "function") {
+        document.getElementById("np-http-warning")?.remove?.();
+    }
     if (typeof document === "undefined" || !document.documentElement) {
         return null;
     }
@@ -248,13 +251,29 @@ export function formatFormsSummary(forms, rollLabel) {
     });
 }
 
+function parseTcpHostPort(portSpec) {
+    const text = String(portSpec || "").trim().replace(/^IP_/i, "");
+    if (isIpLiteral(text)) {
+        return { host: text, port: 9100 };
+    }
+    const match = text.match(/^(\[([^\]]+)\]|(\d{1,3}(?:\.\d{1,3}){3})):(\d{1,5})$/);
+    if (match) {
+        const host = match[2] || match[3];
+        const port = Number(match[4]);
+        if (isIpLiteral(host) && port >= 1 && port <= 65535) {
+            return { host, port };
+        }
+    }
+    return null;
+}
+
 export function printerPatternFor(printer, mode) {
     const rawModes = ["escpos", "zpl", "tspl", "epl", "cpcl"];
-    const port = String((printer && printer.port) || "").trim();
-    if (rawModes.includes(mode) && isIpLiteral(port)) {
+    const spec = parseTcpHostPort(printer && printer.port);
+    if (rawModes.includes(mode) && spec) {
         // Bracket IPv6 literals in URI authority so the port suffix is unambiguous.
-        const host = port.includes(":") ? `[${port}]` : port;
-        return `tcp://${host}:9100`;
+        const host = spec.host.includes(":") ? `[${spec.host}]` : spec.host;
+        return `tcp://${host}:${spec.port}`;
     }
     return (printer && printer.name) || "";
 }

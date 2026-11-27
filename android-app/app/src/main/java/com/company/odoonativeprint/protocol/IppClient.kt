@@ -14,6 +14,14 @@ data class IppResponse(
         get() = httpStatus in 200..299 && statusCode in 0x0000..0x00FF
 }
 
+data class IppPrinterAttributes(
+    val mediaSupported: List<String> = emptyList(),
+    val sidesSupported: List<String> = emptyList(),
+    val documentFormatsSupported: List<String> = emptyList(),
+    val colorSupported: Boolean? = null,
+    val printerName: String? = null,
+)
+
 /**
  * Pure-Kotlin RFC 8011 IPP 2.0 client (Get-Printer-Attributes + Print-Job).
  */
@@ -33,10 +41,14 @@ object IppClient {
     private const val TAG_NATURAL_LANG = 0x48
     private const val TAG_MIME_MEDIA_TYPE = 0x49
 
-    fun normalizeHttpUrl(ippUri: String): String = when {
-        ippUri.startsWith("ipps://", ignoreCase = true) -> "https://" + ippUri.substring(7)
-        ippUri.startsWith("ipp://", ignoreCase = true) -> "http://" + ippUri.substring(6)
-        else -> ippUri
+    fun normalizeHttpUrl(ippUri: String): String {
+        val trimmed = ippUri.trim()
+        return when {
+            trimmed.startsWith("ipps://", ignoreCase = true) -> "https://" + trimmed.substring(7)
+            trimmed.startsWith("ipp://", ignoreCase = true) -> "http://" + trimmed.substring(6)
+            trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true) -> trimmed
+            else -> "http://$trimmed"
+        }
     }
 
     fun buildGetPrinterAttributesRequest(printerUri: String, requestId: Int = 1): ByteArray {
@@ -100,6 +112,87 @@ object IppClient {
             ((bytes[6].toInt() and 0xFF) shl 8) or
             (bytes[7].toInt() and 0xFF)
         return IppResponse(statusCode = statusCode, requestId = requestId, httpStatus = httpStatus)
+    }
+
+    fun parsePrinterAttributesResponse(bytes: ByteArray): IppPrinterAttributes {
+        if (bytes.size < 9) return IppPrinterAttributes()
+        var pos = 8
+        var currentName = ""
+        val media = mutableListOf<String>()
+        val sides = mutableListOf<String>()
+        val formats = mutableListOf<String>()
+        var color: Boolean? = null
+        var printerName: String? = null
+
+        fun u16(offset: Int): Int =
+            ((bytes[offset].toInt() and 0xFF) shl 8) or (bytes[offset + 1].toInt() and 0xFF)
+
+        while (pos < bytes.size) {
+            val tag = bytes[pos++].toInt() and 0xFF
+            if (tag == TAG_END_OF_ATTRIBUTES) break
+            if (tag <= 0x0F) {
+                currentName = ""
+                continue
+            }
+            if (pos + 2 > bytes.size) break
+            val nameLen = u16(pos)
+            pos += 2
+            if (pos + nameLen + 2 > bytes.size) break
+            if (nameLen > 0) {
+                currentName = String(bytes, pos, nameLen, Charsets.UTF_8)
+            }
+            pos += nameLen
+            val valLen = u16(pos)
+            pos += 2
+            if (pos + valLen > bytes.size) break
+            val valStart = pos
+            pos += valLen
+
+            when (currentName) {
+                "media-supported" -> String(bytes, valStart, valLen, Charsets.UTF_8).takeIf { it.isNotBlank() }?.let { media += it }
+                "sides-supported" -> String(bytes, valStart, valLen, Charsets.UTF_8).takeIf { it.isNotBlank() }?.let { sides += it }
+                "document-format-supported" -> String(bytes, valStart, valLen, Charsets.UTF_8).takeIf { it.isNotBlank() }?.let { formats += it }
+                "color-supported" -> if (tag == 0x22 && valLen >= 1) color = bytes[valStart].toInt() != 0
+                "printer-name" -> if (printerName == null) {
+                    printerName = String(bytes, valStart, valLen, Charsets.UTF_8).takeIf { it.isNotBlank() }
+                }
+            }
+        }
+        return IppPrinterAttributes(
+            mediaSupported = media.distinct(),
+            sidesSupported = sides.distinct(),
+            documentFormatsSupported = formats.distinct(),
+            colorSupported = color,
+            printerName = printerName,
+        )
+    }
+
+    fun getPrinterAttributes(
+        printerUri: String,
+        connectTimeoutMs: Int = 2_500,
+        readTimeoutMs: Int = 4_000,
+    ): IppPrinterAttributes? {
+        val payload = buildGetPrinterAttributesRequest(printerUri)
+        val conn = (URL(normalizeHttpUrl(printerUri)).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = connectTimeoutMs
+            readTimeout = readTimeoutMs
+            setRequestProperty("Content-Type", "application/ipp")
+            setFixedLengthStreamingMode(payload.size)
+        }
+        return try {
+            conn.outputStream.use { it.write(payload) }
+            val code = conn.responseCode
+            if (code !in 200..299) return null
+            val bytes = conn.inputStream?.use { it.readBytes() } ?: return null
+            val hdr = if (bytes.size >= 8) parseResponseHeader(bytes, code) else return null
+            if (!hdr.isSuccess) null else parsePrinterAttributesResponse(bytes)
+        } catch (_: Exception) {
+            null
+        } finally {
+            conn.disconnect()
+        }
     }
 
     fun send(
