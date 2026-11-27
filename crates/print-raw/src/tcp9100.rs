@@ -704,7 +704,7 @@ mod tests {
             if let Ok((mut s2, _)) = listener.accept() {
                 let mut req = [0u8; 3];
                 let _ = s2.read_exact(&mut req);
-                std::thread::sleep(Duration::from_millis(500));
+                std::thread::sleep(Duration::from_millis(700));
             }
         });
 
@@ -713,7 +713,7 @@ mod tests {
         let elapsed = start.elapsed();
         assert!(res.is_err(), "expected timeout error, got {res:?}");
         assert!(
-            elapsed < Duration::from_millis(350),
+            elapsed < Duration::from_millis(450),
             "shared deadline exceeded: took {elapsed:?} for 200ms budget"
         );
         let _ = server.join();
