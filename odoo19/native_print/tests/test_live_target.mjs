@@ -985,7 +985,12 @@ try {
         const syncCall = globalThis.__npSystrayRpcs.find((c) => c.url === "/native_print/sync_device" && c.params.name === "CamelPrinter");
         eq(Boolean(syncCall), true, "sync_device called for camelCase printerClass");
         eq(syncCall.params.printer_class, "thermal", "camelCase printerClass normalized to printer_class");
+        globalThis.__npOnWillUnmount();
+        eq(docListeners.length, 0, "onWillUnmount removes visibilitychange listener");
+
         // Manual refresh clicked during an in-flight background sync queues _pendingForceSync.
+        const comp3 = new sMod2.NativePrintSystray();
+        comp3.setup();
         let releaseBg;
         const overviewCalls = [];
         globalThis.window.__NATIVE_PRINT__ = {
@@ -997,17 +1002,14 @@ try {
                 return Promise.resolve({ printers: [{ name: "QueuedPrinter", kind: "local", is_default: true }] });
             },
         };
-        const bgSync = comp2.syncDiscoveredPrinters(false);
-        await comp2.syncDiscoveredPrinters(true);
-        eq(comp2._pendingForceSync, true, "manual refresh queues _pendingForceSync while background sync is in flight");
+        const bgSync = comp3.syncDiscoveredPrinters(false);
+        await comp3.syncDiscoveredPrinters(true);
+        eq(comp3._pendingForceSync, true, "manual refresh queues _pendingForceSync while background sync is in flight");
         releaseBg();
         await bgSync;
         await new Promise((r) => setTimeout(r, 10));
         eq(JSON.stringify(overviewCalls), JSON.stringify([false, true]), "queued manual refresh runs forced appOverview after background poll");
-        eq(comp2.state.printersCount, 1, "queued manual refresh updates discovered printers");
-
-        globalThis.__npOnWillUnmount();
-        eq(docListeners.length, 0, "onWillUnmount removes visibilitychange listener");
+        eq(comp3.state.printersCount, 1, "queued manual refresh updates discovered printers");
     } finally {
         globalThis.document = prevDoc2;
         globalThis.localStorage = prevLs2;

@@ -2009,7 +2009,10 @@ mod tests {
         assert_eq!(std::mem::offset_of!(DocInfoW, doc_name), ptr_sz);
         assert_eq!(std::mem::size_of::<PrinterInfo2W>(), 13 * ptr_sz + 32);
         assert_eq!(std::mem::offset_of!(PrinterInfo2W, attributes), 13 * ptr_sz);
-        assert_eq!(std::mem::offset_of!(PrinterInfo2W, status), 13 * ptr_sz + 20);
+        assert_eq!(
+            std::mem::offset_of!(PrinterInfo2W, status),
+            13 * ptr_sz + 20
+        );
     }
 }
 

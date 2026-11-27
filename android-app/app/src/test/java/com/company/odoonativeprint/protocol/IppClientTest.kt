@@ -53,7 +53,7 @@ class IppClientTest {
         // and no TAG_JOB_ATTRIBUTES (0x02) delimiter precedes it.
         val header = req.copyOfRange(0, req.size - doc.size)
         assertEquals(0x03.toByte(), header.last())
-        assertFalse(header.drop(8).contains(0x02.toByte()))
+        assertTrue(String(header, Charsets.US_ASCII).endsWith("application/pdf\u0003"))
     }
 
     @Test
