@@ -52,9 +52,18 @@ class RawProtocolEncodersTest {
         assertTrue(tspl.contains("BITMAP 0,0,1,2,0,"))
         assertTrue(tspl.contains("PRINT 1,1"))
 
-        val epl = String(EplEncoder.encode(mono), Charsets.ISO_8859_1)
-        assertTrue(epl.contains("GW0,0,1,2,"))
-        assertTrue(epl.trimEnd().endsWith("P1"))
+        val eplBytes = EplEncoder.encode(mono)
+        val epl = String(eplBytes, Charsets.ISO_8859_1)
+        assertTrue(epl.startsWith("N\r\nq8\r\nQ2,24\r\nGW0,0,1,2,"))
+        assertTrue(epl.endsWith("\r\nP1\r\n"))
+        // Inverted raster bytes: 0xAA -> 0x55, 0xFF -> 0x00
+        val headerLen = "N\r\nq8\r\nQ2,24\r\nGW0,0,1,2,".length
+        assertEquals(0x55.toByte(), eplBytes[headerLen])
+        assertEquals(0x00.toByte(), eplBytes[headerLen + 1])
+
+        val eplCustomGap = String(EplEncoder.encode(mono, copies = 3, gapDots = 36), Charsets.ISO_8859_1)
+        assertTrue(eplCustomGap.startsWith("N\r\nq8\r\nQ2,36\r\nGW0,0,1,2,"))
+        assertTrue(eplCustomGap.endsWith("\r\nP3\r\n"))
 
         val cpcl = String(CpclEncoder.encode(mono), Charsets.US_ASCII)
         assertTrue(cpcl.startsWith("! 0 200 200 2 1"))

@@ -143,16 +143,48 @@ def main():
     # Every exported Tauri command must perform an explicit origin or
     # local-app guard. A registered command without either guard is a
     # security regression even if capabilities currently hide it.
-    commands_rs = (SRC / "src" / "commands.rs").read_text(encoding="utf-8").split("#[cfg(test)]", 1)[0]
+    raw_commands_rs = (SRC / "src" / "commands.rs").read_text(encoding="utf-8").split("#[cfg(test)]", 1)[0]
+    # Strip // and /* ... */ comments while preserving string literals so
+    # commented-out guard calls or braces in comments cannot fool the check.
+    commands_rs = re.sub(
+        r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*[\s\S]*?\*/',
+        lambda m: m.group(0) if m.group(0).startswith('"') else "",
+        raw_commands_rs,
+    )
+    def _fn_body(src, start):
+        i = start
+        n = len(src)
+        depth = 0
+        body_start = None
+        while i < n:
+            ch = src[i]
+            if ch == '"':
+                i += 1
+                while i < n and src[i] != '"':
+                    i += 2 if src[i] == "\\" else 1
+                i += 1
+                continue
+            if ch == "'" and i + 2 < n and (src[i + 1] == "\\" or src[i + 2] == "'"):
+                i += 4 if src[i + 1] == "\\" else 3
+                continue
+            if ch == "{":
+                if depth == 0:
+                    body_start = i
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0 and body_start is not None:
+                    return src[body_start:i + 1]
+            i += 1
+        return ""
     command_decls = list(re.finditer(
         r"#\[tauri::command(?:\([^]]*\))?\]\s*pub\s+(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)",
         commands_rs,
     ))
     guarded = set()
     unguarded = []
-    for index, match in enumerate(command_decls):
-        end = command_decls[index + 1].start() if index + 1 < len(command_decls) else len(commands_rs)
-        command_chunk = commands_rs[match.start():end]
+    for match in command_decls:
+        command_chunk = _fn_body(commands_rs, match.end())
         name = match.group(1)
         if "check_origin(" in command_chunk or "check_local_only(" in command_chunk:
             guarded.add(name)

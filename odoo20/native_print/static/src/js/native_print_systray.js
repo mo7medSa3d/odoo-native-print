@@ -132,6 +132,7 @@ export class NativePrintSystray extends Component {
 
         this._unmounted = false;
         this._pendingRefresh = false;
+        this._pendingForceSync = false;
         this._syncingPrinters = false;
         this._discoveredPrintersKey = "[]";
 
@@ -154,6 +155,7 @@ export class NativePrintSystray extends Component {
         onWillUnmount(() => {
             this._unmounted = true;
             this._pendingRefresh = false;
+            this._pendingForceSync = false;
             window.removeEventListener("click", this._onOutsideClick);
             window.removeEventListener(JOB_UPDATED_EVENT, this._onJobUpdated);
             if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
@@ -181,7 +183,12 @@ export class NativePrintSystray extends Component {
             );
             return;
         }
-        if (this._syncingPrinters) return;
+        if (this._syncingPrinters) {
+            if (showNotice) {
+                this._pendingForceSync = true;
+            }
+            return;
+        }
         this._syncingPrinters = true;
         if (showNotice) {
             this._setState("syncingPrinters", true);
@@ -224,6 +231,12 @@ export class NativePrintSystray extends Component {
             this._syncingPrinters = false;
             if (!this._unmounted) {
                 this._setState("syncingPrinters", false);
+                if (this._pendingForceSync) {
+                    this._pendingForceSync = false;
+                    this.syncDiscoveredPrinters(true).catch(() => {});
+                }
+            } else {
+                this._pendingForceSync = false;
             }
         }
     }

@@ -411,7 +411,7 @@
       });
     });
   });
-  window.addEventListener("storage", applyPrefs);
+  window.addEventListener("storage", function (ev) { if (!ev || ev.key === "np_cc_lang" || ev.key === "np_cc_theme") applyPrefs(); });
   applyPrefs();
 </script>
 </body>

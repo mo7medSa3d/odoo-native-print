@@ -62,7 +62,6 @@
   --brand-text: #1e54e6;
   --brand-soft: rgba(46, 103, 255, 0.10);
   --brand-fg: #ffffff;
-  --accent-cyan: #007575;
   --focus-ring: 0 0 0 3px rgba(46, 106, 255, 0.28);
 
   /* Semantic Status (WCAG 2.2 AA verified) */
@@ -124,7 +123,6 @@
   --brand-text: #6b96ff;
   --brand-soft: rgba(43, 101, 255, 0.18);
   --brand-fg: #ffffff;
-  --accent-cyan: #00eeba;
   --focus-ring: 0 0 0 3px rgba(46, 106, 255, 0.36);
 
   /* Semantic Status (WCAG 2.2 AA verified) */

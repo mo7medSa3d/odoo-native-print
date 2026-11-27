@@ -128,6 +128,8 @@ fn dle_silent_record(map: &mut HashMap<String, Instant>, key: String, now: Insta
 }
 /// Cap expanded multi-copy raw byte streams to prevent OOM on large payloads * copies.
 const MAX_RAW_EXPANDED_BYTES: usize = 100 * 1024 * 1024;
+const MAX_CONCURRENT_PRINTERS: usize = 8;
+const WORKER_ERROR_BACKOFF: Duration = Duration::from_secs(5);
 
 pub struct AppState {
     pub queue: Arc<Mutex<Queue>>,
@@ -330,6 +332,10 @@ impl AppState {
     }
 }
 
+/// Legacy fallback cap for JS `Uint8Array` serialized as a JSON object.
+/// `BRIDGE_JS` always base64-encodes binary payloads; capping the map path prevents BTreeMap OOM.
+const MAX_BYTE_MAP_LEN: usize = 1_048_576;
+
 /// Custom deserializer that accepts:
 /// 1. Standard JSON number array `[37, 80, 68, 70, ...]`
 /// 2. Base64 string `"JVBERi0..."`
@@ -385,9 +391,7 @@ where
                 let idx = k
                     .parse::<usize>()
                     .map_err(|_| serde::de::Error::custom("invalid byte map key"))?;
-                if idx >= print_core::security::MAX_JOB_BYTES
-                    || m.len() >= print_core::security::MAX_JOB_BYTES
-                {
+                if idx >= MAX_BYTE_MAP_LEN || m.len() >= MAX_BYTE_MAP_LEN {
                     return Err(serde::de::Error::custom("payload_too_large"));
                 }
                 m.insert(idx, v);
@@ -484,6 +488,7 @@ pub(crate) fn local_app_url(file: &str) -> Result<tauri::Url, String> {
 }
 
 fn check_origin(webview: &tauri::Webview, state: &AppState) -> Result<(), String> {
+    // shortcut: Tauri 2.12 attributes IPC via webview.url() (top-frame URL), not per-iframe origin (ADR-0005); upgrade when Tauri exposes frame-level IPC origin.
     let url = webview.url().map_err(|e| e.to_string())?;
     if is_local_app_url(&url) {
         return Ok(());
@@ -505,6 +510,82 @@ fn check_local_only(webview: &tauri::Webview) -> Result<(), String> {
     } else {
         Err("local_control_center_only".to_string())
     }
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v4) => v4.is_loopback(),
+            std::net::IpAddr::V6(v6) => {
+                if v6.is_loopback() {
+                    return true;
+                }
+                let o = v6.octets();
+                let embedded = (o[..10] == [0u8; 10] && o[10] == 0xff && o[11] == 0xff)
+                    || o[..12] == [0u8; 12];
+                embedded && o[12] == 127
+            }
+        };
+    }
+    let h = host.trim_end_matches('.').to_ascii_lowercase();
+    h == "localhost" || h.ends_with(".localhost")
+}
+
+fn validate_printer_pattern(
+    printer_pattern: &str,
+    is_local: bool,
+    configured: &config::PrinterSettingsMap,
+) -> Result<(), String> {
+    let trimmed = printer_pattern.trim();
+    if trimmed.is_empty() || printer_pattern.len() > 512 {
+        return Err("printer_required".to_string());
+    }
+    if is_local || configured.contains_key(trimmed) || configured.contains_key(printer_pattern) {
+        return Ok(());
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let (scheme_len, default_port, is_raw_tcp) =
+        if lower.starts_with("tcp://") || lower.starts_with("raw://") {
+            (6usize, 9100u16, true)
+        } else if lower.starts_with("ipp://") {
+            (6usize, 631u16, false)
+        } else if lower.starts_with("http://") {
+            (7usize, 631u16, false)
+        } else if lower.starts_with("https://") {
+            (8usize, 631u16, false)
+        } else {
+            return Ok(());
+        };
+    let normalized = format!("{}{}", &lower[..scheme_len], &trimmed[scheme_len..]);
+    let (host, port, _) = NativePrintBackend::parse_host_port(&normalized, default_port)
+        .map_err(|e| format!("{}: {}", e.code, e.message))?;
+    if is_loopback_host(&host) {
+        return Err(
+            "BAD_PRINTER_ADDRESS: loopback printer address is not allowed from remote pages"
+                .to_string(),
+        );
+    }
+    let port_ok = if is_raw_tcp {
+        (9100..=9109).contains(&port)
+    } else {
+        port == 631
+    };
+    if !port_ok {
+        return Err(
+            "BAD_PRINTER_ADDRESS: printer port is not allowed from remote pages".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn check_printer_pattern(
+    webview: &tauri::Webview,
+    state: &AppState,
+    printer_pattern: &str,
+) -> Result<(), String> {
+    let is_local = webview.url().map(|u| is_local_app_url(&u)).unwrap_or(false);
+    let configured = read_lock(&state.printer_settings);
+    validate_printer_pattern(printer_pattern, is_local, &configured)
 }
 
 /// The payload the Odoo addon's handler sends (API contract v1).
@@ -555,9 +636,7 @@ pub async fn print_pdf(
     if !print_core::security::valid_idempotency_key(&req.idempotency_key) {
         return Err("bad_idempotency_key".to_string());
     }
-    if req.printer_pattern.trim().is_empty() || req.printer_pattern.len() > 512 {
-        return Err("printer_required".to_string());
-    }
+    check_printer_pattern(&webview, &state, &req.printer_pattern)?;
     if req.report_name.len() > 512 {
         return Err("bad_report_name".to_string());
     }
@@ -656,9 +735,7 @@ pub fn print_text(
     if !print_core::security::valid_idempotency_key(&req.idempotency_key) {
         return Err("bad_idempotency_key".to_string());
     }
-    if req.printer_pattern.trim().is_empty() || req.printer_pattern.len() > 512 {
-        return Err("printer_required".to_string());
-    }
+    check_printer_pattern(&webview, &state, &req.printer_pattern)?;
     if req.report_name.len() > 512 {
         return Err("bad_report_name".to_string());
     }
@@ -763,9 +840,7 @@ pub async fn print_image(
     if !print_core::security::valid_idempotency_key(&req.idempotency_key) {
         return Err("bad_idempotency_key".to_string());
     }
-    if req.printer_pattern.trim().is_empty() || req.printer_pattern.len() > 512 {
-        return Err("printer_required".to_string());
-    }
+    check_printer_pattern(&webview, &state, &req.printer_pattern)?;
     if req.report_name.len() > 512 {
         return Err("bad_report_name".to_string());
     }
@@ -1347,39 +1422,52 @@ pub async fn run_test_print(
 }
 
 #[tauri::command]
-pub fn retry_job_cmd(
+pub async fn retry_job_cmd(
     webview: tauri::Webview,
     state: State<'_, AppState>,
     job_id: String,
 ) -> Result<(), String> {
     check_local_only(&webview)?;
-    {
-        let mut queue = lock_queue(&state.queue);
-        queue.retry_job(&job_id).map_err(|e| e.to_string())?;
-    }
+    let queue_arc = Arc::clone(&state.queue);
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let mut queue = lock_queue(&queue_arc);
+        queue.retry_job(&job_id).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     state.notify_worker();
     Ok(())
 }
 
 #[tauri::command]
-pub fn cancel_job_cmd(
+pub async fn cancel_job_cmd(
     webview: tauri::Webview,
     state: State<'_, AppState>,
     job_id: String,
 ) -> Result<(), String> {
     check_local_only(&webview)?;
-    let mut queue = lock_queue(&state.queue);
-    queue.cancel_job(&job_id).map_err(|e| e.to_string())
+    let queue_arc = Arc::clone(&state.queue);
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let mut queue = lock_queue(&queue_arc);
+        queue.cancel_job(&job_id).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn clear_finished_cmd(
+pub async fn clear_finished_cmd(
     webview: tauri::Webview,
     state: State<'_, AppState>,
 ) -> Result<u64, String> {
     check_local_only(&webview)?;
-    let mut queue = lock_queue(&state.queue);
-    queue.clear_finished().map_err(|e| e.to_string())
+    let queue_arc = Arc::clone(&state.queue);
+    tauri::async_runtime::spawn_blocking(move || -> Result<u64, String> {
+        let mut queue = lock_queue(&queue_arc);
+        queue.clear_finished().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Strip scheme, credentials, host/port, query string, and fragment from any
@@ -1584,9 +1672,7 @@ pub async fn open_tab_internal(
             return Err("too_many_tabs".to_string());
         }
         tabs.next_id += 1;
-        let label = format!("tab-{}", tabs.next_id);
-        tabs.register(&label, url.as_str());
-        label
+        format!("tab-{}", tabs.next_id)
     };
     let web_url = if is_local_app_url(&url) {
         let path = url.path().trim_start_matches('/');
@@ -1594,15 +1680,10 @@ pub async fn open_tab_internal(
     } else {
         tauri::WebviewUrl::External(url.clone())
     };
-    if let Err(err) = crate::create_tab_webview(app, &label, web_url) {
+    crate::create_tab_webview(app, &label, web_url)?;
+    {
         let mut tabs = write_lock(&state.tabs);
-        tabs.order.retain(|l| l != &label);
-        tabs.urls.remove(&label);
-        tabs.pos_tabs.remove(&label);
-        if tabs.active.as_deref() == Some(label.as_str()) {
-            tabs.active = tabs.order.first().cloned();
-        }
-        return Err(err);
+        tabs.register(&label, url.as_str());
     }
     crate::activate_tab(app, &label);
     Ok(label)
@@ -1898,7 +1979,7 @@ pub async fn clear_web_data_cmd(
 }
 
 #[tauri::command]
-pub fn save_origin_cmd(
+pub async fn save_origin_cmd(
     app: tauri::AppHandle,
     webview: tauri::Webview,
     state: State<'_, AppState>,
@@ -1911,7 +1992,12 @@ pub fn save_origin_cmd(
     }
     let current_auto = *read_lock(&state.auto_reprint);
     let next_auto = auto_reprint.unwrap_or(current_auto);
-    let validated = config::save_origin(&state.config_dir, &origin, next_auto)?;
+    let config_dir = state.config_dir.clone();
+    let validated = tauri::async_runtime::spawn_blocking(move || {
+        config::save_origin(&config_dir, &origin, next_auto)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     let prev_origin = {
         let mut guard = write_lock(&state.configured_origin);
         guard.replace(validated.clone())
@@ -1923,7 +2009,11 @@ pub fn save_origin_cmd(
     // Keep open remote tabs synchronized when the Odoo server URL changes so they
     // never get stranded on a stale origin that fails IPC origin checks.
     if prev_origin.as_deref() != Some(validated.as_str()) {
-        config::clear_last_url(&state.data_dir);
+        let data_dir = state.data_dir.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            config::clear_last_url(&data_dir);
+        })
+        .await;
         if let Ok(target_url) = validated.parse::<tauri::Url>() {
             let snapshot = read_lock(&state.tabs).snapshot();
             for tab in snapshot.iter().filter(|t| !t.is_local) {
@@ -1949,7 +2039,7 @@ pub fn get_printer_settings(
 }
 
 #[tauri::command]
-pub fn set_printer_settings(
+pub async fn set_printer_settings(
     webview: tauri::Webview,
     state: State<'_, AppState>,
     printer: String,
@@ -1965,16 +2055,22 @@ pub fn set_printer_settings(
             return Err("printer setting value too long".to_string());
         }
     }
-    let mut guard = write_lock(&state.printer_settings);
-    let mut map = config::load_printer_settings_checked(&state.config_dir)?;
-    if settings == config::PrinterSettings::default() {
-        map.remove(&name);
-    } else {
-        map.insert(name, settings);
-    }
-    config::save_printer_settings(&state.config_dir, &map)?;
-    *guard = map.clone();
-    Ok(map)
+    let printer_settings = Arc::clone(&state.printer_settings);
+    let config_dir = state.config_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<config::PrinterSettingsMap, String> {
+        let mut guard = write_lock(&printer_settings);
+        let mut map = config::load_printer_settings_checked(&config_dir)?;
+        if settings == config::PrinterSettings::default() {
+            map.remove(&name);
+        } else {
+            map.insert(name, settings);
+        }
+        config::save_printer_settings(&config_dir, &map)?;
+        *guard = map.clone();
+        Ok(map)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Open one of the app's built-in local pages in its own tab
@@ -2413,19 +2509,36 @@ impl NativePrintBackend {
     // Metadata host/IP checks live at module level so config.rs shares them.
 
     fn reject_metadata_resolution(host: &str, port: u16) -> Result<(), BackendError> {
-        if host.parse::<std::net::IpAddr>().is_ok() {
-            return Ok(());
-        }
-        if let Ok(addrs) = (host, port).to_socket_addrs() {
-            if addrs
-                .into_iter()
-                .any(|sock| is_blocked_metadata_ip(sock.ip()))
-            {
+        if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+            if is_blocked_metadata_ip(ip) {
                 return Err(BackendError::fatal(
                     "BAD_PRINTER_ADDRESS",
                     "cloud metadata address is not allowed",
                 ));
             }
+            return Ok(());
+        }
+        let addrs = (host, port).to_socket_addrs().map_err(|e| {
+            BackendError::retryable(
+                "DNS_RESOLUTION_FAILED",
+                &format!("cannot resolve printer host: {e}"),
+            )
+        })?;
+        let mut resolved = false;
+        for sock in addrs {
+            resolved = true;
+            if is_blocked_metadata_ip(sock.ip()) {
+                return Err(BackendError::fatal(
+                    "BAD_PRINTER_ADDRESS",
+                    "cloud metadata address is not allowed",
+                ));
+            }
+        }
+        if !resolved {
+            return Err(BackendError::retryable(
+                "DNS_RESOLUTION_FAILED",
+                "printer host resolved to no addresses",
+            ));
         }
         Ok(())
     }
@@ -2477,6 +2590,7 @@ impl NativePrintBackend {
             .or_else(|| spec.strip_prefix("raw://"))
             .or_else(|| spec.strip_prefix("ipp://"))
             .or_else(|| spec.strip_prefix("http://"))
+            .or_else(|| spec.strip_prefix("https://"))
             .unwrap_or(spec);
         let (host_port, path) = match rest.split_once('/') {
             Some((hp, p)) => (hp, format!("/{p}")),
@@ -2598,6 +2712,12 @@ impl NativePrintBackend {
         let count = doc.page_count();
         if count == 0 {
             return Err(BackendError::fatal("EMPTY_DOCUMENT", "PDF has 0 pages"));
+        }
+        if count > print_core::security::MAX_PAGES as usize {
+            return Err(BackendError::fatal(
+                "TOO_MANY_PAGES",
+                "PDF exceeds maximum page limit",
+            ));
         }
         match mode {
             "escpos" => {
@@ -3384,6 +3504,7 @@ pub fn spawn_worker_loop(
         let mut entropy: u64 = 0x5EED_2026;
         let mut coord_queue: Option<Queue> = None;
         let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        let backoff: Arc<Mutex<HashMap<String, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
         let mut last_reconcile: Option<Instant> = None;
         loop {
             if stop.load(Ordering::Acquire) {
@@ -3418,8 +3539,24 @@ pub fn spawn_worker_loop(
                     }
                 };
                 for printer in printers {
+                    let now = Instant::now();
+                    {
+                        let mut cd = backoff.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Some(&until) = cd.get(&printer) {
+                            if now < until {
+                                continue;
+                            }
+                            cd.remove(&printer);
+                        }
+                        if cd.len() > 64 {
+                            cd.retain(|_, until| now < *until);
+                        }
+                    }
                     let claimed_slot = {
                         let mut active = in_flight.lock().unwrap_or_else(|e| e.into_inner());
+                        if active.len() >= MAX_CONCURRENT_PRINTERS {
+                            break;
+                        }
                         active.insert(printer.clone())
                     };
                     if !claimed_slot {
@@ -3433,27 +3570,46 @@ pub fn spawn_worker_loop(
                     let wake_c = Arc::clone(&wake);
                     let stop_c = Arc::clone(&stop);
                     let flight_c = Arc::clone(&in_flight);
+                    let backoff_c = Arc::clone(&backoff);
                     // One short-lived thread per active printer prevents a slow network
                     // printer from blocking local USB receipt printers.
                     std::thread::spawn(move || {
-                        struct SlotGuard(
-                            Arc<Mutex<HashSet<String>>>,
-                            String,
-                            Arc<(Mutex<bool>, Condvar)>,
-                        );
+                        struct SlotGuard {
+                            in_flight: Arc<Mutex<HashSet<String>>>,
+                            backoff: Arc<Mutex<HashMap<String, Instant>>>,
+                            printer: String,
+                            wake: Arc<(Mutex<bool>, Condvar)>,
+                            normal_exit: bool,
+                        }
                         impl Drop for SlotGuard {
                             fn drop(&mut self) {
-                                self.0
+                                self.in_flight
                                     .lock()
                                     .unwrap_or_else(|e| e.into_inner())
-                                    .remove(&self.1);
-                                let (lock, cvar) = &*self.2;
-                                let mut pending = lock.lock().unwrap_or_else(|p| p.into_inner());
-                                *pending = true;
-                                cvar.notify_one();
+                                    .remove(&self.printer);
+                                if self.normal_exit {
+                                    let (lock, cvar) = &*self.wake;
+                                    let mut pending = lock.lock().unwrap_or_else(|p| p.into_inner());
+                                    *pending = true;
+                                    cvar.notify_one();
+                                } else {
+                                    self.backoff
+                                        .lock()
+                                        .unwrap_or_else(|e| e.into_inner())
+                                        .insert(
+                                            self.printer.clone(),
+                                            Instant::now() + WORKER_ERROR_BACKOFF,
+                                        );
+                                }
                             }
                         }
-                        let _guard = SlotGuard(flight_c, printer.clone(), wake_c);
+                        let mut guard = SlotGuard {
+                            in_flight: flight_c,
+                            backoff: backoff_c,
+                            printer: printer.clone(),
+                            wake: wake_c,
+                            normal_exit: false,
+                        };
                         let Ok(mut q) = Queue::open(&db_c) else {
                             return;
                         };
@@ -3488,6 +3644,7 @@ pub fn spawn_worker_loop(
                                         );
                                     }
                                     if o == Outcome::Idle {
+                                        guard.normal_exit = true;
                                         break;
                                     }
                                 }
@@ -3945,5 +4102,86 @@ mod tests {
         assert_eq!(map.len(), DLE_SILENT_MAX_ENTRIES);
         assert!(map.contains_key("10.0.1.1:9100"));
         assert!(!map.contains_key("10.0.0.0:9100"));
+    }
+
+    #[test]
+    fn remote_printer_pattern_ssrf_and_dns_fail_closed() {
+        let empty = config::PrinterSettingsMap::new();
+        // Remote ad-hoc network URIs: valid printer ports on LAN hosts pass.
+        for ok in [
+            "EPSON TM-T88V",
+            "tcp://192.168.1.50:9100",
+            "tcp://192.168.1.50",
+            "raw://192.168.1.50:9109",
+            "ipp://192.168.1.50:631/ipp/print",
+            "http://192.168.1.50/ipp/print",
+            "https://192.168.1.50:631/ipp/print",
+        ] {
+            assert!(
+                validate_printer_pattern(ok, false, &empty).is_ok(),
+                "expected remote allow for {ok}"
+            );
+        }
+        // Remote ad-hoc network URIs: loopback hosts and non-printer ports are rejected.
+        for bad in [
+            "tcp://127.0.0.1:9100",
+            "tcp://127.0.0.2:9100",
+            "tcp://[::1]:9100",
+            "tcp://[::ffff:127.0.0.1]:9100",
+            "tcp://localhost:9100",
+            "ipp://127.0.0.1:631/ipp/print",
+            "ipp://[::1]:631/ipp/print",
+            "http://localhost:631/ipp/print",
+            "tcp://192.168.1.50:80",
+            "raw://192.168.1.50:9110",
+            "ipp://192.168.1.50:8080/ipp/print",
+            "http://192.168.1.50:8069/web",
+            "https://192.168.1.50:443/ipp/print",
+            "TCP://127.0.0.1:9100",
+        ] {
+            assert!(
+                validate_printer_pattern(bad, false, &empty).is_err(),
+                "expected remote reject for {bad}"
+            );
+        }
+        // Local pages and explicitly configured URIs in printer_settings remain allowed.
+        assert!(validate_printer_pattern("ipp://[::1]:631/ipp/print", true, &empty).is_ok());
+        let mut configured = config::PrinterSettingsMap::new();
+        configured.insert(
+            "tcp://127.0.0.1:9100".to_string(),
+            config::PrinterSettings::default(),
+        );
+        assert!(validate_printer_pattern("tcp://127.0.0.1:9100", false, &configured).is_ok());
+        // reject_metadata_resolution rejects IPv4-mapped metadata and fails closed on DNS errors.
+        assert_eq!(
+            NativePrintBackend::reject_metadata_resolution("::ffff:169.254.169.254", 9100)
+                .unwrap_err()
+                .code,
+            "BAD_PRINTER_ADDRESS"
+        );
+        assert_eq!(
+            NativePrintBackend::reject_metadata_resolution("nonexistent.invalid", 9100)
+                .unwrap_err()
+                .code,
+            "DNS_RESOLUTION_FAILED"
+        );
+    }
+
+    #[test]
+    fn deserialize_bytes_rejects_oversized_map() {
+        #[derive(Deserialize)]
+        struct Wrap {
+            #[serde(deserialize_with = "deserialize_bytes")]
+            bytes: Vec<u8>,
+        }
+        let ok: Wrap = serde_json::from_str(r#"{"bytes":{"0":37,"1":80}}"#).unwrap();
+        assert_eq!(ok.bytes, vec![37, 80]);
+
+        let oversized = format!(r#"{{"bytes":{{"{}":1}}}}"#, MAX_BYTE_MAP_LEN);
+        let err = serde_json::from_str::<Wrap>(&oversized).err().unwrap();
+        assert!(
+            err.to_string().contains("payload_too_large"),
+            "unexpected error: {err}"
+        );
     }
 }

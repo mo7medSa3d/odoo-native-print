@@ -177,7 +177,7 @@ impl PrinterHealth {
     }
 
     /// The single primary status, for consumers that need one value.
-    /// Priority mirrors [`crate::printer::decode_printer_status`]:
+    /// Priority orders what a human must fix first, then activity states.
     /// what a human must fix first, then activity states. Warnings
     /// alone (low supplies) map to `Ready`; an empty condition set
     /// is `Ready`; a `CommunicationError` maps to `Unknown`, never
@@ -255,7 +255,7 @@ impl PrinterHealth {
         if flags & 0x0000_0001 != 0 {
             set.insert(HealthCondition::Paused);
         }
-        if flags & 0x0000_0002 != 0 {
+        if flags & 0x0000_0002 != 0 || flags & 0x0020_0000 != 0 {
             set.insert(HealthCondition::HardwareError);
         }
         if flags & 0x0000_0400 != 0 || flags & 0x0000_4000 != 0 {
@@ -264,8 +264,14 @@ impl PrinterHealth {
         if flags & 0x0000_0200 != 0 {
             set.insert(HealthCondition::Busy);
         }
+        if flags & 0x0001_0000 != 0 {
+            set.insert(HealthCondition::WarmingUp);
+        }
         if flags & 0x0002_0000 != 0 {
             set.insert(HealthCondition::TonerLow);
+        }
+        if flags & 0x0000_0004 != 0 {
+            set.insert(HealthCondition::Offline);
         }
         Self::new(set, HealthSource::Spooler, observed_at, 30)
             .with_raw(format!("spooler_flags=0x{flags:08x}"))
@@ -513,6 +519,34 @@ mod tests {
         let off = PrinterHealth::from_spooler_flags(0, true, 1000);
         assert!(off.has(HealthCondition::Offline));
         assert!(off.blocks_printing());
+    }
+
+    #[test]
+    fn spooler_flags_handle_warming_up_oom_and_unknown_fallback() {
+        // Advisory/transient NOT_AVAILABLE (0x1000) stays tolerant (Ready)
+        // so virtual and UNC shared Windows queues are not downgraded.
+        let na = PrinterHealth::from_spooler_flags(0x0000_1000, false, 1000);
+        assert!(na.conditions.is_empty());
+        assert_eq!(na.primary_status(), PrinterStatus::Ready);
+        assert!(!na.blocks_printing());
+
+        // OUT_OF_MEMORY (0x200000) -> HardwareError (blocks printing).
+        let oom = PrinterHealth::from_spooler_flags(0x0020_0000, false, 1000);
+        assert_eq!(oom.conditions, vec![HealthCondition::HardwareError]);
+        assert_eq!(oom.primary_status(), PrinterStatus::Error);
+        assert!(oom.blocks_printing());
+
+        // PENDING_DELETION (0x04) -> Offline (queue is being removed).
+        let del = PrinterHealth::from_spooler_flags(0x0000_0004, false, 1000);
+        assert_eq!(del.conditions, vec![HealthCondition::Offline]);
+        assert_eq!(del.primary_status(), PrinterStatus::Offline);
+        assert!(del.blocks_printing());
+
+        // WARMING_UP (0x10000) -> WarmingUp (activity, non-blocking).
+        let warm = PrinterHealth::from_spooler_flags(0x0001_0000, false, 1000);
+        assert_eq!(warm.conditions, vec![HealthCondition::WarmingUp]);
+        assert_eq!(warm.primary_status(), PrinterStatus::Printing);
+        assert!(!warm.blocks_printing());
     }
 
     #[test]

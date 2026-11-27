@@ -16,10 +16,15 @@ const posSrc = readFileSync(
 const clientSrc = readFileSync(
     new URL("../static/src/js/native_print_client.js", import.meta.url),
     "utf8",
-).replace(
-    'import { _t } from "@web/core/l10n/translation";',
-    "const _t = (s) => s;",
-);
+)
+    .replace(
+        'import { _t } from "@web/core/l10n/translation";',
+        "const _t = (s) => s;",
+    )
+    .replace(
+        'import { NotificationPlugin } from "@web/core/notifications/notification_plugin";',
+        "class NotificationPlugin {}",
+    );
 
 function extract(name) {
     let start = posSrc.indexOf(`function ${name}(`);
@@ -104,14 +109,20 @@ test("document direction follows session language: Arabic rtl, English ltr", () 
     }
 });
 
-test("posReceiptKey idempotency, per-cashier scoping, tombstone rotation, and stale >15s expiry", () => {
-    const store = new Map();
+test("posReceiptKey idempotency, per-cashier scoping, tombstone rotation, tab reload persistence, pruning, and fallback", () => {
+    const makeWebStorage = (map = new Map()) => ({
+        get length() { return map.size; },
+        key: (i) => Array.from(map.keys())[i] ?? null,
+        getItem: (k) => (map.has(k) ? map.get(k) : null),
+        setItem: (k, v) => map.set(k, String(v)),
+        removeItem: (k) => map.delete(k),
+    });
+    const localStore = new Map();
+    let sessionStore = new Map();
+    const prevLocal = globalThis.localStorage;
     const prevStorage = globalThis.sessionStorage;
-    globalThis.sessionStorage = {
-        getItem: (k) => (store.has(k) ? store.get(k) : null),
-        setItem: (k, v) => store.set(k, String(v)),
-        removeItem: (k) => store.delete(k),
-    };
+    globalThis.localStorage = makeWebStorage(localStore);
+    globalThis.sessionStorage = makeWebStorage(sessionStore);
     try {
         eval(
             extract("extractCashierUserId") + "\n" +
@@ -138,18 +149,51 @@ test("posReceiptKey idempotency, per-cashier scoping, tombstone rotation, and st
         assert.strictEqual(globalThis.__k("Order_1", "9"), other, "second cashier keeps own in-flight key");
         assert.strictEqual(globalThis.__k("Order_1", "7"), k3, "first cashier record untouched");
 
-        store.set("np.pos.key.Order_3.u7", JSON.stringify({
-            key: "pos-Order_3-20261119-u7-a1",
+        const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+        localStore.set(`np.pos.key.${today}.Order_3.u7`, JSON.stringify({
+            key: `pos-Order_3-${today}-u7-a1`,
             ts: Date.now() - 20000,
             attempt: 1,
         }));
         const staleNext = globalThis.__k("Order_3", "7");
         assert.match(staleNext, /-a2$/, "stale >15s record advances to next attempt");
 
+        // Persistence across simulated tab reload: clearing sessionStorage keeps localStorage tombstone.
+        const r1 = globalThis.__k("Order_Reload", "7");
+        assert.match(r1, /-a1$/);
+        globalThis.__c("Order_Reload", "7");
+        sessionStore = new Map();
+        globalThis.sessionStorage = makeWebStorage(sessionStore);
+        const r2 = globalThis.__k("Order_Reload", "7");
+        assert.match(r2, /-a2$/, "reprint after tab reload advances to a2 instead of colliding with a1");
+        assert.notStrictEqual(r2, r1);
+
+        // Pruning: entries older than 2 days are removed on write; recent entries are preserved.
+        const oldDay = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10).replace(/-/g, "");
+        const keepDay = new Date(Date.now() - 1 * 86400000).toISOString().slice(0, 10).replace(/-/g, "");
+        localStore.set(`np.pos.key.${oldDay}.Order_Old.u7`, JSON.stringify({ key: null, ts: 0, attempt: 1 }));
+        localStore.set(`np.pos.key.${keepDay}.Order_Keep.u7`, JSON.stringify({ key: null, ts: 0, attempt: 1 }));
+        globalThis.__k("Order_PruneTrigger", "7");
+        assert.strictEqual(localStore.has(`np.pos.key.${oldDay}.Order_Old.u7`), false, "entries older than 2 days are pruned on write");
+        assert.strictEqual(localStore.has(`np.pos.key.${keepDay}.Order_Keep.u7`), true, "entries within 2 days are kept");
+
+        // Fallback to sessionStorage when localStorage throws.
+        globalThis.localStorage = {
+            getItem() { throw new Error("SecurityError"); },
+            setItem() { throw new Error("SecurityError"); },
+            removeItem() { throw new Error("SecurityError"); },
+        };
+        const fb1 = globalThis.__k("Order_Fallback", "7");
+        assert.match(fb1, /-a1$/);
+        globalThis.__c("Order_Fallback", "7");
+        const fb2 = globalThis.__k("Order_Fallback", "7");
+        assert.match(fb2, /-a2$/, "falls back to sessionStorage when localStorage throws");
+
         assert.strictEqual(globalThis.__u({ name: "Anon" }, { user: { id: 12 } }, null), "12");
         assert.strictEqual(globalThis.__u({}, { user: {}, session: { user_id: [19, "Cashier"] } }, null), "19");
         assert.strictEqual(globalThis.__u(null, null, { user_id: { id: 42 } }), "42");
     } finally {
+        globalThis.localStorage = prevLocal;
         globalThis.sessionStorage = prevStorage;
     }
 });
@@ -632,12 +676,16 @@ test("PosTicketPrinterPlugin.printOrderReceipt cleans up late iframe on generate
     }
 });
 
-test("OneNote-style GDI printer: failed image capture prints text, total capture failure reports natively (no print dialog)", async () => {
+test("OneNote-style GDI printer: tries visible PNG first, rasterizes text to PNG via printImage (never printText), and reports total failure natively", async () => {
     const prevWindow = globalThis.window;
+    const prevDocument = globalThis.document;
+    const prevImage = globalThis.Image;
+    const prevXMLSerializer = globalThis.XMLSerializer;
     const prevStorage = globalThis.sessionStorage;
     const prevSetTimeout = globalThis.setTimeout;
     const prevSuperCount = globalThis.__superCalls.length;
     const store = new Map();
+    const printImageCalls = [];
     const printTextCalls = [];
     const notices = [];
 
@@ -650,20 +698,82 @@ test("OneNote-style GDI printer: failed image capture prints text, total capture
     globalThis.window = {
         localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
         dispatchEvent: () => true,
+        getComputedStyle: () => ({ length: 0, getPropertyValue: () => "" }),
         __NATIVE_PRINT__: {
             listPrinters: async () => [
                 { name: "OneNote (Desktop)", printer_class: "office", protocol: "gdi", online: true },
             ],
             printerCapabilities: async () => ({ forms: [], color: true }),
-            printImage: async () => { throw new Error("must not print an image"); },
+            printImage: async (req) => { printImageCalls.push(req); return req.idempotencyKey; },
             printText: async (req) => { printTextCalls.push(req); return req.idempotencyKey; },
             jobDetail: async () => ({ state: "done", attempts: 1 }),
         },
     };
 
     try {
-        // 1) A GDI printer must still get the receipt text when the image
-        //    capture path fails (previously only ESC/POS had this fallback).
+        // 1) When generateImage fails and a visible receipt is on screen, capture
+        //    visibleReceiptToPngBytes BEFORE plain-text extraction.
+        let drawnText = false;
+        let drawnSvg = false;
+        const visibleEl = {
+            offsetWidth: 300,
+            offsetHeight: 400,
+            scrollHeight: 400,
+            innerText: "VISIBLE RECEIPT",
+            children: [],
+            getBoundingClientRect: () => ({ width: 300, height: 400 }),
+            cloneNode: () => ({ children: [], setAttribute() {} }),
+        };
+        globalThis.XMLSerializer = class { serializeToString() { return "<div>ok</div>"; } };
+        globalThis.Image = class {
+            set src(_v) { Promise.resolve().then(() => this.onload && this.onload()); }
+        };
+        globalThis.document = {
+            querySelector: (sel) => (sel === "#pos-receipt" ? visibleEl : null),
+            createElement: (tag) => (tag === "canvas" ? {
+                width: 0,
+                height: 0,
+                getContext: () => ({
+                    measureText: () => ({ width: 8 }),
+                    fillRect() {},
+                    fillText() { drawnText = true; },
+                    drawImage() { drawnSvg = true; },
+                }),
+                toBlob: (cb) => cb({ arrayBuffer: async () => new Uint8Array([137, 80, 78, 71]).buffer }),
+            } : {}),
+        };
+        const pluginVis = new StubPosTicketPrinterPlugin();
+        pluginVis.pos = { getCashier: () => ({ id: 30 }) };
+        pluginVis.notification = { add: (msg, opts) => notices.push({ msg, opts }) };
+        pluginVis.generateIframe = async () => ({
+            contentDocument: { getElementById: () => ({ innerText: "TOTAL 10.00", offsetWidth: 300 }) },
+            remove() {},
+        });
+        pluginVis.generateImage = async () => { throw new Error("iframe image capture failed"); };
+
+        assert.strictEqual(await pluginVis.printOrderReceipt({ order: { uuid: "ord-20-visible-first" } }), true);
+        assert.strictEqual(drawnSvg, true, "visibleReceiptToPngBytes runs before plain-text fallback");
+        assert.strictEqual(drawnText, false, "text-to-PNG is skipped when visible PNG succeeds");
+        assert.strictEqual(printImageCalls.length, 1, "visible receipt PNG is sent via printImage");
+        assert.strictEqual(printTextCalls.length, 0, "GDI printer must never receive printText");
+
+        // 2) When no visible receipt exists and generateImage fails on a GDI printer,
+        //    rasterize fallbackText to PNG and send via printImage (never printText).
+        printImageCalls.length = 0;
+        drawnText = false;
+        globalThis.document = {
+            querySelector: () => null,
+            createElement: (tag) => (tag === "canvas" ? {
+                width: 0,
+                height: 0,
+                getContext: () => ({
+                    measureText: () => ({ width: 8 }),
+                    fillRect() {},
+                    fillText() { drawnText = true; },
+                }),
+                toBlob: (cb) => cb({ arrayBuffer: async () => new Uint8Array([137, 80, 78, 71]).buffer }),
+            } : {}),
+        };
         const plugin = new StubPosTicketPrinterPlugin();
         plugin.pos = { getCashier: () => ({ id: 31 }) };
         plugin.notification = { add: (msg, opts) => notices.push({ msg, opts }) };
@@ -679,12 +789,15 @@ test("OneNote-style GDI printer: failed image capture prints text, total capture
             await plugin.printOrderReceipt({ order: { uuid: "ord-20-onenote" } }),
             true,
         );
-        assert.strictEqual(printTextCalls.length, 1, "GDI capture failure must fall back to printText");
-        assert.strictEqual(printTextCalls[0].text, "TOTAL 10.00");
-        assert.strictEqual(globalThis.__superCalls.length, prevSuperCount, "text fallback must not use the browser");
+        assert.strictEqual(drawnText, true, "GDI text fallback renders text onto canvas");
+        assert.strictEqual(printImageCalls.length, 1, "GDI capture failure sends rasterized PNG via printImage");
+        assert.strictEqual(printImageCalls[0].mode, "gdi");
+        assert.strictEqual(printTextCalls.length, 0, "GDI printer must never call printText");
+        assert.strictEqual(globalThis.__superCalls.length, prevSuperCount, "PNG fallback must not use the browser");
 
-        // 2) If neither image nor text can be produced, fail loudly but
-        //    never open Odoo's browser print dialog.
+        // 3) If neither image nor text-to-PNG can be produced, fail loudly without
+        //    calling printText or opening Odoo's browser print dialog.
+        globalThis.document = undefined;
         const plugin2 = new StubPosTicketPrinterPlugin();
         plugin2.pos = { getCashier: () => ({ id: 32 }) };
         plugin2.notification = { add: (msg, opts) => notices.push({ msg, opts }) };
@@ -695,6 +808,7 @@ test("OneNote-style GDI printer: failed image capture prints text, total capture
             await plugin2.printOrderReceipt({ order: { uuid: "ord-20-onenote-2" } }),
             true,
         );
+        assert.strictEqual(printTextCalls.length, 0, "total capture failure on GDI never calls printText");
         assert.strictEqual(
             globalThis.__superCalls.length,
             prevSuperCount,
@@ -708,6 +822,9 @@ test("OneNote-style GDI printer: failed image capture prints text, total capture
         );
     } finally {
         globalThis.window = prevWindow;
+        globalThis.document = prevDocument;
+        globalThis.Image = prevImage;
+        globalThis.XMLSerializer = prevXMLSerializer;
         globalThis.sessionStorage = prevStorage;
         globalThis.setTimeout = prevSetTimeout;
     }
@@ -1009,5 +1126,119 @@ test("visibleReceiptToPngBytes rasterizes SVG natively at 2x scaled dimensions v
         globalThis.Image = prevImage;
         globalThis.XMLSerializer = prevXMLSerializer;
         delete globalThis.__testO20VisibleCapture;
+    }
+});
+
+test("visibleReceiptToPngBytes propagates dir/lang for RTL and inlines <canvas> elements as PNG <img>", async () => {
+    const prevWindow = globalThis.window;
+    const prevDocument = globalThis.document;
+    const prevImage = globalThis.Image;
+    const prevXMLSerializer = globalThis.XMLSerializer;
+    let loadedSrc = "";
+    let replacedWith = null;
+
+    const qrDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
+    const srcCanvas = {
+        tagName: "CANVAS",
+        width: 120,
+        height: 120,
+        children: [],
+        toDataURL: () => qrDataUrl,
+    };
+    const makeCloneCanvas = () => ({
+        tagName: "CANVAS",
+        attrs: { style: "display:block;" },
+        children: [],
+        getAttribute(k) { return this.attrs[k] ?? null; },
+        setAttribute(k, v) { this.attrs[k] = String(v); },
+        replaceWith(node) { replacedWith = node; },
+    });
+    const el = {
+        offsetWidth: 300,
+        offsetHeight: 400,
+        scrollHeight: 400,
+        attrs: { dir: "rtl", lang: "ar" },
+        children: [srcCanvas],
+        getAttribute(k) { return this.attrs[k] ?? null; },
+        getBoundingClientRect: () => ({ width: 300, height: 400 }),
+        querySelectorAll: (sel) => (sel === "canvas" ? [srcCanvas] : []),
+        cloneNode() {
+            const cCanvas = makeCloneCanvas();
+            return {
+                attrs: {},
+                children: [cCanvas],
+                getAttribute(k) { return this.attrs[k] ?? null; },
+                setAttribute(k, v) { this.attrs[k] = String(v); },
+                querySelectorAll: (sel) => (sel === "canvas" ? [cCanvas] : []),
+            };
+        },
+    };
+    globalThis.window = {
+        getComputedStyle: () => ({ length: 0, direction: "rtl", getPropertyValue: () => "" }),
+    };
+    globalThis.document = {
+        documentElement: { dir: "rtl", lang: "ar" },
+        createElement(tag) {
+            if (tag === "canvas") {
+                return {
+                    width: 0,
+                    height: 0,
+                    getContext: () => ({
+                        fillStyle: "",
+                        imageSmoothingEnabled: false,
+                        imageSmoothingQuality: "",
+                        fillRect() {},
+                        drawImage() {},
+                    }),
+                    toBlob: (cb) => cb({ arrayBuffer: async () => new Uint8Array([137, 80, 78, 71]).buffer }),
+                };
+            }
+            return {
+                tagName: tag.toUpperCase(),
+                attrs: {},
+                setAttribute(k, v) { this.attrs[k] = String(v); },
+                getAttribute(k) { return this.attrs[k] ?? null; },
+            };
+        },
+    };
+    globalThis.XMLSerializer = class {
+        serializeToString(node) {
+            const imgMarkup = replacedWith
+                ? `<img src="${replacedWith.getAttribute("src")}" width="${replacedWith.getAttribute("width")}" height="${replacedWith.getAttribute("height")}"/>`
+                : "";
+            return `<div dir="${node.getAttribute("dir")}" lang="${node.getAttribute("lang")}">${imgMarkup}</div>`;
+        }
+    };
+    globalThis.Image = class {
+        set src(v) {
+            loadedSrc = v;
+            Promise.resolve().then(() => this.onload && this.onload());
+        }
+    };
+    try {
+        const helperSrc = [
+            "const POS_CAPTURE_TIMEOUT_MS = 5000;",
+            (posSrc.match(/const RECEIPT_LAYOUT_FIX_CSS = [\s\S]*?;/)?.[0] || 'const RECEIPT_LAYOUT_FIX_CSS = "";'),
+            extract("canvasToPngBytes"),
+            extract("visibleReceiptToPngBytes"),
+            "globalThis.__testO20VisibleRtl = visibleReceiptToPngBytes;",
+        ].join("\n");
+        eval(helperSrc);
+        const bytes = await globalThis.__testO20VisibleRtl(el);
+        assert.deepStrictEqual(bytes, [137, 80, 78, 71]);
+        const svg = decodeURIComponent(loadedSrc);
+        assert.ok(svg.includes('dir="rtl"'), "cloned root preserves dir=rtl");
+        assert.ok(svg.includes('lang="ar"'), "cloned root preserves lang=ar");
+        assert.ok(replacedWith && replacedWith.tagName === "IMG", "canvas element replaced with <img>");
+        assert.strictEqual(replacedWith.getAttribute("src"), qrDataUrl, "canvas serialized as data:image/png;base64,...");
+        assert.strictEqual(replacedWith.getAttribute("width"), "120");
+        assert.strictEqual(replacedWith.getAttribute("height"), "120");
+        assert.ok(svg.includes(qrDataUrl), "inlined canvas PNG data URL appears in <foreignObject> SVG");
+    } finally {
+        globalThis.window = prevWindow;
+        globalThis.document = prevDocument;
+        globalThis.Image = prevImage;
+        globalThis.XMLSerializer = prevXMLSerializer;
+        delete globalThis.__testO20VisibleRtl;
     }
 });

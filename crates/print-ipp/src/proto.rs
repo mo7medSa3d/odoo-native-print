@@ -34,6 +34,17 @@ pub enum Value {
     Text(u8, String), // value tag (TEXT/NAME/KEYWORD/URI/CHARSET/LANGUAGE/MIME)
 }
 
+fn truncate_utf8(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 impl Value {
     fn tag(&self) -> u8 {
         match self {
@@ -54,7 +65,7 @@ impl Value {
                 out.push(if *b { 1 } else { 0 });
             }
             Value::Text(_, s) => {
-                let bytes = &s.as_bytes()[..s.len().min(u16::MAX as usize)];
+                let bytes = truncate_utf8(s, u16::MAX as usize).as_bytes();
                 out.extend_from_slice(&(bytes.len() as u16).to_be_bytes());
                 out.extend_from_slice(bytes);
             }
@@ -143,7 +154,7 @@ fn attr_encoded_len(attr: &Attr) -> usize {
     if attr.name.is_empty() {
         return 0;
     }
-    let name_len = attr.name.len().min(u16::MAX as usize);
+    let name_len = truncate_utf8(&attr.name, u16::MAX as usize).len();
     attr.values
         .iter()
         .enumerate()
@@ -152,7 +163,7 @@ fn attr_encoded_len(attr: &Attr) -> usize {
             let vlen = match value {
                 Value::Integer(_) | Value::Enum(_) => 4,
                 Value::Boolean(_) => 1,
-                Value::Text(_, s) => s.len().min(u16::MAX as usize),
+                Value::Text(_, s) => truncate_utf8(s, u16::MAX as usize).len(),
             };
             1usize
                 .saturating_add(2)
@@ -167,7 +178,7 @@ fn write_attr(out: &mut Vec<u8>, attr: &Attr) {
     if attr.name.is_empty() {
         return;
     }
-    let name_bytes = &attr.name.as_bytes()[..attr.name.len().min(u16::MAX as usize)];
+    let name_bytes = truncate_utf8(&attr.name, u16::MAX as usize).as_bytes();
     for (i, value) in attr.values.iter().enumerate() {
         out.push(value.tag());
         if i == 0 {
@@ -498,5 +509,27 @@ mod tests {
         assert_eq!(parse_value(0x12, b"").as_text(), None);
         // Malformed 2-byte INTEGER must not leak raw bytes via as_text().
         assert_eq!(parse_value(tag::INTEGER, b"ab").as_text(), None);
+    }
+
+    #[test]
+    fn truncates_oversized_utf8_at_char_boundary() {
+        // 4-byte emoji placed so it straddles the u16::MAX (65535) byte boundary.
+        let oversized = "x".repeat(65_534) + "😀tail";
+        let attr = Attr::text(&oversized, &oversized);
+        let wire = encode_request(
+            op::PRINT_JOB,
+            7,
+            "ipp://localhost/ipp/print",
+            &[],
+            &[attr],
+            None,
+        );
+        let parsed = parse_message(&wire).unwrap();
+        let job_attr = parsed.attrs_in(tag::GROUP_JOB).next().unwrap();
+        assert_eq!(job_attr.name.len(), 65_534);
+        assert!(!job_attr.name.contains('\u{FFFD}'));
+        let val = job_attr.values[0].as_text().unwrap();
+        assert_eq!(val.len(), 65_534);
+        assert!(!val.contains('\u{FFFD}'));
     }
 }

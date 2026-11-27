@@ -817,48 +817,6 @@
   .sidebar-tab-item:hover { background: var(--bg-subtle); color: var(--text-primary); }
   .sidebar-tab-item.active { background: var(--brand-soft); color: var(--brand-text); font-weight: 600; border-color: var(--info-border); }
   .sidebar-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
-  .cmd-overlay {
-    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.42);
-    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-    z-index: 250; display: flex; align-items: flex-start; justify-content: center;
-    padding: 10vh 1rem 1rem;
-  }
-  .cmd-card {
-    width: min(94vw, 620px); max-height: 76vh;
-    background: var(--glass-bg-strong);
-    backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
-    border: 1px solid var(--border-strong); border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-lg), var(--glass-highlight);
-    display: flex; flex-direction: column; overflow: hidden;
-  }
-  .cmd-head {
-    display: flex; align-items: center; gap: 0.65rem;
-    padding: 0.85rem 1rem; border-bottom: 1px solid var(--border);
-  }
-  .cmd-input {
-    flex: 1 1 auto; border: 0; background: transparent; color: var(--text-primary);
-    font: inherit; font-size: 0.94rem; outline: none;
-  }
-  .cmd-body { overflow-y: auto; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.85rem; }
-  .cmd-section-title {
-    font-size: 0.7rem; font-weight: 700; color: var(--text-muted);
-    padding: 0 0.4rem 0.25rem; display: flex; align-items: center; justify-content: space-between;
-  }
-  .cmd-list { display: flex; flex-direction: column; gap: 0.25rem; }
-  .cmd-item {
-    display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
-    padding: 0.5rem 0.7rem; border-radius: var(--radius-md);
-    border: 1px solid transparent; background: transparent; color: var(--text-primary);
-    font: inherit; font-size: 0.82rem; cursor: pointer; text-align: start; width: 100%;
-    transition: background-color var(--dur-fast) var(--ease-spring), border-color var(--dur-fast) var(--ease-spring);
-  }
-  .cmd-item:hover { background: var(--bg-subtle); border-color: var(--border); }
-  .cmd-item.is-active,
-  .cmd-item[aria-selected="true"] { background: var(--brand-soft); border-color: var(--info-border); }
-  .cmd-item-main { display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex: 1 1 auto; }
-  .cmd-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-  .cmd-item-sub { font-size: 0.72rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .cmd-item-actions { display: flex; align-items: center; gap: 0.25rem; flex-shrink: 0; }
   .cmd-group-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--border-strong); }
   .cmd-group-dot.g-blue { background: var(--chart-1); }
   .cmd-group-dot.g-teal { background: var(--chart-2); }
@@ -923,8 +881,8 @@
   .preview-barcode-code { font-family: var(--font-mono); font-size: 0.78em; color: var(--text-muted); }
   @media (max-width: 520px) { .preview-meta-grid { grid-template-columns: 1fr; } }
   @media (prefers-reduced-transparency: reduce) {
-    .modal-overlay, .cmd-overlay, .modal-card, .cmd-card { backdrop-filter: none; -webkit-backdrop-filter: none; }
-    .modal-card, .cmd-card { background: var(--bg-surface); }
+    .modal-overlay, .modal-card { backdrop-filter: none; -webkit-backdrop-filter: none; }
+    .modal-card { background: var(--bg-surface); }
   }
 </style>
 </head>
@@ -1433,13 +1391,7 @@
       guide_s3_t: "الرجوع السريع",
       guide_s3_d: "اضغط Ctrl+Shift+Y في أي لحظة للعودة إلى مركز التحكم.",
       search_queue_ph: "بحث…",
-      btn_cmd_palette: "بحث سريع",
       sidebar_tabs_title: "التبويبات المفتوحة",
-      btn_manage_tabs: "إدارة",
-      cmd_open_tabs: "التبويبات المفتوحة والمجموعات",
-      cmd_reopen_closed: "إعادة فتح المغلق",
-      cmd_workspaces: "مساحات العمل (الجلسات المحفوظة)",
-      cmd_quick_actions: "أوامر سريعة",
       btn_open_odoo: "فتح Odoo",
       btn_refresh: "تحديث",
       refreshed: "تم التحديث",
@@ -1613,13 +1565,7 @@
       guide_s3_t: "Quick switch",
       guide_s3_d: "Press Ctrl+Shift+Y anytime to jump back to Control Center.",
       search_queue_ph: "Search jobs…",
-      btn_cmd_palette: "Quick Search",
       sidebar_tabs_title: "Open Tabs",
-      btn_manage_tabs: "Manage",
-      cmd_open_tabs: "Open Tabs & Groups",
-      cmd_reopen_closed: "Reopen Closed",
-      cmd_workspaces: "Workspaces (Saved Sessions)",
-      cmd_quick_actions: "Quick Actions",
       btn_open_odoo: "Open Odoo",
       btn_refresh: "Refresh",
       refreshed: "Refreshed",
@@ -1786,7 +1732,6 @@
 
   const formState = {
     settingsDirty: false,
-    testDirty: false,
   };
 
   let lastOverviewSignature = null;
@@ -1998,16 +1943,6 @@
     if (navTabsEl) navTabsEl.setAttribute("aria-label", I18N[currentLang].nav_section);
     const searchEl = document.getElementById("queueSearchInput");
     if (searchEl) { searchEl.placeholder = I18N[currentLang].search_queue_ph; searchEl.setAttribute("aria-label", I18N[currentLang].search_queue_ph); }
-    const cmdBtn = document.getElementById("btnCmdPalette");
-    if (cmdBtn) { const lbl = I18N[currentLang].btn_cmd_palette + " (Ctrl+K)"; cmdBtn.title = lbl; cmdBtn.setAttribute("aria-label", lbl); }
-    const cmdDlg = document.getElementById("cmdDialog");
-    if (cmdDlg) cmdDlg.setAttribute("aria-label", I18N[currentLang].btn_cmd_palette);
-    const cmdIn = document.getElementById("cmdInput");
-    if (cmdIn) {
-      const ph = currentLang === "ar" ? "ابحث في التبويبات، مساحات العمل، أو الأوامر…" : "Search tabs, workspaces, or commands…";
-      cmdIn.placeholder = ph;
-      cmdIn.setAttribute("aria-label", ph);
-    }
     const dict = I18N[currentLang];
     document.querySelectorAll("[data-i18n]").forEach((el) => {
       if (el.id === "diagnosticsOutput" && diagnosticsGenerated) return;
@@ -2018,8 +1953,6 @@
     updateCalWarning();
     rebuildTestKindOptions();
     renderSidebarTabs();
-    const cmdOv = document.getElementById("cmdOverlay");
-    if (cmdOv && !cmdOv.classList.contains("hidden")) renderCommandPalette(cmdIn ? cmdIn.value : "");
     const pvOv = document.getElementById("previewOverlay");
     if (pvOv && !pvOv.classList.contains("hidden") && previewState) renderPrintPreview(previewState.printerName);
     if (overviewState) renderOverview(overviewState);
@@ -2078,6 +2011,7 @@
     if (btn) { btn.disabled = true; btn.classList.add("is-refreshing"); }
     capsEpoch++;
     capsCache.clear();
+    capsRetryAfter.clear();
     openFormsHtmlCache.clear();
     lastPrinterHardwareMeta.clear();
     printerSettingsRequested = false;
@@ -2383,6 +2317,7 @@
   }
 
   const capsCache = new Map();
+  const capsRetryAfter = new Map();
   let capsVersion = 0;
   let lastGridPrinters = [];
   function capsChipsHtml(p) {
@@ -2410,7 +2345,7 @@
   function syncPrinterCaches(printers) {
     const activeNames = new Set(printers.map((p) => p.name));
     for (const name of [...capsCache.keys()]) {
-      if (!activeNames.has(name)) capsCache.delete(name);
+      if (!activeNames.has(name)) { capsCache.delete(name); capsRetryAfter.delete(name); }
     }
     for (const name of [...openFormsHtmlCache.keys()]) {
       if (!activeNames.has(name)) openFormsHtmlCache.delete(name);
@@ -2437,17 +2372,19 @@
     if (!b || typeof b.printerCapabilities !== "function") return;
     const epoch = capsEpoch;
     for (const p of printers) {
-      if (capsCache.has(p.name)) continue;
+      if (capsCache.has(p.name) || (capsRetryAfter.get(p.name) || 0) > Date.now()) continue;
       capsCache.set(p.name, "loading");
       b.printerCapabilities(p.name).then((caps) => {
         if (epoch !== capsEpoch) return;
+        capsRetryAfter.delete(p.name);
         capsCache.set(p.name, caps || {});
         capsVersion++;
         renderPrintersGrid(lastGridPrinters);
         rebuildLabOptions();
       }).catch(() => {
         if (epoch !== capsEpoch) return;
-        capsCache.set(p.name, {});
+        capsCache.delete(p.name);
+        capsRetryAfter.set(p.name, Date.now() + 15000);
         capsVersion++;
         renderPrintersGrid(lastGridPrinters);
       });
@@ -2460,6 +2397,19 @@
   const openSettingsPrinters = new Set();
   let openFormsPrinter = null;
   const openFormsHtmlCache = new Map();
+  function formsBoxContent(printerName) {
+    const cached = openFormsHtmlCache.get(printerName);
+    if (cached === null) return escapeHtml(currentLang === "ar" ? "لا توجد نماذج ورق مسجلة من التعريف." : "No forms reported by driver.");
+    if (cached === "__error__") return escapeHtml(I18N[currentLang].toast_failed);
+    return cached || "";
+  }
+  function findFormsBox(printerName, idx) {
+    for (const el of document.querySelectorAll(".forms-box[data-printer]")) {
+      if ((el.getAttribute && el.getAttribute("data-printer") === printerName) || (el.dataset && el.dataset.printer === printerName)) return el;
+    }
+    const byId = idx !== undefined ? document.getElementById(`forms-box-${idx}`) : null;
+    return byId && ((byId.getAttribute && byId.getAttribute("data-printer") === printerName) || (byId.dataset && byId.dataset.printer === printerName)) ? byId : null;
+  }
   function loadPrinterSettings() {
     if (printerSettingsRequested) return;
     const b = bridge();
@@ -2483,7 +2433,7 @@
     const formNames = [...new Set((Array.isArray(caps.forms) ? caps.forms : []).map((f) => f && f.name).filter(Boolean))];
     const bins = (Array.isArray(caps.bins) ? caps.bins : []).filter(Boolean);
     const opt = (val, sel, label) => `<option value="${escapeHtml(val)}"${sel ? " selected" : ""}>${escapeHtml(label)}</option>`;
-    const listOpts = (names, current) => opt("", !current, d.ps_driver_default) + names.map((n) => opt(n, current === n, n)).join("");
+    const listOpts = (names, current) => opt("", !current, d.ps_driver_default) + (current && !names.includes(current) ? opt(current, true, current) : "") + names.map((n) => opt(n, current === n, n)).join("");
     const triOpts = (current) => opt("", current === undefined || current === null, d.ps_driver_default) +
       opt("on", current === true, d.ps_on) + opt("off", current === false, d.ps_off);
     const row = (label, cls, inner) => `<label class="settings-field"><span class="settings-field-label">${escapeHtml(label)}</span><select class="select settings-select ${cls}">${inner}</select></label>`;
@@ -2642,7 +2592,7 @@
 
         ${printerSettingsHtml(p)}
 
-        <div id="forms-box-${idx}" class="forms-box${openFormsPrinter === p.name ? "" : " hidden"}" data-printer="${escapeHtml(p.name)}">${openFormsPrinter === p.name ? (openFormsHtmlCache.get(p.name) === null ? escapeHtml(currentLang === "ar" ? "لا توجد نماذج ورق مسجلة من التعريف." : "No forms reported by driver.") : (openFormsHtmlCache.get(p.name) || "")) : ""}</div>
+        <div id="forms-box-${idx}" class="forms-box${openFormsPrinter === p.name ? "" : " hidden"}" data-printer="${escapeHtml(p.name)}">${openFormsPrinter === p.name ? formsBoxContent(p.name) : ""}</div>
 
         <div class="printer-actions">
           <button type="button" class="btn btn-sm btn-primary" data-action="test-print" data-printer="${escapeHtml(p.name)}" data-kind="pdf-a4">
@@ -2773,8 +2723,10 @@
   function writeLocalJson(key, val) {
     try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
   }
+  let tabCmdSeq = 0;
   function sendTabCmd(payload) {
-    writeLocalJson("np_tab_cmd", Object.assign({ ts: Date.now() }, payload));
+    const now = Date.now();
+    writeLocalJson("np_tab_cmd", Object.assign({ ts: now, id: `${now}-${++tabCmdSeq}` }, payload));
   }
   function renderSidebarTabs() {
     const box = document.getElementById("sidebarTabsList");
@@ -2796,188 +2748,13 @@
       return `<button type="button" class="sidebar-tab-item${t.active ? " active" : ""}" data-action="cmd-switch-tab" data-tab-label="${escapeHtml(t.label)}"><span class="cmd-group-dot ${grp}"></span><span class="sidebar-tab-name">${title}</span></button>`;
     }).join("");
   }
-  let cmdReturnFocus = null;
-  let cmdActiveIndex = -1;
-  function getCmdItems() {
-    const root = document.getElementById("cmdResults");
-    return root ? [...root.querySelectorAll(".cmd-item")] : [];
-  }
-  function setCmdActiveIndex(nextIdx) {
-    const items = getCmdItems();
-    if (!items.length) { cmdActiveIndex = -1; return; }
-    const idx = ((nextIdx % items.length) + items.length) % items.length;
-    cmdActiveIndex = idx;
-    items.forEach((el, i) => {
-      const active = i === idx;
-      el.classList.toggle("is-active", active);
-      el.setAttribute("aria-selected", active ? "true" : "false");
-    });
-    const activeEl = items[idx];
-    if (activeEl && typeof activeEl.scrollIntoView === "function") {
-      activeEl.scrollIntoView({ block: "nearest" });
-    }
-  }
-  function executeCmdPrimaryAction(btn) {
-    if (!btn) return false;
-    const action = btn.getAttribute("data-action");
-    if (action === "cmd-run-action") {
-      const targetAct = btn.getAttribute("data-run");
-      closeCommandPalette();
-      if (targetAct === "toggle-theme") toggleTheme();
-      else if (targetAct === "toggle-lang") toggleLang();
-      else if (targetAct === "manual-refresh") manualRefresh();
-      return true;
-    }
-    if (action === "cmd-switch-tab") {
-      const lbl = btn.getAttribute("data-tab-label");
-      if (lbl) sendTabCmd({ action: "switch", label: lbl });
-      closeCommandPalette();
-      return true;
-    }
-    if (action === "restore-workspace") {
-      const idx = Number(btn.getAttribute("data-ws-idx"));
-      const list = readLocalJson("np_workspaces", []);
-      if (Array.isArray(list) && Number.isInteger(idx) && idx >= 0 && idx < list.length && list[idx] && Array.isArray(list[idx].urls)) {
-        sendTabCmd({ action: "restore_workspace", urls: list[idx].urls });
-        closeCommandPalette();
-        return true;
-      }
-      return false;
-    }
-    return false;
-  }
-  function activateCmdItem(idx) {
-    const items = getCmdItems();
-    const item = items[idx] || items[0];
-    if (!item) return false;
-    const target = item.getAttribute("data-action")
-      ? item
-      : (item.querySelector ? item.querySelector('[data-action="cmd-switch-tab"], [data-action="restore-workspace"], [data-action="cmd-run-action"]') : null);
-    return executeCmdPrimaryAction(target);
-  }
-  function openCommandPalette() {
-    const overlay = document.getElementById("cmdOverlay");
-    if (!overlay) return;
-    if (overlay.classList.contains("hidden")) cmdReturnFocus = document.activeElement;
-    overlay.classList.remove("hidden");
-    const inp = document.getElementById("cmdInput");
-    if (inp) { inp.value = ""; inp.focus(); }
-    renderCommandPalette("");
-  }
-  function closeCommandPalette() {
-    const overlay = document.getElementById("cmdOverlay");
-    if (overlay) overlay.classList.add("hidden");
-    cmdActiveIndex = -1;
-    if (cmdReturnFocus && typeof cmdReturnFocus.focus === "function") {
-      try { cmdReturnFocus.focus(); } catch (e) {}
-    }
-    cmdReturnFocus = null;
-  }
-  function renderCommandPalette(query) {
-    const q = String(query || "").trim().toLowerCase();
-    const ar = currentLang === "ar";
-    const tabs = readLocalJson("np_open_tabs", []);
-    const pinned = readLocalJson("np_pinned_tabs", []);
-    const groups = readTabGroups();
-    const tabsEl = document.getElementById("cmdTabsList");
-    if (tabsEl) {
-      const matched = (Array.isArray(tabs) ? tabs : []).filter((t) => !q || `${t.title || ""} ${t.url || ""}`.toLowerCase().includes(q));
-      tabsEl.innerHTML = matched.length ? matched.map((t) => {
-        const isPin = Array.isArray(pinned) && pinned.includes(t.label);
-        const grp = safeGroupName(groups[t.label]);
-        const tabTitle = t.title || t.url || "Tab";
-        return `<div class="cmd-item">
-          <button type="button" class="btn btn-sm btn-glass cmd-item-main" data-action="cmd-switch-tab" data-tab-label="${escapeHtml(t.label)}">
-            <span class="cmd-group-dot ${grp ? "g-" + grp : ""}"></span>
-            <span class="cmd-item-title">${escapeHtml(tabTitle)}</span>
-          </button>
-          <div class="cmd-item-actions">
-            <button type="button" class="btn btn-sm btn-glass" data-action="cmd-pin-tab" data-tab-label="${escapeHtml(t.label)}">${isPin ? (ar ? "إلغاء التثبيت" : "Unpin") : (ar ? "تثبيت" : "Pin")}</button>
-            <button type="button" class="btn btn-sm btn-glass" data-action="cmd-group-tab" data-tab-label="${escapeHtml(t.label)}">${ar ? "مجموعة" : "Group"}</button>
-            <button type="button" class="btn btn-sm btn-glass" data-action="cmd-dup-tab" data-tab-url="${escapeHtml(t.url || "")}">${ar ? "تكرار" : "Duplicate"}</button>
-            <button type="button" class="btn btn-sm btn-danger" data-action="cmd-close-tab" data-tab-label="${escapeHtml(t.label)}" aria-label="${escapeHtml((ar ? "إغلاق: " : "Close: ") + tabTitle)}">×</button>
-          </div>
-        </div>`;
-      }).join("") : `<div class="muted-dash">${ar ? "لا توجد نتائج" : "No matching tabs"}</div>`;
-    }
-    const wsEl = document.getElementById("cmdWorkspacesList");
-    if (wsEl) {
-      const list = readLocalJson("np_workspaces", []);
-      const filteredWs = (Array.isArray(list) ? list : [])
-        .map((w, origIdx) => ({ w, origIdx }))
-        .filter(({ w }) => w && (!q || String(w.name || "").toLowerCase().includes(q)));
-      wsEl.innerHTML = filteredWs.length ? filteredWs.map(({ w, origIdx }) => `
-        <div class="cmd-item">
-          <div class="cmd-item-main">
-            <span class="cmd-item-title">${escapeHtml(w.name)}</span>
-            <span class="cmd-item-sub">(${Array.isArray(w.urls) ? w.urls.length : 0} ${ar ? "تبويبات" : "tabs"})</span>
-          </div>
-          <div class="cmd-item-actions">
-            <button type="button" class="btn btn-sm btn-primary" data-action="restore-workspace" data-ws-idx="${origIdx}">${ar ? "فتح" : "Open"}</button>
-            <button type="button" class="btn btn-sm btn-danger" data-action="delete-workspace" data-ws-idx="${origIdx}" aria-label="${escapeHtml((ar ? "حذف: " : "Delete: ") + (w.name || ""))}">×</button>
-          </div>
-        </div>`).join("") : `<div class="muted-dash">${ar ? "احفظ تبويباتك الحالية كمساحة عمل لاستعادتها بنقرة واحدة." : "Save your open tabs as a workspace to restore in one click."}</div>`;
-    }
-    const actEl = document.getElementById("cmdActionsList");
-    if (actEl) {
-      const actions = [
-        { label: ar ? "تبديل الوضع الليلي / النهاري" : "Toggle Light / Dark Theme", act: "toggle-theme" },
-        { label: ar ? "تبديل اللغة (العربية / English)" : "Switch Language (Arabic / English)", act: "toggle-lang" },
-        { label: ar ? "تحديث الطابعات والطابور" : "Refresh Printers & Queue", act: "manual-refresh" }
-      ].filter((a) => !q || a.label.toLowerCase().includes(q));
-      actEl.innerHTML = actions.map((a) => `<button type="button" class="cmd-item" data-action="cmd-run-action" data-run="${escapeHtml(a.act)}"><span class="cmd-item-title">${escapeHtml(a.label)}</span></button>`).join("");
-    }
-    setCmdActiveIndex(0);
-  }
   document.addEventListener("click", (ev) => {
     const btn = ev.target && ev.target.closest ? ev.target.closest("[data-action]") : null;
     if (!btn) return;
     const action = btn.getAttribute("data-action");
-    if (action === "open-cmd-palette") return openCommandPalette();
-    if (action === "close-cmd-palette") return closeCommandPalette();
-    if (action === "cmd-overlay-close") { if (ev.target === btn) closeCommandPalette(); return; }
-    if (action === "cmd-run-action" || action === "cmd-switch-tab") { executeCmdPrimaryAction(btn); return; }
-    if (action === "cmd-reopen-tab") { sendTabCmd({ action: "reopen" }); closeCommandPalette(); return; }
-    if (action === "cmd-close-tab") {
+    if (action === "cmd-switch-tab") {
       const lbl = btn.getAttribute("data-tab-label");
-      if (lbl) sendTabCmd({ action: "close", label: lbl });
-      setTimeout(() => { renderSidebarTabs(); const ov = document.getElementById("cmdOverlay"); if (ov && !ov.classList.contains("hidden")) renderCommandPalette(document.getElementById("cmdInput")?.value || ""); }, 180);
-      return;
-    }
-    if (action === "cmd-dup-tab") { sendTabCmd({ action: "open", url: btn.getAttribute("data-tab-url") || "" }); closeCommandPalette(); return; }
-    if (action === "cmd-pin-tab") {
-      const lbl = btn.getAttribute("data-tab-label");
-      if (!lbl) return;
-      const pins = readLocalJson("np_pinned_tabs", []);
-      const set = new Set(Array.isArray(pins) ? pins : []);
-      if (set.has(lbl)) set.delete(lbl); else set.add(lbl);
-      writeLocalJson("np_pinned_tabs", [...set]);
-      sendTabCmd({ action: "meta_changed" });
-      renderCommandPalette(document.getElementById("cmdInput")?.value || "");
-      return;
-    }
-    if (action === "cmd-group-tab") {
-      const lbl = btn.getAttribute("data-tab-label");
-      if (!lbl) return;
-      const groups = readTabGroups();
-      const cur = safeGroupName(groups[lbl]);
-      const nextGrp = TAB_GROUPS[(TAB_GROUPS.indexOf(cur) + 1) % TAB_GROUPS.length];
-      if (nextGrp) groups[lbl] = nextGrp; else delete groups[lbl];
-      writeLocalJson("np_tab_groups", groups);
-      sendTabCmd({ action: "meta_changed" });
-      renderSidebarTabs();
-      renderCommandPalette(document.getElementById("cmdInput")?.value || "");
-      return;
-    }
-    if (action === "restore-workspace") { executeCmdPrimaryAction(btn); return; }
-    if (action === "delete-workspace") {
-      const idx = Number(btn.getAttribute("data-ws-idx"));
-      const list = readLocalJson("np_workspaces", []);
-      if (Array.isArray(list) && Number.isInteger(idx) && idx >= 0 && idx < list.length) {
-        list.splice(idx, 1);
-        writeLocalJson("np_workspaces", list);
-        renderCommandPalette(document.getElementById("cmdInput")?.value || "");
-      }
+      if (lbl) sendTabCmd({ action: "switch", label: lbl });
       return;
     }
     if (action === "open-odoo") openOdooApp();
@@ -3081,7 +2858,7 @@
   function populatePrinterSelect(printers, defaultPrinter) {
     const sel = document.getElementById("customPrinterSelect");
     if (!sel) return;
-    if (formState.testDirty || anyFormControlFocused()) return;
+    if (anyFormControlFocused(document.getElementById("tab-printers"))) return;
     const previous = sel.value;
     const options = [];
     for (const p of printers) {
@@ -3123,7 +2900,7 @@
         : sel.value;
     if (uri.includes("://")) {
         const scheme = uri.split("://")[0].toLowerCase();
-        const portMatch = uri.match(/:(\d+)/);
+        const portMatch = uri.match(/(?:\]|^[^\[\]]+):(\d+)(?:\/|$)/);
         const port = portMatch ? Number(portMatch[1]) : null;
         if (scheme === "ipp" || scheme === "http" || scheme === "https" || port === 631) return ["pdf-a4"];
         if (scheme === "tcp" || scheme === "raw" || port === 9100) {
@@ -3153,7 +2930,7 @@
     kindSel.innerHTML = allowed
       .map((k) => `<option value="${k}">${escapeHtml(I18N[currentLang][TEST_KIND_I18N[k]] || k)}</option>`)
       .join("");
-    kindSel.value = allowed.includes(prev) ? prev : "pdf-a4";
+    kindSel.value = allowed.includes(prev) ? prev : (allowed[0] || "pdf-a4");
     updateCalWarning();
   }
 
@@ -3250,9 +3027,9 @@
   }
 
   async function inspectForms(printerName, idx) {
-    const box = document.getElementById(`forms-box-${idx}`);
+    const box = findFormsBox(printerName, idx) || document.getElementById(`forms-box-${idx}`);
     if (!box) return;
-    const btn = document.querySelector(`[data-action="inspect-forms"][data-idx="${idx}"]`);
+    const btn = [...document.querySelectorAll('[data-action="inspect-forms"]')].find((el) => el.getAttribute("data-printer") === printerName) || document.querySelector(`[data-action="inspect-forms"][data-idx="${idx}"]`);
     if (!box.classList.contains("hidden")) {
       box.classList.add("hidden");
       openFormsPrinter = null;
@@ -3264,7 +3041,8 @@
     openFormsPrinter = printerName;
     box.classList.remove("hidden");
     if (btn) btn.setAttribute("aria-expanded", "true");
-    box.dataset.printer = printerName;
+    if (box.setAttribute) box.setAttribute("data-printer", printerName);
+    else box.dataset.printer = printerName;
     const b = bridge();
     if (!b || typeof b.printerForms !== "function") {
       box.textContent = I18N[currentLang].native_bridge_unavailable;
@@ -3274,8 +3052,8 @@
     try {
       const forms = await b.printerForms(printerName);
       if (epoch !== capsEpoch) return;
-      const current = document.getElementById(`forms-box-${idx}`);
-      if (!current || current.dataset.printer !== printerName) return;
+      const current = findFormsBox(printerName, idx);
+      if (!current) return;
       if (!forms || !forms.length) {
         const emptyMsg = currentLang === "ar" ? "لا توجد نماذج ورق مسجلة من التعريف." : "No forms reported by driver.";
         openFormsHtmlCache.set(printerName, null);
@@ -3289,8 +3067,10 @@
       openFormsHtmlCache.set(printerName, html);
       current.innerHTML = html;
     } catch (e) {
-      const current = document.getElementById(`forms-box-${idx}`);
-      if (current && current.dataset.printer === printerName) {
+      if (epoch !== capsEpoch) return;
+      openFormsHtmlCache.set(printerName, "__error__");
+      const current = findFormsBox(printerName, idx);
+      if (current) {
         current.textContent = I18N[currentLang].toast_failed;
       }
     }
@@ -3433,7 +3213,7 @@
     let valid = isAllowedPrinterUri(input.value);
     const raw = input.value.trim();
     const scheme = raw.split("://")[0].toLowerCase();
-    const portMatch = raw.match(/:(\d+)/);
+    const portMatch = raw.match(/(?:\]|^[^\[\]]+):(\d+)(?:\/|$)/);
     const port = portMatch ? Number(portMatch[1]) : null;
     // IPP talks on 631; raw 9100 sockets only accept printer languages.
     if (valid && (scheme === "ipp" || scheme === "http" || scheme === "https") && port === 9100) valid = false;
@@ -3594,8 +3374,7 @@
     }
   });
   document.getElementById("inputAutoReprint").addEventListener("change", () => { formState.settingsDirty = true; });
-  document.getElementById("customPrinterSelect").addEventListener("change", () => { formState.testDirty = true; });
-  document.getElementById("customPrinterUri").addEventListener("input", () => { formState.testDirty = true; validateCustomPrinterUriField(); rebuildTestKindOptions(); });
+  document.getElementById("customPrinterUri").addEventListener("input", () => { validateCustomPrinterUriField(); rebuildTestKindOptions(); });
   const navTabsContainer = document.getElementById("navTabs");
   if (navTabsContainer) {
     navTabsContainer.addEventListener("keydown", (ev) => {
@@ -3622,12 +3401,6 @@
     document.title = "Yaseir Print — مركز التحكم";
     const sEl = document.getElementById("queueSearchInput");
     if (sEl) sEl.setAttribute("aria-label", I18N.ar.search_queue_ph);
-    const cBtn = document.getElementById("btnCmdPalette");
-    if (cBtn) { const lbl = I18N.ar.btn_cmd_palette + " (Ctrl+K)"; cBtn.title = lbl; cBtn.setAttribute("aria-label", lbl); }
-  }
-  const cmdInputEl = document.getElementById("cmdInput");
-  if (cmdInputEl) {
-    cmdInputEl.addEventListener("input", () => renderCommandPalette(cmdInputEl.value));
   }
   document.addEventListener("keydown", (ev) => {
     if (confirmResolver) {
@@ -3654,34 +3427,11 @@
       }
       return;
     }
-    const ov = document.getElementById("cmdOverlay");
-    if (!ov || ov.classList.contains("hidden")) return;
-    if (ev.key === "Escape") {
-      closeCommandPalette();
-      return;
-    }
-    if (ev.key === "ArrowDown") {
-      ev.preventDefault();
-      setCmdActiveIndex(cmdActiveIndex + 1);
-    } else if (ev.key === "ArrowUp") {
-      ev.preventDefault();
-      setCmdActiveIndex(cmdActiveIndex - 1);
-    } else if (ev.key === "Enter") {
-      const ae = document.activeElement;
-      if (ae && ae.tagName === "BUTTON" && !ae.classList.contains("cmd-item")) return;
-      ev.preventDefault();
-      activateCmdItem(cmdActiveIndex);
-    }
   });
   renderSidebarTabs();
   window.addEventListener("storage", (ev) => {
     if (ev.key === "np_open_tabs" || ev.key === "np_tab_groups" || ev.key === "np_pinned_tabs") {
       renderSidebarTabs();
-      const ov = document.getElementById("cmdOverlay");
-      if (ov && !ov.classList.contains("hidden")) renderCommandPalette(cmdInputEl ? cmdInputEl.value : "");
-    } else if (ev.key === "np_cc_open_cmd" && ev.newValue) {
-      try { localStorage.removeItem("np_cc_open_cmd"); } catch (e) {}
-      openCommandPalette();
     } else if (ev.key === "np_cc_theme") {
       const nextTheme = ev.newValue === "dark" ? "dark" : "light";
       document.documentElement.setAttribute("data-theme", nextTheme);
@@ -3696,10 +3446,6 @@
     }
   });
   try {
-    if (localStorage.getItem("np_cc_open_cmd")) {
-      localStorage.removeItem("np_cc_open_cmd");
-      openCommandPalette();
-    }
     const requestedTab = localStorage.getItem("np_cc_open_tab");
     if (requestedTab) {
       localStorage.removeItem("np_cc_open_tab");

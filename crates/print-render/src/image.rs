@@ -42,6 +42,15 @@ fn starts_with_num(s: &str, prefix: &str) -> bool {
         .is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_digit()))
 }
 
+fn split_trailing_number(s: &str) -> (&str, &str) {
+    let trimmed = s.trim_end();
+    let start = trimmed
+        .bytes()
+        .rposition(|b| !(b.is_ascii_digit() || b == b'.'))
+        .map_or(0, |i| i + 1);
+    (&trimmed[..start], &trimmed[start..])
+}
+
 fn contains_num(s: &str, needle: &str) -> bool {
     let mut from = 0;
     while let Some(rel) = s[from..].find(needle) {
@@ -84,16 +93,20 @@ pub fn receipt_dots_for_paper(paper: &str) -> Option<u32> {
     {
         Some(576)
     } else if let Some(mm_pos) = lower.find("mm") {
-        let prefix = lower[..mm_pos].trim_end();
-        let num_str: String = prefix
-            .chars()
-            .rev()
-            .take_while(|c| c.is_ascii_digit() || *c == '.')
-            .collect::<String>()
-            .chars()
-            .rev()
-            .collect();
-        num_str
+        let (before_num, trailing) = split_trailing_number(&lower[..mm_pos]);
+        // Parse `<W>x<H>mm` / `<W> x <H> mm` before falling back to the single `<N>mm` number.
+        let width_str = before_num
+            .trim_end()
+            .strip_suffix(['x', '×'])
+            .and_then(|before_x| {
+                let (prefix, w) = split_trailing_number(before_x);
+                (!w.is_empty()
+                    && !trailing.is_empty()
+                    && !prefix.ends_with(|c: char| c.is_alphanumeric()))
+                .then_some(w)
+            })
+            .unwrap_or(trailing);
+        width_str
             .parse::<f64>()
             .ok()
             .and_then(receipt_dots_for_width_mm)
@@ -164,9 +177,51 @@ fn luma_over_white(r: u8, g: u8, b: u8, a: u8) -> u8 {
     ((r as u32 * 299 + g as u32 * 587 + b as u32 * 114) / 1000) as u8
 }
 
+fn row_to_gray(color_type: png::ColorType, src: &[u8], dst: &mut [u8]) -> Result<(), ImageError> {
+    let n = dst.len();
+    match color_type {
+        png::ColorType::Grayscale => {
+            if src.len() < n {
+                return Err(ImageError::BadFrame);
+            }
+            dst.copy_from_slice(&src[..n]);
+        }
+        png::ColorType::GrayscaleAlpha => {
+            if n.checked_mul(2).is_none_or(|need| src.len() < need) {
+                return Err(ImageError::BadFrame);
+            }
+            for (out, chunk) in dst.iter_mut().zip(src.chunks_exact(2)) {
+                *out = luma_over_white(chunk[0], chunk[0], chunk[0], chunk[1]);
+            }
+        }
+        png::ColorType::Rgb => {
+            if n.checked_mul(3).is_none_or(|need| src.len() < need) {
+                return Err(ImageError::BadFrame);
+            }
+            for (out, chunk) in dst.iter_mut().zip(src.chunks_exact(3)) {
+                *out = luma_over_white(chunk[0], chunk[1], chunk[2], 255);
+            }
+        }
+        png::ColorType::Rgba => {
+            if n.checked_mul(4).is_none_or(|need| src.len() < need) {
+                return Err(ImageError::BadFrame);
+            }
+            for (out, chunk) in dst.iter_mut().zip(src.chunks_exact(4)) {
+                *out = luma_over_white(chunk[0], chunk[1], chunk[2], chunk[3]);
+            }
+        }
+        png::ColorType::Indexed => {
+            return Err(ImageError::Decode("indexed colour not expanded".into()));
+        }
+    }
+    Ok(())
+}
+
 /// Decode a PNG into a grayscale Canvas, with hard limits checked from
-/// the header BEFORE any frame buffer is allocated.
+/// the header BEFORE any pixel buffer is allocated, streaming rows
+/// directly into 1-byte/px grayscale without an intermediate RGBA frame.
 pub fn decode_png(bytes: &[u8]) -> Result<Canvas, ImageError> {
+    const PNG_DECODER_MEM_LIMIT: usize = 8 * 1024 * 1024;
     if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES {
         return Err(ImageError::TooLarge);
     }
@@ -174,6 +229,9 @@ pub fn decode_png(bytes: &[u8]) -> Result<Canvas, ImageError> {
         return Err(ImageError::NotPng);
     }
     let mut decoder = png::Decoder::new(Cursor::new(bytes));
+    decoder.set_limits(png::Limits {
+        bytes: PNG_DECODER_MEM_LIMIT,
+    });
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder
         .read_info()
@@ -187,66 +245,56 @@ pub fn decode_png(bytes: &[u8]) -> Result<Canvas, ImageError> {
     {
         return Err(ImageError::DimensionsTooLarge(width, height));
     }
-    let mut buf = vec![0u8; reader.output_buffer_size()];
-    let frame = reader
-        .next_frame(&mut buf)
-        .map_err(|e| ImageError::Decode(e.to_string()))?;
-    if frame.width != width || frame.height != height || frame.bit_depth != png::BitDepth::Eight {
+    let (color_type, bit_depth) = reader.output_color_type();
+    if bit_depth != png::BitDepth::Eight {
         return Err(ImageError::BadFrame);
     }
+    let bpp = match color_type {
+        png::ColorType::Grayscale => 1usize,
+        png::ColorType::GrayscaleAlpha => 2,
+        png::ColorType::Rgb => 3,
+        png::ColorType::Rgba => 4,
+        png::ColorType::Indexed => {
+            return Err(ImageError::Decode("indexed colour not expanded".into()));
+        }
+    };
     let px_count = (width as usize)
         .checked_mul(height as usize)
         .ok_or(ImageError::DimensionsTooLarge(width, height))?;
-    let frame_len = frame.buffer_size();
-    if frame.color_type == png::ColorType::Grayscale {
-        if frame_len < px_count || buf.len() < px_count {
-            return Err(ImageError::BadFrame);
-        }
-        buf.truncate(px_count);
-        return Ok(Canvas {
-            width,
-            height,
-            px: buf,
-        });
-    }
-    if frame_len > buf.len() {
-        return Err(ImageError::BadFrame);
-    }
-    let data = &buf[..frame_len];
     let mut px = vec![255u8; px_count];
-    match frame.color_type {
-        png::ColorType::Grayscale => unreachable!(),
-        png::ColorType::GrayscaleAlpha => {
-            if px_count.checked_mul(2).is_none_or(|n| data.len() < n) {
+    let w = width as usize;
+    if reader.info().interlaced {
+        let mut gray_row = Vec::with_capacity(w);
+        while let Some(row) = reader
+            .next_interlaced_row()
+            .map_err(|e| ImageError::Decode(e.to_string()))?
+        {
+            let png::InterlaceInfo::Adam7(adam7) = *row.interlace() else {
+                return Err(ImageError::BadFrame);
+            };
+            let src = row.data();
+            if src.len() % bpp != 0 {
                 return Err(ImageError::BadFrame);
             }
-            for i in 0..px_count {
-                px[i] = luma_over_white(data[2 * i], data[2 * i], data[2 * i], data[2 * i + 1]);
-            }
+            gray_row.resize(src.len() / bpp, 0);
+            row_to_gray(color_type, src, &mut gray_row)?;
+            png::expand_interlaced_row(&mut px, w, &gray_row, &adam7, 8);
         }
-        png::ColorType::Rgb => {
-            if px_count.checked_mul(3).is_none_or(|n| data.len() < n) {
+    } else {
+        let mut rows_read = 0usize;
+        while let Some(row) = reader
+            .next_row()
+            .map_err(|e| ImageError::Decode(e.to_string()))?
+        {
+            if rows_read >= height as usize {
                 return Err(ImageError::BadFrame);
             }
-            for i in 0..px_count {
-                px[i] = luma_over_white(data[3 * i], data[3 * i + 1], data[3 * i + 2], 255);
-            }
+            let row_off = rows_read * w;
+            row_to_gray(color_type, row.data(), &mut px[row_off..row_off + w])?;
+            rows_read += 1;
         }
-        png::ColorType::Rgba => {
-            if px_count.checked_mul(4).is_none_or(|n| data.len() < n) {
-                return Err(ImageError::BadFrame);
-            }
-            for i in 0..px_count {
-                px[i] = luma_over_white(
-                    data[4 * i],
-                    data[4 * i + 1],
-                    data[4 * i + 2],
-                    data[4 * i + 3],
-                );
-            }
-        }
-        png::ColorType::Indexed => {
-            return Err(ImageError::Decode("indexed colour not expanded".into()));
+        if rows_read != height as usize {
+            return Err(ImageError::BadFrame);
         }
     }
     Ok(Canvas { width, height, px })
@@ -567,6 +615,10 @@ mod tests {
         assert_eq!(receipt_dots_for_paper("580mm"), None);
         assert_eq!(receipt_dots_for_paper(""), None);
         assert_eq!(receipt_dots_for_paper("112mm"), Some(832));
+        assert_eq!(receipt_dots_for_paper("Thermal 58 x 200mm"), Some(384));
+        assert_eq!(receipt_dots_for_paper("Thermal 58 x 200 mm"), Some(384));
+        assert_eq!(receipt_dots_for_paper("Thermal 80x200mm"), Some(576));
+        assert_eq!(receipt_dots_for_paper("Roll 100 x 300mm"), Some(728));
     }
 
     #[test]
@@ -595,5 +647,62 @@ mod tests {
         assert_eq!(out.px[6], 0);
         assert!(out.px[2 * 5 + 2] < 110);
         assert_eq!(out.px[3 * 5 + 3], 255);
+    }
+
+    #[test]
+    fn streaming_decode_matches_expected_grayscale_across_formats() {
+        // Grayscale
+        let gray = make_png(2, 1, png::ColorType::Grayscale, &[10, 200]);
+        assert_eq!(decode_png(&gray).unwrap().px, vec![10, 200]);
+
+        // GrayscaleAlpha: 50% black over white + fully transparent black -> white
+        let ga = make_png(2, 1, png::ColorType::GrayscaleAlpha, &[0, 128, 0, 0]);
+        assert_eq!(
+            decode_png(&ga).unwrap().px,
+            vec![luma_over_white(0, 0, 0, 128), 255]
+        );
+
+        // RGB
+        let rgb = make_png(2, 1, png::ColorType::Rgb, &[255, 0, 0, 0, 255, 0]);
+        assert_eq!(
+            decode_png(&rgb).unwrap().px,
+            vec![
+                luma_over_white(255, 0, 0, 255),
+                luma_over_white(0, 255, 0, 255),
+            ]
+        );
+
+        // Indexed palette with tRNS alpha
+        let mut pal_png = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut pal_png, 2, 1);
+            enc.set_color(png::ColorType::Indexed);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.set_palette(vec![0, 0, 0, 0, 100, 200]);
+            enc.set_trns(vec![0, 255]);
+            let mut w = enc.write_header().unwrap();
+            w.write_image_data(&[0, 1]).unwrap();
+        }
+        assert_eq!(
+            decode_png(&pal_png).unwrap().px,
+            vec![255, luma_over_white(0, 100, 200, 255)]
+        );
+
+        // 16-bit RGBA (STRIP_16 preserves high byte)
+        let mut rgba16_png = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut rgba16_png, 2, 1);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Sixteen);
+            let mut w = enc.write_header().unwrap();
+            w.write_image_data(&[
+                0, 0, 0, 0, 0, 0, 0, 0, 0x80, 0x00, 0x40, 0x00, 0x20, 0x00, 0xFF, 0xFF,
+            ])
+            .unwrap();
+        }
+        assert_eq!(
+            decode_png(&rgba16_png).unwrap().px,
+            vec![255, luma_over_white(0x80, 0x40, 0x20, 0xFF)]
+        );
     }
 }

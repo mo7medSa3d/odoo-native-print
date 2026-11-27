@@ -18,9 +18,6 @@ export function directionForLang(lang) {
 }
 
 export function syncDocumentDirection() {
-    if (typeof document !== "undefined" && typeof document.getElementById === "function") {
-        document.getElementById("np-http-warning")?.remove?.();
-    }
     if (typeof document === "undefined" || !document.documentElement) {
         return null;
     }

@@ -36,6 +36,11 @@ pub const DEFAULT_MAX_PENDING_GLOBAL: u64 = 2000;
 /// instead of letting it hang forever.
 pub const STALE_JOB_THRESHOLD_SECS: i64 = 900;
 
+/// A job stuck in `printing` longer than this is wedged (e.g., a hung
+/// spooler or driver call). Reconciliation fails it with
+/// RECOVERY_AMBIGUOUS (non-retryable) so it cannot block the printer forever.
+pub const STALE_PRINTING_THRESHOLD_SECS: i64 = 3600;
+
 /// Diagnostics correlation id for a job: a stable, short fingerprint
 /// of its idempotency key. Safe to log and quote in support reports
 /// (one-way fingerprint, not the key itself).
@@ -137,24 +142,31 @@ pub struct JobOptions {
 
 impl JobOptions {
     pub fn validate(&self) -> Result<(), QueueError> {
+        if self.copies == 0 || self.copies > crate::security::MAX_COPIES {
+            return Err(QueueError::BadOptions(format!(
+                "invalid copies: {} (expected 1..={})",
+                self.copies,
+                crate::security::MAX_COPIES
+            )));
+        }
         if let Some(w) = self.media_roll_width_mm {
-            if !w.is_finite() {
+            if !w.is_finite() || w <= 0.0 {
                 return Err(QueueError::BadOptions(format!(
-                    "non-finite media_roll_width_mm: {w}"
+                    "invalid media_roll_width_mm: {w}"
                 )));
             }
         }
         if let Some(g) = self.label_gap_mm {
-            if !g.is_finite() {
+            if !g.is_finite() || g < 0.0 {
                 return Err(QueueError::BadOptions(format!(
-                    "non-finite label_gap_mm: {g}"
+                    "invalid label_gap_mm: {g}"
                 )));
             }
         }
         if let Some(w) = self.source_width_mm {
-            if !w.is_finite() {
+            if !w.is_finite() || w <= 0.0 {
                 return Err(QueueError::BadOptions(format!(
-                    "non-finite source_width_mm: {w}"
+                    "invalid source_width_mm: {w}"
                 )));
             }
         }
@@ -217,11 +229,11 @@ impl Queue {
         conn.pragma_update(None, "wal_autocheckpoint", 1000)?;
         // Cap persistent -wal size after large PDF bursts without weakening synchronous=FULL.
         conn.pragma_update(None, "journal_size_limit", 16_777_216)?;
-        // Run DDL and migrations inside IMMEDIATE when user_version < 2
+        // Run DDL and migrations inside IMMEDIATE when user_version < 3
         // so concurrent Queue::open calls cannot race on ALTER TABLE
         // and steady-state opens take no schema write lock.
         let user_version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if user_version < 2 {
+        if user_version < 3 {
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let ver_in_tx: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
             if ver_in_tx < 2 {
@@ -234,7 +246,6 @@ impl Queue {
                        bytes INTEGER NOT NULL, priority INTEGER NOT NULL DEFAULT 0,
                        state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
                        error_code TEXT);
-                     CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(printer, state, priority DESC, seq);
                      CREATE TABLE IF NOT EXISTS payloads(
                        job_id TEXT PRIMARY KEY,
                        kind TEXT NOT NULL,
@@ -281,10 +292,6 @@ impl Queue {
                     )?;
                 }
                 tx.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_jobs_claim_available ON jobs(printer, state, available_at, priority DESC, seq)",
-                    [],
-                )?;
-                tx.execute(
                     "CREATE INDEX IF NOT EXISTS idx_jobs_state_avail_printer ON jobs(state, available_at, printer, priority)",
                     [],
                 )?;
@@ -296,8 +303,12 @@ impl Queue {
                     "CREATE INDEX IF NOT EXISTS idx_jobs_state_updated_id ON jobs(state, updated_at, id)",
                     [],
                 )?;
-                // Schema version 2 = updated_at + payload_hash + available_at.
-                tx.pragma_update(None, "user_version", 2)?;
+            }
+            if ver_in_tx < 3 {
+                tx.execute("DROP INDEX IF EXISTS idx_jobs_claim", [])?;
+                tx.execute("DROP INDEX IF EXISTS idx_jobs_claim_available", [])?;
+                // Schema version 3 = v2 + dropped redundant claim indexes.
+                tx.pragma_update(None, "user_version", 3)?;
             }
             tx.commit()?;
         }
@@ -438,8 +449,13 @@ impl Queue {
             }));
         }
         tx.execute("DELETE FROM payloads WHERE job_id=?1", params![id])?;
+        if let Err(e) = tx.execute(
+            "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'state:canceled','CANCELED_BY_USER')",
+            params![id, now],
+        ) {
+            eprintln!("native-print: failed to record job event state:canceled for {id}: {e}");
+        }
         tx.commit()?;
-        self.record_event_best_effort(id, "state:canceled", Some("CANCELED_BY_USER"));
         Ok(())
     }
 
@@ -478,10 +494,15 @@ impl Queue {
                 to: JobState::Queued,
             }));
         }
-        tx.commit()?;
         if from != JobState::Queued {
-            self.record_event_best_effort(id, "state:queued", None);
+            if let Err(e) = tx.execute(
+                "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'state:queued',NULL)",
+                params![id, now],
+            ) {
+                eprintln!("native-print: failed to record job event state:queued for {id}: {e}");
+            }
         }
+        tx.commit()?;
         Ok(())
     }
 
@@ -967,28 +988,89 @@ impl Queue {
         let tx = self
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let ids: Vec<String> = {
-            let mut stmt = tx.prepare(
-                "SELECT j.id FROM jobs j
-                 WHERE j.state IN ('failed','dead_letter')
-                   AND COALESCE((SELECT MAX(e.ts) FROM job_events e WHERE e.job_id = j.id), NULLIF(j.updated_at, 0)) < ?1",
-            )?;
-            let rows = stmt.query_map(params![cutoff], |r| r.get::<_, String>(0))?;
-            let mut out = Vec::new();
-            for r in rows {
-                out.push(r?);
-            }
-            out
-        };
-        let mut n = 0usize;
-        for id in &ids {
-            tx.execute("DELETE FROM job_events WHERE job_id=?1", params![id])?;
-            tx.execute("DELETE FROM job_options WHERE job_id=?1", params![id])?;
-            tx.execute("DELETE FROM payloads WHERE job_id=?1", params![id])?;
-            n += tx.execute("DELETE FROM jobs WHERE id=?1", params![id])?;
-        }
+        // Delete dependent payloads/options and jobs while job_events are intact
+        // so COALESCE(MAX(e.ts), updated_at) stays accurate for legacy rows.
+        tx.execute(
+            "DELETE FROM payloads WHERE job_id IN (
+               SELECT j.id FROM jobs j
+               WHERE j.state IN ('failed','dead_letter')
+                 AND COALESCE((SELECT MAX(e.ts) FROM job_events e WHERE e.job_id = j.id), NULLIF(j.updated_at, 0)) < ?1
+             )",
+            params![cutoff],
+        )?;
+        tx.execute(
+            "DELETE FROM job_options WHERE job_id IN (
+               SELECT j.id FROM jobs j
+               WHERE j.state IN ('failed','dead_letter')
+                 AND COALESCE((SELECT MAX(e.ts) FROM job_events e WHERE e.job_id = j.id), NULLIF(j.updated_at, 0)) < ?1
+             )",
+            params![cutoff],
+        )?;
+        let n = tx.execute(
+            "DELETE FROM jobs
+             WHERE state IN ('failed','dead_letter')
+               AND COALESCE((SELECT MAX(e.ts) FROM job_events e WHERE e.job_id = jobs.id), NULLIF(updated_at, 0)) < ?1",
+            params![cutoff],
+        )?;
+        tx.execute(
+            "DELETE FROM job_events
+             WHERE job_id != '__queue__'
+               AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.id = job_events.job_id)",
+            [],
+        )?;
         tx.commit()?;
+        if let Ok(age) = u64::try_from(max_age_secs) {
+            let _ = self.purge_stale_finished_jobs(age)?;
+        }
         Ok(n)
+    }
+
+    /// Prune finished (`done`/`canceled`) jobs older than `max_age_secs`
+    /// (plus their events, options, and any remaining payloads) and old
+    /// `__queue__` maintenance events using set-based deletes.
+    /// Returns how many finished job rows were deleted.
+    pub fn purge_stale_finished_jobs(&mut self, max_age_secs: u64) -> Result<u64, QueueError> {
+        let age = i64::try_from(max_age_secs).unwrap_or(i64::MAX);
+        let cutoff = now_unix().saturating_sub(age);
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        // Delete dependent payloads/options and jobs while job_events are intact
+        // so COALESCE(MAX(e.ts), updated_at) stays accurate for legacy rows.
+        tx.execute(
+            "DELETE FROM payloads WHERE job_id IN (
+               SELECT j.id FROM jobs j
+               WHERE j.state IN ('done','canceled')
+                 AND COALESCE((SELECT MAX(e.ts) FROM job_events e WHERE e.job_id = j.id), NULLIF(j.updated_at, 0)) < ?1
+             )",
+            params![cutoff],
+        )?;
+        tx.execute(
+            "DELETE FROM job_options WHERE job_id IN (
+               SELECT j.id FROM jobs j
+               WHERE j.state IN ('done','canceled')
+                 AND COALESCE((SELECT MAX(e.ts) FROM job_events e WHERE e.job_id = j.id), NULLIF(j.updated_at, 0)) < ?1
+             )",
+            params![cutoff],
+        )?;
+        let removed = tx.execute(
+            "DELETE FROM jobs
+             WHERE state IN ('done','canceled')
+               AND COALESCE((SELECT MAX(e.ts) FROM job_events e WHERE e.job_id = jobs.id), NULLIF(updated_at, 0)) < ?1",
+            params![cutoff],
+        )? as u64;
+        tx.execute(
+            "DELETE FROM job_events
+             WHERE job_id != '__queue__'
+               AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.id = job_events.job_id)",
+            [],
+        )?;
+        tx.execute(
+            "DELETE FROM job_events WHERE job_id = '__queue__' AND ts < ?1",
+            params![cutoff],
+        )?;
+        tx.commit()?;
+        Ok(removed)
     }
 
     /// Drop a job's payload (called when the job reaches a terminal
@@ -1091,6 +1173,16 @@ impl Queue {
                 rusqlite::Error::QueryReturnedNoRows => QueueError::NotFound(id),
                 other => QueueError::Db(other),
             })?;
+        let attempt_detail = format!("attempt={}", job.attempts);
+        if let Err(e) = tx.execute(
+            "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'state:rendering',?3)",
+            params![&job.id, now, &attempt_detail],
+        ) {
+            eprintln!(
+                "native-print: failed to record job event state:rendering for {}: {e}",
+                job.id
+            );
+        }
         tx.commit()?;
         Ok(Some(job))
     }
@@ -1121,12 +1213,16 @@ impl Queue {
             "UPDATE jobs SET state=?1, error_code=?2, available_at=0, updated_at=?3 WHERE state='printing'",
             params![state, code, now],
         )? as u64;
+        if requeued > 0 || ambiguous > 0 {
+            let detail = format!("requeued={requeued} ambiguous={ambiguous}");
+            if let Err(e) = tx.execute(
+                "INSERT INTO job_events(job_id, ts, event, detail) VALUES('__queue__',?1,'recovery',?2)",
+                params![now, &detail],
+            ) {
+                eprintln!("native-print: failed to record job event recovery for __queue__: {e}");
+            }
+        }
         tx.commit()?;
-        self.record_event_best_effort(
-            "__queue__",
-            "recovery",
-            Some(&format!("requeued={requeued} ambiguous={ambiguous}")),
-        );
         Ok((requeued, ambiguous))
     }
 
@@ -1139,7 +1235,9 @@ impl Queue {
     /// never reconciled: absence of evidence is not evidence of a
     /// wedge. Returns how many jobs were reconciled.
     pub fn reconcile_stale(&mut self) -> Result<u64, QueueError> {
-        let cutoff = now_unix().saturating_sub(STALE_JOB_THRESHOLD_SECS);
+        let now = now_unix();
+        let cutoff = now.saturating_sub(STALE_JOB_THRESHOLD_SECS);
+        let printing_cutoff = now.saturating_sub(STALE_PRINTING_THRESHOLD_SECS);
         let ids: Vec<String> = {
             let mut stmt = self.conn.prepare(
                 "SELECT id FROM jobs WHERE state IN ('rendering','spooling') AND updated_at > 0 AND updated_at < ?1",
@@ -1151,7 +1249,18 @@ impl Queue {
             }
             out
         };
-        if ids.is_empty() {
+        let printing_ids: Vec<String> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT id FROM jobs WHERE state = 'printing' AND updated_at > 0 AND updated_at < ?1",
+            )?;
+            let rows = stmt.query_map(params![printing_cutoff], |r| r.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            out
+        };
+        if ids.is_empty() && printing_ids.is_empty() {
             return Ok(0);
         }
         let now = now_unix();
@@ -1170,6 +1279,23 @@ impl Queue {
             if changed > 0 {
                 if let Err(e) = tx.execute(
                     "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'reconciled_stale','RECONCILED_STALE')",
+                    params![&id, now],
+                ) {
+                    eprintln!(
+                        "native-print: failed to record job event reconciled_stale for {id}: {e}"
+                    );
+                }
+                n += 1;
+            }
+        }
+        for id in printing_ids {
+            let changed = tx.execute(
+                "UPDATE jobs SET state='failed', error_code='RECOVERY_AMBIGUOUS', updated_at=?1 WHERE id=?2 AND state='printing' AND updated_at > 0 AND updated_at < ?3",
+                params![now, &id, printing_cutoff],
+            )?;
+            if changed > 0 {
+                if let Err(e) = tx.execute(
+                    "INSERT INTO job_events(job_id, ts, event, detail) VALUES(?1,?2,'reconciled_stale','RECOVERY_AMBIGUOUS')",
                     params![&id, now],
                 ) {
                     eprintln!(
@@ -1736,6 +1862,47 @@ mod tests {
             q.store_options("nan1", &bad),
             Err(QueueError::BadOptions(_))
         ));
+        for invalid in [
+            JobOptions {
+                copies: 0,
+                ..JobOptions::default()
+            },
+            JobOptions {
+                copies: crate::security::MAX_COPIES + 1,
+                ..JobOptions::default()
+            },
+            JobOptions {
+                media_roll_width_mm: Some(0.0),
+                ..JobOptions::default()
+            },
+            JobOptions {
+                media_roll_width_mm: Some(-80.0),
+                ..JobOptions::default()
+            },
+            JobOptions {
+                source_width_mm: Some(0.0),
+                ..JobOptions::default()
+            },
+            JobOptions {
+                source_width_mm: Some(-58.0),
+                ..JobOptions::default()
+            },
+            JobOptions {
+                label_gap_mm: Some(-1.0),
+                ..JobOptions::default()
+            },
+        ] {
+            assert!(matches!(
+                q.store_options("nan1", &invalid),
+                Err(QueueError::BadOptions(_))
+            ));
+        }
+        // Zero label gap (continuous media) is valid.
+        let ok = JobOptions {
+            label_gap_mm: Some(0.0),
+            ..JobOptions::default()
+        };
+        assert!(q.store_options("nan1", &ok).is_ok());
     }
 
     #[test]
@@ -2044,5 +2211,191 @@ mod tests {
             assert_eq!(count, q.count_by_state(st).unwrap());
         }
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn reconcile_stale_fails_wedged_printing_job_after_ceiling() {
+        let mut q = Queue::in_memory().unwrap();
+        for (id, key, age) in [
+            ("p-fresh", "k-pf", STALE_PRINTING_THRESHOLD_SECS - 60),
+            ("p-wedged", "k-pw", STALE_PRINTING_THRESHOLD_SECS + 60),
+        ] {
+            q.enqueue_with_payload(&job(id, key, "P1", 0), "pdf", b"data", &JobOptions::default())
+                .unwrap();
+            q.claim_next("P1").unwrap();
+            q.set_state(id, JobState::Spooling, None).unwrap();
+            q.set_state(id, JobState::Printing, None).unwrap();
+            q.conn
+                .execute(
+                    "UPDATE jobs SET updated_at=?1 WHERE id=?2",
+                    params![now_unix() - age, id],
+                )
+                .unwrap();
+        }
+        assert_eq!(q.reconcile_stale().unwrap(), 1);
+        assert_eq!(q.get("p-fresh").unwrap().state, JobState::Printing);
+        let wedged = q.get("p-wedged").unwrap();
+        assert_eq!(wedged.state, JobState::Failed);
+        assert_eq!(wedged.error_code.as_deref(), Some("RECOVERY_AMBIGUOUS"));
+        let events = q.recent_events(20).unwrap();
+        assert!(events.iter().any(|e| e.job_id == "p-wedged"
+            && e.event == "reconciled_stale"
+            && e.detail.as_deref() == Some("RECOVERY_AMBIGUOUS")));
+    }
+
+    #[test]
+    fn purge_stale_finished_jobs_and_queue_events_and_idle_recovery() {
+        let mut q = Queue::in_memory().unwrap();
+        // Idle startup recovery writes no __queue__ event.
+        assert_eq!(q.recover_on_startup(false).unwrap(), (0, 0));
+        assert!(q.recent_events(10).unwrap().is_empty());
+
+        // Seed old done, old canceled, fresh done, and an old __queue__ event.
+        let old_ts = now_unix() - 7200;
+        for (id, key) in [("d-old", "k-do"), ("c-old", "k-co"), ("d-new", "k-dn")] {
+            q.enqueue_with_payload(&job(id, key, "P1", 0), "pdf", b"data", &JobOptions::default())
+                .unwrap();
+        }
+        for id in ["d-old", "d-new"] {
+            for s in [
+                JobState::Rendering,
+                JobState::Spooling,
+                JobState::Printing,
+                JobState::Done,
+            ] {
+                q.set_state(id, s, None).unwrap();
+            }
+        }
+        q.cancel_job("c-old").unwrap();
+        for id in ["d-old", "c-old"] {
+            q.conn
+                .execute("UPDATE jobs SET updated_at=?1 WHERE id=?2", params![old_ts, id])
+                .unwrap();
+            q.conn
+                .execute("UPDATE job_events SET ts=?1 WHERE job_id=?2", params![old_ts, id])
+                .unwrap();
+        }
+        q.conn
+            .execute(
+                "INSERT INTO job_events(job_id, ts, event, detail) VALUES('__queue__', ?1, 'recovery', 'requeued=1 ambiguous=0')",
+                params![old_ts],
+            )
+            .unwrap();
+        q.conn
+            .execute(
+                "INSERT INTO job_events(job_id, ts, event, detail) VALUES('__queue__', ?1, 'recovery', 'requeued=1 ambiguous=0')",
+                params![now_unix()],
+            )
+            .unwrap();
+
+        // Direct call prunes old done/canceled + old __queue__ event, keeps fresh ones.
+        assert_eq!(q.purge_stale_finished_jobs(3600).unwrap(), 2);
+        assert!(q.get("d-old").is_err());
+        assert!(q.get("c-old").is_err());
+        assert!(q.get("d-new").is_ok());
+        let events = q.recent_events(50).unwrap();
+        assert!(!events.iter().any(|e| e.job_id == "d-old" || e.job_id == "c-old"));
+        assert_eq!(
+            events.iter().filter(|e| e.job_id == "__queue__").count(),
+            1
+        );
+
+        // Calling purge_stale_failed_jobs with a non-negative window also prunes old finished jobs.
+        q.conn
+            .execute("UPDATE jobs SET updated_at=?1 WHERE id='d-new'", params![old_ts])
+            .unwrap();
+        q.conn
+            .execute("UPDATE job_events SET ts=?1 WHERE job_id='d-new'", params![old_ts])
+            .unwrap();
+        assert_eq!(q.purge_stale_failed_jobs(3600).unwrap(), 0);
+        assert!(q.get("d-new").is_err());
+    }
+
+    #[test]
+    fn schema_v3_drops_redundant_claim_indexes() {
+        let dir = std::env::temp_dir().join(format!("pq-v3-idx-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("q.db");
+        let p = path.to_str().unwrap().to_string();
+        {
+            let q = Queue::open(&p).unwrap();
+            let ver: i64 = q
+                .conn
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(ver, 3);
+            // Simulate a v2 database with the legacy redundant indexes.
+            q.conn
+                .execute(
+                    "CREATE INDEX idx_jobs_claim ON jobs(printer, state, priority DESC, seq)",
+                    [],
+                )
+                .unwrap();
+            q.conn
+                .execute(
+                    "CREATE INDEX idx_jobs_claim_available ON jobs(printer, state, available_at, priority DESC, seq)",
+                    [],
+                )
+                .unwrap();
+            q.conn.pragma_update(None, "user_version", 2).unwrap();
+        }
+        let q = Queue::open(&p).unwrap();
+        let ver: i64 = q
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ver, 3);
+        for dropped in ["idx_jobs_claim", "idx_jobs_claim_available"] {
+            let exists: i64 = q
+                .conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1)",
+                    params![dropped],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 0, "expected {dropped} to be dropped in v3");
+        }
+        let has_order: i64 = q
+            .conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_jobs_claim_order')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_order, 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn claim_cancel_retry_and_recovery_record_audit_events() {
+        let mut q = Queue::in_memory().unwrap();
+        q.enqueue(&job("a1", "k-a1", "p1", 0)).unwrap();
+        let j = q.claim_next("p1").unwrap().unwrap();
+        assert_eq!(j.attempts, 1);
+        q.set_state(&j.id, JobState::Failed, Some("ERR")).unwrap();
+        q.retry_job(&j.id).unwrap();
+        let j2 = q.claim_next("p1").unwrap().unwrap();
+        assert_eq!(j2.attempts, 2);
+        assert_eq!(q.recover_on_startup(false).unwrap(), (1, 0));
+        q.cancel_job(&j2.id).unwrap();
+
+        let events = q.recent_events(50).unwrap();
+        assert!(events.iter().any(|e| e.job_id == "a1"
+            && e.event == "state:rendering"
+            && e.detail.as_deref() == Some("attempt=1")));
+        assert!(events.iter().any(|e| e.job_id == "a1"
+            && e.event == "state:queued"
+            && e.detail.is_none()));
+        assert!(events.iter().any(|e| e.job_id == "a1"
+            && e.event == "state:rendering"
+            && e.detail.as_deref() == Some("attempt=2")));
+        assert!(events.iter().any(|e| e.job_id == "__queue__"
+            && e.event == "recovery"
+            && e.detail.as_deref() == Some("requeued=1 ambiguous=0")));
+        assert!(events.iter().any(|e| e.job_id == "a1"
+            && e.event == "state:canceled"
+            && e.detail.as_deref() == Some("CANCELED_BY_USER")));
     }
 }

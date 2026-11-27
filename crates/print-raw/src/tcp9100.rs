@@ -1,5 +1,6 @@
+use print_core::net::{connect_any, write_all_with_deadline};
 use std::io::{ErrorKind, Read, Write};
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
 const WRITE_CHUNK_SIZE: usize = 16 * 1024;
@@ -25,44 +26,6 @@ impl std::fmt::Display for SendPhaseError {
 }
 
 impl std::error::Error for SendPhaseError {}
-
-fn connect_addrs(
-    addrs: &[SocketAddr],
-    deadline: Option<Instant>,
-    fallback_timeout: Duration,
-) -> std::io::Result<TcpStream> {
-    if addrs.is_empty() {
-        return Err(std::io::Error::new(
-            ErrorKind::AddrNotAvailable,
-            "no address",
-        ));
-    }
-    let mut last_err = None;
-    for addr in addrs {
-        let remaining = match deadline {
-            Some(d) => d.saturating_duration_since(Instant::now()),
-            None => fallback_timeout,
-        };
-        // Bound each dial so one unresponsive address cannot consume the entire
-        // shared budget before later addresses are tried.
-        let attempt_timeout = remaining.min(fallback_timeout);
-        if attempt_timeout.is_zero() {
-            break;
-        }
-        match TcpStream::connect_timeout(addr, attempt_timeout) {
-            Ok(stream) => return Ok(stream),
-            Err(e) => last_err = Some(e),
-        }
-    }
-    Err(last_err.unwrap_or_else(|| std::io::Error::new(ErrorKind::TimedOut, "connect timed out")))
-}
-
-fn connect_any(host: &str, port: u16, timeout: Duration) -> std::io::Result<TcpStream> {
-    let bare_host = host.trim().trim_start_matches('[').trim_end_matches(']');
-    let addrs: Vec<_> = (bare_host, port).to_socket_addrs()?.collect();
-    let total = timeout.max(MIN_IO_TIMEOUT);
-    connect_addrs(&addrs, Instant::now().checked_add(total), total)
-}
 
 /// Raw TCP 9100 (JetDirect) transport: connect, write all bytes, close.
 /// Closing the connection is the end-of-job signal for these printers.
@@ -96,8 +59,10 @@ pub fn send_raw_phased(
     stream
         .set_read_timeout(Some(io_timeout))
         .map_err(SendPhaseError::Connect)?;
+    let write_deadline = Instant::now() + io_timeout.max(Duration::from_secs(30));
     for chunk in bytes.chunks(WRITE_CHUNK_SIZE) {
-        stream.write_all(chunk).map_err(SendPhaseError::Write)?;
+        write_all_with_deadline(&mut stream, chunk, write_deadline)
+            .map_err(SendPhaseError::Write)?;
     }
     stream.flush().map_err(SendPhaseError::Write)?;
     // Some printer firmwares close or reset the socket immediately upon
@@ -148,14 +113,39 @@ pub fn query_paper_status(host: &str, port: u16, timeout: Duration) -> std::io::
     query_dle_eot(host, port, 4, timeout)
 }
 
-fn query_dle_eot(host: &str, port: u16, n: u8, timeout: Duration) -> std::io::Result<u8> {
-    let mut stream = connect_any(host, port, timeout)?;
+fn remaining_budget(deadline: Option<Instant>, fallback: Duration) -> std::io::Result<Duration> {
+    match deadline {
+        Some(d) => {
+            let rem = d.saturating_duration_since(Instant::now());
+            if rem.is_zero() {
+                Err(std::io::Error::new(
+                    ErrorKind::TimedOut,
+                    "DLE EOT status query deadline exceeded",
+                ))
+            } else {
+                Ok(rem.max(MIN_IO_TIMEOUT))
+            }
+        }
+        None => Ok(fallback.max(MIN_IO_TIMEOUT)),
+    }
+}
+
+fn query_dle_eot_with_deadline(
+    host: &str,
+    port: u16,
+    n: u8,
+    deadline: Option<Instant>,
+    fallback: Duration,
+) -> std::io::Result<u8> {
+    let mut stream = connect_any(host, port, remaining_budget(deadline, fallback)?)?;
     // Avoid Nagle/delayed-ACK 40-200 ms stalls on 3-byte DLE EOT queries.
     let _ = stream.set_nodelay(true);
-    let timeout = timeout.max(MIN_IO_TIMEOUT);
-    stream.set_write_timeout(Some(timeout))?;
-    stream.set_read_timeout(Some(timeout))?;
-    query_dle_eot_on_stream(&mut stream, n)
+    query_dle_eot_on_stream(&mut stream, n, deadline, fallback)
+}
+
+fn query_dle_eot(host: &str, port: u16, n: u8, timeout: Duration) -> std::io::Result<u8> {
+    let total = timeout.max(MIN_IO_TIMEOUT);
+    query_dle_eot_with_deadline(host, port, n, Instant::now().checked_add(total), total)
 }
 
 /// DLE EOT response frames always have bit 1 and bit 4 set and bits 0
@@ -282,9 +272,14 @@ pub fn blocking_condition(
     None
 }
 
-fn read_dle_eot_frame(stream: &mut TcpStream) -> std::io::Result<u8> {
+fn read_dle_eot_frame(
+    stream: &mut TcpStream,
+    deadline: Option<Instant>,
+    fallback: Duration,
+) -> std::io::Result<u8> {
     let mut buf = [0u8; 1];
     for _ in 0..4 {
+        stream.set_read_timeout(Some(remaining_budget(deadline, fallback)?))?;
         stream.read_exact(&mut buf)?;
         if dle_eot_frame_valid(buf[0]) {
             return Ok(buf[0]);
@@ -296,10 +291,16 @@ fn read_dle_eot_frame(stream: &mut TcpStream) -> std::io::Result<u8> {
     ))
 }
 
-fn query_dle_eot_on_stream(stream: &mut TcpStream, n: u8) -> std::io::Result<u8> {
+fn query_dle_eot_on_stream(
+    stream: &mut TcpStream,
+    n: u8,
+    deadline: Option<Instant>,
+    fallback: Duration,
+) -> std::io::Result<u8> {
+    stream.set_write_timeout(Some(remaining_budget(deadline, fallback)?))?;
     stream.write_all(&[0x10, 0x04, n])?;
     stream.flush()?;
-    read_dle_eot_frame(stream)
+    read_dle_eot_frame(stream, deadline, fallback)
 }
 
 /// Query a TCP thermal printer's live sensor state (DLE EOT
@@ -314,18 +315,17 @@ pub fn query_blocking_condition(
     port: u16,
     timeout: Duration,
 ) -> std::io::Result<Option<(&'static str, &'static str)>> {
-    let mut stream = connect_any(host, port, timeout)?;
+    let total = timeout.max(MIN_IO_TIMEOUT);
+    let deadline = Instant::now().checked_add(total);
+    let mut stream = connect_any(host, port, remaining_budget(deadline, total)?)?;
     // Avoid Nagle/delayed-ACK 40-200 ms stalls across sequential 3-byte DLE EOT probes.
     let _ = stream.set_nodelay(true);
-    let timeout = timeout.max(MIN_IO_TIMEOUT);
-    stream.set_write_timeout(Some(timeout))?;
-    stream.set_read_timeout(Some(timeout))?;
 
-    let paper_byte = query_dle_eot_on_stream(&mut stream, 4)?;
+    let paper_byte = query_dle_eot_on_stream(&mut stream, 4, deadline, total)?;
     let mut stream = Some(stream);
     let mut query_next = |n: u8| -> std::io::Result<u8> {
         if let Some(mut s) = stream.take() {
-            match query_dle_eot_on_stream(&mut s, n) {
+            match query_dle_eot_on_stream(&mut s, n, deadline, total) {
                 Ok(b) => {
                     stream = Some(s);
                     return Ok(b);
@@ -341,7 +341,7 @@ pub fn query_blocking_condition(
                 Err(e) => return Err(e),
             }
         }
-        query_dle_eot(host, port, n, timeout)
+        query_dle_eot_with_deadline(host, port, n, deadline, total)
     };
     let error_byte = query_next(3)?;
     let printer_byte = query_next(1)?;
@@ -355,7 +355,8 @@ pub fn query_blocking_condition(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::TcpListener;
+    use print_core::net::{connect_addrs, is_blocked_ip};
+    use std::net::{SocketAddr, TcpListener};
 
     #[test]
     fn connect_failure_is_connect_phase() {
@@ -650,6 +651,63 @@ mod tests {
         )
         .expect("second address should succeed after first fails");
         drop(stream);
+        let _ = server.join();
+    }
+
+    #[test]
+    fn blocked_ips_reject_link_local_and_metadata() {
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+        assert!(is_blocked_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254))));
+        assert!(is_blocked_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 0, 1))));
+        assert!(is_blocked_ip(IpAddr::V6("fe80::1".parse::<Ipv6Addr>().unwrap())));
+        assert!(is_blocked_ip(IpAddr::V6("febf::1".parse::<Ipv6Addr>().unwrap())));
+        assert!(is_blocked_ip(IpAddr::V6(
+            "::ffff:169.254.169.254".parse::<Ipv6Addr>().unwrap()
+        )));
+
+        assert!(!is_blocked_ip(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+        assert!(!is_blocked_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10))));
+        assert!(!is_blocked_ip(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+        assert!(!is_blocked_ip(IpAddr::V6("fd00::1".parse::<Ipv6Addr>().unwrap())));
+        assert!(!is_blocked_ip(IpAddr::V6("fec0::1".parse::<Ipv6Addr>().unwrap())));
+        assert!(!is_blocked_ip(IpAddr::V6(
+            "::ffff:127.0.0.1".parse::<Ipv6Addr>().unwrap()
+        )));
+
+        let blocked_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254)), 9100);
+        let err = connect_addrs(&[blocked_addr], None, Duration::from_secs(1)).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn query_blocking_condition_enforces_shared_deadline_across_probes() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            // Connection 1: answer frame 4 slowly (110ms), then close to force reconnect fallback.
+            if let Ok((mut s1, _)) = listener.accept() {
+                let mut req = [0u8; 3];
+                if s1.read_exact(&mut req).is_ok() {
+                    std::thread::sleep(Duration::from_millis(110));
+                    let _ = s1.write_all(&[0x12]);
+                }
+            }
+            // Connection 2: accept frame 3 and stall beyond the shared budget.
+            if let Ok((mut s2, _)) = listener.accept() {
+                let mut req = [0u8; 3];
+                let _ = s2.read_exact(&mut req);
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        });
+
+        let start = Instant::now();
+        let res = query_blocking_condition("127.0.0.1", port, Duration::from_millis(200));
+        let elapsed = start.elapsed();
+        assert!(res.is_err(), "expected timeout error, got {res:?}");
+        assert!(
+            elapsed < Duration::from_millis(350),
+            "shared deadline exceeded: took {elapsed:?} for 200ms budget"
+        );
         let _ = server.join();
     }
 }

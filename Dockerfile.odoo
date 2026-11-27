@@ -1,13 +1,15 @@
-# Minimal non-root Odoo 19.0 / 20.0 image with the native_print addon pre-installed.
+# Minimal non-root Odoo 17.0 / 18.0 / 19.0 / 20.0 image with the native_print addon pre-installed.
 # Odoo 19 (default):
 #   docker build -f Dockerfile.odoo -t odoo-native-print:19.0 .
-# Odoo 20:
-#   docker build -f Dockerfile.odoo --build-arg ODOO_VERSION=20.0 --build-arg ADDON_SRC=odoo20/native_print -t odoo-native-print:20.0 .
+# Odoo 17 / 18 / 20 (example for 17.0; substitute 18.0/odoo18 or 20.0/odoo20):
+#   docker build -f Dockerfile.odoo --build-arg ODOO_VERSION=17.0 --build-arg ADDON_SRC=odoo17/native_print -t odoo-native-print:17.0 .
 ARG ODOO_VERSION=19.0
 FROM odoo:${ODOO_VERSION}
 
+ARG ODOO_VERSION
 ARG ADDON_SRC=odoo19/native_print
 COPY --chown=odoo:odoo ${ADDON_SRC} /mnt/extra-addons/native_print
+RUN python3 -c "import ast, os, sys; v = ast.literal_eval(open('/mnt/extra-addons/native_print/__manifest__.py', encoding='utf-8').read())['version']; want = os.environ['ODOO_VERSION'] + '.'; sys.exit(0 if v.startswith(want) else f'Addon version {v!r} does not start with {want!r} (pass --build-arg ADDON_SRC=...)')"
 
 USER odoo
 

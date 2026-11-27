@@ -11,35 +11,42 @@ _logger = logging.getLogger(__name__)
 
 
 def migrate(cr, version):
-    from odoo import SUPERUSER_ID, api
+    from odoo import SUPERUSER_ID
 
-    env = api.Environment(cr, SUPERUSER_ID, {})
-    Job = env["native.print.job"]
-    Device = env["native.print.device"]
-    jobs = Job.search([("device_id", "=", False),
-                       ("device", "!=", False)])
-    printers = {}
-    linked = 0
-    for job in jobs:
-        device_name = (job.device or "").strip()[:256]
-        if not device_name or not job.company_id:
-            continue
-        key = (device_name, job.company_id.id)
-        printer = printers.get(key)
-        if printer is None:
-            printer = Device.search([
-                ("name", "=", device_name),
-                ("company_id", "=", job.company_id.id),
-            ], limit=1)
-            if not printer:
-                printer = Device.create({
-                    "name": device_name,
-                    "company_id": job.company_id.id,
-                })
-            printers[key] = printer
-        job.with_context(native_print_status_sync=True).device_id = printer.id
-        linked += 1
+    cr.execute(
+        """
+        INSERT INTO native_print_device
+            (name, company_id, create_uid, write_uid, create_date, write_date)
+        SELECT DISTINCT
+            LEFT(BTRIM(j.device), 256),
+            j.company_id,
+            %s,
+            %s,
+            NOW() AT TIME ZONE 'UTC',
+            NOW() AT TIME ZONE 'UTC'
+        FROM native_print_job j
+        WHERE j.device_id IS NULL
+          AND j.device IS NOT NULL
+          AND BTRIM(j.device) <> ''
+          AND j.company_id IS NOT NULL
+        ON CONFLICT (name, company_id) DO NOTHING
+        """,
+        (SUPERUSER_ID, SUPERUSER_ID),
+    )
+    cr.execute(
+        """
+        UPDATE native_print_job j
+        SET device_id = d.id
+        FROM native_print_device d
+        WHERE j.device_id IS NULL
+          AND j.device IS NOT NULL
+          AND BTRIM(j.device) <> ''
+          AND j.company_id IS NOT NULL
+          AND d.name = LEFT(BTRIM(j.device), 256)
+          AND d.company_id = j.company_id
+        """
+    )
     _logger.info(
         "native_print: linked %d legacy job(s) to the printer registry",
-        linked,
+        cr.rowcount,
     )

@@ -31,7 +31,6 @@ pub struct ResolvedConfig {
     pub odoo_origin: Option<String>,
     pub locked_by_policy: bool,
     pub auto_reprint: bool,
-    pub status_message: Option<String>,
 }
 
 /// Write-temp-then-rename with unique temp filenames and a brief retry
@@ -227,13 +226,40 @@ mod gpo {
     }
 }
 
-pub fn resolve_config(config_dir: &Path) -> ResolvedConfig {
-    let policy_origin = gpo::policy_origin();
-    let locked_by_policy = gpo::policy_locked() || policy_origin.is_some();
-    let file = config_dir.join("config.json");
-    let file_parsed = std::fs::read_to_string(&file).ok().map(|raw| {
+#[cfg(windows)]
+fn machine_config_path() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("PROGRAMDATA")
+        .filter(|v| !v.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(r"C:\ProgramData"));
+    Some(base.join("OdooNativePrint").join("config.json"))
+}
+
+#[cfg(not(windows))]
+fn machine_config_path() -> Option<std::path::PathBuf> {
+    None
+}
+
+fn read_file_config(path: &Path) -> Option<Result<FileConfig, String>> {
+    std::fs::read_to_string(path).ok().map(|raw| {
         serde_json::from_str::<FileConfig>(&raw).map_err(|e| format!("config.json is invalid: {e}"))
-    });
+    })
+}
+
+fn resolve_config_with(
+    config_dir: &Path,
+    policy_origin: Option<String>,
+    policy_locked: bool,
+    machine_config: Option<&Path>,
+) -> ResolvedConfig {
+    let locked_by_policy = policy_locked || policy_origin.is_some();
+    // When locked by Group Policy, never trust user-writable %APPDATA% config.json
+    // for either odoo_origin or auto_reprint; only read machine-level install config.
+    let file_parsed = if locked_by_policy {
+        machine_config.and_then(read_file_config)
+    } else {
+        read_file_config(&config_dir.join("config.json"))
+    };
     let auto_reprint = match &file_parsed {
         Some(Ok(parsed)) => parsed.auto_reprint,
         _ => false,
@@ -242,34 +268,29 @@ pub fn resolve_config(config_dir: &Path) -> ResolvedConfig {
         validate_origin(&po)
     } else if let Some(parsed) = file_parsed {
         parsed.and_then(|cfg| validate_origin(&cfg.odoo_origin))
-    } else if cfg!(debug_assertions) {
+    } else if !locked_by_policy && cfg!(debug_assertions) {
         match std::env::var("NATIVE_PRINT_ODOO_ORIGIN") {
             Ok(v) if !v.trim().is_empty() => validate_origin(&v),
-            _ => Err(
-                "no Odoo address configured; set odoo_origin (HTTPS, or HTTP to an IP address)"
-                    .to_string(),
-            ),
+            _ => Err("no Odoo address configured".to_string()),
         }
     } else {
-        Err(
-            "no Odoo address configured; set odoo_origin (HTTPS, or HTTP to an IP address)"
-                .to_string(),
-        )
+        Err("no Odoo address configured".to_string())
     };
-    match origin_result {
-        Ok(origin) => ResolvedConfig {
-            odoo_origin: Some(origin),
-            locked_by_policy,
-            auto_reprint,
-            status_message: None,
-        },
-        Err(msg) => ResolvedConfig {
-            odoo_origin: None,
-            locked_by_policy,
-            auto_reprint,
-            status_message: Some(msg),
-        },
+    ResolvedConfig {
+        odoo_origin: origin_result.ok(),
+        locked_by_policy,
+        auto_reprint,
     }
+}
+
+pub fn resolve_config(config_dir: &Path) -> ResolvedConfig {
+    let machine_path = machine_config_path();
+    resolve_config_with(
+        config_dir,
+        gpo::policy_origin(),
+        gpo::policy_locked(),
+        machine_path.as_deref(),
+    )
 }
 
 pub fn save_origin(config_dir: &Path, origin: &str, auto_reprint: bool) -> Result<String, String> {
@@ -309,8 +330,19 @@ pub type PrinterSettingsMap = std::collections::BTreeMap<String, PrinterSettings
 pub fn load_printer_settings_checked(config_dir: &Path) -> Result<PrinterSettingsMap, String> {
     let file = config_dir.join("printer_settings.json");
     match std::fs::read_to_string(&file) {
-        Ok(raw) => serde_json::from_str::<PrinterSettingsMap>(&raw)
-            .map_err(|e| format!("printer_settings.json is unreadable: {e}")),
+        Ok(raw) => match serde_json::from_str::<PrinterSettingsMap>(&raw) {
+            Ok(map) => Ok(map),
+            Err(e) => {
+                let backup = config_dir.join("printer_settings.json.corrupt");
+                let _ = std::fs::remove_file(&backup);
+                let _ = std::fs::rename(&file, &backup);
+                eprintln!(
+                    "Yaseir Print: printer_settings.json was corrupt ({e}); moved to {}",
+                    backup.display()
+                );
+                Ok(PrinterSettingsMap::new())
+            }
+        },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(PrinterSettingsMap::new()),
         Err(e) => Err(format!("cannot read printer_settings.json: {e}")),
     }
@@ -397,13 +429,63 @@ mod tests {
     }
 
     #[test]
-    fn printer_settings_checked_rejects_corrupt_json() {
+    fn printer_settings_checked_recovers_corrupt_json() {
         let dir = std::env::temp_dir().join(format!("np-pset-corrupt-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         assert!(load_printer_settings_checked(&dir).unwrap().is_empty());
         std::fs::write(dir.join("printer_settings.json"), "{not-valid-json").unwrap();
-        assert!(load_printer_settings_checked(&dir).is_err());
+        assert!(load_printer_settings_checked(&dir).unwrap().is_empty());
+        assert!(dir.join("printer_settings.json.corrupt").exists());
+        assert!(!dir.join("printer_settings.json").exists());
+        save_printer_settings(&dir, &PrinterSettingsMap::new()).unwrap();
+        assert!(load_printer_settings_checked(&dir).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn policy_locked_ignores_user_config_and_uses_machine_config() {
+        let dir = std::env::temp_dir().join(format!("np-gpo-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let user_dir = dir.join("user");
+        let machine_dir = dir.join("machine");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        std::fs::create_dir_all(&machine_dir).unwrap();
+        std::fs::write(
+            user_dir.join("config.json"),
+            r#"{"odoo_origin":"https://user.corp.local","auto_reprint":true}"#,
+        )
+        .unwrap();
+        let machine_file = machine_dir.join("config.json");
+        // Locked with no machine config: user config must not supply origin or auto_reprint.
+        let r1 = resolve_config_with(&user_dir, None, true, Some(&machine_file));
+        assert!(r1.locked_by_policy);
+        assert_eq!(r1.odoo_origin, None);
+        assert!(!r1.auto_reprint);
+        // Locked with GPO origin: user config must not enable auto_reprint.
+        let r2 = resolve_config_with(
+            &user_dir,
+            Some("https://gpo.corp.local".to_string()),
+            false,
+            Some(&machine_file),
+        );
+        assert!(r2.locked_by_policy);
+        assert_eq!(r2.odoo_origin.as_deref(), Some("https://gpo.corp.local"));
+        assert!(!r2.auto_reprint);
+        // Locked with machine config present: machine config is used.
+        std::fs::write(
+            &machine_file,
+            r#"{"odoo_origin":"https://machine.corp.local","auto_reprint":true}"#,
+        )
+        .unwrap();
+        let r3 = resolve_config_with(&user_dir, None, true, Some(&machine_file));
+        assert!(r3.locked_by_policy);
+        assert_eq!(
+            r3.odoo_origin.as_deref(),
+            Some("https://machine.corp.local")
+        );
+        assert!(r3.auto_reprint);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

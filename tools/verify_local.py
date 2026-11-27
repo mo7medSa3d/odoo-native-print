@@ -59,14 +59,17 @@ def _run_cmd(cmd, env=None):
 
 def _check_py_compile():
     files = (
-        sorted(ROOT.glob("odoo19/native_print/**/*.py"))
+        sorted(ROOT.glob("odoo17/native_print/**/*.py"))
+        + sorted(ROOT.glob("odoo18/native_print/**/*.py"))
+        + sorted(ROOT.glob("odoo19/native_print/**/*.py"))
         + sorted(ROOT.glob("odoo20/native_print/**/*.py"))
         + sorted(ROOT.glob("tools/*.py"))
     )
     if not files:
         return False, "no Python files found"
-    for f in files:
-        py_compile.compile(str(f), doraise=True)
+    with tempfile.TemporaryDirectory(prefix="np-pyc-") as tmpdir:
+        for idx, f in enumerate(files):
+            py_compile.compile(str(f), cfile=os.path.join(tmpdir, f"{idx}.pyc"), doraise=True)
     return True, f"{len(files)} files"
 
 
@@ -106,8 +109,11 @@ def check_js_esm(text, label="<stdin>"):
 
 
 def _check_odoo_esm_syntax():
-    files = sorted(ROOT.glob("odoo19/native_print/static/src/js/*.js")) + sorted(
-        ROOT.glob("odoo20/native_print/static/src/js/*.js")
+    files = (
+        sorted(ROOT.glob("odoo17/native_print/static/src/js/*.js"))
+        + sorted(ROOT.glob("odoo18/native_print/static/src/js/*.js"))
+        + sorted(ROOT.glob("odoo19/native_print/static/src/js/*.js"))
+        + sorted(ROOT.glob("odoo20/native_print/static/src/js/*.js"))
     )
     if not files:
         return False, "no Odoo JS files found"
@@ -393,6 +399,10 @@ def main():
             ("command_surface", lambda: _run_cmd([sys.executable, "tools/check_command_surface.py"], sub_env)),
             ("bash_syntax:fetch-pdfium", lambda: _run_cmd([_find_bash(), "-n", "tools/fetch-pdfium.sh"], sub_env)),
             ("node:control-center", lambda: _run_cmd(["node", "--test", "app/tests/control-center.test.mjs"], sub_env)),
+            ("node:odoo17_pos_keys", lambda: _run_cmd(["node", "--test", "odoo17/native_print/tests/test_pos_keys.mjs"], sub_env)),
+            ("node:odoo17_live_target", lambda: _run_cmd(["node", "--test", "odoo17/native_print/tests/test_live_target.mjs"], sub_env)),
+            ("node:odoo18_pos_keys", lambda: _run_cmd(["node", "--test", "odoo18/native_print/tests/test_pos_keys.mjs"], sub_env)),
+            ("node:odoo18_live_target", lambda: _run_cmd(["node", "--test", "odoo18/native_print/tests/test_live_target.mjs"], sub_env)),
             ("node:pos_keys", lambda: _run_cmd(["node", "--test", "odoo19/native_print/tests/test_pos_keys.mjs"], sub_env)),
             ("node:live_target", lambda: _run_cmd(["node", "--test", "odoo19/native_print/tests/test_live_target.mjs"], sub_env)),
             ("node:odoo20_pos_keys", lambda: _run_cmd(["node", "--test", "odoo20/native_print/tests/test_pos_keys.mjs"], sub_env)),
@@ -404,6 +414,8 @@ def main():
             ("xml/admx/adml", _check_xml),
             ("toml/json", _check_toml_json),
             ("yaml:workflows", _check_workflow_yaml),
+            ("i18n:odoo17_ar.po", lambda: _check_ar_po("odoo17/native_print/i18n/ar.po")),
+            ("i18n:odoo18_ar.po", lambda: _check_ar_po("odoo18/native_print/i18n/ar.po")),
             ("i18n:ar.po", _check_ar_po),
             ("i18n:odoo20_ar.po", lambda: _check_ar_po("odoo20/native_print/i18n/ar.po")),
         ]

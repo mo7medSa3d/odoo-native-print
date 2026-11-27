@@ -94,7 +94,8 @@
   window.addEventListener("error", function (ev) {
     var t = ev && ev.target;
     if (t && t !== window && (t.tagName === "SCRIPT" || t.tagName === "LINK")) {
-      npPushError("load", (t.src || t.href || "asset") + " failed to load");
+      var assetUrl = String(t.src || t.href || "asset").split(/[?#]/)[0];
+      npPushError("load", assetUrl + " failed to load");
     } else if (ev && ev.message) {
       npPushError("error", ev.message);
     }
@@ -168,7 +169,7 @@
   function npProbeEnvironment() {
     var env = {
       userAgent: navigator.userAgent || "",
-      href: window.location.href,
+      pathname: window.location.pathname || "/",
       secureContext: window.isSecureContext === true,
       online: navigator.onLine !== false
     };

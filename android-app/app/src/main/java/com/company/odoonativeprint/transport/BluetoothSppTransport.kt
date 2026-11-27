@@ -12,6 +12,10 @@ import com.company.odoonativeprint.core.PrinterInfo
 import com.company.odoonativeprint.core.PrinterSettings
 import java.io.IOException
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Classic Bluetooth SPP (RFCOMM) transport for portable & POS thermal/label printers.
@@ -45,36 +49,71 @@ class BluetoothSppTransport(private val context: Context) : RawByteTransport {
         }
 
         var socket: BluetoothSocket? = null
+        val timedOut = AtomicBoolean(false)
         return try {
             // Cancel active BT discovery before RFCOMM connect to avoid severe slowdown/failure.
             runCatching { adapter.cancelDiscovery() }
             val primary = device.createRfcommSocketToServiceRecord(SPP_UUID)
             socket = primary
-            try {
-                primary.connect()
-            } catch (_: IOException) {
+            val activeSocket = try {
+                withSocketTimeout(primary, CONNECT_TIMEOUT_MS, timedOut) {
+                    primary.connect()
+                }
+                primary
+            } catch (e: IOException) {
                 runCatching { primary.close() }
+                if (timedOut.get()) throw e
                 val fallback = device.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
                 socket = fallback
-                fallback.connect()
+                withSocketTimeout(fallback, CONNECT_TIMEOUT_MS, timedOut) {
+                    fallback.connect()
+                }
+                fallback
             }
-            val out = socket.outputStream
-            val pacingMs = settings.bluetoothPacingMs.toLong()
-            var offset = 0
-            while (offset < bytes.size) {
-                val len = minOf(CHUNK_SIZE, bytes.size - offset)
-                out.write(bytes, offset, len)
-                offset += len
-                if (pacingMs > 0L) Thread.sleep(pacingMs)
+            withSocketTimeout(activeSocket, WRITE_TIMEOUT_MS, timedOut) {
+                val out = activeSocket.outputStream
+                val pacingMs = settings.bluetoothPacingMs.toLong()
+                var offset = 0
+                while (offset < bytes.size) {
+                    val len = minOf(CHUNK_SIZE, bytes.size - offset)
+                    out.write(bytes, offset, len)
+                    offset += len
+                    if (pacingMs > 0L) Thread.sleep(pacingMs)
+                }
+                out.flush()
             }
-            out.flush()
             // Allow cheap thermal printers to drain the final cut command before RFCOMM disconnect
             Thread.sleep(250L)
             TransportResult.Ok
         } catch (e: IOException) {
-            TransportResult.Failure("BT_IO_ERROR", e.message ?: "Bluetooth write failed", retryable = true)
+            if (timedOut.get()) {
+                TransportResult.Failure("BT_TIMEOUT", "Bluetooth printer timed out", retryable = true)
+            } else {
+                TransportResult.Failure("BT_IO_ERROR", e.message ?: "Bluetooth write failed", retryable = true)
+            }
         } finally {
             runCatching { socket?.close() }
+        }
+    }
+
+    private inline fun withSocketTimeout(
+        socket: BluetoothSocket,
+        timeoutMs: Long,
+        timedOut: AtomicBoolean,
+        block: () -> Unit,
+    ) {
+        val future = watchdog.schedule(
+            {
+                timedOut.set(true)
+                runCatching { socket.close() }
+            },
+            timeoutMs,
+            TimeUnit.MILLISECONDS,
+        )
+        try {
+            block()
+        } finally {
+            future.cancel(false)
         }
     }
 
@@ -87,5 +126,10 @@ class BluetoothSppTransport(private val context: Context) : RawByteTransport {
     companion object {
         val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
         private const val CHUNK_SIZE = 512
+        private const val CONNECT_TIMEOUT_MS = 10_000L
+        private const val WRITE_TIMEOUT_MS = 30_000L
+        private val watchdog: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "bt-spp-watchdog").apply { isDaemon = true }
+        }
     }
 }

@@ -585,7 +585,11 @@ pub fn activate_tab(app: &tauri::AppHandle, label: &str) {
         tabs.order.clone()
     };
     layout_webviews(app);
+    let state = app.state::<AppState>();
     for other in &labels {
+        if commands::read_lock(&state.tabs).active.as_deref() != Some(label) {
+            return;
+        }
         if let Some(wv) = app.get_webview(other) {
             if other == label {
                 let _ = wv.show();
@@ -713,8 +717,12 @@ pub fn create_tab_webview(
                 }
                 if !is_local_app_url(payload.url()) {
                     let cfg_origin = commands::read_lock(&st.configured_origin).clone();
-                    if let Some(cfg_origin) = cfg_origin.as_deref() {
-                        config::save_last_url(&st.data_dir, cfg_origin, payload.url().as_str());
+                    if let Some(cfg_origin) = cfg_origin {
+                        let data_dir = st.data_dir.clone();
+                        let url = payload.url().as_str().to_string();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            config::save_last_url(&data_dir, &cfg_origin, &url);
+                        });
                     }
                 }
             }

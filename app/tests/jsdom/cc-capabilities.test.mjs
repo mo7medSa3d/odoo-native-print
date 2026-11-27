@@ -34,7 +34,7 @@ const dom = new JSDOM(html, { url: "http://tauri.localhost/", runScripts: "dange
     w.__NATIVE_PRINT__ = {
       appOverview: async () => JSON.parse(JSON.stringify(overview)),
       printerCapabilities: async (name) => JSON.parse(JSON.stringify(capsByName[name] || {})),
-      getPrinterSettings: async () => ({}),
+      getPrinterSettings: async () => ({ "HP LaserJet": { paper: "Custom-120x80", tray: "Manual Feed" } }),
       setPrinterSettings: async (name, settings) => {
         w.__savedSettings = [name, settings];
         return { [name]: settings };
@@ -92,6 +92,33 @@ sel.value = "HP LaserJet";
 w.onTestPrinterChange();
 ok("lab: office printer -> pdf only", JSON.stringify(kindValues()) === JSON.stringify(["pdf-a4"]));
 
+// (a) Selecting a tcp:// printer selects thermal-80mm (not blank "") in a real <select>
+sel.value = "tcp://192.168.1.50:9100";
+w.onTestPrinterChange();
+ok("lab: tcp:// printer selects thermal-80mm (not blank)",
+  sel.value === "tcp://192.168.1.50:9100" && kindSel.value === "thermal-80mm");
+
+// (c) IPv6 URI port validation: :631 on ipp:// accepted, :9100 on ipp:// rejected
+{
+  const uriInput = w.document.getElementById("customPrinterUri");
+  const uriError = w.document.getElementById("customPrinterUriError");
+  sel.value = "__uri__";
+  uriInput.value = "ipp://[fd00:9100::1]:631/ipp/print";
+  w.onTestPrinterChange();
+  ok("ipv6: ipp://[fd00:9100::1]:631/ipp/print accepted",
+    w.validateCustomPrinterUriField() === true &&
+    uriInput.getAttribute("aria-invalid") === "false" &&
+    uriError.classList.contains("hidden") &&
+    kindSel.value === "pdf-a4");
+
+  uriInput.value = "ipp://[fe80::631]:9100/ipp/print";
+  w.onTestPrinterChange();
+  ok("ipv6: ipp://[fe80::631]:9100/ipp/print rejected",
+    w.validateCustomPrinterUriField() === false &&
+    uriInput.getAttribute("aria-invalid") === "true" &&
+    !uriError.classList.contains("hidden"));
+}
+
 // Trays + per-printer settings (owner brief, 2026-11-05): the HP
 // card shows the driver's trays and offers defaults only for what
 // the driver reports; saving posts exactly the chosen values.
@@ -104,6 +131,12 @@ ok("lab: office printer -> pdf only", JSON.stringify(kindValues()) === JSON.stri
   ok("hp: settings offer driver forms + trays + duplex",
     !!paperSel && [...paperSel.options].some((o) => o.value === "Letter") &&
     !!traySel && [...traySel.options].some((o) => o.value === "Tray 2") && !!duplexSel);
+  // (b) listOpts preserves saved custom paper/tray absent from driver caps
+  ok("hp: listOpts preserves saved custom paper & tray absent from driver caps",
+    paperSel.value === "Custom-120x80" &&
+    [...paperSel.options].some((o) => o.value === "Custom-120x80") &&
+    traySel.value === "Manual Feed" &&
+    [...traySel.options].some((o) => o.value === "Manual Feed"));
   ok("hp: no color setting (driver reports no color)", !c.querySelector(".ps-color"));
   paperSel.value = "Letter";
   traySel.value = "Tray 2";

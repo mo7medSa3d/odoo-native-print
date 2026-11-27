@@ -1,7 +1,7 @@
 from datetime import timedelta
 import logging
 
-from odoo import _, api, fields, models
+from odoo import _, api, fields, models, tools
 from odoo.exceptions import AccessError, UserError
 
 _logger = logging.getLogger(__name__)
@@ -185,11 +185,9 @@ class NativePrintJob(models.Model):
         no payload copies by design.)
         """
         self.ensure_one()
-        # Public model methods do not automatically enforce the caller's
-        # model ACL merely because a recordset was obtained. Check ACLs only:
-        # the job-log "own jobs" record rule must not block reprinting a job
-        # owned by another user (e.g. one created by an admin on their behalf).
-        self.browse().check_access("read")
+        # Enforce both model ACL and record rules (own-jobs rule for plain
+        # users; managers have full company read access).
+        self.check_access("read")
         if (
             not self.env.su
             and self.company_id
@@ -294,22 +292,32 @@ class NativePrintJob(models.Model):
     )
 
     @api.model
-    def _cron_prune_job_log(self, days=180, batch_size=1000, max_batches=10):
+    def _cron_prune_job_log(
+        self, days=180, batch_size=1000, max_batches=10, stale_active_days=7
+    ):
         """Retention hook for the scheduled action (shipped
         INACTIVE — see data/native_print_cron.xml): delete
-        terminal-state jobs older than `days`. The log is an audit
+        terminal-state jobs older than `days` and orphaned active jobs
+        untouched for more than `stale_active_days`. The log is an audit
         trail, so pruning is an explicit admin decision rather than a
-        silent default. Active jobs are never pruned:
-        their outcome is still owed to someone."""
+        silent default."""
         days = max(1, int(days))
         batch_size = max(1, int(batch_size))
         max_batches = max(1, int(max_batches))
-        cutoff = fields.Datetime.to_string(
-            fields.Datetime.now() - timedelta(days=days)
+        stale_active_days = max(1, int(stale_active_days))
+        now = fields.Datetime.now()
+        cutoff = fields.Datetime.to_string(now - timedelta(days=days))
+        stale_cutoff = fields.Datetime.to_string(
+            now - timedelta(days=stale_active_days)
         )
         domain = [
+            "|",
+            "&",
             ("state", "in", ["done", "failed", "canceled", "dead_letter"]),
             ("create_date", "<", cutoff),
+            "&",
+            ("state", "in", ["queued", "rendering", "spooling", "printing"]),
+            ("write_date", "<", stale_cutoff),
         ]
         Job = self.sudo()
         count = 0
@@ -319,6 +327,8 @@ class NativePrintJob(models.Model):
                 break
             count += len(batch)
             batch.unlink()
+            if not tools.config["test_enable"]:
+                self.env.cr.commit()
             if len(batch) < batch_size:
                 break
         return count

@@ -541,26 +541,59 @@ function posReceiptKey(safeRef, userId) {
     // dedupe on the desktop, so it reuses the in-flight key. Once the
     // job reaches a terminal state the watcher clears the record, so
     // a later deliberate reprint becomes a fresh attempt (a2, a3...).
-    // The day stamp bounds key reuse to one business day.
-    // Scope storage and job keys per cashier user id to prevent
-    // cross-cashier collisions on the per-user server job log.
-    const storeKey = `np.pos.key.${safeRef}.u${userId}`;
+    // Persist per business day in localStorage (falling back to
+    // sessionStorage) so tab reloads on the same day never reset attempt to 1.
     const now = Date.now();
+    const day = new Date(now).toISOString().slice(0, 10).replace(/-/g, "");
+    const storeKey = `np.pos.key.${day}.${safeRef}.u${userId}`;
+    let raw = null;
+    try {
+        if (typeof localStorage !== "undefined" && localStorage) {
+            raw = localStorage.getItem(storeKey);
+        }
+    } catch (_err) { /* fall back to sessionStorage */ }
+    if (raw == null) {
+        try {
+            if (typeof sessionStorage !== "undefined" && sessionStorage) {
+                raw = sessionStorage.getItem(storeKey);
+            }
+        } catch (_err) { /* storage unavailable */ }
+    }
     let record = null;
     try {
-        record = JSON.parse(sessionStorage.getItem(storeKey) || "null");
-    } catch (_err) { /* storage unavailable: fall through */ }
+        record = JSON.parse(raw || "null");
+    } catch (_err) { /* ignore corrupt entry */ }
     if (record && record.key && now - (record.ts || 0) < 15000) {
         // Keep the 15s dedupe window anchored to the first submission.
         return record.key;
     }
     const attempt = (record && record.attempt ? record.attempt : 0) + 1;
-    const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     const key = `pos-${safeRef}-${day}-u${userId}-a${attempt}`;
+    const payload = JSON.stringify({ key, ts: now, attempt });
+    let saved = false;
     try {
-        sessionStorage.setItem(
-            storeKey, JSON.stringify({ key, ts: now, attempt }));
-    } catch (_err) { /* ignore */ }
+        if (typeof localStorage !== "undefined" && localStorage) {
+            if (typeof localStorage.length === "number" && typeof localStorage.key === "function") {
+                const cutoff = new Date(now - 2 * 86400000).toISOString().slice(0, 10).replace(/-/g, "");
+                for (let i = localStorage.length - 1; i >= 0; i--) {
+                    const k = localStorage.key(i);
+                    const m = k && /^np\.pos\.key\.(\d{8})\./.exec(k);
+                    if (m && m[1] < cutoff) {
+                        localStorage.removeItem(k);
+                    }
+                }
+            }
+            localStorage.setItem(storeKey, payload);
+            saved = true;
+        }
+    } catch (_err) { /* fall back to sessionStorage */ }
+    if (!saved) {
+        try {
+            if (typeof sessionStorage !== "undefined" && sessionStorage) {
+                sessionStorage.setItem(storeKey, payload);
+            }
+        } catch (_err) { /* ignore */ }
+    }
     return key;
 }
 
@@ -569,13 +602,42 @@ function finishPosReceiptAttempt(safeRef, userId) {
     // attempt. Keep the attempt counter as a tombstone (key cleared)
     // — deleting the record would reset the counter and reissue the
     // very same key, which the desktop would dedupe into silence.
+    const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const storeKey = `np.pos.key.${day}.${safeRef}.u${userId}`;
+    let raw = null;
     try {
-        const storeKey = `np.pos.key.${safeRef}.u${userId}`;
-        const record = JSON.parse(sessionStorage.getItem(storeKey) || "null");
-        sessionStorage.setItem(storeKey, JSON.stringify({
-            key: null, ts: 0, attempt: record && record.attempt ? record.attempt : 1,
-        }));
+        if (typeof localStorage !== "undefined" && localStorage) {
+            raw = localStorage.getItem(storeKey);
+        }
+    } catch (_err) { /* fall back to sessionStorage */ }
+    if (raw == null) {
+        try {
+            if (typeof sessionStorage !== "undefined" && sessionStorage) {
+                raw = sessionStorage.getItem(storeKey);
+            }
+        } catch (_err) { /* ignore */ }
+    }
+    let record = null;
+    try {
+        record = JSON.parse(raw || "null");
     } catch (_err) { /* ignore */ }
+    const payload = JSON.stringify({
+        key: null, ts: 0, attempt: record && record.attempt ? record.attempt : 1,
+    });
+    let saved = false;
+    try {
+        if (typeof localStorage !== "undefined" && localStorage) {
+            localStorage.setItem(storeKey, payload);
+            saved = true;
+        }
+    } catch (_err) { /* fall back to sessionStorage */ }
+    if (!saved) {
+        try {
+            if (typeof sessionStorage !== "undefined" && sessionStorage) {
+                sessionStorage.setItem(storeKey, payload);
+            }
+        } catch (_err) { /* ignore */ }
+    }
 }
 
 async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, env, userId, order, bridgeJobId = null) {

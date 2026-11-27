@@ -41,6 +41,8 @@ ALLOWED_TRANSITIONS = {
 SOURCE_TYPES = {"report", "pos_receipt", "test"}
 
 PRINT_MODES = {"gdi", "escpos", "zpl", "tspl", "epl", "cpcl"}
+PRINTER_CLASSES = {"thermal", "label", "office", "virtual"}
+MAX_DEVICES_PER_COMPANY = 500
 
 
 def _safe_source_ids(val):
@@ -134,6 +136,8 @@ def _get_or_create_device(device_name, company_id, vals=None):
         ("company_id", "=", company_id),
     ], limit=1)
     if not printer:
+        if Device.search_count([("company_id", "=", company_id)]) >= MAX_DEVICES_PER_COMPANY:
+            return None
         create_vals = dict(vals or {}, name=device_name, company_id=company_id)
         try:
             with Device.env.cr.savepoint():
@@ -353,18 +357,23 @@ class NativePrintController(http.Controller):
             return [" ".join(item.split())[:160] for item in val[:80]
                     if isinstance(item, str) and item.strip()]
 
-        forms_list = _clean_list(forms)
-        trays_list = _clean_list(trays)
-        vals = {
-            "protocol": protocol.strip()[:32] if isinstance(protocol, str) and protocol.strip() else False,
-            "printer_class": printer_class.strip()[:32] if isinstance(printer_class, str) and printer_class.strip() else False,
-            "forms_summary": "\n".join(forms_list) or False,
-            "trays_summary": "\n".join(trays_list) or False,
-            "caps_synced_at": fields.Datetime.now(),
-        }
+        vals = {"caps_synced_at": fields.Datetime.now()}
+        if protocol is not None:
+            clean_proto = protocol.strip().lower() if isinstance(protocol, str) else ""
+            vals["protocol"] = clean_proto if clean_proto in PRINT_MODES else False
+        if printer_class is not None:
+            clean_cls = printer_class.strip().lower() if isinstance(printer_class, str) else ""
+            vals["printer_class"] = clean_cls if clean_cls in PRINTER_CLASSES else False
+        if forms is not None:
+            vals["forms_summary"] = "\n".join(_clean_list(forms)) or False
+        if trays is not None:
+            vals["trays_summary"] = "\n".join(_clean_list(trays)) or False
         company = request.env.company.id
         printer = _get_or_create_device(device_name, company, vals)
         if not printer:
+            Device = request.env["native.print.device"].sudo()
+            if Device.search_count([("company_id", "=", company)]) >= MAX_DEVICES_PER_COMPANY:
+                return {"ok": False, "error": "device_limit_reached"}
             return {"ok": False, "error": "registration_failed"}
         return {"ok": True, "device_id": printer.id}
 

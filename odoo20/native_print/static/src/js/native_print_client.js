@@ -1,5 +1,6 @@
 /** @odoo-module **/
 import { _t } from "@web/core/l10n/translation";
+import { NotificationPlugin } from "@web/core/notifications/notification_plugin";
 
 // Live printer model: printers are never stored on the server. The
 // desktop app on THIS PC is the only printer authority; these helpers
@@ -19,9 +20,6 @@ export function directionForLang(lang) {
 }
 
 export function syncDocumentDirection() {
-    if (typeof document !== "undefined" && typeof document.getElementById === "function") {
-        document.getElementById("np-http-warning")?.remove?.();
-    }
     if (typeof document === "undefined" || !document.documentElement) {
         return null;
     }
@@ -458,13 +456,54 @@ export function recoveryButtons() {
     return null;
 }
 
+export function resolveEnvPlugin(env, key, pluginClass, requiredMethod) {
+    if (!env || typeof env !== "object") {
+        return null;
+    }
+    const ok = (cand) => Boolean(cand && typeof cand[requiredMethod] === "function");
+    if (ok(env)) {
+        return env;
+    }
+    if (ok(env.services?.[key])) {
+        return env.services[key];
+    }
+    if (ok(env[key])) {
+        return env[key];
+    }
+    if (typeof env.getPlugin === "function") {
+        try {
+            const byClass = pluginClass ? env.getPlugin(pluginClass) : null;
+            if (ok(byClass)) return byClass;
+        } catch (_err) { /* plugin not registered under class */ }
+        try {
+            const byKey = env.getPlugin(key);
+            if (ok(byKey)) return byKey;
+        } catch (_err) { /* plugin not registered under key */ }
+    }
+    for (const container of [env.pluginManager, env.plugins]) {
+        if (!container || typeof container !== "object") continue;
+        if (typeof container.getPlugin === "function" && pluginClass) {
+            try {
+                const found = container.getPlugin(pluginClass);
+                if (ok(found)) return found;
+            } catch (_err) { /* ignore */ }
+        }
+        const map = container.plugins instanceof Map ? container.plugins : container;
+        if (typeof map.get === "function") {
+            const found = (pluginClass && map.get(pluginClass)) || map.get(key);
+            if (ok(found)) return found;
+        }
+        if (ok(container[key])) {
+            return container[key];
+        }
+    }
+    return null;
+}
+
 export function notifyUser(env, message, type = "info", title = _t("Yaseir Print"), buttons = null) {
     try {
-        const notification =
-            env && typeof env.add === "function"
-                ? env
-                : env && env.services && env.services.notification;
-        if (!notification || typeof notification.add !== "function") {
+        const notification = resolveEnvPlugin(env, "notification", NotificationPlugin, "add");
+        if (!notification) {
             return;
         }
         const key = `${type}|${title}|${message}`;

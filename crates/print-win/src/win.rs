@@ -157,6 +157,8 @@ extern "system" {
     fn EndPage(dc: Hdc) -> i32;
     fn EndDoc(dc: Hdc) -> i32;
     fn AbortDoc(dc: Hdc) -> i32;
+    fn SetStretchBltMode(dc: Hdc, mode: i32) -> i32;
+    fn SetBrushOrgEx(dc: Hdc, x: i32, y: i32, lppt: *mut c_void) -> Bool;
     fn StretchDIBits(
         dc: Hdc,
         x_dest: i32,
@@ -178,6 +180,7 @@ const HORZRES: i32 = 8;
 const VERTRES: i32 = 10;
 const LOGPIXELSX: i32 = 88;
 const LOGPIXELSY: i32 = 90;
+const HALFTONE: i32 = 4;
 const DIB_RGB_COLORS: u32 = 0;
 const SRCCOPY: u32 = 0x00CC_0020;
 const GDI_ERROR: i32 = -1;
@@ -347,7 +350,11 @@ fn build_printer_devmode(
                 None
             } else {
                 let dm = &mut *(buf.as_mut_ptr() as *mut DevModePrefixW);
-                if (dm.dm_size as usize) < std::mem::size_of::<DevModePrefixW>() {
+                if (dm.dm_size as usize) < std::mem::size_of::<DevModePrefixW>()
+                    || !(dm.dm_size as usize)
+                        .checked_add(dm.dm_driver_extra as usize)
+                        .is_some_and(|n| n <= buf.len() * std::mem::size_of::<u64>())
+                {
                     return None;
                 }
                 let is_roll = matches!(matched_form, Some((_, MatchKind::Roll)));
@@ -451,7 +458,11 @@ fn build_printer_devmode(
                     None
                 } else {
                     let out_dm = &*(out_buf.as_ptr() as *const DevModePrefixW);
-                    if (out_dm.dm_size as usize) < std::mem::size_of::<DevModePrefixW>() {
+                    if (out_dm.dm_size as usize) < std::mem::size_of::<DevModePrefixW>()
+                        || !(out_dm.dm_size as usize)
+                            .checked_add(out_dm.dm_driver_extra as usize)
+                            .is_some_and(|n| n <= out_buf.len() * std::mem::size_of::<u64>())
+                    {
                         None
                     } else {
                         Some(out_buf)
@@ -631,7 +642,7 @@ pub fn print_pdf_gdi_detailed(
             sub.size,
             match_ref,
             opts.duplex,
-            opts.color,
+            effective_mode == print_render::RenderMode::Color,
             opts.tray.as_deref(),
         );
         prepared_subjobs.push((sub, match_kind, devmode));
@@ -1060,6 +1071,14 @@ fn blit_dib_rect(
     );
     if unsafe { StartPage(dc) } <= 0 {
         return Err(format!("StartPage: {}", last_error()));
+    }
+    if dib.bit_count >= 8 {
+        // Microsoft Learn: SetBrushOrgEx must follow SetStretchBltMode(HALFTONE)
+        // to avoid brush misalignment; preserves thin barcodes and Arabic strokes.
+        unsafe {
+            SetStretchBltMode(dc, HALFTONE);
+            SetBrushOrgEx(dc, 0, 0, std::ptr::null_mut());
+        }
     }
     let info = dib.bitmap_info();
     let drawn = unsafe {
@@ -1966,4 +1985,40 @@ mod tests {
         assert_eq!(map.len(), 1);
         assert!(map.contains_key("printer-after-ttl"));
     }
+
+    #[test]
+    fn ffi_struct_layouts_match_win32() {
+        assert_eq!(std::mem::size_of::<DevModePrefixW>(), 168);
+        assert_eq!(std::mem::offset_of!(DevModePrefixW, dm_device_name), 0);
+        assert_eq!(std::mem::offset_of!(DevModePrefixW, dm_spec_version), 64);
+        assert_eq!(std::mem::offset_of!(DevModePrefixW, dm_size), 68);
+        assert_eq!(std::mem::offset_of!(DevModePrefixW, dm_driver_extra), 70);
+        assert_eq!(std::mem::offset_of!(DevModePrefixW, dm_fields), 72);
+        assert_eq!(std::mem::offset_of!(DevModePrefixW, dm_orientation), 76);
+        assert_eq!(std::mem::offset_of!(DevModePrefixW, dm_paper_size), 78);
+        assert_eq!(std::mem::offset_of!(DevModePrefixW, dm_paper_length), 80);
+        assert_eq!(std::mem::offset_of!(DevModePrefixW, dm_paper_width), 82);
+        assert_eq!(std::mem::offset_of!(DevModePrefixW, dm_default_source), 88);
+        assert_eq!(std::mem::offset_of!(DevModePrefixW, dm_color), 92);
+        assert_eq!(std::mem::offset_of!(DevModePrefixW, dm_duplex), 94);
+        assert_eq!(std::mem::offset_of!(DevModePrefixW, dm_form_name), 102);
+
+        let ptr_sz = std::mem::size_of::<*const u16>();
+        assert_eq!(std::mem::size_of::<DocInfo1W>(), 3 * ptr_sz);
+        assert_eq!(std::mem::size_of::<DocInfoW>(), 5 * ptr_sz);
+        assert_eq!(std::mem::offset_of!(DocInfoW, doc_name), ptr_sz);
+        assert_eq!(std::mem::size_of::<PrinterInfo2W>(), 13 * ptr_sz + 32);
+        assert_eq!(std::mem::offset_of!(PrinterInfo2W, attributes), 13 * ptr_sz);
+        assert_eq!(std::mem::offset_of!(PrinterInfo2W, status), 13 * ptr_sz + 20);
+    }
 }
+
+const _: () = {
+    assert!(std::mem::size_of::<DevModePrefixW>() == 168);
+    assert!(std::mem::offset_of!(DevModePrefixW, dm_size) == 68);
+    assert!(std::mem::offset_of!(DevModePrefixW, dm_fields) == 72);
+    assert!(std::mem::offset_of!(DevModePrefixW, dm_form_name) == 102);
+    assert!(std::mem::size_of::<DocInfo1W>() == 3 * std::mem::size_of::<*const u16>());
+    assert!(std::mem::size_of::<DocInfoW>() == 5 * std::mem::size_of::<*const u16>());
+    assert!(std::mem::size_of::<PrinterInfo2W>() == 13 * std::mem::size_of::<*const u16>() + 32);
+};

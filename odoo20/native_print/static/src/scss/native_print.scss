@@ -77,14 +77,12 @@
     .o_dark_mode &,
     body.o_web_client_dark &,
     [data-color-scheme="dark"] &,
-    [data-bs-theme="dark"] &,
-    &.np-theme-dark {
+    [data-bs-theme="dark"] & {
         @include np-dark-tokens;
     }
 
     [data-color-scheme="light"] &,
-    [data-bs-theme="light"] &,
-    &.np-theme-light {
+    [data-bs-theme="light"] & {
         @include np-light-tokens;
     }
 

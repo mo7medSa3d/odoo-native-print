@@ -10,6 +10,8 @@ import java.io.ByteArrayOutputStream
 object EscPosEncoder {
 
     private const val MAX_BAND_ROWS = 256
+    val CUT_COMMAND: ByteArray = byteArrayOf(0x1D, 0x56, 0x42, 0x00)
+    val OPEN_DRAWER_COMMAND: ByteArray = byteArrayOf(0x1B, 0x70, 0x00, 0x19, 0xFA.toByte())
 
     fun encodeRaster(
         mono: MonoBitmap,
@@ -42,11 +44,11 @@ object EscPosEncoder {
         }
         if (cut) {
             // GS V 66 0 (Feed and partial cut)
-            out.write(byteArrayOf(0x1D, 0x56, 0x42, 0x00))
+            out.write(CUT_COMMAND)
         }
         if (openDrawer) {
             // ESC p 0 25 250 (Cash drawer kick pin 2)
-            out.write(byteArrayOf(0x1B, 0x70, 0x00, 0x19, 0xFA.toByte()))
+            out.write(OPEN_DRAWER_COMMAND)
         }
         return out.toByteArray()
     }

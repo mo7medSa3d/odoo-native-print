@@ -402,13 +402,12 @@ impl PdfDocument {
     pub fn page_size_mm(&self, index: usize) -> Result<PageSize, PdfiumError> {
         let _guard = call_lock().lock().unwrap_or_else(|e| e.into_inner());
         let page = self.load_page_locked(index)?;
-        let w_pt = unsafe { (self.pdfium.api.get_page_width_f)(page) } as f64;
-        let h_pt = unsafe { (self.pdfium.api.get_page_height_f)(page) } as f64;
-        unsafe { (self.pdfium.api.close_page)(page) };
+        let w_pt = unsafe { (self.pdfium.api.get_page_width_f)(page.raw) } as f64;
+        let h_pt = unsafe { (self.pdfium.api.get_page_height_f)(page.raw) } as f64;
         Ok(safe_page_size_mm(w_pt, h_pt))
     }
 
-    fn load_page_locked(&self, index: usize) -> Result<FpdfPage, PdfiumError> {
+    fn load_page_locked(&self, index: usize) -> Result<PageGuard<'_>, PdfiumError> {
         let idx = c_int::try_from(index).map_err(|_| PdfiumError::PageOutOfRange(index))?;
         let count = unsafe { (self.pdfium.api.get_page_count)(self.doc) };
         if idx >= count {
@@ -418,7 +417,10 @@ impl PdfDocument {
         if page.is_null() {
             return Err(PdfiumError::PageOutOfRange(index));
         }
-        Ok(page)
+        Ok(PageGuard {
+            api: &self.pdfium.api,
+            raw: page,
+        })
     }
 
     /// Render one page following the shared render plan: the plan
@@ -437,23 +439,39 @@ impl PdfDocument {
         mode: RenderMode,
         requested_dpi: u32,
     ) -> Result<RenderedPage, PdfiumError> {
-        let _guard = call_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let api = &self.pdfium.api;
-        let page = self.load_page_locked(index)?;
-        let result = self.render_locked(api, page, mode, requested_dpi);
-        unsafe { (api.close_page)(page) };
-        result
+        // Drop the page guard and release the process-wide PDFium lock before
+        // running pure-CPU threshold conversion.
+        let (w, h, dpi, rendered) = {
+            let _guard = call_lock().lock().unwrap_or_else(|e| e.into_inner());
+            let page = self.load_page_locked(index)?;
+            self.render_locked(&page, mode, requested_dpi)?
+        };
+        let pixels = match mode {
+            RenderMode::Threshold => {
+                let mono = print_raw::MonoBitmap::from_grayscale(&rendered, w, h, 128)
+                    .map_err(|_| PdfiumError::BitmapFailed(w, h))?;
+                mono.data
+            }
+            _ => rendered,
+        };
+        Ok(RenderedPage {
+            width_px: w,
+            height_px: h,
+            mode,
+            dpi,
+            pixels,
+        })
     }
 
     fn render_locked(
         &self,
-        api: &Api,
-        page: FpdfPage,
+        page: &PageGuard<'_>,
         mode: RenderMode,
         requested_dpi: u32,
-    ) -> Result<RenderedPage, PdfiumError> {
-        let w_pt = unsafe { (api.get_page_width_f)(page) } as f64;
-        let h_pt = unsafe { (api.get_page_height_f)(page) } as f64;
+    ) -> Result<(u32, u32, u32, Vec<u8>), PdfiumError> {
+        let api = page.api;
+        let w_pt = unsafe { (api.get_page_width_f)(page.raw) } as f64;
+        let h_pt = unsafe { (api.get_page_height_f)(page.raw) } as f64;
         let size = safe_page_size_mm(w_pt, h_pt);
         let plan = plan_render(size, requested_dpi, mode).map_err(|e| match e {
             crate::plan::PlanError::ExceedsCeiling { bytes } => PdfiumError::CeilingExceeded {
@@ -498,32 +516,34 @@ impl PdfDocument {
             }
             _ => FPDF_ANNOT | FPDF_PRINTING,
         };
-        let bitmap = unsafe { (api.bitmap_create_ex)(w_c, h_c, format, std::ptr::null_mut(), 0) };
-        if bitmap.is_null() {
+        let raw_bitmap =
+            unsafe { (api.bitmap_create_ex)(w_c, h_c, format, std::ptr::null_mut(), 0) };
+        if raw_bitmap.is_null() {
             return Err(PdfiumError::BitmapFailed(w, h));
         }
+        let bitmap = BitmapGuard {
+            api,
+            raw: raw_bitmap,
+        };
         let rendered = unsafe {
             // White background (BGRA 0xFFFFFFFF) so transparent page
             // areas print as paper, not black.
-            (api.bitmap_fill_rect)(bitmap, 0, 0, w_c, h_c, 0xFFFF_FFFF);
-            (api.render_page_bitmap)(bitmap, page, 0, 0, w_c, h_c, 0, render_flags);
-            let raw_w = (api.bitmap_get_width)(bitmap);
-            let raw_h = (api.bitmap_get_height)(bitmap);
-            let raw_stride = (api.bitmap_get_stride)(bitmap);
-            let buf = (api.bitmap_get_buffer)(bitmap) as *const u8;
+            (api.bitmap_fill_rect)(bitmap.raw, 0, 0, w_c, h_c, 0xFFFF_FFFF);
+            (api.render_page_bitmap)(bitmap.raw, page.raw, 0, 0, w_c, h_c, 0, render_flags);
+            let raw_w = (api.bitmap_get_width)(bitmap.raw);
+            let raw_h = (api.bitmap_get_height)(bitmap.raw);
+            let raw_stride = (api.bitmap_get_stride)(bitmap.raw);
+            let buf = (api.bitmap_get_buffer)(bitmap.raw) as *const u8;
             if buf.is_null() || raw_w <= 0 || raw_h <= 0 || raw_stride <= 0 {
-                (api.bitmap_destroy)(bitmap);
                 return Err(PdfiumError::BitmapFailed(w, h));
             }
             let (bw, bh) = (raw_w as u32, raw_h as u32);
             if bw != w || bh != h {
-                (api.bitmap_destroy)(bitmap);
                 return Err(PdfiumError::BitmapFailed(w, h));
             }
             let stride = raw_stride as usize;
             let row_bytes = (bw as usize) * (staging_bpp as usize);
             if stride < row_bytes {
-                (api.bitmap_destroy)(bitmap);
                 return Err(PdfiumError::BitmapFailed(w, h));
             }
             // Account for PDFium's actual aligned row stride plus the
@@ -532,14 +552,13 @@ impl PdfDocument {
             let copy_bytes = (row_bytes as u64).saturating_mul(bh as u64);
             let peak_bytes = bitmap_bytes.saturating_add(copy_bytes);
             if peak_bytes > PER_PAGE_CEILING_BYTES {
-                (api.bitmap_destroy)(bitmap);
                 return Err(PdfiumError::CeilingExceeded {
                     needed: peak_bytes,
                     ceiling: PER_PAGE_CEILING_BYTES,
                 });
             }
             let total_bytes = row_bytes * bh as usize;
-            let pixels = if stride == row_bytes {
+            if stride == row_bytes {
                 std::slice::from_raw_parts(buf, total_bytes).to_vec()
             } else {
                 let mut out = Vec::with_capacity(total_bytes);
@@ -548,29 +567,33 @@ impl PdfDocument {
                     out.extend_from_slice(row_slice);
                 }
                 out
-            };
-            (api.bitmap_destroy)(bitmap);
-            pixels
-        };
-        let pixels = match mode {
-            RenderMode::Threshold => {
-                // A length mismatch here is an internal invariant
-                // failure; it must fail THIS job, not panic while the
-                // process-wide PDFium lock is held (a panic would
-                // poison the lock for every later PDF job).
-                let mono = print_raw::MonoBitmap::from_grayscale(&rendered, w, h, 128)
-                    .map_err(|_| PdfiumError::BitmapFailed(w, h))?;
-                mono.data
             }
-            _ => rendered,
         };
-        Ok(RenderedPage {
-            width_px: w,
-            height_px: h,
-            mode,
-            dpi: plan.dpi,
-            pixels,
-        })
+        Ok((w, h, plan.dpi, rendered))
+    }
+}
+
+/// RAII guard for a loaded PDFium page handle; must be dropped while `call_lock()` is held.
+struct PageGuard<'a> {
+    api: &'a Api,
+    raw: FpdfPage,
+}
+
+impl Drop for PageGuard<'_> {
+    fn drop(&mut self) {
+        unsafe { (self.api.close_page)(self.raw) };
+    }
+}
+
+/// RAII guard for a PDFium bitmap handle; must be dropped while `call_lock()` is held.
+struct BitmapGuard<'a> {
+    api: &'a Api,
+    raw: FpdfBitmap,
+}
+
+impl Drop for BitmapGuard<'_> {
+    fn drop(&mut self) {
+        unsafe { (self.api.bitmap_destroy)(self.raw) };
     }
 }
 

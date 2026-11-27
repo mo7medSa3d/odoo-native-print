@@ -315,6 +315,52 @@ class TestNativePrintControllers(HttpCase):
         self.assertFalse(res["ok"])
         self.assertEqual(res["error"], "bad_request")
 
+    def test_sync_device_allowlists_preserves_omitted_and_caps_devices(self):
+        from unittest.mock import patch
+
+        Device = self.env["native.print.device"]
+        # Invalid protocol and printer_class are stored as False, not arbitrary strings.
+        res = self._rpc("/native_print/sync_device", {
+            "name": "Hardened Printer",
+            "protocol": "evil_proto",
+            "printer_class": "evil_class",
+            "forms": ["A4 — 210×297mm"],
+            "trays": ["Tray 1"],
+        })
+        self.assertTrue(res["ok"], res)
+        row = Device.browse(res["device_id"])
+        self.assertFalse(row.protocol)
+        self.assertFalse(row.printer_class)
+        self.assertEqual(row.forms_summary, "A4 — 210×297mm")
+        self.assertEqual(row.trays_summary, "Tray 1")
+
+        # Partial update omits forms/trays and must not wipe previously synced values.
+        res2 = self._rpc("/native_print/sync_device", {
+            "name": "Hardened Printer",
+            "protocol": "gdi",
+            "printer_class": "office",
+        })
+        self.assertTrue(res2["ok"], res2)
+        row.invalidate_recordset()
+        self.assertEqual(row.protocol, "gdi")
+        self.assertEqual(row.printer_class, "office")
+        self.assertEqual(row.forms_summary, "A4 — 210×297mm")
+        self.assertEqual(row.trays_summary, "Tray 1")
+
+        # Per-company device cap blocks new devices while allowing updates to existing ones.
+        current_count = Device.search_count([("company_id", "=", self.env.company.id)])
+        with patch("odoo.addons.native_print.controllers.main.MAX_DEVICES_PER_COMPANY", current_count):
+            capped = self._rpc("/native_print/sync_device", {
+                "name": "Over Limit Printer",
+                "protocol": "gdi",
+            })
+            self.assertEqual(capped, {"ok": False, "error": "device_limit_reached"})
+            updated = self._rpc("/native_print/sync_device", {
+                "name": "Hardened Printer",
+                "protocol": "escpos",
+            })
+            self.assertTrue(updated["ok"], updated)
+
     def test_job_status_preserves_large_byte_size_and_ignores_non_string_device(self):
         res = self._rpc("/native_print/job_status", {
             "idempotency_key": JOB_KEY, "state": "queued",

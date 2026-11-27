@@ -1,6 +1,8 @@
 package com.company.odoonativeprint.core
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -15,6 +17,8 @@ internal class InMemoryJobPersistence : JobPersistence {
     override fun listAll(limit: Int): List<PrintJobRecord> = map.values.sortedByDescending { it.createdAtMs }.take(limit)
     override fun countActiveForPrinter(printerName: String): Int = map.values.count { it.printerName == printerName && it.state.isActive }
     override fun countActiveGlobal(): Int = map.values.count { it.state.isActive }
+    override fun nextPendingRetryAtMs(printerName: String): Long? =
+        map.values.filter { it.printerName == printerName && it.state == JobState.QUEUED }.minOfOrNull { it.nextRetryAtMs }
     override fun deleteByIds(ids: List<String>) { ids.forEach { map.remove(it) } }
 }
 
@@ -67,5 +71,40 @@ class JobQueueStoreTest {
         }
         assertEquals(queued.id, engine.nextReadyJobForPrinter("POS-1")?.id)
         assertEquals(setOf("POS-1"), engine.printersWithQueuedJobs())
+    }
+
+    @Test
+    fun `terminal state guard prevents resurrecting cancelled jobs`(@TempDir tempDir: File) {
+        val engine = JobQueueEngine(InMemoryJobPersistence(), tempDir)
+        val job = engine.enqueue("POS-1", "text", "CANCEL-ME".toByteArray())
+        val cancelled = engine.cancelJob(job.id)
+        assertEquals(JobState.CANCELLED, cancelled?.state)
+        assertFalse(File(job.payloadPath).exists())
+
+        val afterTransition = engine.transition(job.id, JobState.RENDERING, incrementAttempt = true)
+        assertEquals(JobState.CANCELLED, afterTransition?.state)
+        assertEquals(0, afterTransition?.attempts)
+        assertEquals(JobState.CANCELLED, engine.getJob(job.id)?.state)
+    }
+
+    @Test
+    fun `nextPendingRetryAtMs returns earliest queued retry timestamp per printer`(@TempDir tempDir: File) {
+        val engine = JobQueueEngine(InMemoryJobPersistence(), tempDir)
+        assertNull(engine.nextPendingRetryAtMs("POS-1"))
+
+        val j1 = engine.enqueue("POS-1", "text", "J1".toByteArray())
+        val j2 = engine.enqueue("POS-1", "text", "J2".toByteArray())
+        val other = engine.enqueue("POS-2", "text", "OTHER".toByteArray())
+
+        engine.transition(j1.id, JobState.QUEUED, nextRetryAtMs = 5_000L)
+        engine.transition(j2.id, JobState.QUEUED, nextRetryAtMs = 2_000L)
+        engine.transition(other.id, JobState.QUEUED, nextRetryAtMs = 1_000L)
+
+        assertEquals(2_000L, engine.nextPendingRetryAtMs("POS-1"))
+        assertEquals(1_000L, engine.nextPendingRetryAtMs("POS-2"))
+
+        engine.cancelJob(j1.id)
+        engine.cancelJob(j2.id)
+        assertNull(engine.nextPendingRetryAtMs("POS-1"))
     }
 }

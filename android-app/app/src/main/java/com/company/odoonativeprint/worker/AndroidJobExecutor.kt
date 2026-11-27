@@ -138,23 +138,30 @@ class AndroidJobExecutor(
             (job.sourceKind == "pdf" || protocol == PrinterProtocol.PDF)
         ) {
             val duplex = jobOpts.optBoolean("duplex", false)
-            val pdfBytes = if (job.sourceKind == "pdf") {
-                payloadFile.readBytes()
-            } else {
+            val sides = if (duplex) "two-sided-long-edge" else "one-sided"
+            if (job.sourceKind == "pdf") {
+                return ipp.sendDocument(
+                    printer = printer,
+                    documentFile = payloadFile,
+                    mimeType = "application/pdf",
+                    jobName = "Yaseir-${job.id.take(8)}",
+                    copies = job.copies,
+                    sides = sides,
+                )
+            }
+            val pdfBytes = try {
+                val pages = renderPayload(job, printer, payloadFile, settings, widthDots)
                 try {
-                    val pages = renderPayload(job, printer, payloadFile, settings, widthDots)
-                    try {
-                        BitmapToPdfWriter.encode(pages, settings.paperWidthMm.toFloat())
-                    } finally {
-                        pages.forEach { it.recycle() }
-                    }
-                } catch (e: Exception) {
-                    return TransportResult.Failure(
-                        "RENDER_FAILED",
-                        e.message ?: "Failed to render PDF for IPP printer",
-                        retryable = false,
-                    )
+                    BitmapToPdfWriter.encode(pages, settings.paperWidthMm.toFloat())
+                } finally {
+                    pages.forEach { it.recycle() }
                 }
+            } catch (e: Exception) {
+                return TransportResult.Failure(
+                    "RENDER_FAILED",
+                    e.message ?: "Failed to render PDF for IPP printer",
+                    retryable = false,
+                )
             }
             return ipp.sendDocument(
                 printer = printer,
@@ -162,21 +169,16 @@ class AndroidJobExecutor(
                 mimeType = "application/pdf",
                 jobName = "Yaseir-${job.id.take(8)}",
                 copies = job.copies,
-                sides = if (duplex) "two-sided-long-edge" else "one-sided",
+                sides = sides,
             )
         }
 
-        val bitmaps: List<Bitmap> = try {
-            renderPayload(job, printer, payloadFile, settings, widthDots)
-        } catch (e: Exception) {
-            return TransportResult.Failure("RENDER_FAILED", e.message ?: "Failed to render payload", retryable = false)
-        }
-
-        val encodedStream = ByteArrayOutputStream()
+        // Stream one rendered page at a time so multi-page PDFs never hold all bitmaps in RAM at once.
+        val encodedPages = mutableListOf<ByteArray>()
         try {
-            val encodedPages = bitmaps.map { bmp ->
+            renderEachPage(job, printer, payloadFile, settings, widthDots) { bmp ->
                 val mono = MonoBitmap.fromAndroidBitmap(bmp, dither = settings.dithering)
-                when (protocol) {
+                encodedPages += when (protocol) {
                     PrinterProtocol.ZPL -> ZplEncoder.encode(mono, copies = job.copies)
                     PrinterProtocol.TSPL -> TsplEncoder.encode(
                         mono,
@@ -189,19 +191,28 @@ class AndroidJobExecutor(
                     PrinterProtocol.CPCL -> CpclEncoder.encode(mono, copies = job.copies)
                     else -> EscPosEncoder.encodeRaster(
                         mono = mono,
-                        cut = settings.cutPaper,
-                        openDrawer = settings.openCashDrawer,
+                        cut = false,
+                        openDrawer = false,
                     )
                 }
             }
-            val copies = if (protocol == PrinterProtocol.ESCPOS) job.copies else 1
-            repeat(copies) {
-                for (pageBytes in encodedPages) {
-                    encodedStream.write(pageBytes)
-                }
+        } catch (e: Exception) {
+            return TransportResult.Failure("RENDER_FAILED", e.message ?: "Failed to render payload", retryable = false)
+        }
+
+        val isEscPos = protocol !in setOf(PrinterProtocol.ZPL, PrinterProtocol.TSPL, PrinterProtocol.EPL, PrinterProtocol.CPCL)
+        val encodedStream = ByteArrayOutputStream()
+        val copies = if (isEscPos) job.copies.coerceAtLeast(1) else 1
+        repeat(copies) {
+            for (pageBytes in encodedPages) {
+                encodedStream.write(pageBytes)
             }
-        } finally {
-            bitmaps.forEach { it.recycle() }
+            if (isEscPos && settings.cutPaper && encodedPages.isNotEmpty()) {
+                encodedStream.write(EscPosEncoder.CUT_COMMAND)
+            }
+        }
+        if (isEscPos && settings.openCashDrawer && encodedPages.isNotEmpty()) {
+            encodedStream.write(EscPosEncoder.OPEN_DRAWER_COMMAND)
         }
 
         return sendRawPayload(printer, encodedStream.toByteArray(), settings)
@@ -217,6 +228,53 @@ class AndroidJobExecutor(
         PrinterTransportType.USB_OTG -> usbOtg.sendRaw(printer, rawBytes, settings)
         PrinterTransportType.IPP -> ipp.sendDocument(printer, rawBytes, mimeType = "application/octet-stream", copies = 1)
         PrinterTransportType.ANDROID_SYSTEM -> TransportResult.Failure("UNSUPPORTED_TRANSPORT", "Unsupported transport", retryable = false)
+    }
+
+    private suspend fun renderEachPage(
+        job: PrintJobRecord,
+        printer: PrinterInfo,
+        payloadFile: File,
+        settings: PrinterSettings,
+        widthDots: Int,
+        onPage: (Bitmap) -> Unit,
+    ) {
+        when (job.sourceKind) {
+            "pdf" -> PdfPageRenderer.renderEachPage(
+                pdfFile = payloadFile,
+                targetWidthDots = widthDots,
+                offsetXDots = (settings.offsetXMm * settings.dpi / 25.4f),
+                offsetYDots = (settings.offsetYMm * settings.dpi / 25.4f),
+            ) { _, bmp -> onPage(bmp) }
+            "image" -> {
+                val bmp = decodeValidatedImage(payloadFile, widthDots)
+                try {
+                    onPage(bmp)
+                } finally {
+                    if (!bmp.isRecycled) bmp.recycle()
+                }
+            }
+            "text" -> {
+                val bmp = TextReceiptRenderer.render(
+                    context,
+                    payloadFile.readText(Charsets.UTF_8),
+                    widthDots = widthDots,
+                )
+                try {
+                    onPage(bmp)
+                } finally {
+                    if (!bmp.isRecycled) bmp.recycle()
+                }
+            }
+            "test" -> {
+                val bmp = CalibrationPages.thermalTestReceipt(context, printer.displayName, settings.paperWidthMm, settings.dpi)
+                try {
+                    onPage(bmp)
+                } finally {
+                    if (!bmp.isRecycled) bmp.recycle()
+                }
+            }
+            else -> throw IllegalArgumentException("Unsupported kind: ${job.sourceKind}")
+        }
     }
 
     private suspend fun renderPayload(
@@ -265,7 +323,12 @@ class AndroidJobExecutor(
         require(bounds.outWidth.toLong() * bounds.outHeight.toLong() <= PayloadLimits.MAX_IMAGE_PIXELS) {
             "IMAGE_PIXEL_LIMIT_EXCEEDED"
         }
-        val decoded = BitmapFactory.decodeFile(file.absolutePath)
+        var sampleSize = 1
+        while (bounds.outWidth / (sampleSize * 2) >= targetWidthDots) {
+            sampleSize *= 2
+        }
+        val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        val decoded = BitmapFactory.decodeFile(file.absolutePath, decodeOpts)
             ?: throw IllegalArgumentException("IMAGE_DECODE_FAILED")
         if (decoded.width == targetWidthDots) return decoded
         val targetH = ((decoded.height.toLong() * targetWidthDots) / decoded.width).toInt().coerceAtLeast(1)

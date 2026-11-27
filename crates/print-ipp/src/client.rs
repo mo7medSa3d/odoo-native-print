@@ -1,6 +1,6 @@
 use crate::proto::{self, op, tag, Attr, IppMessage, Value};
+use print_core::net::{connect_any, write_all_with_deadline};
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
@@ -192,44 +192,6 @@ pub struct IppClient {
     next_request_id: u32,
 }
 
-fn connect_addrs(
-    addrs: &[SocketAddr],
-    deadline: Option<Instant>,
-    fallback_timeout: Duration,
-) -> std::io::Result<TcpStream> {
-    if addrs.is_empty() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::AddrNotAvailable,
-            "no address",
-        ));
-    }
-    let mut last_err = None;
-    for addr in addrs {
-        let remaining = match deadline {
-            Some(d) => d.saturating_duration_since(Instant::now()),
-            None => fallback_timeout,
-        };
-        // Bound each dial so one unresponsive address cannot consume the entire
-        // shared budget before later addresses are tried.
-        let attempt_timeout = remaining.min(fallback_timeout);
-        if attempt_timeout.is_zero() {
-            break;
-        }
-        match TcpStream::connect_timeout(addr, attempt_timeout) {
-            Ok(stream) => return Ok(stream),
-            Err(e) => last_err = Some(e),
-        }
-    }
-    Err(last_err
-        .unwrap_or_else(|| std::io::Error::new(std::io::ErrorKind::TimedOut, "connect timed out")))
-}
-
-fn connect_any(host: &str, port: u16, timeout: Duration) -> std::io::Result<TcpStream> {
-    let addrs: Vec<_> = (host, port).to_socket_addrs()?.collect();
-    let total = timeout.max(MIN_IPP_TIMEOUT);
-    connect_addrs(&addrs, Instant::now().checked_add(total), total)
-}
-
 impl IppClient {
     pub fn new(host: &str, port: u16) -> Self {
         let bare_host = host.trim().trim_start_matches('[').trim_end_matches(']');
@@ -283,8 +245,9 @@ impl IppClient {
             "POST {path} HTTP/1.1\r\nHost: {host_hdr}\r\nContent-Type: application/ipp\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
         );
-        stream.write_all(request.as_bytes())?;
-        stream.write_all(body)?;
+        let write_deadline = Instant::now() + timeout.max(Duration::from_secs(30));
+        write_all_with_deadline(&mut stream, request.as_bytes(), write_deadline)?;
+        write_all_with_deadline(&mut stream, body, write_deadline)?;
         stream.flush()?;
         // IPP attribute responses are small; cap the read so a
         // broken or hostile endpoint cannot stream forever and grow
@@ -293,6 +256,7 @@ impl IppClient {
         let read_deadline = std::time::Instant::now().checked_add(timeout);
         let mut raw = Vec::new();
         let mut buf = [0u8; 8192];
+        let mut parsed_header: Option<ParsedHttpHeader> = None;
         loop {
             if raw.len() > MAX_IPP_RESPONSE_BYTES {
                 return Err(std::io::Error::new(
@@ -301,8 +265,13 @@ impl IppClient {
                 )
                 .into());
             }
-            if http_response_complete(&raw) {
-                break;
+            if parsed_header.is_none() {
+                parsed_header = split_http_response(&raw)?;
+            }
+            if let Some((status, framing, body_offset)) = parsed_header {
+                if http_body_complete(status, framing, &raw[body_offset..]) {
+                    break;
+                }
             }
             if let Some(deadline) = read_deadline {
                 let remaining_time = deadline.saturating_duration_since(std::time::Instant::now());
@@ -324,7 +293,12 @@ impl IppClient {
                 Err(e) => return Err(e.into()),
             }
         }
-        parse_http_response(&raw)
+        let (status, framing, body_offset) = match parsed_header {
+            Some(header) => header,
+            None => split_http_response(&raw)?
+                .ok_or_else(|| IppError::Parse("no HTTP header terminator".into()))?,
+        };
+        finish_http_response(status, framing, &raw[body_offset..])
     }
 
     fn exchange(&mut self, body: &[u8]) -> Result<IppMessage, IppError> {
@@ -450,20 +424,23 @@ fn base_format(f: &str) -> &str {
     f.split(';').next().unwrap_or("").trim()
 }
 
+#[derive(Clone, Copy)]
 enum HttpFraming {
     Chunked,
     ContentLength(usize),
     Close,
 }
 
-type ParsedHttpResponse<'a> = (u16, HttpFraming, &'a [u8]);
+type ParsedHttpHeader = (u16, HttpFraming, usize);
 
-fn split_http_response(mut raw: &[u8]) -> Result<Option<ParsedHttpResponse<'_>>, IppError> {
+fn split_http_response(raw: &[u8]) -> Result<Option<ParsedHttpHeader>, IppError> {
+    let mut offset = 0usize;
     loop {
-        let Some(split) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
+        let rest = &raw[offset..];
+        let Some(split) = rest.windows(4).position(|w| w == b"\r\n\r\n") else {
             return Ok(None);
         };
-        let headers = String::from_utf8_lossy(&raw[..split]);
+        let headers = String::from_utf8_lossy(&rest[..split]);
         let status: u16 = headers
             .lines()
             .next()
@@ -479,10 +456,10 @@ fn split_http_response(mut raw: &[u8]) -> Result<Option<ParsedHttpResponse<'_>>,
         // Skip interim 1xx responses (e.g. `HTTP/1.1 100 Continue`) that CUPS
         // and embedded IPP servers frequently prepend before `HTTP/1.1 200 OK`.
         if (100..200).contains(&status) {
-            raw = &raw[split + 4..];
+            offset += split + 4;
             continue;
         }
-        let body = &raw[split + 4..];
+        let body_offset = offset + split + 4;
         let lower = headers.to_ascii_lowercase();
         let mut has_transfer_encoding = false;
         let mut is_chunked = false;
@@ -542,7 +519,7 @@ fn split_http_response(mut raw: &[u8]) -> Result<Option<ParsedHttpResponse<'_>>,
         } else {
             HttpFraming::Close
         };
-        return Ok(Some((status, framing, body)));
+        return Ok(Some((status, framing, body_offset)));
     }
 }
 
@@ -553,20 +530,33 @@ fn chunked_body_complete(body: &[u8]) -> bool {
     body.len() >= 5 && body.ends_with(b"\r\n\r\n") && dechunk_into(body, None).is_ok()
 }
 
+fn http_body_complete(status: u16, framing: HttpFraming, body: &[u8]) -> bool {
+    if status != 200 {
+        return true;
+    }
+    match framing {
+        HttpFraming::Chunked => chunked_body_complete(body),
+        HttpFraming::ContentLength(len) => body.len() >= len,
+        HttpFraming::Close => false,
+    }
+}
+
+#[cfg(test)]
 fn http_response_complete(raw: &[u8]) -> bool {
     match split_http_response(raw) {
         Ok(None) => false,
         Err(_) => true,
-        Ok(Some((status, _, _))) if status != 200 => true,
-        Ok(Some((_, HttpFraming::Chunked, body))) => chunked_body_complete(body),
-        Ok(Some((_, HttpFraming::ContentLength(len), body))) => body.len() >= len,
-        Ok(Some((_, HttpFraming::Close, _))) => false,
+        Ok(Some((status, framing, body_offset))) => {
+            http_body_complete(status, framing, &raw[body_offset..])
+        }
     }
 }
 
-pub fn parse_http_response(raw: &[u8]) -> Result<Vec<u8>, IppError> {
-    let (status, framing, body) = split_http_response(raw)?
-        .ok_or_else(|| IppError::Parse("no HTTP header terminator".into()))?;
+fn finish_http_response(
+    status: u16,
+    framing: HttpFraming,
+    body: &[u8],
+) -> Result<Vec<u8>, IppError> {
     if status != 200 {
         return Err(IppError::Http(status));
     }
@@ -580,6 +570,12 @@ pub fn parse_http_response(raw: &[u8]) -> Result<Vec<u8>, IppError> {
         }
         HttpFraming::Close => Ok(body.to_vec()),
     }
+}
+
+pub fn parse_http_response(raw: &[u8]) -> Result<Vec<u8>, IppError> {
+    let (status, framing, body_offset) = split_http_response(raw)?
+        .ok_or_else(|| IppError::Parse("no HTTP header terminator".into()))?;
+    finish_http_response(status, framing, &raw[body_offset..])
 }
 
 fn dechunk_into(body: &[u8], mut out: Option<&mut Vec<u8>>) -> Result<(), String> {
@@ -695,7 +691,8 @@ mod job_attribute_tests {
 mod tests {
     use super::*;
     use crate::proto::{encode_response, parse_message};
-    use std::net::TcpListener;
+    use print_core::net::{connect_addrs, is_blocked_ip};
+    use std::net::{SocketAddr, TcpListener};
 
     fn mock_printer(response: Vec<u8>) -> (u16, std::thread::JoinHandle<Vec<u8>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1133,5 +1130,63 @@ mod tests {
         .expect("second address should succeed after first fails");
         drop(stream);
         let _ = server.join();
+    }
+
+    #[test]
+    fn blocked_ips_reject_link_local_and_metadata() {
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+        assert!(is_blocked_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254))));
+        assert!(is_blocked_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 0, 1))));
+        assert!(is_blocked_ip(IpAddr::V6("fe80::1".parse::<Ipv6Addr>().unwrap())));
+        assert!(is_blocked_ip(IpAddr::V6("febf::1".parse::<Ipv6Addr>().unwrap())));
+        assert!(is_blocked_ip(IpAddr::V6(
+            "::ffff:169.254.169.254".parse::<Ipv6Addr>().unwrap()
+        )));
+
+        assert!(!is_blocked_ip(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+        assert!(!is_blocked_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10))));
+        assert!(!is_blocked_ip(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+        assert!(!is_blocked_ip(IpAddr::V6("fd00::1".parse::<Ipv6Addr>().unwrap())));
+        assert!(!is_blocked_ip(IpAddr::V6("fec0::1".parse::<Ipv6Addr>().unwrap())));
+        assert!(!is_blocked_ip(IpAddr::V6(
+            "::ffff:127.0.0.1".parse::<Ipv6Addr>().unwrap()
+        )));
+
+        let blocked_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254)), 631);
+        let err = connect_addrs(&[blocked_addr], None, Duration::from_secs(1)).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn post_handles_split_tcp_chunks_with_cached_headers() {
+        let response = caps_response();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut raw = Vec::new();
+            let mut buf = [0u8; 4096];
+            while !raw.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = s.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                raw.extend_from_slice(&buf[..n]);
+            }
+            let http = format!(
+                "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nContent-Type: application/ipp\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                response.len()
+            );
+            let mut full = http.into_bytes();
+            full.extend_from_slice(&response);
+            for chunk in full.chunks(17) {
+                s.write_all(chunk).unwrap();
+                s.flush().unwrap();
+            }
+        });
+        let mut client = IppClient::new("127.0.0.1", port);
+        let caps = client.get_printer_attributes().unwrap();
+        assert_eq!(caps.name, "MockJet");
+        server.join().unwrap();
     }
 }

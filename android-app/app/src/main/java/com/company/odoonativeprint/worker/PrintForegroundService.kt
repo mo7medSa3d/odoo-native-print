@@ -27,20 +27,26 @@ class PrintForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val activeCount = intent?.getIntExtra(EXTRA_ACTIVE_COUNT, 0) ?: 0
-        if (activeCount <= 0) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-            return START_NOT_STICKY
-        }
         val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         } else {
             0
         }
         try {
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(activeCount), fgsType)
+            // Android 8-15 requires startForeground() before stopping when launched via startForegroundService().
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                buildNotification(activeCount.coerceAtLeast(0)),
+                fgsType,
+            )
         } catch (_: Exception) {
             // Gracefully avoid crash if OS denies background start (Android 12+)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (activeCount <= 0) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
         return START_NOT_STICKY

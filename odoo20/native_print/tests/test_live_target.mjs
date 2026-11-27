@@ -6,14 +6,24 @@ import { join } from "path";
 import { pathToFileURL } from "node:url";
 import vm from "node:vm";
 
+class StubNotificationPlugin {}
+class StubActionPlugin {}
+globalThis.__npNotificationPlugin = StubNotificationPlugin;
+globalThis.__npActionPlugin = StubActionPlugin;
+
 const src = readFileSync(
     new URL("../static/src/js/native_print_client.js", import.meta.url),
     "utf8",
-).replace(
-    // Stub the Odoo translation import for the bare-node harness.
-    'import { _t } from "@web/core/l10n/translation";',
-    "const _t = (s) => s;",
-);
+)
+    .replace(
+        // Stub the Odoo translation import for the bare-node harness.
+        'import { _t } from "@web/core/l10n/translation";',
+        "const _t = (s) => s;",
+    )
+    .replace(
+        'import { NotificationPlugin } from "@web/core/notifications/notification_plugin";',
+        "const NotificationPlugin = globalThis.__npNotificationPlugin;",
+    );
 const tmpDir = mkdtempSync(join(tmpdir(), "np-live-target-"));
 process.on("exit", () => { try { rmSync(tmpDir, { recursive: true, force: true }); } catch {} });
 const tmp = join(tmpDir, "np_client_test.mjs");
@@ -311,6 +321,8 @@ const handlerSrc = readFileSync(
         'const user = globalThis.__npUser;')
     .replace('import { _t } from "@web/core/l10n/translation";',
         'const _t = (s, ...args) => args.reduce((acc, v) => acc.replace("%s", String(v)), s);')
+    .replace('import { ActionPlugin } from "@web/webclient/actions/action_plugin";',
+        'const ActionPlugin = globalThis.__npActionPlugin;')
     .replace('from "./native_print_client";',
         `from "${tmpUrl}";`);
 globalThis.__npRpcCalls = rpcCalls;
@@ -1042,9 +1054,125 @@ try {
         eq(syncDev.params.protocol, "escpos", "sync_device sends resolved protocol instead of auto");
         eq(syncDev.params.printer_class, "thermal", "sync_device sends inferred printer_class");
         eq(syncDev.params.forms[0], "80mm Roll", "sync_device preserves Android string forms");
+
+        // Manual refresh clicked during an in-flight background sync queues _pendingForceSync.
+        let releaseBg20;
+        const overviewCalls20 = [];
+        globalThis.window.__NATIVE_PRINT__ = {
+            appOverview: (opts) => {
+                overviewCalls20.push(Boolean(opts && opts.force));
+                if (overviewCalls20.length === 1) {
+                    return new Promise((r) => { releaseBg20 = () => r({ printers: [] }); });
+                }
+                return Promise.resolve({ printers: [{ name: "QueuedPrinter20", kind: "local", is_default: true }] });
+            },
+        };
+        const bgSync20 = comp8.syncDiscoveredPrinters(false);
+        await comp8.syncDiscoveredPrinters(true);
+        eq(comp8._pendingForceSync, true, "Odoo 20 manual refresh queues _pendingForceSync while background sync is in flight");
+        releaseBg20();
+        await bgSync20;
+        await new Promise((r) => setTimeout(r, 10));
+        eq(JSON.stringify(overviewCalls20), JSON.stringify([false, true]), "Odoo 20 queued manual refresh runs forced appOverview after background poll");
+        eq(comp8.state.printersCount, 1, "Odoo 20 queued manual refresh updates discovered printers");
     } finally {
         globalThis.document = prevDoc8;
         globalThis.localStorage = prevLs8;
+        delete globalThis.window.__NATIVE_PRINT__;
+    }
+}
+
+// 9. Expired session /web/login HTML & OWL 3 NotificationPlugin/ActionPlugin resolution tests.
+{
+    const origFetch9 = globalThis.fetch;
+    try {
+        let bridgePrints = 0;
+        let fetchCount = 0;
+        notices.length = 0;
+        globalThis.window.__NATIVE_PRINT__ = {
+            listPrinters: async () => [{ name: "HP LaserJet", driver: "HP PCL", kind: "local", is_default: true }],
+            printerCapabilities: async () => ({ forms: [], color: true }),
+            printPdf: async () => { bridgePrints++; return "never"; },
+            printImage: async () => { bridgePrints++; return "never"; },
+            printText: async () => { bridgePrints++; return "never"; },
+        };
+        globalThis.fetch = async () => {
+            fetchCount++;
+            return {
+                ok: true,
+                redirected: true,
+                url: "https://odoo.example/web/login?redirect=%2Freport%2Fpdf%2Faccount.report_invoice%2F1",
+                headers: { get: () => "text/html; charset=utf-8" },
+                arrayBuffer: async () => new TextEncoder().encode("<html>login</html>").buffer,
+            };
+        };
+        eq(
+            await registeredHandler({ report_type: "qweb-pdf", report_name: "account.report_invoice", context: { active_ids: [1] } }, {}, testEnv),
+            undefined,
+            "Odoo 20 redirected /web/login falls back to Odoo",
+        );
+        eq(fetchCount, 1, "Odoo 20 redirected /web/login does not fetch /report/text/");
+        eq(bridgePrints, 0, "Odoo 20 redirected /web/login never sends to printer");
+
+        fetchCount = 0;
+        globalThis.fetch = async () => {
+            fetchCount++;
+            return {
+                ok: true,
+                redirected: false,
+                url: "https://odoo.example/report/pdf/account.report_invoice/2",
+                headers: { get: () => "text/html; charset=utf-8" },
+                arrayBuffer: async () => new TextEncoder().encode('<html><body><form class="oe_login_form"></form></body></html>').buffer,
+            };
+        };
+        eq(
+            await registeredHandler({ report_type: "qweb-pdf", report_name: "account.report_invoice", context: { active_ids: [2] } }, {}, testEnv),
+            undefined,
+            "Odoo 20 oe_login_form HTML falls back to Odoo",
+        );
+        eq(fetchCount, 1, "Odoo 20 oe_login_form HTML does not fetch /report/text/");
+        eq(bridgePrints, 0, "Odoo 20 oe_login_form HTML never sends to printer");
+        eq(notices.some((n) => /no PDF engine/i.test(n.msg)), false, "Odoo 20 oe_login_form HTML emits no PDF engine warning");
+
+        // 9b. OWL 3 NotificationPlugin resolution across env.notification, env.getPlugin, and plugin containers.
+        const pluginNotices = [];
+        const notifPlugin = { add: (msg, opts) => pluginNotices.push({ msg, type: opts?.type }) };
+        m.notifyUser({ notification: notifPlugin }, "owl3-direct-prop", "info");
+        m.notifyUser({ getPlugin: (cls) => (cls === StubNotificationPlugin ? notifPlugin : null) }, "owl3-getPlugin", "info");
+        m.notifyUser({ plugins: new Map([[StubNotificationPlugin, notifPlugin]]) }, "owl3-plugins-map", "info");
+        m.notifyUser({ pluginManager: { getPlugin: (cls) => (cls === StubNotificationPlugin ? notifPlugin : null) } }, "owl3-pluginManager", "info");
+        eq(pluginNotices.length, 4, "notifyUser resolves NotificationPlugin from all OWL 3 env shapes");
+
+        // 9c. OWL 3 ActionPlugin resolution in handleCloseOnReportDownload.
+        const actionCalls = [];
+        const actionPlugin = { doAction: async (act) => { actionCalls.push(act); } };
+        globalThis.window.__NATIVE_PRINT__ = {
+            listPrinters: async () => [{ name: "HP LaserJet", driver: "HP PCL", kind: "local", is_default: true }],
+            printerCapabilities: async () => ({ forms: [], color: true }),
+            printPdf: async (req) => req.idempotencyKey,
+            jobDetail: async () => ({ state: "done", pages: 1, attempts: 1 }),
+        };
+        globalThis.fetch = async () => ({
+            ok: true,
+            arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]).buffer,
+        });
+        const owl3Env = {
+            getPlugin: (cls) => {
+                if (cls === StubActionPlugin) return actionPlugin;
+                if (cls === StubNotificationPlugin) return notifPlugin;
+                return null;
+            },
+        };
+        const closeRes = await registeredHandler(
+            { report_type: "qweb-pdf", report_name: "r.close_owl3", close_on_report_download: true, context: { active_ids: [42] } },
+            {},
+            owl3Env,
+        );
+        eq(closeRes, true, "report prints with OWL 3 plugin env");
+        eq(actionCalls.length, 1, "handleCloseOnReportDownload resolves ActionPlugin via env.getPlugin");
+        eq(actionCalls[0].type, "ir.actions.act_window_close", "ActionPlugin receives act_window_close");
+    } finally {
+        globalThis.fetch = origFetch9;
         delete globalThis.window.__NATIVE_PRINT__;
     }
 }

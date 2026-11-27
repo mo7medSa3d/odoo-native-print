@@ -135,15 +135,17 @@ class TestNativePrintJobLog(TransactionCase):
         report, partners = self._report_on_partners()
         group = self.env["res.groups"].create({"name": "NP Restricted Reports"})
         report.group_ids = [(4, group.id)]
+        user = self._plain_print_user()
         job = self._job()
         job.with_context(native_print_status_sync=True).write({
             "report_id": report.id,
             "source_ids": str(partners.ids[0]),
+            "user_id": user.id,
         })
         # A plain user without the report's group is still refused
         # (restricted reports stay restricted for non-admin users).
         with self.assertRaises(UserError):
-            job.with_user(self._plain_print_user()).action_reprint()
+            job.with_user(user).action_reprint()
 
     def test_action_reprint_allows_administrator(self):
         # Administrators must be able to reprint restricted reports
@@ -172,14 +174,25 @@ class TestNativePrintJobLog(TransactionCase):
             "implied_ids": [(4, report_group.id)],
         })
         report.group_ids = [(4, report_group.id)]
+        user = self._plain_print_user(extra_group_ids=[parent_group.id])
         job = self._job()
         job.with_context(native_print_status_sync=True).write({
             "report_id": report.id,
             "source_ids": str(partners.ids[0]),
+            "user_id": user.id,
         })
-        user = self._plain_print_user(extra_group_ids=[parent_group.id])
         action = job.with_user(user).action_reprint()
         self.assertEqual(action.get("type"), "ir.actions.report")
+
+    def test_action_reprint_rejects_other_users_job(self):
+        report, partners = self._report_on_partners()
+        job = self._job("job-key-other-user")
+        job.with_context(native_print_status_sync=True).write({
+            "report_id": report.id,
+            "source_ids": str(partners.ids[0]),
+        })
+        with self.assertRaises(AccessError):
+            job.with_user(self._plain_print_user()).action_reprint()
 
     def test_action_reprint_rejects_user_without_model_acl(self):
         portal_user = self.env["res.users"].create({

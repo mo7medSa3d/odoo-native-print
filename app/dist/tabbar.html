@@ -441,39 +441,56 @@
       );
     } catch (e) { return false; }
   }
+  var restoringSession = false;
   function restoreSavedSession() {
     var saved = readJson("np_open_tabs", []);
     if (!Array.isArray(saved) || saved.length < 2) return;
-    var activeIdx = 0;
-    saved.forEach(function (tab, i) { if (tab && tab.active) activeIdx = i; });
-    var skipFirst = isInitialTabUrl(String((saved[0] && saved[0].url) || ""));
-    var queue = saved.slice(skipFirst ? 1 : 0).map(function (tab) {
-      return String((tab && tab.url) || "");
-    }).filter(isRestorableTabUrl);
-    var targetUrl = skipFirst && activeIdx === 0
-      ? null
-      : (saved[activeIdx] && saved[activeIdx].url) || null;
-    if (!queue.length && !targetUrl) return;
-    var openNext = function () {
-      if (queue.length) {
-        var url = queue.shift();
-        invoke("tab_open", { url: url })
-          .catch(function () {})
-          .finally(function () { openNext(); });
-        return;
-      }
-      invoke("tab_list", {}).then(function (tabs) {
-        if (targetUrl && Array.isArray(tabs)) {
-          var match = tabs.find(function (tab) { return tab.url === targetUrl; });
-          if (match) {
-            invoke("tab_switch", { label: match.label }).catch(function () {}).finally(refresh);
-            return;
-          }
-        }
-        refresh();
-      }).catch(function () { refresh(); });
+    restoringSession = true;
+    var finishRestore = function () {
+      restoringSession = false;
+      lastSignature = "";
+      refresh();
     };
-    openNext();
+    invoke("app_identity", {}).catch(function () { return null; }).then(function (ov) {
+      var startupUrl = ov && (ov.startupUrl || ov.startup_url) ? String(ov.startupUrl || ov.startup_url) : "";
+      var activeIdx = 0;
+      saved.forEach(function (tab, i) { if (tab && tab.active) activeIdx = i; });
+      var firstUrl = String((saved[0] && saved[0].url) || "");
+      var skipFirst = (!!startupUrl && firstUrl === startupUrl) || isInitialTabUrl(firstUrl);
+      var queue = saved.slice(skipFirst ? 1 : 0).map(function (tab) {
+        return String((tab && tab.url) || "");
+      }).filter(isRestorableTabUrl);
+      var targetUrl = skipFirst && activeIdx === 0
+        ? null
+        : (saved[activeIdx] && saved[activeIdx].url) || null;
+      if (!queue.length && !targetUrl) { finishRestore(); return; }
+      var openNext = function () {
+        if (queue.length) {
+          var url = queue.shift();
+          invoke("tab_open", { url: url })
+            .catch(function () {})
+            .finally(function () { openNext(); });
+          return;
+        }
+        invoke("tab_list", {}).then(function (tabs) {
+          if (Array.isArray(tabs) && tabs.length) {
+            var targetLabel = null;
+            if (skipFirst && activeIdx === 0) {
+              targetLabel = tabs[0].label;
+            } else if (targetUrl) {
+              var match = tabs.find(function (tab) { return tab.url === targetUrl; });
+              if (match) targetLabel = match.label;
+            }
+            if (targetLabel) {
+              invoke("tab_switch", { label: targetLabel }).catch(function () {}).finally(finishRestore);
+              return;
+            }
+          }
+          finishRestore();
+        }).catch(finishRestore);
+      };
+      openNext();
+    });
   }
 
   function applyPrefs() {
@@ -606,8 +623,8 @@
     if (sig === lastSignature) return;
     lastSignature = sig;
     currentTabs = tabs;
-    // Mirror live tabs to localStorage so Control Center Command Palette / Vertical Tab Manager stays live
-    writeJson("np_open_tabs", tabs);
+    // Mirror live tabs to localStorage so Control Center sidebar stays live (skip while restoring startup session)
+    if (!restoringSession) writeJson("np_open_tabs", tabs);
     var strip = document.getElementById("tabs");
     var activeEl = document.activeElement;
     var focusedInStrip = !!(activeEl && strip.contains(activeEl));
@@ -780,13 +797,14 @@
     });
   }
 
-  var lastCmdTs = 0;
+  var lastCmdKey = null;
   // Execute cross-webview tab commands sent from Control Center Command Palette / Workspaces
   function handleCrossTabCommand() {
     var cmd = readJson("np_tab_cmd", null);
     if (!cmd || !cmd.action) return;
-    if (cmd.ts && cmd.ts === lastCmdTs) return;
-    lastCmdTs = cmd.ts || Date.now();
+    var cmdKey = cmd.id || cmd.ts;
+    if (cmdKey && cmdKey === lastCmdKey) return;
+    lastCmdKey = cmdKey || Date.now();
     try { localStorage.removeItem("np_tab_cmd"); } catch (e) {}
     if (cmd.action === "switch" && cmd.label) {
       invoke("tab_switch", { label: cmd.label }).then(refresh).catch(function () {});
@@ -798,11 +816,6 @@
       if (isSafeTabUrl(openUrl)) invoke("tab_open", { url: openUrl }).then(refresh).catch(function () {});
     } else if (cmd.action === "reopen") {
       reopenLastClosedTab();
-    } else if (cmd.action === "restore_workspace" && Array.isArray(cmd.urls)) {
-      cmd.urls.slice(0, 15).forEach(function (u) {
-        if (typeof u === "string" && u && isSafeTabUrl(u)) invoke("tab_open", { url: u }).catch(function () {});
-      });
-      setTimeout(refresh, 250);
     } else if (cmd.action === "meta_changed") {
       lastSignature = "";
       render(currentTabs);
@@ -914,11 +927,7 @@
     }
     if (!(ev.ctrlKey || ev.metaKey)) return;
     var k = String(ev.key || "").toLowerCase();
-    if (k === "k") {
-      ev.preventDefault();
-      try { localStorage.setItem("np_cc_open_cmd", String(Date.now())); } catch (e) {}
-      invoke("open_control_center", {}).then(refresh).catch(function () {});
-    } else if (k === "t" && ev.shiftKey) {
+    if (k === "t" && ev.shiftKey) {
       ev.preventDefault();
       reopenLastClosedTab();
     } else if (k === "t" && !ev.shiftKey) {

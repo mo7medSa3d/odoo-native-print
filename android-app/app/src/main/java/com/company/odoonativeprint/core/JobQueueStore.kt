@@ -23,6 +23,7 @@ interface JobPersistence {
     fun listAll(limit: Int = 500): List<PrintJobRecord>
     fun countActiveForPrinter(printerName: String): Int
     fun countActiveGlobal(): Int
+    fun nextPendingRetryAtMs(printerName: String): Long?
     fun deleteByIds(ids: List<String>)
 }
 
@@ -118,6 +119,10 @@ class JobQueueEngine(
             .minByOrNull { it.createdAtMs }
     }
 
+    fun nextPendingRetryAtMs(printerName: String): Long? = synchronized(lock) {
+        persistence.nextPendingRetryAtMs(printerName)
+    }
+
     fun printersWithQueuedJobs(): Set<String> = synchronized(lock) {
         persistence.listAll(PayloadLimits.MAX_ACTIVE_GLOBAL + PayloadLimits.MAX_RETAINED_FINISHED)
             .filter { it.state == JobState.QUEUED }
@@ -134,6 +139,7 @@ class JobQueueEngine(
         nextRetryAtMs: Long = 0L,
     ): PrintJobRecord? = synchronized(lock) {
         val current = persistence.findById(id) ?: return null
+        if (current.state.isTerminal) return current
         val updated = current.copy(
             state = newState,
             attempts = if (incrementAttempt) current.attempts + 1 else current.attempts,
@@ -179,6 +185,8 @@ class JobQueueEngine(
             updatedAtMs = clock(),
         )
         persistence.update(updated)
+        File(updated.payloadPath).delete()
+        pruneFinishedLocked()
         return updated
     }
 
@@ -328,6 +336,13 @@ class SqliteJobPersistence(context: Context) :
         val sql = "SELECT COUNT(*) FROM $TABLE WHERE state IN ('queued','rendering','spooling','submitted','in_progress')"
         return readableDatabase.rawQuery(sql, null).use { c ->
             if (c.moveToFirst()) c.getInt(0) else 0
+        }
+    }
+
+    override fun nextPendingRetryAtMs(printerName: String): Long? {
+        val sql = "SELECT MIN(next_retry_at_ms) FROM $TABLE WHERE printer_name = ? AND state = 'queued'"
+        return readableDatabase.rawQuery(sql, arrayOf(printerName)).use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null
         }
     }
 

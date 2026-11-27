@@ -71,11 +71,8 @@ class PrintWorkerCoordinator(
                 val job = queue.nextReadyJobForPrinter(printerName)
                 if (job == null) {
                     // Check if any delayed retry is pending for this printer
-                    val pending = queue.listJobs(500)
-                        .filter { it.printerName == printerName && it.state == JobState.QUEUED }
-                        .minByOrNull { it.nextRetryAtMs }
-                    if (pending == null) break
-                    val waitMs = (pending.nextRetryAtMs - System.currentTimeMillis()).coerceIn(50L, 5_000L)
+                    val nextRetryAt = queue.nextPendingRetryAtMs(printerName) ?: break
+                    val waitMs = (nextRetryAt - System.currentTimeMillis()).coerceIn(50L, 5_000L)
                     delay(waitMs)
                     continue
                 }

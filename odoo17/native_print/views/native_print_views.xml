@@ -1,0 +1,296 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- The job log is a READ-ONLY record of jobs that actually ran:
+         records are created only by the desktop status sync, never by
+         hand, so every view disables create/edit/delete. The one
+         action offered is Reprint, which re-runs the original report
+         for the original records. -->
+    <record id="view_job_list" model="ir.ui.view">
+        <field name="name">native.print.job.list</field>
+        <field name="model">native.print.job</field>
+        <field name="arch" type="xml">
+            <tree create="0" edit="0" delete="0"
+                  decoration-success="state == 'done'"
+                  decoration-danger="state in ('failed', 'dead_letter')"
+                  decoration-info="state in ('queued', 'rendering', 'spooling', 'printing')"
+                  decoration-muted="state == 'canceled'"
+                 >
+                <field name="create_date" string="Created"/>
+                <field name="name" class="font-monospace"/>
+                <field name="report_id"/>
+                <field name="source_type" widget="badge"
+                       decoration-info="source_type == 'report'"
+                       decoration-warning="source_type == 'pos_receipt'"
+                       decoration-muted="source_type == 'test'"/>
+                <field name="report_name" optional="hide"/>
+                <field name="device_id"/>
+                <field name="pages" sum="Total Pages"/>
+                <field name="byte_size" optional="hide"/>
+                <field name="attempts" optional="show"/>
+                <field name="state" widget="badge"
+                       decoration-success="state == 'done'"
+                       decoration-danger="state in ('failed', 'dead_letter')"
+                       decoration-info="state in ('queued', 'rendering', 'spooling', 'printing')"
+                       decoration-muted="state == 'canceled'"/>
+                <field name="error_code" class="font-monospace text-danger" optional="show"/>
+                <field name="user_id" widget="many2one_avatar_user"/>
+                <field name="source_ids" column_invisible="1"/>
+                <button name="action_reprint" type="object" string="Reprint"
+                        icon="fa-print" class="btn-link"
+                        invisible="not report_id or not source_ids"
+                        confirm="Reprint this document now? The original printer and print settings are restored when that printer is connected to this PC."/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_job_kanban" model="ir.ui.view">
+        <field name="name">native.print.job.kanban</field>
+        <field name="model">native.print.job</field>
+        <field name="arch" type="xml">
+            <kanban default_group_by="state" create="0" edit="0" delete="0" records_draggable="0">
+                <field name="name"/>
+                <field name="state"/>
+                <field name="error_code"/>
+                <field name="report_id"/>
+                <field name="report_name"/>
+                <field name="source_type"/>
+                <field name="device_id"/>
+                <field name="source_ids"/>
+                <field name="pages"/>
+                <field name="user_id"/>
+                <field name="create_date"/>
+                <templates>
+                    <t t-name="kanban-box">
+                        <div class="d-flex justify-content-between align-items-start mb-1">
+                            <strong class="font-monospace text-truncate">
+                                <field name="name"/>
+                            </strong>
+                            <field name="state" widget="badge"
+                                   decoration-success="state == 'done'"
+                                   decoration-danger="state in ('failed', 'dead_letter')"
+                                   decoration-info="state in ('queued', 'rendering', 'spooling', 'printing')"
+                                   decoration-muted="state == 'canceled'"/>
+                        </div>
+                        <div class="small text-muted mb-1">
+                            <i class="fa fa-file-text-o me-1" title="Report"/>
+                            <field name="report_id"/>
+                            <span t-if="!record.report_id.raw_value and record.report_name.raw_value" class="font-monospace">
+                                <field name="report_name"/>
+                            </span>
+                        </div>
+                        <div t-if="record.device_id.raw_value" class="small text-muted mb-1">
+                            <i class="fa fa-print me-1" title="Printer"/>
+                            <field name="device_id"/>
+                        </div>
+                        <div t-if="record.error_code.raw_value" class="badge text-bg-danger font-monospace mb-2">
+                            <i class="fa fa-warning me-1" title="Error"/>
+                            <field name="error_code"/>
+                        </div>
+                        <footer class="pt-1 border-top d-flex justify-content-between align-items-center small text-muted">
+                            <span><field name="pages"/> page(s)</span>
+                            <field name="user_id" widget="many2one_avatar_user"/>
+                        </footer>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <record id="view_job_form" model="ir.ui.view">
+        <field name="name">native.print.job.form</field>
+        <field name="model">native.print.job</field>
+        <field name="arch" type="xml">
+            <form create="0" edit="0" delete="0">
+                <header>
+                    <button name="action_reprint" type="object" string="Reprint"
+                            class="btn-primary"
+                            invisible="not report_id or not source_ids"
+                            confirm="Reprint this document now? The original printer and print settings are restored when that printer is connected to this PC."/>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="queued,rendering,spooling,printing,done,failed,canceled,dead_letter"/>
+                </header>
+                <sheet>
+                    <div class="alert alert-danger d-flex align-items-center gap-2" role="alert"
+                         invisible="not error_code">
+                        <i class="fa fa-exclamation-triangle fa-lg" title="Error"/>
+                        <div>
+                            <strong>Error Code: </strong>
+                            <field name="error_code" class="font-monospace fw-bold"/>
+                        </div>
+                    </div>
+                    <div class="oe_title">
+                        <label for="name" string="Idempotency Key"/>
+                        <h1>
+                            <field name="name" class="font-monospace"/>
+                        </h1>
+                    </div>
+                    <group expand="0" string="Group By">
+                        <group string="Print Source &amp; Routing">
+                            <field name="source_ids" invisible="1"/>
+                            <field name="report_id"/>
+                            <field name="report_name" string="Source Name"/>
+                            <field name="source_type" widget="badge"
+                                   decoration-info="source_type == 'report'"
+                                   decoration-warning="source_type == 'pos_receipt'"
+                                   decoration-muted="source_type == 'test'"/>
+                            <field name="device_id"/>
+                        </group>
+                        <group string="Document Metrics &amp; Audit">
+                            <field name="pages"/>
+                            <field name="byte_size"/>
+                            <field name="attempts"/>
+                            <field name="copies"/>
+                            <field name="paper"/>
+                            <field name="mode"/>
+                            <field name="user_id" widget="many2one_avatar_user"/>
+                            <field name="company_id"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_job_search" model="ir.ui.view">
+        <field name="name">native.print.job.search</field>
+        <field name="model">native.print.job</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/>
+                <field name="report_id"/>
+                <field name="device_id"/>
+                <field name="source_type"/>
+                <field name="error_code"/>
+                <filter name="f_executed" string="Executed"
+                        domain="[('state', 'in', ('done', 'failed', 'canceled', 'dead_letter'))]"/>
+                <filter name="f_active" string="Active / Queued"
+                        domain="[('state', 'in', ('queued', 'rendering', 'spooling', 'printing'))]"/>
+                <filter name="f_failed" string="Failed" domain="[('state', '=', 'failed')]"/>
+                <filter name="f_dead" string="Dead letter" domain="[('state', '=', 'dead_letter')]"/>
+                <filter name="f_done" string="Done" domain="[('state', '=', 'done')]"/>
+                <separator/>
+                <filter name="f_reports" string="Reports" domain="[('source_type', '=', 'report')]"/>
+                <filter name="f_pos" string="POS Receipts" domain="[('source_type', '=', 'pos_receipt')]"/>
+                <filter name="f_my_jobs" string="My Print Jobs" domain="[('user_id', '=', uid)]"/>
+                <group>
+                    <filter name="g_state" string="State" context="{'group_by': 'state'}"/>
+                    <filter name="g_report" string="Report" context="{'group_by': 'report_id'}"/>
+                    <filter name="g_source_type" string="Source Type" context="{'group_by': 'source_type'}"/>
+                    <filter name="g_device" string="Printer" context="{'group_by': 'device_id'}"/>
+                    <filter name="g_user" string="User" context="{'group_by': 'user_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="view_job_graph" model="ir.ui.view">
+        <field name="name">native.print.job.graph</field>
+        <field name="model">native.print.job</field>
+        <field name="arch" type="xml">
+            <graph string="Print Jobs Analysis" type="bar">
+                <field name="state"/>
+                <field name="pages" type="measure"/>
+            </graph>
+        </field>
+    </record>
+
+    <record id="view_job_pivot" model="ir.ui.view">
+        <field name="name">native.print.job.pivot</field>
+        <field name="model">native.print.job</field>
+        <field name="arch" type="xml">
+            <pivot string="Print Jobs Pivot" display_quantity="1">
+                <field name="state" type="col"/>
+                <field name="report_id" type="row"/>
+                <field name="pages" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="action_jobs" model="ir.actions.act_window">
+        <field name="name">Print Jobs</field>
+        <field name="res_model">native.print.job</field>
+        <field name="view_mode">tree,kanban,form,graph,pivot</field>
+        <field name="search_view_id" ref="view_job_search"/>
+        <field name="domain">[('company_id', 'in', allowed_company_ids)]</field>
+        <field name="context">{'create': False, 'search_default_f_executed': 1}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">No print jobs yet</p>
+            <p>Print a report or POS receipt from the Yaseir Print desktop app to track jobs and reprint from here.</p>
+        </field>
+    </record>
+
+    <!-- Printer registry maintenance (managers only): rows are
+         auto-created by the job sync; this list exists so a stale
+         row (renamed/retired printer) can be removed. Deleting a row
+         never deletes jobs - their printer field just empties
+         (ondelete set null) and the raw reported name stays on the
+         job. Create/edit stay off: the registry mirrors reality. -->
+    <record id="view_device_list" model="ir.ui.view">
+        <field name="name">native.print.device.list</field>
+        <field name="model">native.print.device</field>
+        <field name="arch" type="xml">
+            <tree create="0" edit="0">
+                <field name="name"/>
+                <field name="printer_class" string="Class"/>
+                <field name="protocol" string="Protocol"/>
+                <field name="caps_synced_at" string="Capabilities"/>
+                <field name="company_id"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_device_form" model="ir.ui.view">
+        <field name="name">native.print.device.form</field>
+        <field name="model">native.print.device</field>
+        <field name="arch" type="xml">
+            <form create="0" edit="0" delete="0">
+                <sheet>
+                    <div class="oe_title">
+                        <h1><field name="name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <field name="printer_class" readonly="1"/>
+                        <field name="protocol" readonly="1"/>
+                        <field name="caps_synced_at" readonly="1"/>
+                        <field name="company_id" readonly="1"/>
+                    </group>
+                    <group string="Paper Sizes (from the printer's driver)">
+                        <field name="forms_summary" readonly="1" nolabel="1"/>
+                    </group>
+                    <group string="Trays (from the printer's driver)">
+                        <field name="trays_summary" readonly="1" nolabel="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_devices" model="ir.actions.act_window">
+        <field name="name">Printers</field>
+        <field name="res_model">native.print.device</field>
+        <field name="view_mode">tree,form</field>
+        <field name="domain">[('company_id', 'in', allowed_company_ids)]</field>
+        <field name="context">{'create': False}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">No printers recorded yet</p>
+            <p>Printers appear here automatically after their first print job from the Yaseir Print desktop app.</p>
+        </field>
+    </record>
+
+    <menuitem id="menu_native_print_root"
+              name="Yaseir Print"
+              web_icon="native_print,static/description/icon.png"
+              groups="native_print.group_native_print_user"
+              sequence="95"/>
+    <menuitem id="menu_jobs"
+              name="Jobs"
+              parent="menu_native_print_root"
+              action="action_jobs"
+              sequence="10"/>
+    <menuitem id="menu_devices"
+              name="Printers"
+              parent="menu_native_print_root"
+              action="action_devices"
+              groups="native_print.group_native_print_manager"
+              sequence="20"/>
+</odoo>

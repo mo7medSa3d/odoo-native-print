@@ -192,8 +192,10 @@ fun ControlCenterScreen(
                 onAddManual = { showAddPrinter = true },
                 onConfigure = { editingPrinter = it },
                 onTestPrint = { p ->
-                    app.enqueueTestPrint(p.name)
-                    reloadData()
+                    scope.launch(Dispatchers.IO) {
+                        app.enqueueTestPrint(p.name)
+                        reloadData()
+                    }
                 },
                 onRequestUsbPermission = { p ->
                     UsbOtgTransport.requestPermission(ctx, p.address)
@@ -207,25 +209,36 @@ fun ControlCenterScreen(
             1 -> QueueTab(
                 jobs = jobs,
                 onRetry = { id ->
-                    app.queueEngine.retryJob(id)?.let { app.worker.wakePrinter(it.printerName) }
-                    reloadData()
+                    scope.launch(Dispatchers.IO) {
+                        app.queueEngine.retryJob(id)?.let { app.worker.wakePrinter(it.printerName) }
+                        reloadData()
+                    }
                 },
                 onCancel = { id ->
-                    app.queueEngine.cancelJob(id)
-                    app.worker.refreshSummary()
-                    reloadData()
+                    scope.launch(Dispatchers.IO) {
+                        app.queueEngine.cancelJob(id)
+                        app.worker.refreshSummary()
+                        reloadData()
+                    }
                 },
                 onClearFinished = {
-                    app.queueEngine.clearFinished()
-                    app.worker.refreshSummary()
-                    reloadData()
+                    scope.launch(Dispatchers.IO) {
+                        app.queueEngine.clearFinished()
+                        app.worker.refreshSummary()
+                        reloadData()
+                    }
                 },
             )
             2 -> DiagnosticsTab(
                 app = app,
                 printers = printers,
                 onExport = {
-                    DiagnosticsExporter.exportAndShare(ctx, app.configStore, app.queueEngine, printers)
+                    scope.launch(Dispatchers.IO) {
+                        val file = DiagnosticsExporter.exportBundle(ctx, app.configStore, app.queueEngine, printers)
+                        withContext(Dispatchers.Main) {
+                            DiagnosticsExporter.shareBundle(ctx, file)
+                        }
+                    }
                 },
             )
         }

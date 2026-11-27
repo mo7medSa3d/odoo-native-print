@@ -32,11 +32,8 @@ test("static DOM lookups resolve and element IDs are unique", () => {
   const ids = [...html.matchAll(/(?<![-\w])id=["']([^"']+)["']/g)].map(m => m[1]);
   const set = new Set(ids);
   assert.equal(set.size, ids.length);
-  // The command palette / quick search was removed; its dead lookups stay in
-  // the script but have no matching DOM nodes.
-  const removedPaletteIds = new Set(["btnCmdPalette", "cmdDialog", "cmdInput", "cmdOverlay", "cmdResults", "cmdTabsList", "cmdWorkspacesList", "cmdActionsList"]);
   const refs = [...script.matchAll(/getElementById\(["']([^"'$]+)["']\)/g)].map(m => m[1]);
-  assert.deepEqual([...new Set(refs.filter(id => !set.has(id) && !removedPaletteIds.has(id)))], []);
+  assert.deepEqual([...new Set(refs.filter(id => !set.has(id)))], []);
 });
 
 test("localized controls have Arabic and English translations", () => {
@@ -292,7 +289,7 @@ test("theme.css Light and Dark tokens meet WCAG 2.2 AA contrast thresholds", () 
     const subtle = parseColor(vars["--bg-subtle"]);
 
     // Core text tokens >= 4.5:1 on surface, canvas, and subtle
-    for (const token of ["--text-primary", "--text-secondary", "--text-muted", "--brand-text", "--accent-cyan"]) {
+    for (const token of ["--text-primary", "--text-secondary", "--text-muted", "--brand-text"]) {
       const fg = parseColor(vars[token]);
       for (const [bgName, bg] of [["--bg-surface", surface], ["--bg-canvas", canvas], ["--bg-subtle", subtle]]) {
         const cr = ratio(fg, bg);
@@ -1123,107 +1120,6 @@ test("tabbar.html pointer-event drag-and-drop reorders tabs and refresh() drains
   assert.deepEqual(JSON.parse(windowObj.localStorage.getItem("np_tab_groups")), { t1: "blue" });
 });
 
-test.skip("index.html Command Palette clears np_cc_open_cmd on storage event and needs no manual session save", async () => {
-  const { windowObj, document } = createMiniDom(html);
-  windowObj.__NATIVE_PRINT__ = {
-    async appOverview() { return { appVersion: "1.5.7", odooOrigin: "https://odoo.example.com", printers: [], recentJobs: [], counts: { active: 0, done: 0, failed: 0 } }; },
-    async getPrinterSettings() { return {}; },
-  };
-  windowObj.localStorage.setItem("np_open_tabs", JSON.stringify([
-    { label: "t1", title: "Sales", url: "https://odoo.example.com/odoo/sales", active: true, is_local: false },
-  ]));
-  const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout, localStorage: windowObj.localStorage });
-  new vm.Script(script).runInContext(ctx);
-  await new Promise(r => setImmediate(r));
-
-  // Storage trigger opens palette and clears flag
-  windowObj.localStorage.setItem("np_cc_open_cmd", "123");
-  windowObj.dispatch("storage", { key: "np_cc_open_cmd", newValue: "123" });
-  assert.equal(document.getElementById("cmdOverlay").classList.contains("hidden"), false, "Command Palette must open");
-  assert.equal(windowObj.localStorage.getItem("np_cc_open_cmd"), null, "np_cc_open_cmd must be cleared on storage event");
-
-  // Sessions are saved/restored automatically by the tab bar: the manual
-  // "Save Session" button and workspace-name input must be gone.
-  assert.equal(document.getElementById("btnSaveWorkspace"), null);
-  assert.equal(document.getElementById("cmdWorkspaceName"), null);
-  assert.equal(ctx.saveCurrentWorkspace, undefined);
-});
-
-test.skip("index.html Command Palette delegated clicks: filtered restore/delete workspace uses origIdx and tab actions run without ReferenceError", async () => {
-  const { windowObj, document, MiniEl } = createMiniDom(html);
-  windowObj.__NATIVE_PRINT__ = {
-    async appOverview() { return { appVersion: "1.5.7", odooOrigin: "https://odoo.example.com", printers: [], recentJobs: [], counts: { active: 0, done: 0, failed: 0 } }; },
-    async getPrinterSettings() { return {}; },
-  };
-  windowObj.localStorage.setItem("np_open_tabs", JSON.stringify([
-    { label: "t1", title: "Sales", url: "https://odoo.example.com/odoo/sales", active: true, is_local: false },
-    { label: "t2", title: "POS", url: "https://odoo.example.com/pos", active: false, is_local: false },
-  ]));
-  windowObj.localStorage.setItem("np_workspaces", JSON.stringify([
-    { name: "Alpha Shift", urls: ["https://odoo.example.com/alpha"], savedAt: 1 },
-    { name: "Beta Shift", urls: ["https://odoo.example.com/beta"], savedAt: 2 },
-    { name: "Gamma Shift", urls: ["https://odoo.example.com/gamma"], savedAt: 3 },
-  ]));
-  const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout, localStorage: windowObj.localStorage });
-  new vm.Script(script).runInContext(ctx);
-  await new Promise(r => setImmediate(r));
-
-  const clickAction = (action, attrs = {}) => {
-    const btn = new MiniEl("BUTTON");
-    btn.setAttribute("data-action", action);
-    for (const [k, v] of Object.entries(attrs)) btn.setAttribute(k, String(v));
-    btn.closest = () => btn;
-    document.dispatch("click", { target: btn });
-  };
-
-  // Filtered search query "gamma" must emit origIdx=2 (not filtered index 0) and restore Gamma Shift
-  ctx.openCommandPalette();
-  const cmdInput = document.getElementById("cmdInput");
-  cmdInput.value = "gamma";
-  ctx.renderCommandPalette("gamma");
-  const wsHtmlGamma = document.getElementById("cmdWorkspacesList").innerHTML;
-  const restoreMatch = wsHtmlGamma.match(/data-action="restore-workspace"\s+data-ws-idx="(\d+)"/);
-  assert.ok(restoreMatch, "filtered workspace must render restore-workspace button");
-  assert.equal(restoreMatch[1], "2", "filtered restore-workspace must use origIdx=2");
-
-  clickAction("restore-workspace", { "data-ws-idx": restoreMatch[1] });
-  const restoreCmd = JSON.parse(windowObj.localStorage.getItem("np_tab_cmd") || "null");
-  assert.equal(restoreCmd.action, "restore_workspace");
-  assert.deepEqual(restoreCmd.urls, ["https://odoo.example.com/gamma"], "restore-workspace must restore Gamma Shift, not Alpha Shift");
-  assert.equal(document.getElementById("cmdOverlay").classList.contains("hidden"), true, "restore-workspace closes Command Palette");
-
-  // Filtered search query "beta" must emit origIdx=1 and delete Beta Shift only
-  ctx.openCommandPalette();
-  cmdInput.value = "beta";
-  ctx.renderCommandPalette("beta");
-  const wsHtmlBeta = document.getElementById("cmdWorkspacesList").innerHTML;
-  const deleteMatch = wsHtmlBeta.match(/data-action="delete-workspace"\s+data-ws-idx="(\d+)"/);
-  assert.ok(deleteMatch, "filtered workspace must render delete-workspace button");
-  assert.equal(deleteMatch[1], "1", "filtered delete-workspace must use origIdx=1");
-
-  clickAction("delete-workspace", { "data-ws-idx": deleteMatch[1] });
-  const remainingWs = JSON.parse(windowObj.localStorage.getItem("np_workspaces") || "[]").map(w => w.name);
-  assert.deepEqual(remainingWs, ["Alpha Shift", "Gamma Shift"], "delete-workspace must remove only Beta Shift");
-
-  // Delegated cmd-pin-tab, cmd-group-tab, cmd-switch-tab execute cleanly with zero ReferenceError
-  clickAction("cmd-pin-tab", { "data-tab-label": "t1" });
-  assert.deepEqual(JSON.parse(windowObj.localStorage.getItem("np_pinned_tabs")), ["t1"]);
-  assert.equal(JSON.parse(windowObj.localStorage.getItem("np_tab_cmd")).action, "meta_changed");
-  clickAction("cmd-pin-tab", { "data-tab-label": "t1" });
-  assert.deepEqual(JSON.parse(windowObj.localStorage.getItem("np_pinned_tabs")), []);
-
-  clickAction("cmd-group-tab", { "data-tab-label": "t1" });
-  const groupsAfter = JSON.parse(windowObj.localStorage.getItem("np_tab_groups") || "{}");
-  assert.ok(typeof groupsAfter.t1 === "string" && groupsAfter.t1.length > 0, "cmd-group-tab assigns a group color");
-  assert.equal(JSON.parse(windowObj.localStorage.getItem("np_tab_cmd")).action, "meta_changed");
-
-  clickAction("cmd-switch-tab", { "data-tab-label": "t2" });
-  const switchCmd = JSON.parse(windowObj.localStorage.getItem("np_tab_cmd") || "null");
-  assert.equal(switchCmd.action, "switch");
-  assert.equal(switchCmd.label, "t2");
-  assert.equal(document.getElementById("cmdOverlay").classList.contains("hidden"), true, "cmd-switch-tab closes Command Palette");
-});
-
 test("tabbar.html pointercancel rolls back drag without invoking tab_move and isSafeTabUrl rejects unsafe URLs", async () => {
   const tabHtml = readFileSync(new URL("../dist/tabbar.html", import.meta.url), "utf8");
   const tabScript = tabHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
@@ -1269,14 +1165,13 @@ test("tabbar.html pointercancel rolls back drag without invoking tab_move and is
   assert.equal(ctx.isSafeTabUrl("file:///etc/passwd"), false);
   assert.equal(ctx.isSafeTabUrl("data:text/html,<script>alert(1)</script>"), false);
 
-  // Command path enforcement: restore_workspace only opens safe URLs
-  windowObj.localStorage.setItem("np_tab_cmd", JSON.stringify({
-    action: "restore_workspace",
-    urls: ["javascript:alert(1)", "https://user:pass@odoo.example.com/x", "https://odoo.example.com/safe"],
-    ts: Date.now(),
-  }));
-  ctx.refresh();
-  await new Promise(r => setImmediate(r));
+  // Command path enforcement: open action only opens safe URLs
+  let ts = Date.now();
+  for (const url of ["javascript:alert(1)", "https://user:pass@odoo.example.com/x", "https://odoo.example.com/safe"]) {
+    windowObj.localStorage.setItem("np_tab_cmd", JSON.stringify({ action: "open", url, ts: ++ts }));
+    ctx.refresh();
+    await new Promise(r => setImmediate(r));
+  }
   const openedUrls = invoked.filter(([c]) => c === "tab_open").map(([, a]) => a.url);
   assert.deepEqual(openedUrls, ["https://odoo.example.com/safe"], "unsafe URLs must never reach tab_open");
 });
@@ -2055,9 +1950,173 @@ test("boot.html targetUrl restores same-origin startupUrl and rejects off-origin
 });
 
 test("Odoo 19/20 qweb-text handler passes raw label modes directly via printText", () => {
-  for (const ver of ["odoo19", "odoo20"]) {
+  for (const ver of ["odoo17", "odoo18", "odoo19", "odoo20"]) {
     const h = readFileSync(new URL(`../../${ver}/native_print/static/src/js/native_print_handler.js`, import.meta.url), "utf8");
     assert.match(h, /\["escpos", "zpl", "tspl", "epl", "cpcl"\]\.includes\(rule\.mode\)/);
     assert.match(h, /mode:\s*rule\.mode,\s*text/);
+  }
+});
+
+test("Calibration Lab: tcp:// selects thermal-80mm, populatePrinterSelect updates after user change, and IPv6 URI port parsing works", async () => {
+  const { windowObj, document } = createMiniDom(html);
+  const printers = [
+    { name: "Office Laser", kind: "local", is_default: true, status: "ready", port: "192.168.1.50", driver: "HP" },
+  ];
+  windowObj.__NATIVE_PRINT__ = {
+    async appOverview() {
+      return { appVersion: "1.5.7", odooOrigin: "https://odoo.example.com", printers, defaultPrinter: "Office Laser", recentJobs: [], stateCounts: [] };
+    },
+    async printerCapabilities() { return { forms: [], duplex: false, color: false, bins: [] }; },
+    async getPrinterSettings() { return {}; },
+  };
+  const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout, localStorage: windowObj.localStorage, navigator: {} });
+  new vm.Script(script).runInContext(ctx);
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  // (a) Selecting tcp:// sets customTestKind to thermal-80mm (not blank / pdf-a4)
+  const printerSel = document.getElementById("customPrinterSelect");
+  const kindSel = document.getElementById("customTestKind");
+  printerSel.value = "tcp://192.168.1.50:9100";
+  ctx.onTestPrinterChange();
+  assert.equal(kindSel.value, "thermal-80mm", "tcp:// printer must default test kind to thermal-80mm");
+
+  // (b) populatePrinterSelect still updates after user selection when new printer arrives, preserving current selection
+  printerSel.dispatch("change");
+  printers.push({ name: "Receipt Thermal", kind: "local", is_default: false, status: "ready", port: "USB001", driver: "Epson" });
+  ctx.populatePrinterSelect(printers, "Office Laser");
+  assert.ok(printerSel.innerHTML.includes("Receipt Thermal"), "new printer must appear in select after user previously changed it");
+  assert.equal(printerSel.value, "tcp://192.168.1.50:9100", "previous selection must be preserved");
+
+  // (c) IPv6 bracket-aware port parsing in allowedTestKinds() and validateCustomPrinterUriField()
+  const uriInput = document.getElementById("customPrinterUri");
+  printerSel.value = "__uri__";
+  uriInput.value = "tcp://[fe80::631]:9100";
+  assert.equal(ctx.validateCustomPrinterUriField(), true, "tcp://[fe80::631]:9100 must parse port 9100, not 631");
+  assert.deepEqual([...ctx.allowedTestKinds()], ["thermal-80mm", "thermal-58mm", "zpl-label", "tspl-label", "epl-label"]);
+
+  uriInput.value = "ipp://[fe80::9100]:631/ipp/print";
+  assert.equal(ctx.validateCustomPrinterUriField(), true, "ipp://[fe80::9100]:631/ipp/print must parse port 631, not 9100");
+  assert.deepEqual([...ctx.allowedTestKinds()], ["pdf-a4"]);
+
+  uriInput.value = "tcp://[fe80::1]:631";
+  assert.equal(ctx.validateCustomPrinterUriField(), false, "tcp://[fe80::1]:631 must be rejected (raw socket on IPP port 631)");
+});
+
+test("tabbar.html restoreSavedSession guards np_open_tabs, avoids duplicating /pos startupUrl, and restores active focus to tabs[0]", async () => {
+  const tabHtml = readFileSync(new URL("../dist/tabbar.html", import.meta.url), "utf8");
+  const tabScript = tabHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
+  const { windowObj } = createMiniDom(tabHtml);
+  const posUrl = "https://odoo.example.com/pos/ui?config_id=1";
+  const salesUrl = "https://odoo.example.com/web#menu_id=5";
+  const savedTabs = [
+    { label: "t1", title: "POS", url: posUrl, active: true, is_pos: true },
+    { label: "t2", title: "Sales", url: salesUrl, active: false, is_pos: false },
+  ];
+  windowObj.localStorage.setItem("np_open_tabs", JSON.stringify(savedTabs));
+
+  let resolveIdentity;
+  const identityP = new Promise((r) => { resolveIdentity = r; });
+  const liveTabs = [
+    { label: "boot-0", title: "POS", url: posUrl, active: true, is_pos: true },
+  ];
+  const invoked = [];
+  windowObj.__TAURI_INTERNALS__ = {
+    async invoke(cmd, args) {
+      invoked.push([cmd, args]);
+      if (cmd === "app_identity") return identityP;
+      if (cmd === "tab_open") {
+        liveTabs.forEach((t) => { t.active = false; });
+        liveTabs.push({ label: "tab-" + liveTabs.length, title: "Sales", url: args.url, active: true, is_pos: false });
+        return {};
+      }
+      if (cmd === "tab_switch") {
+        liveTabs.forEach((t) => { t.active = t.label === args.label; });
+        return {};
+      }
+      if (cmd === "tab_list") return liveTabs.map((t) => ({ ...t }));
+      return {};
+    },
+  };
+  const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout, localStorage: windowObj.localStorage });
+  new vm.Script(tabScript).runInContext(ctx);
+  await new Promise((r) => setImmediate(r));
+
+  // Initial refresh() ran while restoreSavedSession() is awaiting app_identity: np_open_tabs must NOT be overwritten with 1 tab
+  const duringRestore = JSON.parse(windowObj.localStorage.getItem("np_open_tabs"));
+  assert.equal(duringRestore.length, 2, "refresh() must not overwrite np_open_tabs while restoringSession is true");
+
+  resolveIdentity({ odooOrigin: "https://odoo.example.com", startupUrl: posUrl });
+  for (let i = 0; i < 6; i++) await new Promise((r) => setImmediate(r));
+
+  const openedUrls = invoked.filter(([c]) => c === "tab_open").map(([, a]) => a.url);
+  assert.deepEqual(openedUrls, [salesUrl], "must skip saved[0] when startupUrl matches /pos URL to avoid duplicate POS tab");
+  assert.ok(invoked.some(([c, a]) => c === "tab_switch" && a.label === "boot-0"), "must switch focus back to tabs[0] when skipFirst && activeIdx === 0");
+  const afterRestore = JSON.parse(windowObj.localStorage.getItem("np_open_tabs"));
+  assert.equal(afterRestore.length, 2, "np_open_tabs must mirror restored tabs after restore completes");
+});
+
+test("np_tab_cmd same-millisecond monotonic id: sendTabCmd emits id+ts and handleCrossTabCommand never drops same-ms commands", async () => {
+  // 1. Verify sendTabCmd emits ts + distinct monotonic id within the same millisecond
+  const { windowObj: ccWin } = createMiniDom(html);
+  const fixedNow = 1760000000000;
+  const origNow = Date.now;
+  Date.now = () => fixedNow;
+  try {
+    const ccCtx = vm.createContext({
+      ...ccWin,
+      Date,
+      setInterval: ccWin.setInterval,
+      clearInterval: ccWin.clearInterval,
+      setTimeout: ccWin.setTimeout,
+      clearTimeout: ccWin.clearTimeout,
+      localStorage: ccWin.localStorage,
+    });
+    new vm.Script(script).runInContext(ccCtx);
+    ccCtx.sendTabCmd({ action: "switch", label: "t1" });
+    const cmd1 = JSON.parse(ccWin.localStorage.getItem("np_tab_cmd"));
+    ccCtx.sendTabCmd({ action: "switch", label: "t2" });
+    const cmd2 = JSON.parse(ccWin.localStorage.getItem("np_tab_cmd"));
+    assert.equal(cmd1.ts, fixedNow, "cmd1 preserves ts");
+    assert.equal(cmd2.ts, fixedNow, "cmd2 preserves ts");
+    assert.ok(typeof cmd1.id === "string" && cmd1.id.startsWith(fixedNow + "-"), "cmd1 has monotonic id");
+    assert.ok(typeof cmd2.id === "string" && cmd2.id.startsWith(fixedNow + "-"), "cmd2 has monotonic id");
+    assert.notEqual(cmd1.id, cmd2.id, "same-ms commands must have distinct ids");
+
+    // 2. Verify tabbar.html executes both same-ms commands and still dedupes identical id
+    const tabHtml = readFileSync(new URL("../dist/tabbar.html", import.meta.url), "utf8");
+    const tabScript = tabHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
+    const { windowObj: tbWin } = createMiniDom(tabHtml);
+    const invoked = [];
+    tbWin.__TAURI_INTERNALS__ = {
+      async invoke(cmd, args) {
+        invoked.push([cmd, args]);
+        if (cmd === "tab_list") return [{ label: "t1", title: "A", url: "https://a.test", active: true }, { label: "t2", title: "B", url: "https://b.test", active: false }];
+        return true;
+      },
+    };
+    const tbCtx = vm.createContext({
+      ...tbWin,
+      Date,
+      setInterval: tbWin.setInterval,
+      clearInterval: tbWin.clearInterval,
+      setTimeout: tbWin.setTimeout,
+      clearTimeout: tbWin.clearTimeout,
+      localStorage: tbWin.localStorage,
+    });
+    new vm.Script(tabScript).runInContext(tbCtx);
+
+    tbWin.localStorage.setItem("np_tab_cmd", JSON.stringify(cmd1));
+    tbCtx.handleCrossTabCommand();
+    tbWin.localStorage.setItem("np_tab_cmd", JSON.stringify(cmd2));
+    tbCtx.handleCrossTabCommand();
+    // Replay cmd2 with identical id -> must be deduped
+    tbWin.localStorage.setItem("np_tab_cmd", JSON.stringify(cmd2));
+    tbCtx.handleCrossTabCommand();
+
+    const switches = invoked.filter(([c]) => c === "tab_switch").map(([, a]) => a.label);
+    assert.deepEqual(switches, ["t1", "t2"], "both same-ms commands execute and duplicate id is deduped");
+  } finally {
+    Date.now = origNow;
   }
 });

@@ -40,57 +40,6 @@ pub fn needs_intervention(s: PrinterStatus) -> bool {
     )
 }
 
-pub fn decode_printer_status(flags: u32) -> PrinterStatus {
-    const PAUSED: u32 = 0x0000_0001;
-    const ERROR: u32 = 0x0000_0002;
-    const PAPER_JAM: u32 = 0x0000_0008;
-    const PAPER_OUT: u32 = 0x0000_0010;
-    const OFFLINE: u32 = 0x0000_0080;
-    const PRINTING: u32 = 0x0000_0400;
-    const PROCESSING: u32 = 0x0000_4000;
-    const NO_TONER: u32 = 0x0004_0000;
-    const DOOR_OPEN: u32 = 0x0040_0000;
-    const PAPER_PROBLEM: u32 = 0x0000_0040;
-    const BUSY: u32 = 0x0000_0200;
-    const MANUAL_FEED: u32 = 0x0000_0020;
-    // PRINTER_STATUS_NOT_AVAILABLE (0x1000) is deliberately not
-    // decoded to a blocking state: see the Unknown fallthrough.
-    const OUTPUT_BIN_FULL: u32 = 0x0000_0800;
-    const USER_INTERVENTION: u32 = 0x0010_0000;
-    // Priority: what the user must fix first, then activity states.
-    if flags & DOOR_OPEN != 0 {
-        PrinterStatus::DoorOpen
-    } else if flags & PAPER_JAM != 0 {
-        PrinterStatus::PaperJam
-    } else if flags & PAPER_OUT != 0 {
-        PrinterStatus::PaperOut
-    } else if flags & NO_TONER != 0 {
-        PrinterStatus::NoToner
-    } else if flags & OFFLINE != 0 {
-        PrinterStatus::Offline
-    } else if flags & USER_INTERVENTION != 0
-        || flags & MANUAL_FEED != 0
-        || flags & OUTPUT_BIN_FULL != 0
-    {
-        // A human must act (or the device needs attention) before
-        // anything can print — never let these fall through to Unknown,
-        // which every consumer treats as printable.
-        PrinterStatus::UserIntervention
-    } else if flags & PAPER_PROBLEM != 0 {
-        PrinterStatus::Error
-    } else if flags & PAUSED != 0 {
-        PrinterStatus::Paused
-    } else if flags & ERROR != 0 {
-        PrinterStatus::Error
-    } else if flags & (PRINTING | PROCESSING | BUSY) != 0 {
-        PrinterStatus::Printing
-    } else if flags == 0 {
-        PrinterStatus::Ready
-    } else {
-        PrinterStatus::Unknown
-    }
-}
-
 fn is_ipv4(s: &str) -> bool {
     s.parse::<std::net::Ipv4Addr>().is_ok()
 }
@@ -399,15 +348,19 @@ pub fn detect_protocol(
     }
     let signature = format!("{} {}", name, driver).to_lowercase();
     let has_word = |tok: &str| -> bool {
-        let bytes = signature.as_bytes();
-        let t = tok.as_bytes();
-        if t.is_empty() || bytes.len() < t.len() {
+        if tok.is_empty() {
             return false;
         }
-        (0..=bytes.len() - t.len()).any(|i| {
-            bytes[i..i + t.len()] == *t
-                && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
-                && (i + t.len() == bytes.len() || !bytes[i + t.len()].is_ascii_alphanumeric())
+        signature.char_indices().any(|(i, _)| {
+            signature[i..].starts_with(tok)
+                && !signature[..i]
+                    .chars()
+                    .next_back()
+                    .is_some_and(char::is_alphanumeric)
+                && !signature[i + tok.len()..]
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_alphanumeric)
         })
     };
     if signature.contains("zdesigner") || signature.contains("zebra") || has_word("zpl") {
@@ -665,48 +618,10 @@ pub fn document_mode_downgrade(
 mod tests {
     use super::*;
     #[test]
-    fn intervention_flags_decode() {
-        // Audit D-2: flags that used to fall through to Unknown
-        // (treated as printable by every gate).
-        assert_eq!(
-            decode_printer_status(0x0010_0000),
-            PrinterStatus::UserIntervention
-        );
-        assert!(needs_intervention(PrinterStatus::UserIntervention));
-        assert_eq!(
-            decode_printer_status(0x0000_0020),
-            PrinterStatus::UserIntervention
-        ); // manual feed
-        assert_eq!(
-            decode_printer_status(0x0000_0800),
-            PrinterStatus::UserIntervention
-        ); // output bin full
-        assert_eq!(decode_printer_status(0x0000_0040), PrinterStatus::Error); // paper problem
-                                                                              // NOT_AVAILABLE alone means "state unknown" (drivers set
-                                                                              // it while initializing or waking); it is not evidence the
-                                                                              // device is offline and must not block printing. Combined
-                                                                              // with the real OFFLINE flag it stays Offline.
-        assert_eq!(decode_printer_status(0x0000_1000), PrinterStatus::Unknown);
-        assert_eq!(decode_printer_status(0x0000_1080), PrinterStatus::Offline);
-        assert_eq!(decode_printer_status(0x0000_0200), PrinterStatus::Printing);
-        // busy
-    }
-
-    #[test]
-    fn status_priority() {
-        assert_eq!(decode_printer_status(0), PrinterStatus::Ready);
-        assert_eq!(decode_printer_status(0x80), PrinterStatus::Offline);
-        assert_eq!(decode_printer_status(0x10), PrinterStatus::PaperOut);
-        // Door open wins over paper out when both bits are set.
-        assert_eq!(
-            decode_printer_status(0x0040_0000 | 0x10),
-            PrinterStatus::DoorOpen
-        );
-        assert_eq!(decode_printer_status(0x8), PrinterStatus::PaperJam);
-        assert_eq!(decode_printer_status(0x0004_0000), PrinterStatus::NoToner);
-        assert_eq!(decode_printer_status(0x400), PrinterStatus::Printing);
+    fn status_helpers() {
         assert!(has_toner_low(0x0002_0000));
         assert!(!has_toner_low(0));
+        assert!(needs_intervention(PrinterStatus::UserIntervention));
         assert!(needs_intervention(PrinterStatus::PaperJam));
         assert!(!needs_intervention(PrinterStatus::Printing));
     }
@@ -1185,6 +1100,26 @@ mod tests {
         assert_eq!(
             document_mode_downgrade("pdf", "escpos", PrinterKind::Shared, "office"),
             Some("gdi")
+        );
+    }
+
+    #[test]
+    fn detect_protocol_respects_unicode_word_boundaries() {
+        assert_eq!(
+            detect_protocol("Dépl Office", "Generic", PrinterKind::Local),
+            ("gdi", "office")
+        );
+        assert_eq!(
+            detect_protocol("Ézpl Printer", "Generic", PrinterKind::Local),
+            ("gdi", "office")
+        );
+        assert_eq!(
+            detect_protocol("Tscé Model", "Generic", PrinterKind::Local),
+            ("gdi", "office")
+        );
+        assert_eq!(
+            detect_protocol("Imprimante (EPL)", "Generic", PrinterKind::Local),
+            ("epl", "label")
         );
     }
 }

@@ -131,34 +131,99 @@ function extractCashierUserId(cashierObj, posStore, order) {
 }
 
 function posReceiptKey(safeRef, userId) {
-    // Reuse the in-flight key within 15s for double-fire dedupe; clear on terminal state for reprints.
-    const storeKey = `np.pos.key.${safeRef}.u${userId}`;
+    // Reuse the in-flight key within 15s for double-fire dedupe; persist per business day
+    // in localStorage (falling back to sessionStorage) so tab reloads never reset attempt to 1.
     const now = Date.now();
+    const day = new Date(now).toISOString().slice(0, 10).replace(/-/g, "");
+    const storeKey = `np.pos.key.${day}.${safeRef}.u${userId}`;
+    let raw = null;
+    try {
+        if (typeof localStorage !== "undefined" && localStorage) {
+            raw = localStorage.getItem(storeKey);
+        }
+    } catch (_err) { /* fall back to sessionStorage */ }
+    if (raw == null) {
+        try {
+            if (typeof sessionStorage !== "undefined" && sessionStorage) {
+                raw = sessionStorage.getItem(storeKey);
+            }
+        } catch (_err) { /* storage unavailable */ }
+    }
     let record = null;
     try {
-        record = JSON.parse(sessionStorage.getItem(storeKey) || "null");
-    } catch (_err) { /* storage unavailable */ }
+        record = JSON.parse(raw || "null");
+    } catch (_err) { /* ignore corrupt entry */ }
     if (record && record.key && now - (record.ts || 0) < 15000) {
         return record.key;
     }
     const attempt = (record && record.attempt ? record.attempt : 0) + 1;
-    const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     const key = `pos-${safeRef}-${day}-u${userId}-a${attempt}`;
+    const payload = JSON.stringify({ key, ts: now, attempt });
+    let saved = false;
     try {
-        sessionStorage.setItem(storeKey, JSON.stringify({ key, ts: now, attempt }));
-    } catch (_err) { /* ignore */ }
+        if (typeof localStorage !== "undefined" && localStorage) {
+            if (typeof localStorage.length === "number" && typeof localStorage.key === "function") {
+                const cutoff = new Date(now - 2 * 86400000).toISOString().slice(0, 10).replace(/-/g, "");
+                for (let i = localStorage.length - 1; i >= 0; i--) {
+                    const k = localStorage.key(i);
+                    const m = k && /^np\.pos\.key\.(\d{8})\./.exec(k);
+                    if (m && m[1] < cutoff) {
+                        localStorage.removeItem(k);
+                    }
+                }
+            }
+            localStorage.setItem(storeKey, payload);
+            saved = true;
+        }
+    } catch (_err) { /* fall back to sessionStorage */ }
+    if (!saved) {
+        try {
+            if (typeof sessionStorage !== "undefined" && sessionStorage) {
+                sessionStorage.setItem(storeKey, payload);
+            }
+        } catch (_err) { /* ignore */ }
+    }
     return key;
 }
 
 function finishPosReceiptAttempt(safeRef, userId) {
     // Keep the attempt counter as a tombstone so the next deliberate reprint gets a fresh key.
+    const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const storeKey = `np.pos.key.${day}.${safeRef}.u${userId}`;
+    let raw = null;
     try {
-        const storeKey = `np.pos.key.${safeRef}.u${userId}`;
-        const record = JSON.parse(sessionStorage.getItem(storeKey) || "null");
-        sessionStorage.setItem(storeKey, JSON.stringify({
-            key: null, ts: 0, attempt: record && record.attempt ? record.attempt : 1,
-        }));
+        if (typeof localStorage !== "undefined" && localStorage) {
+            raw = localStorage.getItem(storeKey);
+        }
+    } catch (_err) { /* fall back to sessionStorage */ }
+    if (raw == null) {
+        try {
+            if (typeof sessionStorage !== "undefined" && sessionStorage) {
+                raw = sessionStorage.getItem(storeKey);
+            }
+        } catch (_err) { /* ignore */ }
+    }
+    let record = null;
+    try {
+        record = JSON.parse(raw || "null");
     } catch (_err) { /* ignore */ }
+    const payload = JSON.stringify({
+        key: null, ts: 0, attempt: record && record.attempt ? record.attempt : 1,
+    });
+    let saved = false;
+    try {
+        if (typeof localStorage !== "undefined" && localStorage) {
+            localStorage.setItem(storeKey, payload);
+            saved = true;
+        }
+    } catch (_err) { /* fall back to sessionStorage */ }
+    if (!saved) {
+        try {
+            if (typeof sessionStorage !== "undefined" && sessionStorage) {
+                sessionStorage.setItem(storeKey, payload);
+            }
+        } catch (_err) { /* ignore */ }
+    }
 }
 
 async function resolveLivePosTarget(bridge) {
@@ -550,6 +615,42 @@ async function visibleReceiptToPngBytes(element, scale = 2) {
     } else if (typeof clone.appendChild === "function") {
         clone.appendChild(layoutFix);
     }
+    // Inline <canvas> elements (QR codes, barcodes) as PNG <img> tags for <foreignObject>.
+    if (
+        typeof element.querySelectorAll === "function" &&
+        typeof clone.querySelectorAll === "function" &&
+        typeof document !== "undefined" &&
+        typeof document.createElement === "function"
+    ) {
+        const sourceCanvases = element.querySelectorAll("canvas");
+        const cloneCanvases = clone.querySelectorAll("canvas");
+        for (let i = 0; i < sourceCanvases.length && i < cloneCanvases.length; i++) {
+            try {
+                const dataUrl = sourceCanvases[i].toDataURL("image/png");
+                if (!dataUrl || !dataUrl.startsWith("data:image/")) continue;
+                const img = document.createElement("img");
+                img.setAttribute("src", dataUrl);
+                if (sourceCanvases[i].width) img.setAttribute("width", String(sourceCanvases[i].width));
+                if (sourceCanvases[i].height) img.setAttribute("height", String(sourceCanvases[i].height));
+                const canvasStyle = cloneCanvases[i].getAttribute?.("style");
+                if (canvasStyle) img.setAttribute("style", canvasStyle);
+                cloneCanvases[i].replaceWith(img);
+            } catch (_err) {
+                // Leave cross-origin canvas as-is.
+            }
+        }
+    }
+    const rootDir =
+        element.getAttribute?.("dir") ||
+        (typeof window !== "undefined" && window.getComputedStyle && window.getComputedStyle(element)?.direction) ||
+        (typeof document !== "undefined" && document.documentElement?.dir) ||
+        "";
+    if (rootDir) clone.setAttribute("dir", rootDir);
+    const rootLang =
+        element.getAttribute?.("lang") ||
+        (typeof document !== "undefined" && document.documentElement?.lang) ||
+        "";
+    if (rootLang) clone.setAttribute("lang", rootLang);
     clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
     const serialized = new XMLSerializer()
         .serializeToString(clone)
@@ -583,6 +684,48 @@ async function visibleReceiptToPngBytes(element, scale = 2) {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(image, 0, 0, scaledW, scaledH);
+    return canvasToPngBytes(canvas);
+}
+
+async function textReceiptToPngBytes(text) {
+    if (typeof document === "undefined" || typeof document.createElement !== "function") {
+        throw new Error("canvas unavailable");
+    }
+    const FONT_PX = 14;
+    const LINE_H = 20;
+    const PAD = 16;
+    const WIDTH = 384;
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext?.("2d");
+    if (!ctx) {
+        throw new Error("2d context unavailable");
+    }
+    ctx.font = FONT_PX + "px 'Courier New', monospace";
+    const charW = ctx.measureText?.("M")?.width || 8.4;
+    const maxChars = Math.max(16, Math.floor((WIDTH - PAD * 2) / charW));
+    const lines = [];
+    for (const rawLine of String(text).replace(/\f/g, "\n").split("\n")) {
+        const line = rawLine.replace(/\r$/, "").replace(/\t/g, "    ");
+        if (line.length <= maxChars) {
+            lines.push(line);
+        } else {
+            for (let i = 0; i < line.length; i += maxChars) {
+                lines.push(line.slice(i, i + maxChars));
+            }
+        }
+    }
+    const height = Math.min(16000, PAD * 2 + Math.max(1, lines.length) * LINE_H);
+    canvas.width = WIDTH;
+    canvas.height = height;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, WIDTH, height);
+    ctx.fillStyle = "#000000";
+    ctx.font = FONT_PX + "px 'Courier New', monospace";
+    ctx.textBaseline = "top";
+    lines.forEach((line, idx) => {
+        const y = PAD + idx * LINE_H;
+        if (y < height - LINE_H) ctx.fillText(line, PAD, y);
+    });
     return canvasToPngBytes(canvas);
 }
 
@@ -651,45 +794,58 @@ async function printPosReceiptNatively(plugin, { order, basic = false, simplifie
                 }
             } catch (captureError) {
                 console.warn("Native Print: Odoo 20 receipt image capture failed.", captureError);
-                // GDI/virtual printers (e.g. OneNote) still need a useful
-                // receipt when the image path fails: plain text is valid
-                // for every mode, not only ESC/POS.
-                if (typeof bridge.printText === "function") {
-                    fallbackText = extractReceiptText(receiptEl);
-                }
+                fallbackText = extractReceiptText(receiptEl);
             }
         } catch (iframeError) {
             console.warn("Native Print: Odoo 20 receipt iframe generation failed.", iframeError);
-            if (typeof bridge.printText === "function") {
-                fallbackText = extractReceiptText(findVisibleReceiptElement());
-            }
         } finally {
             removeIframe(iframe);
             iframe = null;
         }
 
-        // The plugin API can be missing or incompatible in staging builds:
-        // fall back to the receipt Odoo has already rendered on screen.
-        if (!bytes && !fallbackText) {
+        // Prefer capturing the on-screen receipt as PNG before falling back to plain text.
+        if (!bytes) {
             const visible = findVisibleReceiptElement();
             if (visible) {
-                if (typeof bridge.printText === "function") {
-                    fallbackText = extractReceiptText(visible);
-                }
-                if (!fallbackText) {
-                    try {
-                        bytes = await withTimeout(
-                            visibleReceiptToPngBytes(visible),
-                            POS_CAPTURE_TIMEOUT_MS,
-                            "visibleReceiptToPngBytes",
-                        );
+                try {
+                    bytes = await withTimeout(
+                        visibleReceiptToPngBytes(visible),
+                        POS_CAPTURE_TIMEOUT_MS,
+                        "visibleReceiptToPngBytes",
+                    );
+                    if (bytes?.length) {
                         const widthPx = visible.offsetWidth || 300;
                         sourceWidthMm = Math.round(((widthPx * 25.4) / 96) * 10) / 10;
-                    } catch (visibleError) {
-                        console.warn("Native Print: on-screen receipt capture failed.", visibleError);
+                        fallbackText = null;
+                    } else {
+                        bytes = null;
                     }
+                } catch (visibleError) {
+                    console.warn("Native Print: on-screen receipt capture failed.", visibleError);
+                }
+                if (!bytes && !fallbackText) {
+                    fallbackText = extractReceiptText(visible);
                 }
             }
+        }
+        // Only ESC/POS printers accept raw text; rasterize text to PNG for GDI/virtual/label printers.
+        if (!bytes && fallbackText && (effectiveMode !== "escpos" || typeof bridge.printText !== "function")) {
+            try {
+                const pngBytes = await withTimeout(
+                    textReceiptToPngBytes(fallbackText),
+                    POS_CAPTURE_TIMEOUT_MS,
+                    "textReceiptToPngBytes",
+                );
+                if (pngBytes?.length) {
+                    bytes = pngBytes;
+                    if (!sourceWidthMm) {
+                        sourceWidthMm = 80;
+                    }
+                }
+            } catch (textRenderError) {
+                console.warn("Native Print: text-to-PNG receipt fallback failed.", textRenderError);
+            }
+            fallbackText = null;
         }
         if (!bytes && !fallbackText) {
             return {

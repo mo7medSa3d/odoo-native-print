@@ -132,6 +132,7 @@ export class NativePrintSystray extends Component {
 
         this._unmounted = false;
         this._pendingRefresh = false;
+        this._pendingForceSync = false;
 
         onMounted(() => {
             this.refreshStats().catch(() => {});
@@ -152,6 +153,7 @@ export class NativePrintSystray extends Component {
         onWillUnmount(() => {
             this._unmounted = true;
             this._pendingRefresh = false;
+            this._pendingForceSync = false;
             window.removeEventListener("click", this._onOutsideClick);
             window.removeEventListener(JOB_UPDATED_EVENT, this._onJobUpdated);
             if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
@@ -173,7 +175,12 @@ export class NativePrintSystray extends Component {
             );
             return;
         }
-        if (this.state.syncingPrinters) return;
+        if (this.state.syncingPrinters) {
+            if (showNotice) {
+                this._pendingForceSync = true;
+            }
+            return;
+        }
         this.state.syncingPrinters = true;
         try {
             // Live discovery only: printers belong to this PC and are
@@ -207,6 +214,12 @@ export class NativePrintSystray extends Component {
         } finally {
             if (!this._unmounted) {
                 this.state.syncingPrinters = false;
+                if (this._pendingForceSync) {
+                    this._pendingForceSync = false;
+                    this.syncDiscoveredPrinters(true).catch(() => {});
+                }
+            } else {
+                this._pendingForceSync = false;
             }
         }
     }

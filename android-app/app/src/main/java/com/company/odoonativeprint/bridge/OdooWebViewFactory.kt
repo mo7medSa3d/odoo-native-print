@@ -33,6 +33,23 @@ data class WebViewCallbacks(
  */
 object OdooWebViewFactory {
 
+    internal enum class ExternalSchemeAction { ALLOW_WEBVIEW, LAUNCH_EXTERNAL, BLOCK }
+
+    internal fun classifyNavigationScheme(scheme: String?, hasGesture: Boolean): ExternalSchemeAction {
+        val lower = scheme?.lowercase() ?: return ExternalSchemeAction.BLOCK
+        return when (lower) {
+            "http", "https" -> ExternalSchemeAction.ALLOW_WEBVIEW
+            "mailto", "tel" -> if (hasGesture) ExternalSchemeAction.LAUNCH_EXTERNAL else ExternalSchemeAction.BLOCK
+            else -> ExternalSchemeAction.BLOCK
+        }
+    }
+
+    internal fun isAllowedPopupUrl(url: String?, isUserGesture: Boolean): Boolean {
+        if (!isUserGesture || url.isNullOrBlank()) return false
+        val lower = url.trim().lowercase()
+        return lower.startsWith("http://") || lower.startsWith("https://")
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     fun create(
         context: Context,
@@ -49,7 +66,7 @@ object OdooWebViewFactory {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 databaseEnabled = true
-                javaScriptCanOpenWindowsAutomatically = true
+                javaScriptCanOpenWindowsAutomatically = false
                 setSupportMultipleWindows(true)
                 // Respect viewport meta tags and scale down wide content on narrow phones
                 // instead of forcing 100% physical-pixel scale and clipping horizontally.
@@ -107,15 +124,19 @@ object OdooWebViewFactory {
                 }
 
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                    val uri = request.url ?: return false
-                    val scheme = uri.scheme?.lowercase() ?: return false
-                    if (scheme != "http" && scheme != "https") {
-                        runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    val uri = request.url ?: return true
+                    return when (classifyNavigationScheme(uri.scheme, request.hasGesture())) {
+                        ExternalSchemeAction.ALLOW_WEBVIEW -> false
+                        ExternalSchemeAction.LAUNCH_EXTERNAL -> {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                )
+                            }
+                            true
                         }
-                        return true
+                        ExternalSchemeAction.BLOCK -> true
                     }
-                    return false
                 }
             }
 
@@ -134,9 +155,10 @@ object OdooWebViewFactory {
                     isUserGesture: Boolean,
                     resultMsg: Message?,
                 ): Boolean {
+                    if (!isUserGesture) return false
                     val href = view?.hitTestResult?.extra
                     if (!href.isNullOrBlank()) {
-                        routePopupUrl(context, configuredOrigin, href, callbacks)
+                        routePopupUrl(context, configuredOrigin, href, isUserGesture, callbacks)
                         return false
                     }
                     val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
@@ -145,7 +167,7 @@ object OdooWebViewFactory {
                         override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest): Boolean {
                             val url = request.url?.toString()
                             if (!url.isNullOrBlank()) {
-                                routePopupUrl(context, configuredOrigin, url, callbacks)
+                                routePopupUrl(context, configuredOrigin, url, isUserGesture, callbacks)
                             }
                             v.destroy()
                             return true
@@ -169,8 +191,10 @@ object OdooWebViewFactory {
         context: Context,
         configuredOrigin: String,
         url: String,
+        isUserGesture: Boolean,
         callbacks: WebViewCallbacks,
     ) {
+        if (!isAllowedPopupUrl(url, isUserGesture)) return
         if (OriginPolicy.isSameOrigin(configuredOrigin, url)) {
             callbacks.onOpenNewTab(url)
         } else {

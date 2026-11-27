@@ -72,7 +72,26 @@ async function fetchReportBody(url, readBody, timeoutMs = REPORT_FETCH_TIMEOUT_M
         if (!resp.ok) {
             return null;
         }
-        return await readBody(resp);
+        // Expired session redirects to /web/login or serves the login HTML form;
+        // return null so Odoo's own flow handles re-authentication instead of
+        // treating the login page as a missing-PDF-engine report.
+        if (resp.redirected && /\/web\/login\b/.test(String(resp.url || ""))) {
+            return null;
+        }
+        const body = await readBody(resp);
+        const contentType = String(resp.headers?.get?.("content-type") || "").toLowerCase();
+        if (!contentType || contentType.includes("text/html") || contentType.includes("application/xhtml")) {
+            const probe =
+                typeof body === "string"
+                    ? body
+                    : body instanceof ArrayBuffer
+                        ? new TextDecoder().decode(new Uint8Array(body, 0, Math.min(body.byteLength, 8192)))
+                        : "";
+            if (probe.includes("oe_login_form")) {
+                return null;
+            }
+        }
+        return body;
     } finally {
         if (timer !== null) {
             clearTimeout(timer);
@@ -491,15 +510,16 @@ async function printReportTextWhenPdfEngineMissing(action, options, env, bridge,
             env,
         ).catch(() => {});
     } catch (error) {
-        await rpc("/native_print/job_status", Object.assign({
+        rpc("/native_print/job_status", Object.assign({
             idempotency_key: key,
             state: "failed",
             error_code: "BRIDGE_ERROR",
             device: target.printer.name,
             report_name: action.report_name,
             byte_size: textBytes,
-        }, source.model ? { source_model: source.model } : {}, source.ids ? { source_ids: source.ids } : {}), { silent: true }).catch(() => {});
-        notifyJobUpdated();
+        }, source.model ? { source_model: source.model } : {}, source.ids ? { source_ids: source.ids } : {}), { silent: true })
+            .catch(() => {})
+            .finally(() => notifyJobUpdated());
         console.warn("Native Print: text fallback for a report without a PDF engine failed.", error);
         return undefined;
     }
@@ -649,7 +669,7 @@ async function handleReportSubmission(action, options, env, bridge) {
             // the exception would escape the fallback path, the user
             // would get an RPC error instead of the file, and the
             // download below would never happen.
-            await rpc("/native_print/job_status", {
+            rpc("/native_print/job_status", {
                 idempotency_key: textKey,
                 state: "failed",
                 error_code: "BRIDGE_ERROR",
@@ -664,8 +684,9 @@ async function handleReportSubmission(action, options, env, bridge) {
                 mode: textAsRaw ? rule.mode : "gdi",
                 pages: 1,
                 byte_size: textBytes,
-            }, { silent: true }).catch(() => {});
-            notifyJobUpdated();
+            }, { silent: true })
+                .catch(() => {})
+                .finally(() => notifyJobUpdated());
             console.warn("Native Print: text print bridge call failed.", error);
             notifyUser(
                 env,
@@ -783,7 +804,7 @@ async function handleReportSubmission(action, options, env, bridge) {
     } catch (error) {
         // Best-effort like the text path: never let failure logging
         // break the fallback download (see the qweb-text branch).
-        await rpc("/native_print/job_status", {
+        rpc("/native_print/job_status", {
             idempotency_key: idempotencyKey,
             state: "failed",
             error_code: "BRIDGE_ERROR",
@@ -798,8 +819,9 @@ async function handleReportSubmission(action, options, env, bridge) {
             color: rule.color !== false,
             mode: rule.mode || undefined,
             byte_size: bytes.length,
-        }, { silent: true }).catch(() => {});
-        notifyJobUpdated();
+        }, { silent: true })
+            .catch(() => {})
+            .finally(() => notifyJobUpdated());
         console.warn("Native Print: PDF print bridge call failed.", error);
         notifyUser(
             env,
@@ -846,7 +868,8 @@ registry.category("ir.actions.report handlers").add(
             }
         })();
         const guardKey =
-            `${action.report_name}|` +
+            `${action.report_name || action.report_url || ""}|` +
+            `${action.report_type || ""}|` +
             JSON.stringify(
                 (action.context &&
                     (action.context.active_ids ||

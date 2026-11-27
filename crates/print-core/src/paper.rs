@@ -160,7 +160,7 @@ pub fn match_paper(
             kind: MatchKind::Roll,
             form: Form {
                 name: f.name.clone(),
-                size: page,
+                size: PageSize::new(f.size.width_mm, page.height_mm),
                 roll: true,
                 paper_id: f.paper_id,
             },
@@ -399,15 +399,14 @@ pub fn match_paper_auto(
                     && within_rel(f.size.height_mm, page.height_mm);
                 let rotated = within_rel(f.size.width_mm, page.height_mm)
                     && within_rel(f.size.height_mm, page.width_mm);
+                let direct_delta = (f.size.width_mm - page.width_mm).abs()
+                    + (f.size.height_mm - page.height_mm).abs();
+                let rotated_delta = (f.size.width_mm - page.height_mm).abs()
+                    + (f.size.height_mm - page.width_mm).abs();
                 match (direct, rotated) {
-                    (true, _) => Some(
-                        (f.size.width_mm - page.width_mm).abs()
-                            + (f.size.height_mm - page.height_mm).abs(),
-                    ),
-                    (false, true) => Some(
-                        (f.size.width_mm - page.height_mm).abs()
-                            + (f.size.height_mm - page.width_mm).abs(),
-                    ),
+                    (true, true) => Some(direct_delta.min(rotated_delta)),
+                    (true, false) => Some(direct_delta),
+                    (false, true) => Some(rotated_delta),
                     (false, false) => None,
                 }
             };
@@ -643,7 +642,29 @@ mod tests {
             assert_eq!(m.form.size.height_mm, h);
         }
         assert!(match_paper(PageSize::a5(), &forms, ScalePolicy::Strict).is_err());
+        // Width within roll tolerance clamps to the roll's physical width.
+        let clamped =
+            match_paper(PageSize::new(81.5, 250.0), &forms, ScalePolicy::Strict).unwrap();
+        assert_eq!(clamped.kind, MatchKind::Roll);
+        assert_eq!(clamped.form.size.width_mm, 80.0);
+        assert_eq!(clamped.form.size.height_mm, 250.0);
         let narrow = vec![Form::roll("58mm Roll", 58.0)];
         assert!(match_paper(PageSize::new(80.0, 100.0), &narrow, ScalePolicy::Strict).is_err());
+    }
+
+    #[test]
+    fn close_sheet_fallback_picks_tighter_rotated_orientation() {
+        let caps = PrinterCapabilities {
+            forms: vec![
+                // Direct delta = 12mm, rotated delta = 4mm (both within 10%).
+                Form::sheet("RotatedCloser", PageSize::new(98.0, 104.0)),
+                // Direct delta = 8mm, rotated delta = 12mm (both within 10%).
+                Form::sheet("DirectMediocre", PageSize::new(102.0, 96.0)),
+            ],
+            ..Default::default()
+        };
+        let matched = match_paper_auto(PageSize::new(106.0, 100.0), &caps).unwrap();
+        assert_eq!(matched.kind, MatchKind::NearestLargerFit);
+        assert_eq!(matched.form.name, "RotatedCloser");
     }
 }

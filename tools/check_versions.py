@@ -47,6 +47,8 @@ def main():
     if android_ver is not None:
         versions["android-app/app/build.gradle.kts"] = android_ver
     for label, rel, prefix in (
+        ("odoo17", "odoo17/native_print/__manifest__.py", "17.0."),
+        ("odoo18", "odoo18/native_print/__manifest__.py", "18.0."),
         ("odoo19", "odoo19/native_print/__manifest__.py", "19.0."),
         ("odoo20", "odoo20/native_print/__manifest__.py", "20.0."),
     ):
@@ -70,7 +72,7 @@ def main():
     if not tag and ref.startswith("refs/tags/"):
         tag = ref.removeprefix("refs/tags/")
     is_tag = (ref_type == "tag") or ref.startswith("refs/tags/") or (not ref_type and not ref and tag.startswith("v"))
-    if is_tag and tag.startswith("v") and tag.removeprefix("v").split("-")[0] != app_version:
+    if is_tag and tag.removeprefix("v").split("-")[0] != app_version:
         print(f"TAG MISMATCH: tag {tag} vs app version {app_version}")
         return 1
     print(f"app version consistent everywhere: {app_version}")

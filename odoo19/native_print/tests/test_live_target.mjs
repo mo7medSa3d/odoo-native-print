@@ -985,6 +985,27 @@ try {
         const syncCall = globalThis.__npSystrayRpcs.find((c) => c.url === "/native_print/sync_device" && c.params.name === "CamelPrinter");
         eq(Boolean(syncCall), true, "sync_device called for camelCase printerClass");
         eq(syncCall.params.printer_class, "thermal", "camelCase printerClass normalized to printer_class");
+        // Manual refresh clicked during an in-flight background sync queues _pendingForceSync.
+        let releaseBg;
+        const overviewCalls = [];
+        globalThis.window.__NATIVE_PRINT__ = {
+            appOverview: (opts) => {
+                overviewCalls.push(Boolean(opts && opts.force));
+                if (overviewCalls.length === 1) {
+                    return new Promise((r) => { releaseBg = () => r({ printers: [] }); });
+                }
+                return Promise.resolve({ printers: [{ name: "QueuedPrinter", kind: "local", is_default: true }] });
+            },
+        };
+        const bgSync = comp2.syncDiscoveredPrinters(false);
+        await comp2.syncDiscoveredPrinters(true);
+        eq(comp2._pendingForceSync, true, "manual refresh queues _pendingForceSync while background sync is in flight");
+        releaseBg();
+        await bgSync;
+        await new Promise((r) => setTimeout(r, 10));
+        eq(JSON.stringify(overviewCalls), JSON.stringify([false, true]), "queued manual refresh runs forced appOverview after background poll");
+        eq(comp2.state.printersCount, 1, "queued manual refresh updates discovered printers");
+
         globalThis.__npOnWillUnmount();
         eq(docListeners.length, 0, "onWillUnmount removes visibilitychange listener");
     } finally {
@@ -1087,6 +1108,68 @@ try {
     } finally {
         globalThis.fetch = origFetch9;
         globalThis.setTimeout = origSetTimeout9;
+        delete globalThis.window.__NATIVE_PRINT__;
+    }
+}
+
+// 10. Expired session /web/login HTML must return undefined instead of "no PDF engine" fallback.
+{
+    const origFetchLogin = globalThis.fetch;
+    try {
+        let bridgePrints = 0;
+        let fetchCount = 0;
+        notices.length = 0;
+        globalThis.window.__NATIVE_PRINT__ = {
+            listPrinters: async () => [{ name: "HP LaserJet", driver: "HP PCL", kind: "local", is_default: true }],
+            printerCapabilities: async () => ({ forms: [], color: true }),
+            printPdf: async () => { bridgePrints++; return "never"; },
+            printImage: async () => { bridgePrints++; return "never"; },
+            printText: async () => { bridgePrints++; return "never"; },
+        };
+        // 10a. Redirect to /web/login
+        globalThis.fetch = async () => {
+            fetchCount++;
+            return {
+                ok: true,
+                redirected: true,
+                url: "https://odoo.example/web/login?redirect=%2Freport%2Fpdf%2Faccount.report_invoice%2F1",
+                headers: { get: () => "text/html; charset=utf-8" },
+                arrayBuffer: async () => new TextEncoder().encode("<html>login</html>").buffer,
+            };
+        };
+        const redirectRes = await registeredHandler(
+            { report_type: "qweb-pdf", report_name: "account.report_invoice", context: { active_ids: [1] } },
+            {},
+            testEnv,
+        );
+        eq(redirectRes, undefined, "redirected /web/login falls back to Odoo");
+        eq(fetchCount, 1, "redirected /web/login does not fetch /report/text/");
+        eq(bridgePrints, 0, "redirected /web/login never sends to printer");
+        eq(notices.some((n) => /no PDF engine/i.test(n.msg)), false, "redirected /web/login emits no PDF engine warning");
+
+        // 10b. Direct 200 HTML containing oe_login_form
+        fetchCount = 0;
+        globalThis.fetch = async () => {
+            fetchCount++;
+            return {
+                ok: true,
+                redirected: false,
+                url: "https://odoo.example/report/pdf/account.report_invoice/2",
+                headers: { get: () => "text/html; charset=utf-8" },
+                arrayBuffer: async () => new TextEncoder().encode('<html><body><form class="oe_login_form" action="/web/login"></form></body></html>').buffer,
+            };
+        };
+        const formRes = await registeredHandler(
+            { report_type: "qweb-pdf", report_name: "account.report_invoice", context: { active_ids: [2] } },
+            {},
+            testEnv,
+        );
+        eq(formRes, undefined, "oe_login_form HTML falls back to Odoo");
+        eq(fetchCount, 1, "oe_login_form HTML does not fetch /report/text/");
+        eq(bridgePrints, 0, "oe_login_form HTML never sends to printer");
+        eq(notices.some((n) => /no PDF engine/i.test(n.msg)), false, "oe_login_form HTML emits no PDF engine warning");
+    } finally {
+        globalThis.fetch = origFetchLogin;
         delete globalThis.window.__NATIVE_PRINT__;
     }
 }

@@ -148,4 +148,51 @@ class WebBridgeSecurityTest {
         assertFalse(res.getBoolean("ok"))
         assertFalse(decoderCalled, "Base64 decoder must not run on oversized payloads")
     }
+
+    @Test
+    fun `webview scheme policy allows only gesture-initiated mailto and tel externally`() {
+        assertEquals(
+            OdooWebViewFactory.ExternalSchemeAction.ALLOW_WEBVIEW,
+            OdooWebViewFactory.classifyNavigationScheme("https", hasGesture = false),
+        )
+        assertEquals(
+            OdooWebViewFactory.ExternalSchemeAction.ALLOW_WEBVIEW,
+            OdooWebViewFactory.classifyNavigationScheme("http", hasGesture = false),
+        )
+        assertEquals(
+            OdooWebViewFactory.ExternalSchemeAction.LAUNCH_EXTERNAL,
+            OdooWebViewFactory.classifyNavigationScheme("mailto", hasGesture = true),
+        )
+        assertEquals(
+            OdooWebViewFactory.ExternalSchemeAction.LAUNCH_EXTERNAL,
+            OdooWebViewFactory.classifyNavigationScheme("TEL", hasGesture = true),
+        )
+        assertEquals(
+            OdooWebViewFactory.ExternalSchemeAction.BLOCK,
+            OdooWebViewFactory.classifyNavigationScheme("mailto", hasGesture = false),
+        )
+        assertEquals(
+            OdooWebViewFactory.ExternalSchemeAction.BLOCK,
+            OdooWebViewFactory.classifyNavigationScheme("tel", hasGesture = false),
+        )
+        for (blocked in listOf("intent", "file", "content", "data", "javascript", "market", "custom", null)) {
+            assertEquals(
+                OdooWebViewFactory.ExternalSchemeAction.BLOCK,
+                OdooWebViewFactory.classifyNavigationScheme(blocked, hasGesture = true),
+                "Scheme $blocked must be blocked",
+            )
+        }
+    }
+
+    @Test
+    fun `popup routing allows only http and https with user gesture`() {
+        assertTrue(OdooWebViewFactory.isAllowedPopupUrl("https://erp.company.com/report/1", isUserGesture = true))
+        assertTrue(OdooWebViewFactory.isAllowedPopupUrl("http://docs.example/help", isUserGesture = true))
+        assertFalse(OdooWebViewFactory.isAllowedPopupUrl("https://erp.company.com/report/1", isUserGesture = false))
+        assertFalse(OdooWebViewFactory.isAllowedPopupUrl("javascript:alert(1)", isUserGesture = true))
+        assertFalse(OdooWebViewFactory.isAllowedPopupUrl("intent://scan/#Intent;end", isUserGesture = true))
+        assertFalse(OdooWebViewFactory.isAllowedPopupUrl("file:///etc/passwd", isUserGesture = true))
+        assertFalse(OdooWebViewFactory.isAllowedPopupUrl("mailto:a@b.com", isUserGesture = true))
+        assertFalse(OdooWebViewFactory.isAllowedPopupUrl("   ", isUserGesture = true))
+    }
 }

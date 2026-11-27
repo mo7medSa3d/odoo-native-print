@@ -13,7 +13,13 @@ const overview = {
   recentJobs: [{ id: "job-1", report: "Invoice", printer: "HP LaserJet", pages: 2, bytes: 2048, state: "queued", attempts: 1, error_code: "" }],
 };
 const dom = new JSDOM(html, { url: "http://tauri.localhost/", runScripts: "dangerously", pretendToBeVisual: true,
-  beforeParse(w) { w.__NATIVE_PRINT__ = { appOverview: async () => JSON.parse(JSON.stringify(overview)) }; } });
+  beforeParse(w) {
+    w.__printerFormsImpl = async () => [];
+    w.__NATIVE_PRINT__ = {
+      appOverview: async () => JSON.parse(JSON.stringify(overview)),
+      printerForms: (name) => w.__printerFormsImpl(name),
+    };
+  } });
 const w = dom.window;
 await sleep(300);
 
@@ -72,5 +78,36 @@ ok("toast: duplicate deduped", ![...c.children].some(el => el.textContent.includ
 ok("toast: has close button + icon", !!c.children[0].querySelector(".toast-close") && !!c.children[0].querySelector(".toast-icon"));
 c.children[0].querySelector(".toast-close").click();
 ok("toast: close button dismisses", c.children.length === 2);
+
+// inspectForms: error persists across 5s poll re-render and re-localizes on lang switch
+w.__printerFormsImpl = async () => { throw new Error("driver_timeout"); };
+await w.inspectForms("HP LaserJet", 0);
+const errBox1 = w.document.querySelector('.forms-box[data-printer="HP LaserJet"]');
+ok("inspectForms: rejection shows localized error", !!errBox1 && !errBox1.classList.contains("hidden") && errBox1.textContent.trim().length > 0);
+const errTextBeforePoll = errBox1.textContent.trim();
+overview.printers[0].status = "busy"; // force grid re-render on next poll
+await w.refreshAll({ silent: true });
+const errBox2 = w.document.querySelector('.forms-box[data-printer="HP LaserJet"]');
+ok("inspectForms: error survives 5s poll re-render", !!errBox2 && !errBox2.classList.contains("hidden") && errBox2.textContent.trim() === errTextBeforePoll);
+
+// inspectForms: printer reorder mid-fetch still populates the matching [data-printer] box
+await w.inspectForms("HP LaserJet", 0); // close first
+let resolveReorderForms;
+w.__printerFormsImpl = () => new Promise((r) => { resolveReorderForms = r; });
+const reorderPromise = w.inspectForms("HP LaserJet", 0);
+overview.printers = [
+  { name: "Zebra Rearranged", kind: "local", is_default: false, status: "ready", port: "USB002", driver: "Zebra" },
+  { name: "HP LaserJet", kind: "local", is_default: true, status: "ready", port: "USB001", driver: "HP" },
+];
+await w.refreshAll({ silent: true });
+resolveReorderForms([{ name: "A5 Custom", size: { width_mm: 148, height_mm: 210 }, roll: false }]);
+await reorderPromise;
+const hpBoxAfterReorder = w.document.querySelector('.forms-box[data-printer="HP LaserJet"]');
+const zebraBoxAfterReorder = w.document.querySelector('.forms-box[data-printer="Zebra Rearranged"]');
+ok("inspectForms: printer reorder mid-fetch writes to [data-printer] box",
+  !!hpBoxAfterReorder && hpBoxAfterReorder.id === "forms-box-1" &&
+  hpBoxAfterReorder.innerHTML.includes("A5 Custom") &&
+  !!zebraBoxAfterReorder && !zebraBoxAfterReorder.innerHTML.includes("A5 Custom"));
+
 console.log(`behavior checks: ${pass} pass, ${fail} fail`);
 process.exit(fail ? 1 : 0);

@@ -354,7 +354,7 @@
   });
 
   window.addEventListener("pagehide", function () { stopCountdown(); disarmNavWatchdog(); });
-  window.addEventListener("storage", applyPrefs);
+  window.addEventListener("storage", function (ev) { if (!ev || ev.key === "np_cc_lang" || ev.key === "np_cc_theme") applyPrefs(); });
   applyPrefs();
 
   // Use lightweight app_identity instead of heavyweight app_overview so startup never blocks on PDFium/spooler.

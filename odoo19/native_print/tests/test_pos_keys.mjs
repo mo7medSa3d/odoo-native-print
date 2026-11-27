@@ -19,12 +19,19 @@ function extract(name) {
     }
     throw new Error("unbalanced");
 }
-const store = new Map();
-globalThis.sessionStorage = {
-    getItem: (k) => (store.has(k) ? store.get(k) : null),
-    setItem: (k, v) => store.set(k, String(v)),
-    removeItem: (k) => store.delete(k),
-};
+function makeWebStorage(map = new Map()) {
+    return {
+        get length() { return map.size; },
+        key: (i) => Array.from(map.keys())[i] ?? null,
+        getItem: (k) => (map.has(k) ? map.get(k) : null),
+        setItem: (k, v) => map.set(k, String(v)),
+        removeItem: (k) => map.delete(k),
+    };
+}
+const localStore = new Map();
+let sessionStore = new Map();
+globalThis.localStorage = makeWebStorage(localStore);
+globalThis.sessionStorage = makeWebStorage(sessionStore);
 eval(extract("extractCashierUserId") + "\n" + extract("posReceiptKey") + "\n" + extract("finishPosReceiptAttempt") +
     "\nglobalThis.__u = extractCashierUserId; globalThis.__k = posReceiptKey; globalThis.__c = finishPosReceiptAttempt;");
 
@@ -47,9 +54,46 @@ assert.notStrictEqual(other, k3);
 assert.strictEqual(globalThis.__k("Order_1", "9"), other, "second cashier keeps own in-flight key");
 assert.strictEqual(globalThis.__k("Order_1", "7"), k3, "first cashier record untouched");
 // Stale record (>15s without terminal state) advances to a fresh attempt.
-store.set("np.pos.key.Order_3.u7", JSON.stringify({ key: "pos-Order_3-20261119-u7-a1", ts: Date.now() - 20000, attempt: 1 }));
+const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+localStore.set(`np.pos.key.${today}.Order_3.u7`, JSON.stringify({ key: `pos-Order_3-${today}-u7-a1`, ts: Date.now() - 20000, attempt: 1 }));
 const staleNext = globalThis.__k("Order_3", "7");
 assert.match(staleNext, /-a2$/, "stale >15s record advances to next attempt");
+
+// Persistence across simulated tab reload: clearing sessionStorage keeps localStorage tombstone.
+const r1 = globalThis.__k("Order_Reload", "7");
+assert.match(r1, /-a1$/);
+globalThis.__c("Order_Reload", "7");
+sessionStore = new Map();
+globalThis.sessionStorage = makeWebStorage(sessionStore);
+const r2 = globalThis.__k("Order_Reload", "7");
+assert.match(r2, /-a2$/, "reprint after tab reload advances to a2 instead of colliding with a1");
+assert.notStrictEqual(r2, r1);
+
+// Pruning: entries older than 2 days are removed on write; recent entries are preserved.
+const oldDay = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10).replace(/-/g, "");
+const keepDay = new Date(Date.now() - 1 * 86400000).toISOString().slice(0, 10).replace(/-/g, "");
+localStore.set(`np.pos.key.${oldDay}.Order_Old.u7`, JSON.stringify({ key: null, ts: 0, attempt: 1 }));
+localStore.set(`np.pos.key.${keepDay}.Order_Keep.u7`, JSON.stringify({ key: null, ts: 0, attempt: 1 }));
+globalThis.__k("Order_PruneTrigger", "7");
+assert.strictEqual(localStore.has(`np.pos.key.${oldDay}.Order_Old.u7`), false, "entries older than 2 days are pruned on write");
+assert.strictEqual(localStore.has(`np.pos.key.${keepDay}.Order_Keep.u7`), true, "entries within 2 days are kept");
+
+// Fallback to sessionStorage when localStorage throws.
+const prevLsFallback = globalThis.localStorage;
+globalThis.localStorage = {
+    getItem() { throw new Error("SecurityError"); },
+    setItem() { throw new Error("SecurityError"); },
+    removeItem() { throw new Error("SecurityError"); },
+};
+try {
+    const fb1 = globalThis.__k("Order_Fallback", "7");
+    assert.match(fb1, /-a1$/);
+    globalThis.__c("Order_Fallback", "7");
+    const fb2 = globalThis.__k("Order_Fallback", "7");
+    assert.match(fb2, /-a2$/, "falls back to sessionStorage when localStorage throws");
+} finally {
+    globalThis.localStorage = prevLsFallback;
+}
 
 // Cashier ID extraction: an object without .id falls through instead of returning "0".
 assert.strictEqual(

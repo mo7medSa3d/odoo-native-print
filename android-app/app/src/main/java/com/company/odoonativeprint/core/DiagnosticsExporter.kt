@@ -15,7 +15,7 @@ import java.io.File
  */
 object DiagnosticsExporter {
 
-    fun exportAndShare(
+    fun exportBundle(
         context: Context,
         config: AppConfigStore,
         queue: JobQueueEngine,
@@ -43,7 +43,10 @@ object DiagnosticsExporter {
         }
 
         file.writeText(payload.toString(2), Charsets.UTF_8)
+        return file
+    }
 
+    fun shareBundle(context: Context, file: File) {
         val uri = FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
@@ -57,6 +60,12 @@ object DiagnosticsExporter {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(Intent.createChooser(shareIntent, "تصدير حزمة التشخيص").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        return file
     }
+
+    fun exportAndShare(
+        context: Context,
+        config: AppConfigStore,
+        queue: JobQueueEngine,
+        printers: List<PrinterInfo>,
+    ): File = exportBundle(context, config, queue, printers).also { shareBundle(context, it) }
 }

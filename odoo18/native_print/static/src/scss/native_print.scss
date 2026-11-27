@@ -1,0 +1,498 @@
+/* Yaseir Print — Odoo 19 Systray (Light & Dark Theme Tokens) */
+@mixin np-light-tokens {
+    --np-surface: rgba(255, 255, 255, 0.90);
+    --np-card: #fafafa;
+    --np-subtle: #f3f4f6;
+    --np-border: #e7e4e4;
+    --np-border-strong: #858894;
+    --np-text: #0e142b;
+    --np-text-secondary: #2d344d;
+    --np-text-muted: #555c72;
+    --np-brand: #1e54e6;
+    --np-brand-fill: #2e67ff;
+    --np-brand-hover: #1d54e8;
+    --np-brand-fg: #ffffff;
+    --np-brand-soft: rgba(46, 103, 255, 0.10);
+    --np-info-bg: #edf3ff;
+    --np-info-border: #c2d6ff;
+    --np-ok: #046c4e;
+    --np-ok-bg: #e6fbf5;
+    --np-ok-border: #9be8d2;
+    --np-ok-ring: rgba(4, 108, 78, 0.22);
+    --np-err: #b8370a;
+    --np-err-bg: #fff0eb;
+    --np-err-border: #ffc4b0;
+    --np-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.90);
+    --np-shadow: 0 20px 48px rgba(14, 20, 43, 0.14), 0 4px 12px rgba(14, 20, 43, 0.06);
+    --np-brand-shadow: 0 6px 16px -6px rgba(46, 103, 255, 0.45);
+    --np-focus-ring: 0 0 0 3px rgba(46, 106, 255, 0.28);
+}
+
+@mixin np-dark-tokens {
+    --np-surface: rgba(15, 15, 15, 0.90);
+    --np-card: #0f0f0f;
+    --np-subtle: #181818;
+    --np-border: #26272e;
+    --np-border-strong: #323e62;
+    --np-text: #ffffff;
+    --np-text-secondary: #d9d9d9;
+    --np-text-muted: #9397a8;
+    --np-brand: #6b96ff;
+    --np-brand-fill: #2b65ff;
+    --np-brand-hover: #1d54e8;
+    --np-brand-fg: #ffffff;
+    --np-brand-soft: rgba(43, 101, 255, 0.18);
+    --np-info-bg: #000e39;
+    --np-info-border: #323e62;
+    --np-ok: #00eeba;
+    --np-ok-bg: rgba(0, 238, 186, 0.14);
+    --np-ok-border: rgba(0, 238, 186, 0.34);
+    --np-ok-ring: rgba(0, 238, 186, 0.28);
+    --np-err: #ff8559;
+    --np-err-bg: rgba(255, 108, 53, 0.16);
+    --np-err-border: rgba(255, 108, 53, 0.36);
+    --np-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+    --np-shadow: 0 22px 54px rgba(0, 0, 0, 0.80);
+    --np-brand-shadow: 0 6px 16px -6px rgba(43, 101, 255, 0.45);
+    --np-focus-ring: 0 0 0 3px rgba(46, 106, 255, 0.36);
+}
+
+@keyframes np-pop-in {
+    from {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.o_native_print_systray {
+    /* Always follow Odoo's active theme (Light by default); never force dark from OS prefers-color-scheme on a Light Odoo page. */
+    @include np-light-tokens;
+    --np-dur-fast: 140ms;
+    --np-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+    .o_dark_mode &,
+    body.o_web_client_dark &,
+    [data-color-scheme="dark"] &,
+    [data-bs-theme="dark"] & {
+        @include np-dark-tokens;
+    }
+
+    [data-color-scheme="light"] &,
+    [data-bs-theme="light"] & {
+        @include np-light-tokens;
+    }
+
+    button,
+    .btn {
+        transition:
+            background-color var(--np-dur-fast) var(--np-ease-out),
+            border-color var(--np-dur-fast) var(--np-ease-out),
+            color var(--np-dur-fast) var(--np-ease-out),
+            transform var(--np-dur-fast) var(--np-ease-out);
+
+        &:active:not(:disabled) {
+            transform: scale(0.97);
+        }
+
+        &:focus-visible {
+            outline: 2px solid var(--np-brand);
+            outline-offset: 2px;
+            box-shadow: var(--np-focus-ring);
+        }
+    }
+
+    .o_native_print_dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+    }
+    .o_native_print_dot_online {
+        background-color: var(--np-ok);
+        box-shadow: 0 0 0 2px var(--np-ok-ring);
+    }
+    .o_native_print_dot_browser {
+        background-color: var(--np-text-muted);
+    }
+
+    .o_native_print_dropdown {
+        top: 100%;
+        margin-top: 8px;
+        inset-inline-start: auto;
+        inset-inline-end: 0;
+        width: 348px;
+        max-width: 92vw;
+        max-height: calc(100vh - 64px);
+        overflow-y: auto;
+        z-index: 1055;
+        padding: 14px;
+        background-color: var(--np-surface);
+        backdrop-filter: blur(22px) saturate(180%);
+        -webkit-backdrop-filter: blur(22px) saturate(180%);
+        color: var(--np-text);
+        border: 1px solid var(--np-border);
+        border-radius: 20px;
+        box-shadow: var(--np-shadow), var(--np-glass-highlight);
+        animation: np-pop-in var(--np-dur-fast) var(--np-ease-out);
+    }
+
+    /* Header */
+    .np-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding-bottom: 10px;
+        margin-bottom: 10px;
+        border-bottom: 1px solid var(--np-border);
+    }
+    .np-brand-tile {
+        width: 36px;
+        height: 36px;
+        flex: 0 0 36px;
+        border-radius: 10px;
+        background: transparent;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        box-shadow: var(--np-brand-shadow);
+        overflow: hidden;
+    }
+    .np-head-text {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+    .np-brand-name {
+        font-weight: 700;
+        font-size: 0.96rem;
+        line-height: 1.2;
+        letter-spacing: -0.01em;
+        color: var(--np-text);
+    }
+    .np-head-sub {
+        font-size: 0.72rem;
+        line-height: 1.35;
+        margin-top: 1px;
+        color: var(--np-text-muted);
+    }
+    .np-mode-pill {
+        flex: 0 0 auto;
+        font-weight: 600;
+        font-size: 0.72rem;
+        padding: 4px 10px;
+        border-radius: 999px;
+        max-width: none;
+        white-space: nowrap;
+        overflow: visible;
+        background: var(--np-subtle) !important;
+        color: var(--np-text) !important;
+        border: 1px solid var(--np-border);
+    }
+    .np-mode-pill.text-bg-success {
+        background: var(--np-ok-bg) !important;
+        color: var(--np-ok) !important;
+        border-color: var(--np-ok-border);
+    }
+
+    /* Info boxes (concentric inner radius: 20px - 8px = 12px) */
+    .np-info-box {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        background: var(--np-info-bg);
+        border: 1px solid var(--np-info-border);
+        border-radius: 12px;
+        padding: 10px 12px;
+        font-size: 0.8rem;
+        line-height: 1.5;
+        color: var(--np-text-secondary);
+        margin-bottom: 10px;
+    }
+    .np-info-rows {
+        flex-direction: column;
+        gap: 5px;
+    }
+    .np-info-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+    }
+    .np-info-icon {
+        color: var(--np-brand);
+        margin-top: 2px;
+    }
+    .np-info-row .np-info-icon {
+        margin-top: 0;
+    }
+    .np-info-label {
+        color: var(--np-text-muted);
+    }
+    .np-info-value {
+        margin-inline-start: auto;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        color: var(--np-text);
+        max-width: 55%;
+    }
+
+    /* Printer picker */
+    .np-printer-list {
+        margin-bottom: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .np-printer-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 10px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        transition:
+            background-color var(--np-dur-fast) var(--np-ease-out),
+            border-color var(--np-dur-fast) var(--np-ease-out);
+        &:hover {
+            background: var(--np-subtle);
+            border-color: var(--np-border);
+        }
+    }
+    .np-printer-text {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+    }
+    .np-printer-name {
+        font-weight: 600;
+        font-size: 0.82rem;
+        line-height: 1.3;
+        color: var(--np-text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .np-printer-meta {
+        font-size: 0.7rem;
+        color: var(--np-text-muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .np-inuse-pill {
+        font-size: 0.68rem;
+        font-weight: 600;
+        padding: 3px 8px;
+        border-radius: 999px;
+    }
+    .np-use-btn {
+        font-size: 0.74rem;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 8px;
+        color: var(--np-brand);
+        text-decoration: none;
+        &:hover {
+            background: var(--np-brand-soft);
+            color: var(--np-brand);
+        }
+    }
+
+    .np-refresh-btn {
+        margin-bottom: 10px;
+        border-radius: 10px;
+        border-color: var(--np-border);
+        color: var(--np-text-secondary);
+        background: var(--np-card);
+        &:hover:not(:disabled) {
+            background: var(--np-subtle);
+            color: var(--np-text);
+            border-color: var(--np-border-strong);
+        }
+    }
+
+    /* Job stats cards (concentric 12px radius) */
+    .np-stats {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+    .np-stat {
+        position: relative;
+        overflow: hidden;
+        background: var(--np-card);
+        border: 1px solid var(--np-border);
+        border-radius: 12px;
+        padding: 9px 6px;
+        text-align: center;
+    }
+    .np-stat::before {
+        content: "";
+        position: absolute;
+        inset-block-start: 0;
+        inset-inline: 0;
+        height: 2px;
+        background: var(--np-border);
+    }
+    .np-stat-active::before { background: var(--np-brand-fill); }
+    .np-stat-done::before { background: var(--np-ok); }
+    .np-stat-failed::before { background: var(--np-err); }
+    .np-stat-alert {
+        background: var(--np-err-bg);
+        border-color: var(--np-err-border);
+    }
+    .np-stat-num {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        font-size: 1.08rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        line-height: 1.2;
+        color: var(--np-text);
+    }
+    .np-stat-alert .np-stat-num { color: var(--np-err); }
+    .np-stat-label {
+        font-size: 0.69rem;
+        font-weight: 500;
+        color: var(--np-text-muted);
+        margin-top: 2px;
+    }
+    .np-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        display: inline-block;
+    }
+    .np-dot-active { background: var(--np-brand-fill); }
+    .np-dot-done { background: var(--np-ok); }
+    .np-dot-failed { background: var(--np-err); }
+
+    /* Actions */
+    .np-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .np-action-row {
+        display: flex;
+        gap: 6px;
+    }
+    .np-primary-action {
+        background: var(--np-brand-fill);
+        border-color: var(--np-brand-fill);
+        color: var(--np-brand-fg);
+        font-weight: 600;
+        border-radius: 12px;
+        padding: 8px 12px;
+        box-shadow: var(--np-brand-shadow);
+        &:hover:not(:disabled) {
+            background: var(--np-brand-hover);
+            border-color: var(--np-brand-hover);
+            color: var(--np-brand-fg);
+        }
+    }
+    .np-action-row .btn-outline-secondary {
+        border-radius: 10px;
+        border-color: var(--np-border);
+        color: var(--np-text);
+        background: var(--np-card);
+        &:hover {
+            background: var(--np-subtle);
+            border-color: var(--np-border-strong);
+        }
+    }
+
+    .np-systray-icon {
+        width: 18px;
+        height: 18px;
+        border-radius: 5px;
+        display: block;
+    }
+    .np-brand-icon {
+        width: 100%;
+        height: 100%;
+        border-radius: 8px;
+        display: block;
+    }
+}
+
+/* Scoped Liquid Glass Notifications (never override core Odoo notifications or dialogs) */
+.o_notification_manager .o_notification.o_native_print_notification {
+    @include np-light-tokens;
+
+    .o_dark_mode &,
+    body.o_web_client_dark &,
+    [data-color-scheme="dark"] &,
+    [data-bs-theme="dark"] & {
+        @include np-dark-tokens;
+    }
+
+    [data-color-scheme="light"] &,
+    [data-bs-theme="light"] & {
+        @include np-light-tokens;
+    }
+
+    background-color: var(--np-surface);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    color: var(--np-text);
+    border: 1px solid var(--np-border);
+    border-radius: 16px;
+    box-shadow: var(--np-shadow), var(--np-glass-highlight);
+    padding-block: 12px;
+    padding-inline: 14px;
+
+    &.border-success { border-color: var(--np-ok-border); }
+    &.border-danger,
+    &.border-warning { border-color: var(--np-err-border); }
+    &.border-info { border-color: var(--np-info-border); }
+
+    .o_notification_title {
+        color: var(--np-text);
+        font-weight: 600;
+    }
+    .o_notification_content {
+        color: var(--np-text-secondary);
+    }
+    .o_notification_close {
+        color: var(--np-text-muted);
+        &:hover {
+            color: var(--np-text);
+        }
+    }
+    .o_notification_buttons {
+        margin-top: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+
+        .btn-primary {
+            background-color: var(--np-brand-fill);
+            border-color: var(--np-brand-fill);
+            color: var(--np-brand-fg);
+            border-radius: 10px;
+            font-weight: 600;
+            &:hover {
+                background-color: var(--np-brand-hover);
+                border-color: var(--np-brand-hover);
+            }
+        }
+    }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+    .o_native_print_systray .o_native_print_dropdown,
+    .o_notification_manager .o_notification.o_native_print_notification {
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        background-color: var(--np-card);
+    }
+}

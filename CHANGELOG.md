@@ -1,7 +1,20 @@
 # Changelog
 
 All notable changes to **Odoo Native Print** are documented in this file.
-The desktop client (`app/`), the Odoo 19 addon (`odoo19/native_print/`), and the Odoo 20 addon (`odoo20/native_print/`) follow independent version lines.
+The desktop client (`app/`), Android companion (`android-app/`), and the Odoo 17–20 addons (`odoo17/native_print/` through `odoo20/native_print/`) follow independent version lines.
+
+## Odoo 17 (`17.0.1.0.0`) & Odoo 18 (`18.0.1.0.0`) Addons + Release Hardening — 2026-11-28
+
+### Odoo 17 & 18 Addons (`17.0.1.0.0`, `18.0.1.0.0`)
+- **Multi-Version Odoo Support (`odoo17/native_print/`, `odoo18/native_print/`):** Added native Odoo 17 and Odoo 18 addons with full backend QWeb (`qweb-pdf` / `qweb-text`) and POS receipt interception, OWL navbar systray widget, multi-company job/device logs, dark-mode stylesheet, and Arabic translations (`i18n/ar.po`), matching the `window.__NATIVE_PRINT__` v1 contract across Windows desktop and Android clients.
+
+### Security, Reliability & CI Hardening
+- **Expanded CI Coverage:** Added `odoo17` and `odoo18` to `.github/workflows/odoo.yml` (Docker install + `--test-tags /native_print` matrix across `17.0`–`20.0`) and `.github/workflows/ci.yml` (Python compile, XML validation, JS ESM syntax check, and Node unit tests).
+- **Real-DOM PR Gate:** Added `app/tests/jsdom` (`npm ci && node --test *.test.mjs`) to `.github/workflows/ci.yml` so Control Center and bridge DOM behavior tests run on every PR.
+- **Release Hygiene & Docs:** Removed internal AI scratch plan (`docs/superpowers/`), documented `ODOO_VERSION` (`17.0`–`20.0`) and `ADDON_SRC` pairs in `.env.example`, and tightened `README.md` for operational setup, testing, and deployment across Odoo 17–20, Windows desktop, and Android.
+
+### Verification
+- Validated all `.github/workflows/*.yml` files with `yaml.safe_load` and ran `python3 tools/verify_local.py` with zero regressions.
 
 ## Desktop Client `1.5.7` / Odoo 19 Addon `19.0.2.24.0` / Odoo 20 Addon `20.0.1.0.0` — 2026-11-20
 

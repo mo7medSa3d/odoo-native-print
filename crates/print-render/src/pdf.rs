@@ -221,6 +221,8 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
     // like `/PageLabels` or `/PageMode`. Also check `/Encrypt` only in
     // dictionary headers (never inside stream payloads) and the trailer.
     let mut page_dicts: Vec<&str> = Vec::new();
+    let mut page_indices: std::collections::HashMap<(u32, u32), usize> =
+        std::collections::HashMap::new();
     let mut pages_tree_boxes: Vec<(f64, f64)> = Vec::new();
     let mut declared_count: Option<usize> = None;
     let mut has_obj_stm = false;
@@ -230,7 +232,7 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
         }
     }
     for chunk in text.split("endobj") {
-        let Some((_, _, body_start)) = find_obj_header(chunk) else {
+        let Some((obj_id, gen_id, body_start)) = find_obj_header(chunk) else {
             continue;
         };
         let dict = &chunk[body_start..];
@@ -265,10 +267,15 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
                 }
             }
         } else if is_page {
-            if page_dicts.len() >= print_core::security::MAX_PAGES as usize {
-                return Err(PdfParseError::TooManyPages(page_dicts.len() + 1));
+            if let Some(&idx) = page_indices.get(&(obj_id, gen_id)) {
+                page_dicts[idx] = dict_header;
+            } else {
+                if page_dicts.len() >= print_core::security::MAX_PAGES as usize {
+                    return Err(PdfParseError::TooManyPages(page_dicts.len() + 1));
+                }
+                page_indices.insert((obj_id, gen_id), page_dicts.len());
+                page_dicts.push(dict_header);
             }
-            page_dicts.push(dict_header);
         }
     }
 
@@ -489,5 +496,26 @@ endobj
         assert_eq!(info.confidence, Confidence::Exact);
         assert_eq!(info.pages.len(), 1);
         assert!((info.pages[0].size.width_mm - 100.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn incremental_update_deduplicates_page_by_obj_and_gen_keeping_latest() {
+        let s = "%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] >> endobj
+4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] >> endobj
+%%EOF
+3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 283.46 425.20] /Rotate 90 >> endobj
+%%EOF";
+        let info = parse_pdf_info(s.as_bytes()).unwrap();
+        assert_eq!(info.pages.len(), 2);
+        assert_eq!(info.confidence, Confidence::Exact);
+        // Latest revision of `3 0 obj` (rotated 100x150mm -> 150x100mm) wins in place.
+        assert!((info.pages[0].size.width_mm - 150.0).abs() < 0.5);
+        assert!((info.pages[0].size.height_mm - 100.0).abs() < 0.5);
+        assert_eq!(info.pages[0].rotation, Rotation::R90);
+        // `4 0 obj` stays second as A4.
+        assert!((info.pages[1].size.width_mm - 210.0).abs() < 0.2);
     }
 }

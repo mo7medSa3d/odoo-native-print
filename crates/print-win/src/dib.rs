@@ -77,7 +77,10 @@ fn repack_rows(src: &[u8], src_row_bytes: usize, w: u32, h: u32, bit_count: u16)
     if src_row_bytes == dst_row && src.len() >= total {
         return src[..total].to_vec();
     }
-    let mut out = vec![0u8; total];
+    // 8-bpp grayscale palette maps 0xFF to white paper (0x00 is solid black);
+    // 1-bpp threshold maps 0 to white and 32-bpp BGRA keeps zeroed padding.
+    let fill = if bit_count == 8 { 0xFF } else { 0x00 };
+    let mut out = vec![fill; total];
     for (row, dst_slice) in out.chunks_exact_mut(dst_row).enumerate() {
         let Some(src_start) = row.checked_mul(src_row_bytes) else {
             break;
@@ -281,7 +284,7 @@ mod tests {
         assert_eq!(&d.palette[255 * 4..255 * 4 + 4], &[255, 255, 255, 0]);
         assert_eq!(d.bits.len(), 8 * 3);
         assert_eq!(d.bits[0], 200);
-        assert_eq!(d.bits[5], 0, "padding is zeroed");
+        assert_eq!(d.bits[5], 0xFF, "8-bpp padding is white paper");
         assert_eq!(dib_row_bytes(5, 8), 8);
         // Direct grayscale helper on a 4-byte-aligned width uses the fast path.
         let aligned = build_grayscale_dib(4, 2, &[10, 20, 30, 40, 50, 60, 70, 80]);
@@ -391,6 +394,16 @@ mod tests {
         // Unaligned grayscale width still falls back to 4-byte padded repacking.
         let unaligned = build_dib_owned(page(RenderMode::Grayscale, 5, 2, vec![77u8; 10]));
         assert_eq!(unaligned.bits.len(), 16);
-        assert_eq!(unaligned.bits[5], 0);
+        assert_eq!(unaligned.bits[5], 0xFF);
+    }
+
+    #[test]
+    fn grayscale_truncated_rows_pad_with_white_not_black() {
+        let d = build_grayscale_dib(4, 3, &[10, 20, 30, 40, 50, 60]);
+        assert_eq!(d.bit_count, 8);
+        assert_eq!(
+            d.bits,
+            vec![10, 20, 30, 40, 50, 60, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+        );
     }
 }

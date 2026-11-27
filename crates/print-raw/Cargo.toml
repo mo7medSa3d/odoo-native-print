@@ -7,4 +7,5 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+print-core = { path = "../print-core" }
 thiserror = { workspace = true }
