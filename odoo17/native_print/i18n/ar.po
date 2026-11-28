@@ -811,3 +811,9 @@ msgstr "لا توجد طابعات مسجلة بعد"
 #: model_terms:ir.actions.act_window,help:native_print.action_devices
 msgid "Printers appear here automatically after their first print job from the Yaseir Print desktop app."
 msgstr "تظهر الطابعات هنا تلقائيًا بعد أول مهمة طباعة من تطبيق Yaseir Print على سطح المكتب."
+
+#. module: native_print
+#. odoo-python
+#: code:addons/native_print/models/native_print_job.py:0
+msgid "This label job cannot be reprinted because its label layout data is no longer available. Open the product and click Print -> Labels instead."
+msgstr "لا يمكن إعادة طباعة مهمة الملصق هذه لأن بيانات تخطيط الملصق لم تعد متاحة. افتح المنتج واختر طباعة -> الملصقات بدلاً من ذلك."
