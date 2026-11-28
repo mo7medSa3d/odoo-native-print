@@ -2628,13 +2628,12 @@ impl NativePrintBackend {
         spec: &str,
         default_port: u16,
     ) -> Result<(String, u16, String), BackendError> {
-        let rest = spec
-            .strip_prefix("tcp://")
-            .or_else(|| spec.strip_prefix("raw://"))
-            .or_else(|| spec.strip_prefix("ipp://"))
-            .or_else(|| spec.strip_prefix("http://"))
-            .or_else(|| spec.strip_prefix("https://"))
-            .unwrap_or(spec);
+        let spec_trimmed = spec.trim();
+        let lower = spec_trimmed.to_ascii_lowercase();
+        let rest = ["tcp://", "raw://", "ipp://", "http://", "https://"]
+            .iter()
+            .find_map(|p| lower.starts_with(p).then(|| &spec_trimmed[p.len()..]))
+            .unwrap_or(spec_trimmed);
         let (host_port, path) = match rest.split_once('/') {
             Some((hp, p)) => (hp, format!("/{p}")),
             None => (rest, "/ipp/print".to_string()),

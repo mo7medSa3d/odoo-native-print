@@ -683,7 +683,10 @@ pub fn print_pdf_gdi_detailed(
             if dc.is_null() && !init_ptr.is_null() {
                 if opts.scale_policy == ScalePolicy::Strict {
                     return Err(stage_err(
-                        format!("CreateDC with strict DEVMODE failed for {printer:?}: {}", last_error()),
+                        format!(
+                            "CreateDC with strict DEVMODE failed for {printer:?}: {}",
+                            last_error()
+                        ),
                         total_sent,
                     ));
                 }
