@@ -77,7 +77,12 @@ class NativePrintJob(models.Model):
                     (f"{self._table}_state_create_date_idx", ("state", "create_date")),
                 )
                 for idx_name, cols in expected_indexes:
-                    if idx_name not in existing_indexes and set(cols) <= existing:
+                    orm_idx_name = f"{self._table}_{idx_name[len(self._table):]}"
+                    if (
+                        idx_name not in existing_indexes
+                        and orm_idx_name not in existing_indexes
+                        and set(cols) <= existing
+                    ):
                         col_sql = ", ".join(f'"{c}"' for c in cols)
                         self.env.cr.execute(
                             f'CREATE INDEX IF NOT EXISTS "{idx_name}" '
@@ -282,10 +287,15 @@ class NativePrintJob(models.Model):
                 parsed_data = None
         if is_product_label_report:
             wizard_id = parsed_data.get("layout_wizard") if parsed_data else None
+            try:
+                wizard_rec_id = int(wizard_id) if wizard_id else 0
+            except (TypeError, ValueError):
+                wizard_rec_id = 0
             wizard_model = self.env.get("product.label.layout")
             wizard_missing = bool(wizard_id) and (
-                wizard_model is None
-                or not wizard_model.sudo().browse(int(wizard_id)).exists()
+                wizard_rec_id <= 0
+                or wizard_model is None
+                or not wizard_model.sudo().browse(wizard_rec_id).exists()
             )
             if not parsed_data or wizard_missing:
                 raise UserError(_(

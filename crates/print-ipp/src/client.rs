@@ -205,7 +205,7 @@ impl IppClient {
             port,
             path: "/ipp/print".to_string(),
             printer_uri: format!("ipp://{uri_host}:{port}/ipp/print"),
-            timeout: Duration::from_secs(10),
+            timeout: Duration::from_secs(30),
             next_request_id: 1,
         }
     }

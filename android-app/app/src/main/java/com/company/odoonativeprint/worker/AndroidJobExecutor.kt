@@ -62,15 +62,13 @@ class AndroidJobExecutor(
             return TransportResult.Failure("PAYLOAD_MISSING", "Spool payload file is missing", retryable = false)
         }
 
-        // Render width is shared by raw protocols and by the PDF fallback.
-        // Match standard 203-dpi thermal head widths (58mm->384, 80mm->576, 112mm->832),
-        // rounded to whole raster bytes so GS v 0 never overflows the head.
+        // Match standard 203-dpi thermal head widths; otherwise convert exact paperWidthMm to whole bytes.
         val widthDots = when {
             settings.dpi == 203 && settings.paperWidthMm in 54..62 -> 384
             settings.dpi == 203 && settings.paperWidthMm in 72..84 -> 576
             settings.dpi == 203 && settings.paperWidthMm in 104..120 -> 832
-            else -> (((settings.paperWidthMm - 8).coerceAtLeast(32) * settings.dpi / 25.4 / 8.0).toInt() * 8)
-                .coerceIn(256, 1664)
+            else -> ((settings.paperWidthMm * settings.dpi / 25.4 / 8.0).toInt() * 8)
+                .coerceIn(192, 1664)
         }
 
         // Android System Print accepts PDFs only. The POS sends receipts as
@@ -176,16 +174,16 @@ class AndroidJobExecutor(
             renderEachPage(job, printer, payloadFile, settings, widthDots) { bmp ->
                 val mono = MonoBitmap.fromAndroidBitmap(bmp, dither = settings.dithering)
                 encodedPages += when (protocol) {
-                    PrinterProtocol.ZPL -> ZplEncoder.encode(mono, copies = job.copies)
+                    PrinterProtocol.ZPL -> ZplEncoder.encode(mono, copies = 1)
                     PrinterProtocol.TSPL -> TsplEncoder.encode(
                         mono,
                         widthMm = settings.paperWidthMm,
                         heightMm = settings.labelHeightMm.takeIf { it > 0 }
-                            ?: (mono.height * 25.4f / settings.dpi).roundToInt().coerceIn(20, 600),
-                        copies = job.copies,
+                            ?: (mono.height * 25.4f / settings.dpi).roundToInt().coerceIn(10, 600),
+                        copies = 1,
                     )
-                    PrinterProtocol.EPL -> EplEncoder.encode(mono, copies = job.copies)
-                    PrinterProtocol.CPCL -> CpclEncoder.encode(mono, copies = job.copies)
+                    PrinterProtocol.EPL -> EplEncoder.encode(mono, copies = 1)
+                    PrinterProtocol.CPCL -> CpclEncoder.encode(mono, copies = 1, dpi = settings.dpi)
                     else -> EscPosEncoder.encodeRaster(
                         mono = mono,
                         cut = false,
@@ -199,7 +197,7 @@ class AndroidJobExecutor(
 
         val isEscPos = protocol !in setOf(PrinterProtocol.ZPL, PrinterProtocol.TSPL, PrinterProtocol.EPL, PrinterProtocol.CPCL)
         val encodedStream = ByteArrayOutputStream()
-        val copies = if (isEscPos) job.copies.coerceAtLeast(1) else 1
+        val copies = job.copies.coerceAtLeast(1)
         repeat(copies) {
             for (pageBytes in encodedPages) {
                 encodedStream.write(pageBytes)

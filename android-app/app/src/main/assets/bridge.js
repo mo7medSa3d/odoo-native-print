@@ -308,4 +308,31 @@
     };
     window.addEventListener("popstate", function () { npBootWatchdog(); });
   } catch (e) {}
+
+  // Convert client-side blob: export links (Excel/CSV) into data: URLs so WebView DownloadListener captures them.
+  try {
+    document.addEventListener("click", function (ev) {
+      var target = ev && ev.target;
+      var anchor = target && target.closest ? target.closest("a[href^='blob:']") : null;
+      if (!anchor || anchor.__npBlobBypass) return;
+      ev.preventDefault();
+      var blobUrl = anchor.href;
+      var filename = anchor.getAttribute("download") || "export";
+      fetch(blobUrl).then(function (r) { return r.blob(); }).then(function (blob) {
+        var reader = new FileReader();
+        reader.onloadend = function () {
+          if (typeof reader.result !== "string") return;
+          var tmp = document.createElement("a");
+          tmp.href = reader.result;
+          tmp.setAttribute("download", filename);
+          tmp.__npBlobBypass = true;
+          tmp.style.display = "none";
+          (document.body || document.documentElement).appendChild(tmp);
+          tmp.click();
+          tmp.remove();
+        };
+        reader.readAsDataURL(blob);
+      }).catch(function () {});
+    }, true);
+  } catch (e) {}
 })();

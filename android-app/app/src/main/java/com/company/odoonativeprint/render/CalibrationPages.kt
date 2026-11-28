@@ -13,7 +13,12 @@ import com.company.odoonativeprint.BuildConfig
 object CalibrationPages {
 
     fun thermalTestReceipt(context: Context, printerName: String, paperWidthMm: Int, dpi: Int): Bitmap {
-        val widthDots = ((paperWidthMm - 4).coerceAtLeast(48) * dpi / 25.4).toInt()
+        val widthDots = when {
+            dpi == 203 && paperWidthMm in 54..62 -> 384
+            dpi == 203 && paperWidthMm in 72..84 -> 576
+            dpi == 203 && paperWidthMm in 104..120 -> 832
+            else -> ((paperWidthMm * dpi / 25.4 / 8.0).toInt() * 8).coerceIn(192, 1664)
+        }
         val text = buildString {
             appendLine("Yaseir Print — اختبار الطباعة")
             appendLine("════════════════════════════")

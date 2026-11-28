@@ -89,6 +89,7 @@ const DM_ORIENTATION: u32 = 0x0000_0001;
 const DM_PAPERSIZE: u32 = 0x0000_0002;
 const DM_PAPERLENGTH: u32 = 0x0000_0004;
 const DM_PAPERWIDTH: u32 = 0x0000_0008;
+const DM_COPIES: u32 = 0x0000_0100;
 const DM_DEFAULTSOURCE: u32 = 0x0000_0200;
 const DM_COLOR: u32 = 0x0000_0800;
 const DM_DUPLEX: u32 = 0x0000_1000;
@@ -358,9 +359,15 @@ fn build_printer_devmode(
                     return None;
                 }
                 let is_roll = matches!(matched_form, Some((_, MatchKind::Roll)));
+                // Native wide discrete label forms (e.g. 100x50mm) already have width > height
+                // in driver coordinates; flipping DMORIENT_LANDSCAPE would rotate them 90 deg.
+                let native_wide = matches!(
+                    matched_form,
+                    Some((form, MatchKind::Exact)) if form.size.width_mm > form.size.height_mm
+                );
                 // Orientation: roll printers feed continuous media lengthwise
                 // and cannot rotate 90 degrees even for short receipts (e.g. 80x50mm).
-                dm.dm_orientation = if !is_roll && page_size.is_landscape() {
+                dm.dm_orientation = if !is_roll && !native_wide && page_size.is_landscape() {
                     DMORIENT_LANDSCAPE
                 } else {
                     DMORIENT_PORTRAIT
@@ -443,6 +450,9 @@ fn build_printer_devmode(
                     DMCOLOR_MONOCHROME
                 };
                 dm.dm_fields |= DM_COLOR;
+                // Copy loop prints one page set per iteration; clear any sticky driver default > 1.
+                dm.dm_copies = 1;
+                dm.dm_fields |= DM_COPIES;
 
                 // Separate output buffer avoids overlapping in/out DEVMODE aliasing.
                 let mut out_buf = aligned_byte_buf(needed as usize);
@@ -671,6 +681,12 @@ pub fn print_pdf_gdi_detailed(
             let mut dc =
                 unsafe { CreateDCW(std::ptr::null(), name.as_ptr(), std::ptr::null(), init_ptr) };
             if dc.is_null() && !init_ptr.is_null() {
+                if opts.scale_policy == ScalePolicy::Strict {
+                    return Err(stage_err(
+                        format!("CreateDC with strict DEVMODE failed for {printer:?}: {}", last_error()),
+                        total_sent,
+                    ));
+                }
                 eprintln!(
                     "Yaseir Print: CreateDC with custom DEVMODE failed for {printer:?} ({}); retrying with driver defaults",
                     last_error()

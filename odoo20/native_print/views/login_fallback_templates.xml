@@ -20,10 +20,10 @@
              does run, its setup() re-applies d-none itself whenever
              more than one remembered user exists, so the chooser
              behaviour is unchanged. -->
-        <xpath expr="//form[contains(@t-attf-class, 'oe_login_form')]" position="attributes">
+        <xpath expr="//form[contains(@class, 'oe_login_form') or contains(@t-attf-class, 'oe_login_form')]" position="attributes">
             <attribute name="t-attf-class">oe_login_form</attribute>
         </xpath>
-        <xpath expr="//form[contains(@t-attf-class, 'oe_login_form')]" position="after">
+        <xpath expr="//form[contains(@class, 'oe_login_form') or contains(@t-attf-class, 'oe_login_form')]" position="after">
             <script>
 (function () {
     var attempts = 0;

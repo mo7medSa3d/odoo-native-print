@@ -732,6 +732,7 @@ pub fn create_tab_webview(
             }
             tauri::webview::NewWindowResponse::Deny
         })
+        .on_download(|_webview, _event| true)
         .on_page_load(move |_webview, payload| match payload.event() {
             tauri::webview::PageLoadEvent::Started => {
                 let st = load_handle.state::<AppState>();

@@ -133,11 +133,7 @@ export function buildReportUrl(action, converter = "pdf", env = null) {
         const encodedContext = encodeURIComponent(JSON.stringify(mergedContext));
         url += `?options=${encodedOptions}&context=${encodedContext}`;
     } else {
-        const ids =
-            actionContext.active_ids ||
-            (actionContext.active_id ? [actionContext.active_id] : null) ||
-            action.ids ||
-            (action.res_id ? [action.res_id] : []);
+        const ids = pickIds(action);
         const docids = Array.isArray(ids) ? ids.join(",") : String(ids || "");
         if (docids) {
             url += `/${docids}`;
@@ -150,6 +146,18 @@ export function buildReportUrl(action, converter = "pdf", env = null) {
     return url;
 }
 
+function pickIds(action) {
+    if (!action) return [];
+    const ctx = action.context || {};
+    const nonEmpty = (v) => (Array.isArray(v) ? (v.length > 0 ? v : null) : (v || null));
+    return (
+        nonEmpty(ctx.active_ids) ||
+        (ctx.active_id ? [ctx.active_id] : null) ||
+        nonEmpty(action.ids) ||
+        (action.res_id ? [action.res_id] : [])
+    );
+}
+
 // The source reference (model + record ids) a report is printed
 // for, posted with the job so the job log can offer a real Reprint.
 export function reportSource(action) {
@@ -157,16 +165,22 @@ export function reportSource(action) {
         return { model: null, ids: "" };
     }
     const ctx = action.context || {};
-    const ids =
-        ctx.active_ids ||
-        (ctx.active_id ? [ctx.active_id] : null) ||
-        action.ids ||
-        (action.res_id ? [action.res_id] : []);
+    const ids = pickIds(action);
     const list = Array.isArray(ids) ? ids : [ids];
     return {
         model: ctx.active_model || action.model || null,
         ids: list.filter((x) => Number.isInteger(x) || /^\d+$/.test(String(x))).join(","),
     };
+}
+
+function withTimeout(promise, ms, msg) {
+    return new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error(msg || "bridge_timeout")), ms);
+        Promise.resolve(promise).then(
+            (v) => { clearTimeout(t); resolve(v); },
+            (e) => { clearTimeout(t); reject(e); },
+        );
+    });
 }
 
 export function reportDataOf(action) {
@@ -275,6 +289,7 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
     let lastPages = meta.pages || 1;
     let lastAttempts = 1;
     let consecutiveErrors = 0;
+    let consecutiveMissing = 0;
     // One failure notification per (state, attempts): the watch
     // continues past retryable outcomes, so without this a job
     // failing on every retry would toast on every poll.
@@ -307,8 +322,12 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
             }
             consecutiveErrors = 0;
             if (!state) {
+                if (++consecutiveMissing >= 15) {
+                    break;
+                }
                 continue;
             }
+            consecutiveMissing = 0;
             // Quiet retry check: if the desktop worker hit a transient
             // error (busy/offline) and auto-requeued or recovered within
             // one brief tick, resolve the recheck BEFORE posting `failed`
@@ -636,23 +655,25 @@ async function handleReportSubmission(action, options, env, bridge) {
                 });
             }
             const textBridgeJobId = resolveBridgeJobId(textEnqueueRes, textKey);
-            // Log queued state to Odoo asynchronously AFTER local enqueue so WAN RTT never delays printing.
-            rpc("/native_print/job_status", {
-                idempotency_key: textKey,
-                state: "queued",
-                device: target.printer.name,
-                report_name: action.report_name,
-                source_type: "report",
-                source_model: textSource.model,
-                source_ids: textSource.ids || undefined,
-                ...(textReportData ? { report_data: textReportData } : {}),
-                copies: rule.copies || 1,
-                paper: rule.paper || undefined,
-                color: rule.color !== false,
-                mode: textAsRaw ? rule.mode : "gdi",
-                pages: 1,
-                byte_size: textBytes,
-            }, { silent: true }).catch(() => {});
+            await Promise.race([
+                rpc("/native_print/job_status", {
+                    idempotency_key: textKey,
+                    state: "queued",
+                    device: target.printer.name,
+                    report_name: action.report_name,
+                    source_type: "report",
+                    source_model: textSource.model,
+                    source_ids: textSource.ids || undefined,
+                    ...(textReportData ? { report_data: textReportData } : {}),
+                    copies: rule.copies || 1,
+                    paper: rule.paper || undefined,
+                    color: rule.color !== false,
+                    mode: textAsRaw ? rule.mode : "gdi",
+                    pages: 1,
+                    byte_size: textBytes,
+                }, { silent: true }).catch(() => {}),
+                new Promise((r) => setTimeout(r, 400)),
+            ]);
             watchJobToCompletion(
                 bridge,
                 textKey,
@@ -775,23 +796,25 @@ async function handleReportSubmission(action, options, env, bridge) {
             bytes,
         });
         const pdfBridgeJobId = resolveBridgeJobId(pdfEnqueueRes, idempotencyKey);
-        // Log queued state to Odoo asynchronously AFTER local enqueue so WAN RTT never delays printing.
-        rpc("/native_print/job_status", {
-            idempotency_key: idempotencyKey,
-            state: "queued",
-            device: target.printer.name,
-            report_name: action.report_name,
-            source_type: "report",
-            source_model: pdfSource.model,
-            source_ids: pdfSource.ids || undefined,
-            ...(pdfReportData ? { report_data: pdfReportData } : {}),
-            copies: rule.copies || 1,
-            paper: rule.paper || undefined,
-            duplex: typeof rule.duplex === "boolean" ? rule.duplex : null,
-            color: rule.color !== false,
-            mode: rule.mode || undefined,
-            byte_size: bytes.length,
-        }, { silent: true }).catch(() => {});
+        await Promise.race([
+            rpc("/native_print/job_status", {
+                idempotency_key: idempotencyKey,
+                state: "queued",
+                device: target.printer.name,
+                report_name: action.report_name,
+                source_type: "report",
+                source_model: pdfSource.model,
+                source_ids: pdfSource.ids || undefined,
+                ...(pdfReportData ? { report_data: pdfReportData } : {}),
+                copies: rule.copies || 1,
+                paper: rule.paper || undefined,
+                duplex: typeof rule.duplex === "boolean" ? rule.duplex : null,
+                color: rule.color !== false,
+                mode: rule.mode || undefined,
+                byte_size: bytes.length,
+            }, { silent: true }).catch(() => {}),
+            new Promise((r) => setTimeout(r, 400)),
+        ]);
         watchJobToCompletion(
             bridge,
             idempotencyKey,

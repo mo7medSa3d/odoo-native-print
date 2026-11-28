@@ -84,26 +84,35 @@ object PdfPageRenderer {
                 val start = (pageRange?.first ?: 0).coerceIn(0, count - 1)
                 val end = (pageRange?.last ?: (count - 1)).coerceIn(start, count - 1)
                 val pages = ArrayList<Bitmap>(end - start + 1)
-
-                for (index in start..end) {
-                    renderer.openPage(index).use { page ->
-                        val scale = targetWidthDots.toFloat() / page.width.coerceAtLeast(1).toFloat()
-                        val outW = targetWidthDots.coerceAtLeast(1)
-                        val outH = (page.height * scale).roundToInt().coerceIn(1, MAX_PAGE_HEIGHT_PX)
-                        val bmp = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
-                        val canvas = Canvas(bmp)
-                        canvas.drawColor(Color.WHITE)
-                        val matrix = Matrix().apply {
-                            postScale(scale, scale)
-                            if (offsetXDots != 0f || offsetYDots != 0f) {
-                                postTranslate(offsetXDots, offsetYDots)
+                try {
+                    for (index in start..end) {
+                        renderer.openPage(index).use { page ->
+                            val scale = targetWidthDots.toFloat() / page.width.coerceAtLeast(1).toFloat()
+                            val outW = targetWidthDots.coerceAtLeast(1)
+                            val outH = (page.height * scale).roundToInt().coerceIn(1, MAX_PAGE_HEIGHT_PX)
+                            val bmp = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+                            try {
+                                val canvas = Canvas(bmp)
+                                canvas.drawColor(Color.WHITE)
+                                val matrix = Matrix().apply {
+                                    postScale(scale, scale)
+                                    if (offsetXDots != 0f || offsetYDots != 0f) {
+                                        postTranslate(offsetXDots, offsetYDots)
+                                    }
+                                }
+                                page.render(bmp, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+                                pages += bmp
+                            } catch (t: Throwable) {
+                                if (!bmp.isRecycled) bmp.recycle()
+                                throw t
                             }
                         }
-                        page.render(bmp, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
-                        pages += bmp
                     }
+                    pages
+                } catch (t: Throwable) {
+                    pages.forEach { if (!it.isRecycled) it.recycle() }
+                    throw t
                 }
-                pages
             }
         }
     }

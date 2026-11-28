@@ -290,12 +290,17 @@ object IppClient {
 
     private fun readIppResponse(conn: HttpURLConnection): IppResponse {
         val code = conn.responseCode
+        val contentType = conn.contentType?.lowercase().orEmpty()
         val stream = if (code in 200..299) conn.inputStream else conn.errorStream
         val responseBytes = stream?.use { readCappedBytes(it) } ?: ByteArray(0)
-        return if (responseBytes.size >= 8) {
+        val looksLikeIpp = responseBytes.size >= 8 &&
+            (contentType.contains("application/ipp") ||
+                (responseBytes[0].toInt() in 1..2 && responseBytes[1].toInt() in 0..9))
+        return if (looksLikeIpp) {
             parseResponseHeader(responseBytes, code)
         } else {
-            IppResponse(statusCode = 0x0500, requestId = 0, httpStatus = code)
+            val fallbackStatus = if (code in 400..499) 0x0400 else 0x0500
+            IppResponse(statusCode = fallbackStatus, requestId = 0, httpStatus = code)
         }
     }
 

@@ -49,5 +49,7 @@ class Tcp9100TransportTest {
         val parsed = Tcp9100Transport.parseHostPort("RAW://192.168.1.50:9102/print")
         assertTrue(parsed == ("192.168.1.50" to 9102))
         assertTrue(Tcp9100Transport.parseHostPort("TCP://10.0.0.5") == ("10.0.0.5" to 9100))
+        assertTrue(Tcp9100Transport.parseHostPort("tcp://fe80::1:9102") == ("fe80::1" to 9102))
+        assertTrue(Tcp9100Transport.parseHostPort("fe80::1") == ("fe80::1" to 9100))
     }
 }

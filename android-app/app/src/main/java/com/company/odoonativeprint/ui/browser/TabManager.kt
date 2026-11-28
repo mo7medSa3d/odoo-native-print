@@ -136,12 +136,16 @@ class TabManager(
 
     fun goBack(): Boolean {
         val wv = activeWebView() ?: return false
-        return if (wv.canGoBack()) {
+        if (wv.canGoBack()) {
             wv.goBack()
-            true
-        } else {
-            false
+            return true
         }
+        val state = _state.value
+        if (state.tabs.size > 1 && state.activeTabId != null) {
+            closeTab(state.activeTabId)
+            return true
+        }
+        return false
     }
 
     fun goForward() { activeWebView()?.takeIf { it.canGoForward() }?.goForward() }

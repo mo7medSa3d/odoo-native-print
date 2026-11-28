@@ -1,22 +1,35 @@
 package com.company.odoonativeprint.bridge
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.app.DownloadManager
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.os.Message
+import android.provider.MediaStore
+import android.util.Base64
 import android.webkit.CookieManager
+import android.webkit.PermissionRequest
+import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.company.odoonativeprint.core.OriginPolicy
 import kotlinx.coroutines.CoroutineScope
+import java.io.File
 
 data class WebViewCallbacks(
     val onTitleChanged: (String) -> Unit,
@@ -170,6 +183,7 @@ object OdooWebViewFactory {
                     }
                     val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
                     val temp = WebView(context)
+                    temp.postDelayed({ runCatching { temp.destroy() } }, 10_000L)
                     temp.webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest): Boolean {
                             val url = request.url?.toString()
@@ -185,12 +199,96 @@ object OdooWebViewFactory {
                     return true
                 }
 
+                override fun onPermissionRequest(request: PermissionRequest) {
+                    val reqOrigin = request.origin?.toString() ?: ""
+                    val hasCamera = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                        PackageManager.PERMISSION_GRANTED
+                    if (hasCamera &&
+                        OriginPolicy.isSameOrigin(configuredOrigin, reqOrigin) &&
+                        PermissionRequest.RESOURCE_VIDEO_CAPTURE in request.resources
+                    ) {
+                        request.grant(arrayOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE))
+                    } else {
+                        request.deny()
+                    }
+                }
+
                 override fun onShowFileChooser(
                     webView: WebView?,
                     filePathCallback: ValueCallback<Array<Uri>>,
                     fileChooserParams: FileChooserParams,
                 ): Boolean = callbacks.onShowFileChooser(filePathCallback, fileChooserParams)
             }
+
+            setDownloadListener { url, userAgent, contentDisposition, mimetype, _ ->
+                handleWebDownload(context, configuredOrigin, url, userAgent, contentDisposition, mimetype)
+            }
+        }
+    }
+
+    private fun handleWebDownload(
+        context: Context,
+        configuredOrigin: String,
+        url: String?,
+        userAgent: String?,
+        contentDisposition: String?,
+        mimetype: String?,
+    ) {
+        if (url.isNullOrBlank()) return
+        val fileName = URLUtil.guessFileName(url, contentDisposition, mimetype)
+            .ifBlank { "odoo-download" }
+            .replace(Regex("[/\\\\:*?\"<>|]"), "_")
+        if (url.startsWith("data:", ignoreCase = true)) {
+            saveDataUrlDownload(context, url, fileName, mimetype ?: "application/octet-stream")
+            return
+        }
+        if (!OriginPolicy.isSameOrigin(configuredOrigin, url) &&
+            !url.startsWith("http://", ignoreCase = true) &&
+            !url.startsWith("https://", ignoreCase = true)
+        ) {
+            return
+        }
+        runCatching {
+            val req = DownloadManager.Request(Uri.parse(url)).apply {
+                setMimeType(mimetype)
+                CookieManager.getInstance().getCookie(url)?.takeIf { it.isNotBlank() }?.let {
+                    addRequestHeader("Cookie", it)
+                }
+                userAgent?.takeIf { it.isNotBlank() }?.let { addRequestHeader("User-Agent", it) }
+                setTitle(fileName)
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+            }
+            val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+            dm?.enqueue(req)
+            Toast.makeText(context, "Downloading $fileName", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun saveDataUrlDownload(context: Context, dataUrl: String, fileName: String, mime: String) {
+        val comma = dataUrl.indexOf(',')
+        if (comma <= 5) return
+        val header = dataUrl.substring(5, comma).lowercase()
+        val body = dataUrl.substring(comma + 1)
+        val bytes = runCatching {
+            if (header.contains(";base64")) Base64.decode(body, Base64.DEFAULT) else Uri.decode(body).toByteArray(Charsets.UTF_8)
+        }.getOrNull() ?: return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                    put(MediaStore.Downloads.MIME_TYPE, mime)
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                val resolver = context.contentResolver
+                val item = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return
+                resolver.openOutputStream(item)?.use { it.write(bytes) }
+            } else {
+                val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                dir.mkdirs()
+                File(dir, fileName).writeBytes(bytes)
+            }
+            Toast.makeText(context, "Saved $fileName", Toast.LENGTH_SHORT).show()
         }
     }
 

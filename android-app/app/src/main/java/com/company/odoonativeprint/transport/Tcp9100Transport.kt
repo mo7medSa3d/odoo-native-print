@@ -69,6 +69,9 @@ class Tcp9100Transport(
             }
             val clean = withoutScheme.substringBefore('/').trim()
             if (clean.isEmpty()) return null
+            if (!clean.startsWith("[") && clean.count { it == ':' } > 1) {
+                return clean to 9100
+            }
             val idx = clean.lastIndexOf(':')
             return if (idx > 0 && clean.indexOf(']') < idx) {
                 val host = clean.substring(0, idx).removePrefix("[").removeSuffix("]")

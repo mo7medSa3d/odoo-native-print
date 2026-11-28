@@ -27,34 +27,53 @@ class PrintForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val activeCount = intent?.getIntExtra(EXTRA_ACTIVE_COUNT, 0) ?: 0
-        val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-        } else {
-            0
-        }
-        try {
-            // Android 8-15 requires startForeground() before stopping when launched via startForegroundService().
-            ServiceCompat.startForeground(
-                this,
-                NOTIFICATION_ID,
-                buildNotification(activeCount.coerceAtLeast(0)),
-                fgsType,
-            )
-        } catch (_: Exception) {
-            // Gracefully avoid crash if OS denies background start (Android 12+)
-            stopSelf()
+        val started = startForegroundCompat(activeCount.coerceAtLeast(0))
+        if (!started) {
+            isForeground = false
+            stopSelfResult(startId)
             return START_NOT_STICKY
         }
-        if (activeCount <= 0) {
+        isForeground = true
+        if (activeCount <= 0 || !desiredActive) {
+            isForeground = false
             stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            stopSelfResult(startId)
         }
         return START_NOT_STICKY
     }
 
+    private fun startForegroundCompat(activeCount: Int): Boolean {
+        val notification = buildNotification(activeCount)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val tryConnected = runCatching {
+                ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+                )
+            }
+            if (tryConnected.isSuccess) return true
+        }
+        val fallbackType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        } else {
+            0
+        }
+        return runCatching {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, fallbackType)
+        }.isSuccess
+    }
+
     override fun onTimeout(startId: Int, fgsType: Int) {
+        isForeground = false
         stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        stopSelfResult(startId)
+    }
+
+    override fun onDestroy() {
+        isForeground = false
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -87,18 +106,31 @@ class PrintForegroundService : Service() {
         private const val NOTIFICATION_ID = 4107
         private const val EXTRA_ACTIVE_COUNT = "active_count"
 
+        @Volatile
+        private var isForeground: Boolean = false
+
+        @Volatile
+        private var desiredActive: Boolean = false
+
         fun sync(context: Context, activeCount: Int) {
             val intent = Intent(context, PrintForegroundService::class.java)
                 .putExtra(EXTRA_ACTIVE_COUNT, activeCount)
             runCatching {
                 if (activeCount > 0) {
+                    desiredActive = true
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         context.startForegroundService(intent)
                     } else {
                         context.startService(intent)
                     }
                 } else {
-                    context.stopService(intent)
+                    desiredActive = false
+                    // Only call stopService once startForeground() has completed; stopping earlier triggers
+                    // ForegroundServiceDidNotStartInTimeException on fast-finishing jobs.
+                    if (isForeground) {
+                        isForeground = false
+                        context.stopService(intent)
+                    }
                 }
             }
         }

@@ -31,10 +31,11 @@ class UsbOtgTransport(private val context: Context) : RawByteTransport {
             ?: return TransportResult.Failure("USB_DISCONNECTED", "USB printer not connected", retryable = true)
 
         if (!manager.hasPermission(device)) {
+            requestPermission(context, printer.address)
             return TransportResult.Failure(
                 "USB_PERMISSION_DENIED",
-                "USB permission required for ${printer.displayName}",
-                retryable = false,
+                "USB permission requested for ${printer.displayName}; approve dialog to retry",
+                retryable = true,
             )
         }
 
@@ -97,16 +98,22 @@ class UsbOtgTransport(private val context: Context) : RawByteTransport {
         fun formatKey(device: UsbDevice): String = "${device.vendorId}:${device.productId}:${device.deviceId}"
 
         fun findPrinterBulkOut(device: UsbDevice): Pair<UsbInterface, UsbEndpoint>? {
+            fun findOutEndpoint(iface: UsbInterface): UsbEndpoint? =
+                (0 until iface.endpointCount)
+                    .map { iface.getEndpoint(it) }
+                    .firstOrNull { it.type == UsbConstants.USB_ENDPOINT_XFER_BULK && it.direction == UsbConstants.USB_DIR_OUT }
+
+            // Prefer standard USB Printer Class (0x07), fall back to CDC-Data (0x0A) or Vendor-Specific (0xFF).
             for (i in 0 until device.interfaceCount) {
                 val iface = device.getInterface(i)
-                val isPrinterIface = iface.interfaceClass == UsbConstants.USB_CLASS_PRINTER ||
-                    device.deviceClass == UsbConstants.USB_CLASS_PRINTER
-                if (!isPrinterIface) continue
-                for (e in 0 until iface.endpointCount) {
-                    val ep = iface.getEndpoint(e)
-                    if (ep.type == UsbConstants.USB_ENDPOINT_XFER_BULK && ep.direction == UsbConstants.USB_DIR_OUT) {
-                        return iface to ep
-                    }
+                if (iface.interfaceClass == UsbConstants.USB_CLASS_PRINTER || device.deviceClass == UsbConstants.USB_CLASS_PRINTER) {
+                    findOutEndpoint(iface)?.let { return iface to it }
+                }
+            }
+            for (i in 0 until device.interfaceCount) {
+                val iface = device.getInterface(i)
+                if (iface.interfaceClass == UsbConstants.USB_CLASS_CDC_DATA || iface.interfaceClass == UsbConstants.USB_CLASS_VENDOR_SPEC) {
+                    findOutEndpoint(iface)?.let { return iface to it }
                 }
             }
             return null

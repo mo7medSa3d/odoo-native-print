@@ -17,19 +17,20 @@ import {
 const POS_RECEIPT_SOURCE = "point_of_sale.receipt";
 const RECEIPT_LAYOUT_FIX_CSS =
     ".pos-receipt{padding-bottom:16px !important}" +
-    ".pos-receipt,.pos-receipt *{float:none !important;position:static !important;direction:ltr !important;line-height:1.35 !important;box-sizing:border-box !important}" +
+    ".pos-receipt,.pos-receipt *{float:none !important;position:static !important;line-height:1.35 !important;box-sizing:border-box !important}" +
     ".pos-receipt *:not(img):not(canvas):not(svg){height:auto !important;min-height:0 !important;max-height:none !important;block-size:auto !important;overflow:visible !important}" +
     ".pos-receipt span:not(.pos-receipt-right-align),.pos-receipt .cashier,.pos-receipt .cashier>div{width:auto !important;inline-size:auto !important}" +
     ".pos-receipt .pos-receipt-amount,.pos-receipt .paymentlines,.pos-receipt .pos-receipt-taxes>div{display:flex !important;justify-content:space-between !important;gap:0.75em !important;align-items:baseline !important}" +
-    ".pos-receipt .ms-auto{margin-left:auto !important;margin-inline-start:auto !important;white-space:nowrap !important;flex-shrink:0 !important}" +
+    ".pos-receipt .ms-auto{margin-inline-start:auto !important;white-space:nowrap !important;flex-shrink:0 !important}" +
     ".pos-receipt .pos-receipt-contact,.pos-receipt .pos-receipt-customer{display:flex !important;flex-direction:column !important;align-items:center !important}" +
-    ".pos-receipt .pos-receipt-right-align{display:inline-block !important;margin-left:auto !important;margin-inline-start:auto !important;text-align:right !important;white-space:nowrap !important;flex-shrink:0 !important}" +
+    ".pos-receipt .pos-receipt-right-align{display:inline-block !important;margin-inline-start:auto !important;text-align:end !important;white-space:nowrap !important;flex-shrink:0 !important}" +
     ".pos-receipt .pos-receipt-qr{display:flex !important;flex-direction:row !important;align-items:flex-start !important;gap:0.75em !important}" +
     ".pos-receipt .pos-receipt-qr>div:first-child{flex:0 0 auto !important;width:auto !important;inline-size:auto !important}" +
     ".pos-receipt .pos-receipt-qr>div:last-child{flex:1 1 0% !important;min-width:0 !important;width:auto !important;inline-size:auto !important}" +
     ".pos-receipt .portal-url,.pos-receipt .text-break{overflow-wrap:anywhere !important;word-break:break-word !important;max-width:100% !important}";
 
 (function installReceiptLayoutFix() {
+    if (!nativeBridge()) return;
     if (typeof document === "undefined" || !document.head || typeof document.createElement !== "function") return;
     if (typeof document.getElementById === "function" && document.getElementById("np-receipt-layout-fix")) return;
     const style = document.createElement("style");
@@ -42,7 +43,7 @@ export const POS_CAPTURE_TIMEOUT_MS = 15_000;
 const inFlightPosKeys = new Set();
 
 function nativeBridge() {
-    return window.__NATIVE_PRINT__ || null;
+    return (typeof window !== "undefined" && window.__NATIVE_PRINT__) || null;
 }
 
 function isNativeApp() {
@@ -245,6 +246,7 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
     let lastSeenAttempts = 1;
     let reachedTerminal = false;
     let consecutiveErrors = 0;
+    let consecutiveMissing = 0;
     let lastOutcomeKey = null;
     let orderReleased = false;
     const syncJobStatus = async (state, errorCode, attempts) => {
@@ -286,8 +288,12 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
             }
             consecutiveErrors = 0;
             if (!state) {
+                if (++consecutiveMissing >= 15) {
+                    break;
+                }
                 continue;
             }
+            consecutiveMissing = 0;
             const progressed = state !== lastSeenState || attempts !== lastSeenAttempts;
             if (progressed) {
                 lastProgressAt = Date.now();
@@ -366,6 +372,10 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
         }
     }
     if (!reachedTerminal) {
+        if (!orderReleased && safeRef) {
+            orderReleased = true;
+            finishPosReceiptAttempt(safeRef, userId);
+        }
         notifyUser(
             env,
             _t('Receipt job on "%s" is still running. Check Print Jobs for the final status.', printerName || rule.printer_pattern),
@@ -612,23 +622,66 @@ async function visibleReceiptToPngBytes(element, scale = 2) {
     } else if (typeof clone.appendChild === "function") {
         clone.appendChild(layoutFix);
     }
-    // Inline <canvas> elements (QR codes, barcodes) as PNG <img> tags for <foreignObject>.
+    const inlineUrlToDataUrl = async (url, fallbackImg) => {
+        if (!url || url.startsWith("data:")) return url || null;
+        try {
+            if (typeof fetch === "function") {
+                const resp = await fetch(url, { credentials: "same-origin" });
+                if (resp && resp.ok) {
+                    const blob = await resp.blob();
+                    const dataUrl = await new Promise((resolve) => {
+                        const fr = new FileReader();
+                        fr.onload = () => resolve(typeof fr.result === "string" ? fr.result : null);
+                        fr.onerror = () => resolve(null);
+                        fr.readAsDataURL(blob);
+                    });
+                    if (dataUrl && dataUrl.startsWith("data:image/")) return dataUrl;
+                }
+            }
+        } catch (_err) { /* try canvas fallback */ }
+        try {
+            if (fallbackImg && fallbackImg.naturalWidth > 0 && fallbackImg.naturalHeight > 0) {
+                const c = document.createElement("canvas");
+                c.width = fallbackImg.naturalWidth;
+                c.height = fallbackImg.naturalHeight;
+                c.getContext("2d").drawImage(fallbackImg, 0, 0);
+                const d = c.toDataURL("image/png");
+                if (d && d.startsWith("data:image/")) return d;
+            }
+        } catch (_err) { /* cross-origin canvas */ }
+        return null;
+    };
+    // Inline <img> elements (company logos, <img> barcodes/QR) and <canvas> for <foreignObject>.
     if (
         typeof element.querySelectorAll === "function" &&
         typeof clone.querySelectorAll === "function" &&
         typeof document !== "undefined" &&
         typeof document.createElement === "function"
     ) {
+        const TRANSPARENT_PIXEL = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+        const sourceImgs = element.querySelectorAll("img");
+        const cloneImgs = clone.querySelectorAll("img");
+        for (let i = 0; i < sourceImgs.length && i < cloneImgs.length; i++) {
+            cloneImgs[i].removeAttribute?.("srcset");
+            cloneImgs[i].removeAttribute?.("loading");
+            cloneImgs[i].removeAttribute?.("decoding");
+            const src = sourceImgs[i].currentSrc || sourceImgs[i].src;
+            if (src && !src.startsWith("data:")) {
+                const dataUrl = await inlineUrlToDataUrl(src, sourceImgs[i]);
+                cloneImgs[i].setAttribute("src", dataUrl || TRANSPARENT_PIXEL);
+            }
+        }
         const sourceCanvases = element.querySelectorAll("canvas");
         const cloneCanvases = clone.querySelectorAll("canvas");
         for (let i = 0; i < sourceCanvases.length && i < cloneCanvases.length; i++) {
             try {
+                if (!sourceCanvases[i].width || !sourceCanvases[i].height) continue;
                 const dataUrl = sourceCanvases[i].toDataURL("image/png");
                 if (!dataUrl || !dataUrl.startsWith("data:image/")) continue;
                 const img = document.createElement("img");
                 img.setAttribute("src", dataUrl);
-                if (sourceCanvases[i].width) img.setAttribute("width", String(sourceCanvases[i].width));
-                if (sourceCanvases[i].height) img.setAttribute("height", String(sourceCanvases[i].height));
+                img.setAttribute("width", String(sourceCanvases[i].width));
+                img.setAttribute("height", String(sourceCanvases[i].height));
                 const canvasStyle = cloneCanvases[i].getAttribute?.("style");
                 if (canvasStyle) img.setAttribute("style", canvasStyle);
                 cloneCanvases[i].replaceWith(img);
@@ -748,7 +801,7 @@ async function textReceiptToPngBytes(text) {
     return canvasToPngBytes(canvas);
 }
 
-async function printPosReceiptNatively(plugin, { order, basic = false, simplified = false }) {
+async function printPosReceiptNatively(plugin, { order, basic = false, simplified = false, skipMarkPrinted = false }) {
     const bridge = nativeBridge();
     const posStore = plugin?.pos || plugin || null;
     const keyRef =
@@ -937,9 +990,9 @@ async function printPosReceiptNatively(plugin, { order, basic = false, simplifie
         ).catch(() => {});
         watchPosJob(
             bridge, idempotencyKey, rule, payloadByteSize, safeRef,
-            target.printer.name, notificationEnv(plugin), userId, order, bridgeJobId,
+            target.printer.name, notificationEnv(plugin), userId, skipMarkPrinted ? null : order, bridgeJobId,
         ).catch(() => {});
-        if (order) {
+        if (order && !skipMarkPrinted) {
             order._printed = true;
         }
         return null;
@@ -965,12 +1018,13 @@ patch(PosTicketPrinterPlugin.prototype, {
             this.pos?.get_order?.() ||
             null;
         try {
-            const failure = await printPosReceiptNatively(this, { order, basic, simplified });
+            const skipMarkPrinted = Boolean(printBillActionTriggered || basic);
+            const failure = await printPosReceiptNatively(this, { order, basic, simplified, skipMarkPrinted });
             if (failure?.deduped) {
                 return true;
             }
             if (!failure) {
-                if (order) {
+                if (order && !printBillActionTriggered && !basic) {
                     order._printed = true;
                 }
                 if (!printBillActionTriggered && typeof this.markReceiptAsPrinted === "function") {

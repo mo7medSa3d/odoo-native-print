@@ -70,20 +70,22 @@ class BluetoothSppTransport(private val context: Context) : RawByteTransport {
                 }
                 fallback
             }
-            withSocketTimeout(activeSocket, WRITE_TIMEOUT_MS, timedOut) {
-                val out = activeSocket.outputStream
-                val pacingMs = settings.bluetoothPacingMs.toLong()
-                var offset = 0
-                while (offset < bytes.size) {
-                    val len = minOf(CHUNK_SIZE, bytes.size - offset)
+            val out = activeSocket.outputStream
+            val pacingMs = settings.bluetoothPacingMs.toLong()
+            var offset = 0
+            while (offset < bytes.size) {
+                val len = minOf(CHUNK_SIZE, bytes.size - offset)
+                withSocketTimeout(activeSocket, WRITE_TIMEOUT_MS, timedOut) {
                     out.write(bytes, offset, len)
-                    offset += len
-                    if (pacingMs > 0L) Thread.sleep(pacingMs)
                 }
+                offset += len
+                if (pacingMs > 0L) Thread.sleep(pacingMs)
+            }
+            withSocketTimeout(activeSocket, WRITE_TIMEOUT_MS, timedOut) {
                 out.flush()
             }
-            // Allow cheap thermal printers to drain the final cut command before RFCOMM disconnect
-            Thread.sleep(250L)
+            // Scale RFCOMM drain window by payload size so 9600-baud Bluetooth printers finish cutting before close.
+            Thread.sleep((bytes.size / 1024L * 35L).coerceIn(350L, 2_500L))
             TransportResult.Ok
         } catch (e: IOException) {
             if (timedOut.get()) {

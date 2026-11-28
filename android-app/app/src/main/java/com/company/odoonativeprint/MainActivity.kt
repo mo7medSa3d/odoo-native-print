@@ -56,7 +56,14 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
         val uris = if (result.resultCode == RESULT_OK) {
-            result.data?.data?.let { arrayOf(it) }
+            val data = result.data
+            val clip = data?.clipData
+            when {
+                clip != null && clip.itemCount > 0 ->
+                    Array(clip.itemCount) { i -> clip.getItemAt(i).uri }
+                data?.data != null -> arrayOf(data.data!!)
+                else -> null
+            }
         } else {
             null
         }
@@ -73,7 +80,9 @@ class MainActivity : ComponentActivity() {
     private val hardwareReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             app.discovery.invalidate()
-            if (intent?.action == UsbOtgTransport.ACTION_USB_PERMISSION) {
+            if (intent?.action == UsbOtgTransport.ACTION_USB_PERMISSION &&
+                intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
+            ) {
                 app.queueEngine.printersWithQueuedJobs().forEach { app.worker.wakePrinter(it) }
             }
         }
@@ -188,9 +197,10 @@ class MainActivity : ComponentActivity() {
                                     activeScreen = AppScreen.BROWSER
                                 },
                                 onClearWebData = {
-                                    clearWebBrowsingData()
-                                    config.origin?.let { tabManager.ensureInitialized(it) }
-                                    activeScreen = AppScreen.BROWSER
+                                    clearWebBrowsingData {
+                                        config.origin?.let { tabManager.ensureInitialized(it) }
+                                        activeScreen = AppScreen.BROWSER
+                                    }
                                 },
                                 onBack = { activeScreen = if (hasOrigin) AppScreen.BROWSER else AppScreen.BOOT },
                             )
@@ -218,16 +228,19 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun clearWebBrowsingData() {
+    private fun clearWebBrowsingData(onComplete: () -> Unit = {}) {
         app.configStore.saveLastUrl(null)
         tabManager.destroyAll()
-        CookieManager.getInstance().removeAllCookies(null)
-        CookieManager.getInstance().flush()
         WebStorage.getInstance().deleteAllData()
+        val cm = CookieManager.getInstance()
+        cm.removeAllCookies {
+            cm.flush()
+            onComplete()
+        }
     }
 
     private fun requestRuntimePermissionsIfNeeded() {
-        val needed = mutableListOf<String>()
+        val needed = mutableListOf<String>(Manifest.permission.CAMERA)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             needed += Manifest.permission.BLUETOOTH_CONNECT
             needed += Manifest.permission.BLUETOOTH_SCAN

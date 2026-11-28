@@ -426,6 +426,15 @@
       return parsed.protocol === "http:" || parsed.protocol === "https:";
     } catch (e) { return false; }
   }
+  function normTabUrl(u) {
+    try {
+      var parsed = new URL(String(u || ""));
+      if (parsed.pathname.length > 1 && parsed.pathname.endsWith("/")) {
+        parsed.pathname = parsed.pathname.slice(0, -1);
+      }
+      return parsed.toString();
+    } catch (e) { return String(u || "").replace(/\/+$/, ""); }
+  }
   function isInitialTabUrl(u) {
     if (!isRestorableTabUrl(u)) return false;
     if (isLocalTabUrl(u)) {
@@ -437,7 +446,7 @@
       // do not restore a duplicate of it. POS tabs are never skipped.
       return (
         !/\/pos(\/|$)/i.test(u) &&
-        (parsed.pathname === "/" || parsed.pathname === "/web" || parsed.pathname === "/web/login")
+        (parsed.pathname === "/" || parsed.pathname === "/web" || parsed.pathname === "/web/login" || parsed.pathname === "/odoo")
       );
     } catch (e) { return false; }
   }
@@ -451,15 +460,32 @@
       lastSignature = "";
       refresh();
     };
-    invoke("app_identity", {}).catch(function () { return null; }).then(function (ov) {
-      var startupUrl = ov && (ov.startupUrl || ov.startup_url) ? String(ov.startupUrl || ov.startup_url) : "";
+    Promise.all([
+      invoke("app_identity", {}).catch(function () { return null; }),
+      invoke("tab_list", {}).catch(function () { return []; })
+    ]).then(function (pair) {
+      var ov = pair[0];
+      var liveTabs = Array.isArray(pair[1]) ? pair[1] : [];
+      var liveFirstUrl = normTabUrl((liveTabs[0] && liveTabs[0].url) || "");
+      var startupUrl = ov && (ov.startupUrl || ov.startup_url) ? normTabUrl(ov.startupUrl || ov.startup_url) : "";
       var activeIdx = 0;
       saved.forEach(function (tab, i) { if (tab && tab.active) activeIdx = i; });
       var firstUrl = String((saved[0] && saved[0].url) || "");
-      var skipFirst = (!!startupUrl && firstUrl === startupUrl) || isInitialTabUrl(firstUrl);
+      var skipFirst =
+        (!!startupUrl && normTabUrl(firstUrl) === startupUrl) ||
+        (!!liveFirstUrl && normTabUrl(firstUrl) === liveFirstUrl) ||
+        isInitialTabUrl(firstUrl);
+      var seen = {};
+      if (liveFirstUrl) seen[liveFirstUrl] = true;
       var queue = saved.slice(skipFirst ? 1 : 0).map(function (tab) {
         return String((tab && tab.url) || "");
-      }).filter(isRestorableTabUrl);
+      }).filter(function (u) {
+        if (!isRestorableTabUrl(u)) return false;
+        var n = normTabUrl(u);
+        if (seen[n]) return false;
+        seen[n] = true;
+        return true;
+      });
       var targetUrl = skipFirst && activeIdx === 0
         ? null
         : (saved[activeIdx] && saved[activeIdx].url) || null;

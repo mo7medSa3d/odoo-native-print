@@ -32,13 +32,13 @@ const POS_RECEIPT_SOURCE = "point_of_sale.receipt";
 
 const RECEIPT_LAYOUT_FIX_CSS =
     ".pos-receipt{padding-bottom:16px !important}" +
-    ".pos-receipt,.pos-receipt *{float:none !important;position:static !important;direction:ltr !important;line-height:1.35 !important;box-sizing:border-box !important}" +
+    ".pos-receipt,.pos-receipt *{float:none !important;position:static !important;line-height:1.35 !important;box-sizing:border-box !important}" +
     ".pos-receipt *:not(img):not(canvas):not(svg){height:auto !important;min-height:0 !important;max-height:none !important;block-size:auto !important;overflow:visible !important}" +
     ".pos-receipt span:not(.pos-receipt-right-align),.pos-receipt .cashier,.pos-receipt .cashier>div{width:auto !important;inline-size:auto !important}" +
     ".pos-receipt .pos-receipt-amount,.pos-receipt .paymentlines,.pos-receipt .pos-receipt-taxes>div{display:flex !important;justify-content:space-between !important;gap:0.75em !important;align-items:baseline !important}" +
-    ".pos-receipt .ms-auto{margin-left:auto !important;margin-inline-start:auto !important;white-space:nowrap !important;flex-shrink:0 !important}" +
+    ".pos-receipt .ms-auto{margin-inline-start:auto !important;white-space:nowrap !important;flex-shrink:0 !important}" +
     ".pos-receipt .pos-receipt-contact,.pos-receipt .pos-receipt-customer{display:flex !important;flex-direction:column !important;align-items:center !important}" +
-    ".pos-receipt .pos-receipt-right-align{display:inline-block !important;margin-left:auto !important;margin-inline-start:auto !important;text-align:right !important;white-space:nowrap !important;flex-shrink:0 !important}" +
+    ".pos-receipt .pos-receipt-right-align{display:inline-block !important;margin-inline-start:auto !important;text-align:end !important;white-space:nowrap !important;flex-shrink:0 !important}" +
     ".pos-receipt .pos-receipt-qr{display:flex !important;flex-direction:row !important;align-items:flex-start !important;gap:0.75em !important}" +
     ".pos-receipt .pos-receipt-qr>div:first-child{flex:0 0 auto !important;width:auto !important;inline-size:auto !important}" +
     ".pos-receipt .pos-receipt-qr>div:last-child{flex:1 1 0% !important;min-width:0 !important;width:auto !important;inline-size:auto !important}" +
@@ -48,6 +48,7 @@ const RECEIPT_LAYOUT_FIX_CSS =
 // capture and the 2D-canvas fallback draw stacked/overlapping text because of
 // it. Install the fix on the live page so both capture paths inherit it.
 (function installReceiptLayoutFix() {
+    if (!nativeBridge()) return;
     if (typeof document === "undefined" || !document.head || typeof document.createElement !== "function") return;
     if (typeof document.getElementById === "function" && document.getElementById("np-receipt-layout-fix")) return;
     const style = document.createElement("style");
@@ -57,7 +58,7 @@ const RECEIPT_LAYOUT_FIX_CSS =
 })();
 
 function nativeBridge() {
-    return window.__NATIVE_PRINT__ || null;
+    return (typeof window !== "undefined" && window.__NATIVE_PRINT__) || null;
 }
 
 function notificationEnv(contextObj) {
@@ -257,8 +258,11 @@ async function inlineMedia(source, clone, bgTargets = []) {
     const cloneCanvases = clone.querySelectorAll("canvas");
     for (let i = 0; i < sourceCanvases.length && i < cloneCanvases.length; i++) {
         try {
+            if (!sourceCanvases[i].width || !sourceCanvases[i].height) continue;
+            const dataUrl = sourceCanvases[i].toDataURL("image/png");
+            if (!dataUrl || !dataUrl.startsWith("data:image/")) continue;
             const img = document.createElement("img");
-            img.setAttribute("src", sourceCanvases[i].toDataURL("image/png"));
+            img.setAttribute("src", dataUrl);
             img.setAttribute("width", sourceCanvases[i].width);
             img.setAttribute("height", sourceCanvases[i].height);
             const canvasStyle = cloneCanvases[i].getAttribute("style");
@@ -634,6 +638,7 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
     let lastSeenAttempts = 1;
     let reachedTerminal = false;
     let consecutiveErrors = 0;
+    let consecutiveMissing = 0;
     // The watch continues past retryable outcomes (failed /
     // dead_letter: the worker may re-queue the job), so outcome
     // handling must run once per (state, attempts) — otherwise
@@ -679,8 +684,12 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
             }
             consecutiveErrors = 0;
             if (!state) {
+                if (++consecutiveMissing >= 15) {
+                    break;
+                }
                 continue;
             }
+            consecutiveMissing = 0;
             const progressed = state !== lastSeenState || attempts !== lastSeenAttempts;
             if (progressed) {
                 lastProgressAt = Date.now();
@@ -765,6 +774,10 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
         }
     }
     if (!reachedTerminal) {
+        if (!orderReleased && safeRef) {
+            orderReleased = true;
+            finishPosReceiptAttempt(safeRef, userId);
+        }
         notifyUser(
             env,
             _t('Receipt print on "%s" is still pending. Check Print Jobs for the final status.', printerName || rule.printer_pattern),

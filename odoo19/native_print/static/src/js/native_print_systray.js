@@ -189,6 +189,8 @@ export class NativePrintSystray extends Component {
             const local = await bridge.appOverview(showNotice ? { force: true } : undefined);
             if (this._unmounted || syncSeq !== this._printerSyncSeq) return;
             const printers = Array.isArray(local && local.printers) ? local.printers : [];
+            this._bridgeSyncFailed = false;
+            this.state.bridgeActive = true;
             this.state.printersCount = printers.length;
             const defaultEntry = printers.find((p) => p && (p.is_default || p.isDefault));
             this.state.defaultPrinter = (local && local.defaultPrinter) || (defaultEntry && defaultEntry.name) || null;
@@ -208,6 +210,13 @@ export class NativePrintSystray extends Component {
         } catch (error) {
             // Keep raw exception text in console; show localized notice to users.
             console.error("Yaseir Print: printer refresh failed.", error);
+            if (!this._unmounted) {
+                this._bridgeSyncFailed = true;
+                this.state.bridgeActive = false;
+                this.state.printersCount = 0;
+                this.state.defaultPrinter = null;
+                this.state.discoveredPrinters = [];
+            }
             if (showNotice && !this._unmounted) this.notification.add(
                 _t("Could not read this PC's printers. Check the desktop app and try again."),
                 { title: _t("Printer Refresh Failed"), type: "danger" });
@@ -240,7 +249,9 @@ export class NativePrintSystray extends Component {
             const parsed = JSON.parse(localStorage.getItem("npCapsSyncV1") || "{}");
             store = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
         } catch (_e) { store = {}; }
-        const prev = store[target.name] || {};
+        const companyId = (this.env && this.env.services && this.env.services.company && this.env.services.company.currentCompany && this.env.services.company.currentCompany.id) || 0;
+        const cacheKey = `${companyId}:${target.name}`;
+        const prev = store[cacheKey] || {};
         const now = Date.now();
         const inferred = detectPrinterType(target);
         const printerClass = target.printer_class || target.printerClass || inferred.printerClass || null;
@@ -267,7 +278,7 @@ export class NativePrintSystray extends Component {
                 forms, trays,
             }, { silent: true });
             if (res && res.ok) {
-                store[target.name] = { at: now, hash, meta: metaKey };
+                store[cacheKey] = { at: now, hash, meta: metaKey };
                 try {
                     localStorage.setItem("npCapsSyncV1", JSON.stringify(store));
                 } catch (_e) { /* ignore storage quota/privacy errors */ }
@@ -286,7 +297,7 @@ export class NativePrintSystray extends Component {
         this._refreshingStats = true;
         try {
             const bridge = window.__NATIVE_PRINT__ || null;
-            this.state.bridgeActive = Boolean(bridge);
+            this.state.bridgeActive = Boolean(bridge) && !this._bridgeSyncFailed;
             this.state.appOutdated = bridgeIsOutdated(bridge && bridge.version);
             const overviewTask = rpc("/native_print/overview", {}, { silent: true })
                 .then((srv) => {

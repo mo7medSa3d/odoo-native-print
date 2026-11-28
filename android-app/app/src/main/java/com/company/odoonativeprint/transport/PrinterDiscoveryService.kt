@@ -359,13 +359,19 @@ class PrinterDiscoveryService(
         val usbManager = context.getSystemService(Context.USB_SERVICE) as? UsbManager
         usbManager?.deviceList?.values?.forEach { dev ->
             if (!UsbOtgTransport.isPrinterDevice(dev)) return@forEach
-            val label = dev.productName?.takeIf { it.isNotBlank() } ?: "USB Printer (${dev.vendorId}:${dev.productId})"
+            val baseLabel = dev.productName?.takeIf { it.isNotBlank() } ?: "USB Printer (${dev.vendorId}:${dev.productId})"
+            var label = baseLabel
+            var suffix = 2
+            while (byName.containsKey(label)) {
+                label = "$baseLabel #$suffix"
+                suffix++
+            }
             val hasPerm = usbManager.hasPermission(dev)
             byName[label] = PrinterInfo(
                 name = label,
                 displayName = label,
                 transport = PrinterTransportType.USB_OTG,
-                address = "usb://${dev.deviceName}",
+                address = "usb://${UsbOtgTransport.formatKey(dev)}",
                 protocol = PrinterProtocol.ESCPOS,
                 online = hasPerm,
                 status = if (hasPerm) "ready" else "permission_required",

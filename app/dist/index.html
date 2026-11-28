@@ -2395,6 +2395,7 @@
   let printerSettingsVersion = 0;
   let printerSettingsRequested = false;
   const openSettingsPrinters = new Set();
+  const dirtySettingsPrinters = new Set();
   let openFormsPrinter = null;
   const openFormsHtmlCache = new Map();
   function formsBoxContent(printerName) {
@@ -2491,6 +2492,7 @@
     if (colorEl) { const cv = tri(colorEl.value); if (cv !== null) settings.color = cv; }
     try {
       printerSettings = await b.setPrinterSettings(name, settings) || {};
+      dirtySettingsPrinters.delete(name);
       printerSettingsVersion++;
       showToast(I18N[currentLang].ps_saved);
       renderPrintersGrid(lastGridPrinters);
@@ -2533,7 +2535,7 @@
     lastGridPrinters = printers;
     syncPrinterCaches(printers);
     const ae = document.activeElement;
-    if (ae && grid && grid.contains(ae) && (ae.tagName === "SELECT" || ae.tagName === "INPUT")) return;
+    if (dirtySettingsPrinters.size > 0 || (ae && grid && grid.contains(ae) && (ae.tagName === "SELECT" || ae.tagName === "INPUT"))) return;
     const signature = currentLang + "|" + capsVersion + "|" + printerSettingsVersion + "|" + JSON.stringify(printers.map((p) =>
       [p.name, p.kind, p.is_default, p.status, p.port, p.driver, p.protocol, p.printer_class, p.stable_id || "", healthFingerprint(p)]));
     if (signature === lastPrintersSignature) return;
@@ -3427,6 +3429,11 @@
       }
       return;
     }
+  });
+  document.getElementById("printersGrid")?.addEventListener("change", (ev) => {
+    const wrap = ev.target && ev.target.closest ? ev.target.closest("[data-settings-wrap]") : null;
+    const name = wrap ? wrap.getAttribute("data-printer") : null;
+    if (name) dirtySettingsPrinters.add(name);
   });
   renderSidebarTabs();
   window.addEventListener("storage", (ev) => {

@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.text.Layout
 import android.text.StaticLayout
+import android.text.TextDirectionHeuristics
 import android.text.TextPaint
 import androidx.core.content.res.ResourcesCompat
 import com.company.odoonativeprint.R
@@ -34,12 +35,13 @@ object TextReceiptRenderer {
         val contentWidth = (widthDots - paddingPx * 2).coerceAtLeast(120)
         val layout = StaticLayout.Builder
             .obtain(text, 0, text.length, paint, contentWidth)
-            .setAlignment(Layout.Alignment.ALIGN_CENTER)
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setTextDirection(TextDirectionHeuristics.ANYRTL_LTR)
             .setLineSpacing(4f, 1.15f)
             .setIncludePad(true)
             .build()
 
-        val height = (layout.height + paddingPx * 2).coerceAtLeast(64)
+        val height = (layout.height + paddingPx * 2).coerceIn(64, 8_192)
         val bmp = Bitmap.createBitmap(widthDots, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         canvas.drawColor(Color.WHITE)

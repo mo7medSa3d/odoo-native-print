@@ -3010,6 +3010,18 @@ fn print_pdf_via_gdi(
     Ok(())
 }
 
+fn parse_paper_width_mm(paper: Option<&str>) -> Option<f64> {
+    let s = paper?.trim().to_ascii_lowercase();
+    let head = s.split(|c: char| !c.is_ascii_digit() && c != '.').next()?;
+    let mm: f64 = head.parse().ok()?;
+    // Restrict fallback parsing to narrow receipt widths so A4/letter names don't hijack roll sizing.
+    if (30.0..=120.0).contains(&mm) && s.contains("mm") {
+        Some(mm)
+    } else {
+        None
+    }
+}
+
 fn print_png_via_gdi(
     target_name: &str,
     title: &str,
@@ -3024,7 +3036,9 @@ fn print_png_via_gdi(
         &canvas,
         opts.copies.max(1),
         opts.tray.as_deref(),
-        opts.media_roll_width_mm.or(opts.source_width_mm),
+        opts.media_roll_width_mm
+            .or(opts.source_width_mm)
+            .or_else(|| parse_paper_width_mm(opts.paper.as_deref())),
     )
     .map_err(|e| {
         if e.ambiguous {
@@ -3062,9 +3076,12 @@ impl PrintBackend for NativePrintBackend {
         let mut paper: Option<String> = opts.paper.clone();
         let title = job.report.as_deref().unwrap_or("Yaseir Print Job");
 
+        let trimmed_printer = job.printer.trim();
+        let lower_printer = trimmed_printer.to_ascii_lowercase();
+
         // 1. Direct TCP 9100 transport (tcp://host:port or raw://host:port)
-        if job.printer.starts_with("tcp://") || job.printer.starts_with("raw://") {
-            let (host, port, _) = Self::parse_host_port(&job.printer, 9100)?;
+        if lower_printer.starts_with("tcp://") || lower_printer.starts_with("raw://") {
+            let (host, port, _) = Self::parse_host_port(trimmed_printer, 9100)?;
             Self::reject_metadata_resolution(&host, port)?;
             // Live sensor check for ESC/POS printers (2026-11-07):
             // ask the hardware itself (DLE EOT) before sending —
@@ -3166,8 +3183,8 @@ impl PrintBackend for NativePrintBackend {
         }
 
         // 2. Direct IPP transport (ipp://host:port/path or mode == "ipp")
-        if job.printer.starts_with("ipp://") || opts.mode == "ipp" {
-            if !job.printer.starts_with("ipp://") && !job.printer.starts_with("http://") {
+        if lower_printer.starts_with("ipp://") || opts.mode == "ipp" {
+            if !lower_printer.starts_with("ipp://") && !lower_printer.starts_with("http://") {
                 return Err(BackendError::fatal(
                     "BAD_PRINTER_ADDRESS",
                     "IPP mode requires an ipp:// or http:// printer URI",
@@ -3183,14 +3200,17 @@ impl PrintBackend for NativePrintBackend {
                     "IPP printers accept PDF documents only; images and raw printer language cannot be sent over IPP",
                 ));
             }
-            let (host, port, path) = Self::parse_host_port(&job.printer, 631)?;
+            let (host, port, path) = Self::parse_host_port(trimmed_printer, 631)?;
             Self::reject_metadata_resolution(&host, port)?;
             let mut client = print_ipp::IppClient::new(&host, port);
             client.path = path.clone();
             client.printer_uri = Self::ipp_uri(&host, port, &path);
-            let caps = client
-                .get_printer_attributes()
-                .map_err(|e| BackendError::retryable("IPP_ATTRIBUTES_ERROR", &e.to_string()))?;
+            let caps = client.get_printer_attributes().map_err(|e| match e {
+                print_ipp::IppError::Http(code) if (400..500).contains(&code) => {
+                    BackendError::fatal("IPP_CLIENT_ERROR", &e.to_string())
+                }
+                other => BackendError::retryable("IPP_ATTRIBUTES_ERROR", &other.to_string()),
+            })?;
             if caps.is_blocked() {
                 return Err(BackendError::retryable(
                     "PRINTER_STOPPED",
@@ -4250,6 +4270,19 @@ mod tests {
         assert!(
             err.to_string().contains("payload_too_large"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_paper_width_mm_and_case_insensitive_uri() {
+        assert_eq!(parse_paper_width_mm(Some("80mm")), Some(80.0));
+        assert_eq!(parse_paper_width_mm(Some("58mm x 210mm")), Some(58.0));
+        assert_eq!(parse_paper_width_mm(Some("A4")), None);
+        assert_eq!(parse_paper_width_mm(Some("210mm")), None);
+        let parsed = NativePrintBackend::parse_host_port("TCP://192.168.1.50:9100", 9100).unwrap();
+        assert_eq!(
+            parsed,
+            ("192.168.1.50".to_string(), 9100, "/ipp/print".to_string())
         );
     }
 }

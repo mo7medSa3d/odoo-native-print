@@ -38,6 +38,7 @@ registry.
         # hard dependency on point_of_sale for backend-only users.
         "point_of_sale._assets_pos": [
             "native_print/static/src/js/native_print_client.js",
+            "native_print/static/src/js/native_print_handler.js",
             "native_print/static/src/js/pos_native_print.js",
         ],
     },
