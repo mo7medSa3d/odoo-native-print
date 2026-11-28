@@ -85,6 +85,15 @@ private val ENGLISH = mapOf(
     "منتهي الصلاحية" to "Expired",
     "يوم" to "days",
     "يوم واحد" to "1 day",
+    "حول التطبيق والدعم" to "About & Support",
+    "محرك طباعة صامتة ومباشرة لبيئات Odoo (17–20) مبني أصلياً بلغة Kotlin بدون IoT Box، بطابور SQLite WAL محلي وترخيص Ed25519 أوفلاين." to "Native silent printing engine for Odoo (17–20), built in Kotlin with zero IoT Box dependency, a local SQLite WAL queue, and offline Ed25519 licensing.",
+    "واتساب الدعم" to "WhatsApp support",
+    "البريد الإلكتروني" to "Email",
+    "تواصل عبر واتساب" to "WhatsApp",
+    "إرسال بريد" to "Email",
+    "نسخ معلومات النظام" to "Copy system info",
+    "تم نسخ معلومات النظام" to "System info copied",
+    "تطوير وإشراف اطبع · جميع الحقوق محفوظة © 2026" to "Engineered by Itbaa · © 2026 All rights reserved",
 )
 
 fun localize(text: String, language: String): String {
@@ -95,13 +104,5 @@ fun localize(text: String, language: String): String {
 }
 
 @Composable
-fun tr(text: String): String = localize(text, LocalLanguage.current)        "حول التطبيق والدعم" to "About & Support",
-        "محرك طباعة صامتة ومباشرة لبيئات Odoo (17–20) مبني أصلياً بلغة Kotlin بدون IoT Box، بطابور SQLite WAL محلي وترخيص Ed25519 أوفلاين." to "Native silent printing engine for Odoo (17–20), built in Kotlin with zero IoT Box dependency, a local SQLite WAL queue, and offline Ed25519 licensing.",
-        "واتساب الدعم" to "WhatsApp support",
-        "البريد الإلكتروني" to "Email",
-        "تواصل عبر واتساب" to "WhatsApp",
-        "إرسال بريد" to "Email",
-        "نسخ معلومات النظام" to "Copy system info",
-        "تم نسخ معلومات النظام" to "System info copied",
-        "تطوير وإشراف اطبع · جميع الحقوق محفوظة © 2026" to "Engineered by Itbaa · © 2026 All rights reserved",
+fun tr(text: String): String = localize(text, LocalLanguage.current)
 
