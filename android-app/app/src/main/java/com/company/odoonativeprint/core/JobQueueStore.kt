@@ -349,7 +349,8 @@ class SqliteJobPersistence(context: Context) :
     override fun deleteByIds(ids: List<String>) {
         if (ids.isEmpty()) return
         val db = writableDatabase
-        db.beginTransaction()
+        // WAL mode: BEGIN IMMEDIATE allows concurrent readers while pruning finished rows.
+        db.beginTransactionNonExclusive()
         try {
             ids.chunked(200).forEach { chunk ->
                 val placeholders = chunk.joinToString(",") { "?" }
@@ -400,7 +401,7 @@ class SqliteJobPersistence(context: Context) :
     )
 
     companion object {
-        private const val DB_NAME = "yaseir_print_queue.db"
+        private const val DB_NAME = "itbaa_queue.db"
         private const val DB_VERSION = 1
         private const val TABLE = "print_jobs"
     }

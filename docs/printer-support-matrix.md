@@ -1,6 +1,6 @@
 # Printer Support Matrix
 
-Reference matrix of printer classes, protocols, transports, paper-matching policies, and fallbacks implemented in `odoo-native-print`. See also [compatibility.md](compatibility.md), [error-catalog.md](error-catalog.md), and [adr/0003-paper-ladder-fail-loud.md](adr/0003-paper-ladder-fail-loud.md).
+Reference matrix of printer classes, protocols, transports, paper-matching policies, and fallbacks implemented in **Itbaa**. See also [compatibility.md](compatibility.md), [error-catalog.md](error-catalog.md), and [adr/0003-paper-ladder-fail-loud.md](adr/0003-paper-ladder-fail-loud.md).
 
 ## 1. Supported Printer Classes
 

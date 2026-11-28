@@ -31,7 +31,7 @@ class LocalizationContractTest {
 
     @Test
     fun `language preference is wired into composition and system bars`() {
-        val theme = source("ui/theme/YaseirTheme.kt")
+        val theme = source("ui/theme/ItbaaTheme.kt")
         assertTrue(theme.contains("LocalLanguage provides language"))
         assertTrue(theme.contains("isAppearanceLightStatusBars = !isDark"))
     }

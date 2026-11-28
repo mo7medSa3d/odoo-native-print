@@ -19,6 +19,8 @@ fn main() {
             "report_environment",
             "clear_web_data_cmd",
             "save_origin_cmd",
+            "license_status_cmd",
+            "save_license_cmd",
             "get_printer_settings",
             "set_printer_settings",
             "tab_open",

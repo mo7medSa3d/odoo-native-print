@@ -5,10 +5,10 @@ import { TicketScreen } from "@point_of_sale/app/screens/ticket_screen/ticket_sc
 import { patch } from "@web/core/utils/patch";
 import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
-import { JOB_TERMINAL_STATES as TERMINAL_STATES, normalizeBridgeJobState, notifyJobUpdated, notifyUser, recoveryButtons, resolveBridgeJobId, resolveBridgeTarget, safeErrorCode } from "./native_print_client";
+import { extractLicenseErrorCode, JOB_TERMINAL_STATES as TERMINAL_STATES, licenseErrorMessage, normalizeBridgeJobState, notifyJobUpdated, notifyUser, recoveryButtons, resolveBridgeJobId, resolveBridgeTarget, safeErrorCode } from "./native_print_client";
 
 /*
- * Native Print for POS receipts (Odoo 17, 18, and 19 compatible).
+ * Itbaa for POS receipts (Odoo 17, 18, and 19 compatible).
  *
  * Architectural compatibility:
  * - In Odoo 17, `printReceipt` is a method on `ReceiptScreen.prototype`.
@@ -19,7 +19,7 @@ import { JOB_TERMINAL_STATES as TERMINAL_STATES, normalizeBridgeJobState, notify
  * We hook BOTH:
  * 1. In `ReceiptScreen.prototype.setup()`, we wrap `this.pos.printReceipt`
  *    on the PosStore instance/prototype (idempotently) so manual prints,
- *    auto-prints, and TicketScreen reprints all route through Native Print.
+ *    auto-prints, and TicketScreen reprints all route through Itbaa.
  * 2. TicketScreen can render a past receipt offscreen and call
  *    `pos.printer.printHtml(element)`. We wrap that explicit-element
  *    entry point as well, capture the supplied DOM node, and route it
@@ -804,7 +804,7 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
             if (state === "failed" || state === "dead_letter") {
                 notifyUser(
                     env,
-                    _t('Receipt printing failed on "%s" (%s). Check the printer before reprinting.', printerName || rule.printer_pattern, safeErrorCode(errorCode, state)),
+                    (typeof licenseErrorMessage === "function" && licenseErrorMessage(errorCode)) || _t('Receipt printing failed on "%s" (%s). Check the printer before reprinting.', printerName || rule.printer_pattern, safeErrorCode(errorCode, state)),
                     "danger",
                     undefined,
                     typeof recoveryButtons === "function" ? recoveryButtons() : null,
@@ -941,15 +941,15 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
         try {
             bytes = await elementToPngBytes(element, 2);
         } catch (firstCaptureError) {
-            console.warn("Native Print: POS SVG capture (scale 2) failed, retrying at scale 1.", firstCaptureError);
+            console.warn("Itbaa: POS SVG capture (scale 2) failed, retrying at scale 1.", firstCaptureError);
             try {
                 bytes = await elementToPngBytes(element, 1);
             } catch (secondCaptureError) {
-                console.warn("Native Print: POS SVG capture (scale 1) failed, trying 2D canvas fallback.", secondCaptureError);
+                console.warn("Itbaa: POS SVG capture (scale 1) failed, trying 2D canvas fallback.", secondCaptureError);
                 try {
                     bytes = await renderReceiptCanvasFallback(element, 2);
                 } catch (canvasFallbackError) {
-                    console.warn("Native Print: POS 2D canvas fallback failed.", canvasFallbackError);
+                    console.warn("Itbaa: POS 2D canvas fallback failed.", canvasFallbackError);
                     if (effectiveMode === "escpos" && typeof bridge.printText === "function") {
                         const extracted = extractReceiptText(element);
                         if (extracted) {
@@ -994,15 +994,17 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
             }
             bridgeJobId = resolveBridgeJobId(enqueueRes, idempotencyKey);
         } catch (err) {
-            if (safeRef) { finishPosReceiptAttempt(safeRef, userId); }
-            try {
-                err.npKey = idempotencyKey;
-                err.npRef = safeRef;
-                err.npUserId = userId;
-                err.npDevice = target.printer.name;
-                err.npMode = effectiveMode;
-            } catch (_ignored) { /* non-object error: nothing to attach */ }
-            throw err;
+            const licenseCode = extractLicenseErrorCode(err);
+            console.warn("Itbaa: POS receipt print failed.", err);
+            return {
+                reason: licenseErrorMessage(licenseCode) || _t("Print job could not be queued."),
+                code: licenseCode || "POS_ENQUEUE_FAILED",
+                key: idempotencyKey,
+                safeRef,
+                userId,
+                device: target.printer.name,
+                mode: effectiveMode,
+            };
         }
         rpc(
             "/native_print/job_status",
@@ -1038,7 +1040,7 @@ function reportPosFailure(contextObj, failure) {
 }
 
 function reportPosException(contextObj, error, label) {
-    console.warn(`Native Print: POS ${label} capture failed.`, error);
+    console.warn(`Itbaa: POS ${label} capture failed.`, error);
     if (error && error.npKey) {
         postPosDeclined(error.npKey, "POS_ENQUEUE_FAILED", error.npRef || null, error.npUserId || null, error.npDevice, error.npMode);
     }

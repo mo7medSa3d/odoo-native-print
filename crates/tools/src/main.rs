@@ -1,5 +1,5 @@
 //! Benchmark and chaos harness (spec section 6).
-//! Run: cargo run --release -p print-tools -- bench | chaos | calibration
+//! Run: cargo run --release -p print-tools -- bench | chaos | calibration | license-bench
 //! Every mode prints measured numbers and exits non-zero on any failed
 //! invariant. Nothing here simulates a *result*: the invariants checked
 //! are the real queue/worker code paths used by the app.
@@ -222,14 +222,65 @@ fn calibration() {
     println!("calibration.result=PASS");
 }
 
+const LICENSE_BENCH_PUBKEY: [u8; 32] = [
+    234, 74, 108, 99, 226, 156, 82, 10, 190, 245, 80, 123, 19, 46, 197, 249, 149, 71, 118, 174,
+    190, 190, 123, 146, 66, 30, 234, 105, 20, 70, 210, 44,
+];
+const LICENSE_BENCH_KEY: &str = "ITBAA1.eyJjIjoiSXRiYWEgQmVuY2giLCJvIjoiaHR0cHM6Ly9lcnAuaXRiYWEudGVzdCIsImV4cCI6MTgwMDAwMDAwMCwidCI6InBybyJ9.8-tHpWQC_tlQ5-Qb7s8OBYiKWMtzHxkVdm__ANWT7jCF4iENB0B5l24oJZz-dVOCZnd5hm8tnhOnq4MZ55_eBw";
+const LICENSE_BENCH_ORIGIN: &str = "https://erp.itbaa.test";
+
+fn license_bench() {
+    const OPS: usize = 1000;
+    let t0 = Instant::now();
+    for _ in 0..OPS {
+        let payload = print_core::license::verify_license_with_pubkey(
+            Some(std::hint::black_box(LICENSE_BENCH_KEY)),
+            std::hint::black_box(&LICENSE_BENCH_PUBKEY),
+            LICENSE_BENCH_ORIGIN,
+            1_750_000_000,
+            1_749_999_900,
+        )
+        .expect("benchmark license must verify");
+        std::hint::black_box(payload);
+    }
+    let elapsed = t0.elapsed();
+    let total_ms = elapsed.as_secs_f64() * 1000.0;
+    let us_per_op = elapsed.as_secs_f64() * 1_000_000.0 / OPS as f64;
+    assert!(
+        us_per_op < 1000.0,
+        "license verification too slow: {us_per_op:.2} us/op (budget < 1000 us/op)"
+    );
+    println!("license_bench.result=PASS ops={OPS} total_ms={total_ms:.2} us_per_op={us_per_op:.2}");
+}
+
 fn main() {
     match std::env::args().nth(1).as_deref() {
         Some("bench") => bench(),
         Some("chaos") => chaos(),
         Some("calibration") => calibration(),
+        Some("license-bench") => license_bench(),
         _ => {
-            eprintln!("usage: native-print-tools <bench|chaos|calibration>");
+            eprintln!("usage: native-print-tools <bench|chaos|calibration|license-bench>");
             std::process::exit(2);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn license_bench_fixture_verifies() {
+        let payload = print_core::license::verify_license_with_pubkey(
+            Some(LICENSE_BENCH_KEY),
+            &LICENSE_BENCH_PUBKEY,
+            LICENSE_BENCH_ORIGIN,
+            1_750_000_000,
+            1_749_999_900,
+        )
+        .expect("fixture must be a valid Ed25519 license");
+        assert_eq!(payload.c, "Itbaa Bench");
+        assert_eq!(payload.t, "pro");
     }
 }

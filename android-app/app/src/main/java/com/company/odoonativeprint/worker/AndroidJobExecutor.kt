@@ -102,15 +102,15 @@ class AndroidJobExecutor(
             val activity = activityProvider()
                 ?: return TransportResult.Failure(
                     "NO_ACTIVE_ACTIVITY",
-                    "Open Yaseir Print to use Android System Print",
+                    "Open Itbaa to use Android System Print",
                     retryable = true,
                 )
             return withContext(Dispatchers.Main) {
                 AndroidPrintManagerAdapter.printPdfBytes(
                     activity = activity,
                     pdfBytes = pdfBytes,
-                    documentName = "Yaseir-${job.id.take(8)}.pdf",
-                    jobName = "Yaseir Print #${job.id.take(8)}",
+                    documentName = "Itbaa-${job.id.take(8)}.pdf",
+                    jobName = "Itbaa #${job.id.take(8)}",
                 )
             }
         }
@@ -139,7 +139,7 @@ class AndroidJobExecutor(
                     printer = printer,
                     documentFile = payloadFile,
                     mimeType = "application/pdf",
-                    jobName = "Yaseir-${job.id.take(8)}",
+                    jobName = "Itbaa-${job.id.take(8)}",
                     copies = job.copies,
                     sides = sides,
                 )
@@ -162,7 +162,7 @@ class AndroidJobExecutor(
                 printer = printer,
                 documentBytes = pdfBytes,
                 mimeType = "application/pdf",
-                jobName = "Yaseir-${job.id.take(8)}",
+                jobName = "Itbaa-${job.id.take(8)}",
                 copies = job.copies,
                 sides = sides,
             )

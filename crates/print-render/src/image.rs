@@ -92,25 +92,29 @@ pub fn receipt_dots_for_paper(paper: &str) -> Option<u32> {
         || starts_with_num(&lower, "72")
     {
         Some(576)
-    } else if let Some(mm_pos) = lower.find("mm") {
-        let (before_num, trailing) = split_trailing_number(&lower[..mm_pos]);
-        // Parse `<W>x<H>mm` / `<W> x <H> mm` before falling back to the single `<N>mm` number.
-        let width_str = before_num
-            .trim_end()
-            .strip_suffix(['x', '×'])
-            .and_then(|before_x| {
-                let (prefix, w) = split_trailing_number(before_x);
-                (!w.is_empty()
-                    && !trailing.is_empty()
-                    && !prefix.ends_with(|c: char| c.is_alphanumeric()))
-                .then_some(w)
-            })
-            .unwrap_or(trailing);
-        width_str
-            .parse::<f64>()
-            .ok()
-            .and_then(receipt_dots_for_width_mm)
     } else {
+        for (mm_pos, _) in lower.match_indices("mm") {
+            let (before_num, trailing) = split_trailing_number(&lower[..mm_pos]);
+            // Parse `<W>x<H>mm` / `<W> x <H> mm` before falling back to the single `<N>mm` number.
+            let width_str = before_num
+                .trim_end()
+                .strip_suffix(['x', '×'])
+                .and_then(|before_x| {
+                    let (prefix, w) = split_trailing_number(before_x);
+                    (!w.is_empty()
+                        && !trailing.is_empty()
+                        && !prefix.ends_with(|c: char| c.is_alphanumeric()))
+                    .then_some(w)
+                })
+                .unwrap_or(trailing);
+            if let Some(dots) = width_str
+                .parse::<f64>()
+                .ok()
+                .and_then(receipt_dots_for_width_mm)
+            {
+                return Some(dots);
+            }
+        }
         // Unknown non-mm paper names are refused, never silently treated as
         // 80 mm (a wrong-width receipt is clipped or scaled).
         None
@@ -619,6 +623,7 @@ mod tests {
         assert_eq!(receipt_dots_for_paper("Thermal 58 x 200 mm"), Some(384));
         assert_eq!(receipt_dots_for_paper("Thermal 80x200mm"), Some(576));
         assert_eq!(receipt_dots_for_paper("Roll 100 x 300mm"), Some(728));
+        assert_eq!(receipt_dots_for_paper("Summary 100mm"), Some(728));
     }
 
     #[test]

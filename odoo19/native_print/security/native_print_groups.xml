@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <record id="group_native_print_user" model="res.groups">
-        <field name="name">Yaseir Print / User</field>
+        <field name="name">Itbaa / User</field>
     </record>
     <record id="group_native_print_manager" model="res.groups">
-        <field name="name">Yaseir Print / Manager</field>
+        <field name="name">Itbaa / Manager</field>
         <field name="implied_ids" eval="[(4, ref('group_native_print_user'))]"/>
         <field name="user_ids" eval="[(4, ref('base.user_root')), (4, ref('base.user_admin'))]"/>
     </record>
-    <!-- Grant administrators Native Print / Manager by default -->
+    <!-- Grant administrators Itbaa / Manager by default -->
     <record id="base.group_system" model="res.groups">
         <field name="implied_ids" eval="[(4, ref('group_native_print_manager'))]"/>
     </record>
-    <!-- Grant internal users Native Print / User by default so standard Odoo users
+    <!-- Grant internal users Itbaa / User by default so standard Odoo users
          can print natively and see the print job log out of the box -->
     <record id="base.group_user" model="res.groups">
         <field name="implied_ids" eval="[(4, ref('group_native_print_user'))]"/>

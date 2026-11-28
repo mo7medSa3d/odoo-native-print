@@ -2,7 +2,7 @@
 
 ## Verified in Repository & Automated Test Suite
 - [x] `cargo test --workspace`: all unit and integration tests passing (`print-core`, `print-render`, `print-raw`, `print-ipp`, `print-win`, `app/src-tauri`)
-- [x] Tauri v2 ACL command gating: all 32 app commands registered in `app/src-tauri/build.rs` via `tauri_build::AppManifest::new().commands(&[...])` and mapped in `permissions/print.toml` + `capabilities/{main,remote,toolbar}.json`
+- [x] Tauri v2 ACL command gating: all 34 app commands registered in `app/src-tauri/build.rs` via `tauri_build::AppManifest::new().commands(&[...])` and mapped in `permissions/print.toml` + `capabilities/{main,remote,toolbar}.json`
 - [x] Exact-origin IPC validation in Rust (`print_core::security::origin_is_allowed`) with IPv4, IPv6 (`[::1]`), port, and scheme checks + `check_local_only` on `save_origin_cmd`
 - [x] Durable SQLite WAL queue (`print-core::queue`): atomic `claim_next` (`UPDATE ... WHERE state='queued'`), payload purging on `Done` and `Canceled`, crash recovery (`recover_on_startup`, ADR-0004), and backpressure limit (`500` active jobs/printer)
 - [x] PDFium dynamic FFI (`print-render::pdfium`): `FPDF_ANNOT | FPDF_PRINTING` render flags (plus `FPDF_RENDER_NO_SMOOTHTEXT | NO_SMOOTHIMAGE | NO_SMOOTHPATH` in 1-bit `Threshold` mode), safe struct drop ordering (`api` before `_lib`), and 128 MiB per-page ceiling

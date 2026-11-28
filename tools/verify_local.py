@@ -383,6 +383,149 @@ def _find_bash():
     return shutil.which("bash") or "bash"
 
 
+
+def _check_license_vectors() -> tuple[bool, str]:
+    import sys
+    sys.path.insert(0, str(ROOT / "tools"))
+    import license_keygen as lk
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    seed = bytes([99] * 32)
+    pub = Ed25519PrivateKey.from_private_bytes(seed).public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    valid = lk.sign_license(seed, "VerifyCo", "https://erp.verify.sa", days=15, tier="pro", now_utc=1750000000)
+    ok, code, _ = lk.verify_license(valid, pub, "https://ERP.VERIFY.SA:443/", now_utc=1750000100, last_seen_utc=1750000000)
+    if not ok or code != "OK":
+        return False, f"valid key failed: {code}"
+
+    # Tampered
+    tampered = valid[:14] + ("B" if valid[14] == "A" else "A") + valid[15:]
+    ok, code, _ = lk.verify_license(tampered, pub, "https://erp.verify.sa", now_utc=1750000100)
+    if ok or code != "ERR_LICENSE_REQUIRED":
+        return False, f"tampered key should fail: {ok} {code}"
+
+    # Wrong domain
+    ok, code, _ = lk.verify_license(valid, pub, "https://erp.other.sa", now_utc=1750000100)
+    if ok or code != "ERR_LICENSE_REQUIRED":
+        return False, f"wrong domain should fail: {ok} {code}"
+
+    # Expired
+    ok, code, _ = lk.verify_license(valid, pub, "https://erp.verify.sa", now_utc=1750000000 + 20 * 86400)
+    if ok or code != "ERR_LICENSE_EXPIRED":
+        return False, f"expired key should return ERR_LICENSE_EXPIRED: {ok} {code}"
+
+    # Clock rollback
+    ok, code, _ = lk.verify_license(valid, pub, "https://erp.verify.sa", now_utc=1750000000, last_seen_utc=1750003600)
+    if ok or code != "ERR_LICENSE_REQUIRED":
+        return False, f"clock rollback should fail: {ok} {code}"
+
+    return True, "5/5 Ed25519 vectors passed"
+
+
+def _check_brand_and_security() -> tuple[bool, str]:
+    import re
+    old_re = re.compile(r"yaseir|ياسير|يسير", re.IGNORECASE)
+    priv_re = re.compile(r"BEGIN (OPENSSH |EC |RSA )?PRIVATE KEY|PRIVATE_KEY_HEX=[0-9a-f]{64}")
+    pub_dl_re = re.compile(r"""href=["'][^"']*\.(msi|exe|apk|zip)["']""", re.IGNORECASE)
+    skip_dirs = {".git", "target", "node_modules", "__pycache__"}
+    bin_exts = {".png", ".ico", ".jpg", ".otf", ".ttf", ".pdf", ".zip", ".jar", ".so", ".dll", ".exe"}
+    issues = []
+    for p in ROOT.rglob("*"):
+        if any(part in skip_dirs for part in p.parts) or not p.is_file() or p.suffix.lower() in bin_exts:
+            continue
+        if p.name == "verify_local.py":
+            continue
+        try:
+            content = p.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        rel = str(p.relative_to(ROOT))
+        if old_re.search(content):
+            issues.append(f"old brand name in {rel}")
+        if priv_re.search(content):
+            issues.append(f"private key material in {rel}")
+        if rel.startswith("website/") and pub_dl_re.search(content):
+            issues.append(f"public binary download link in {rel}")
+    if issues:
+        return False, "; ".join(issues[:8])
+    return True, "0 old brand, 0 secrets, 0 public downloads"
+
+
+
+def _check_release_hardening() -> tuple[bool, str]:
+    checks = [
+        ("Cargo.toml", "debug = false"),
+        ("Cargo.toml", "strip = true"),
+        ("app/src-tauri/Cargo.toml", "debug = false"),
+        ("app/src-tauri/tauri.conf.json", '"withGlobalTauri": false'),
+        (".cargo/config.toml", "--remap-path-prefix"),
+        ("android-app/gradle.properties", "android.enableR8.fullMode=true"),
+        ("android-app/app/proguard-rules.pro", "-assumenosideeffects class android.util.Log"),
+        ("android-app/app/src/main/AndroidManifest.xml", 'android:allowBackup="false"'),
+        ("android-app/app/build.gradle.kts", "isDebuggable = false"),
+        ("android-app/app/src/main/java/com/company/odoonativeprint/ItbaaApp.kt", "setWebContentsDebuggingEnabled(BuildConfig.DEBUG)"),
+        ("android-app/app/src/main/java/com/company/odoonativeprint/core/ApkIntegrityGuard.kt", "verifyCertDigest"),
+        ("android-app/app/src/main/java/com/company/odoonativeprint/core/SecureLicenseStore.kt", "AES/GCM/NoPadding"),
+        ("app/src-tauri/src/config.rs", "CryptProtectData"),
+        ("crates/print-core/src/license.rs", "assemble_public_key"),
+    ]
+    missing = []
+    for rel, needle in checks:
+        p = ROOT / rel
+        if not p.exists() or needle not in p.read_text(encoding="utf-8"):
+            missing.append(f"{rel} missing {needle!r}")
+    if missing:
+        return False, "; ".join(missing)
+    return True, f"{len(checks)}/{len(checks)} hardening controls present"
+
+
+def _check_website_headers_and_seo() -> tuple[bool, str]:
+    issues = []
+    headers_path = ROOT / "website/_headers"
+    if not headers_path.is_file():
+        issues.append("missing website/_headers")
+    else:
+        hdr = headers_path.read_text(encoding="utf-8")
+        for needle in (
+            "Content-Security-Policy:",
+            "script-src 'self'",
+            "Strict-Transport-Security:",
+            "X-Content-Type-Options: nosniff",
+            "X-Frame-Options: DENY",
+            "Referrer-Policy:",
+            "Permissions-Policy:",
+            "/fonts/*",
+            "/assets/*",
+            "Cache-Control: public, max-age=31536000, immutable",
+        ):
+            if needle not in hdr:
+                issues.append(f"website/_headers missing {needle!r}")
+
+    robots_path = ROOT / "website/robots.txt"
+    if not robots_path.is_file():
+        issues.append("missing website/robots.txt")
+    else:
+        robots = robots_path.read_text(encoding="utf-8")
+        for needle in ("User-agent: *", "Allow: /", "Disallow: /404.html"):
+            if needle not in robots:
+                issues.append(f"website/robots.txt missing {needle!r}")
+
+    if not (ROOT / "website/theme-init.js").is_file():
+        issues.append("missing website/theme-init.js")
+
+    html_files = sorted((ROOT / "website").glob("*.html"))
+    for html_path in html_files:
+        text = html_path.read_text(encoding="utf-8")
+        for m in re.finditer(r"<script\b([^>]*)>", text, re.IGNORECASE):
+            attrs = m.group(1)
+            if not re.search(r'\bsrc\s*=', attrs, re.IGNORECASE) and "application/ld+json" not in attrs.lower():
+                issues.append(f"{html_path.relative_to(ROOT)} has inline executable <script>")
+
+    if issues:
+        return False, "; ".join(issues[:8])
+    return True, f"_headers + robots.txt + {len(html_files)} HTML CSP-clean"
+
+
 def main():
     if "--self-test" in sys.argv[1:]:
         return _self_test()
@@ -409,6 +552,9 @@ def main():
             ("node:odoo20_live_target", lambda: _run_cmd(["node", "--test", "odoo20/native_print/tests/test_live_target.mjs"], sub_env)),
             ("node:odoo_esm_syntax", _check_odoo_esm_syntax),
             ("node:android_bridge_js", lambda: _run_cmd(["node", "--check", "android-app/app/src/main/assets/bridge.js"], sub_env)),
+            ("node:website_app_js", lambda: _run_cmd(["node", "--check", "website/app.js"], sub_env)),
+            ("node:website_theme_init_js", lambda: _run_cmd(["node", "--check", "website/theme-init.js"], sub_env)),
+            ("website:headers_seo_csp", _check_website_headers_and_seo),
             ("android:kotlin_static", check_android_kotlin),
             ("python:py_compile", _check_py_compile),
             ("xml/admx/adml", _check_xml),
@@ -418,6 +564,9 @@ def main():
             ("i18n:odoo18_ar.po", lambda: _check_ar_po("odoo18/native_print/i18n/ar.po")),
             ("i18n:ar.po", _check_ar_po),
             ("i18n:odoo20_ar.po", lambda: _check_ar_po("odoo20/native_print/i18n/ar.po")),
+            ("license:ed25519_vectors", _check_license_vectors),
+            ("security:brand_secrets", _check_brand_and_security),
+            ("security:release_hardening", _check_release_hardening),
         ]
         results = _run_steps(steps)
 

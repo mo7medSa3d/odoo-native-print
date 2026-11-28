@@ -11,3 +11,4 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 rusqlite = { workspace = true }
+ed25519-dalek = { version = "2", default-features = false }

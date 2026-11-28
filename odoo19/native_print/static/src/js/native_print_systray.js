@@ -93,12 +93,12 @@ export class NativePrintSystray extends Component {
         // dropdown speaks one language: full, unambiguous phrases
         // (one-word labels collide with other modules' catalog terms).
         this.labels = {
-            title: _t("Yaseir Print Status & Control"),
+            title: _t("Itbaa Status & Control"),
             appActive: _t("App Active"),
             browserMode: _t("Browser Mode"),
             localPrinters: _t("Local Printers"),
             defaultPrinter: _t("Default Printer"),
-            browserNote: _t("Browser mode: reports download as files. Open Odoo in the Yaseir Print app to print directly."),
+            browserNote: _t("Browser mode: reports download as files. Open Odoo in the Itbaa app to print directly."),
             noPrinters: _t("No printers found on this PC. Connect a printer and refresh."),
             inUse: _t("In use"),
             usePrinter: _t("Use for Reports"),
@@ -111,7 +111,7 @@ export class NativePrintSystray extends Component {
             failedJobs: _t("Failed jobs"),
             jobsLog: _t("Print Jobs Log"),
             controlCenter: _t("Open Control Center"),
-            updateApp: _t("A newer desktop app is available. Update Yaseir Print for the latest fixes."),
+            updateApp: _t("A newer desktop app is available. Update Itbaa for the latest fixes."),
         };
 
         this._onOutsideClick = () => {
@@ -170,7 +170,7 @@ export class NativePrintSystray extends Component {
         const bridge = window.__NATIVE_PRINT__ || null;
         if (!bridge || typeof bridge.appOverview !== "function") {
             if (showNotice) this.notification.add(
-                _t("Open Odoo inside the Yaseir Print desktop app to see this PC's printers."),
+                _t("Open Odoo inside the Itbaa desktop app to see this PC's printers."),
                 { title: _t("Desktop App Required"), type: "warning" },
             );
             return;
@@ -209,7 +209,7 @@ export class NativePrintSystray extends Component {
             );
         } catch (error) {
             // Keep raw exception text in console; show localized notice to users.
-            console.error("Yaseir Print: printer refresh failed.", error);
+            console.error("Itbaa: printer refresh failed.", error);
             if (!this._unmounted) {
                 this._bridgeSyncFailed = true;
                 this.state.bridgeActive = false;
@@ -284,7 +284,7 @@ export class NativePrintSystray extends Component {
                 } catch (_e) { /* ignore storage quota/privacy errors */ }
             }
         } catch (error) {
-            console.error("Yaseir Print: device capability sync failed.", error);
+            console.error("Itbaa: device capability sync failed.", error);
         }
     }
 
@@ -349,11 +349,11 @@ export class NativePrintSystray extends Component {
             try {
                 await bridge.openControlCenter();
             } catch (err) {
-                console.error("Yaseir Print: opening Control Center failed.", err);
+                console.error("Itbaa: opening Control Center failed.", err);
             }
         } else {
             this.notification.add(
-                _t("Open Odoo in the Yaseir Print desktop app to use the Control Center (Ctrl+Shift+Y)."),
+                _t("Open Odoo in the Itbaa desktop app to use the Control Center (Ctrl+Shift+Y)."),
                 { title: _t("Browser Fallback Mode"), type: "info" },
             );
         }

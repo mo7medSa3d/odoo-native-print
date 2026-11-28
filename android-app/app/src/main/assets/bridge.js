@@ -163,7 +163,7 @@
     window.__NATIVE_PRINT__ = __npFacade;
   }
 
-  // Suppress browser print dialog so all Odoo reports flow through Native Print
+  // Suppress browser print dialog so all Odoo reports flow through Itbaa
   try { window.print = function () {}; } catch (e) {}
 
   // LAN HTTP origins are non-secure contexts where navigator.clipboard is undefined,

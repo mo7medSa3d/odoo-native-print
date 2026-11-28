@@ -473,7 +473,7 @@ function createMiniDom(pageHtml, { lang = "ar", dir = "rtl" } = {}) {
   // Parse static elements with id, class, data-i18n, data-page, data-tab, data-filter from markup
   const markup = pageHtml.slice(0, pageHtml.indexOf("<script"));
   const body = new MiniEl("BODY");
-  const tagRe = /<(main|nav|section|div|button|input|select|pre|span|h1|p|footer|tbody)\b([^>]*)>/gi;
+  const tagRe = /<(main|nav|section|div|button|input|select|pre|span|h1|h2|p|footer|tbody)\b([^>]*)>/gi;
   for (const m of markup.matchAll(tagRe)) {
     const tag = m[1], attrStr = m[2];
     const el = new MiniEl(tag);
@@ -834,7 +834,7 @@ test("settings.html flows: tab switching + keyboard nav, theme/lang toggle, and 
     document.getElementById("btnLangEn").dispatch("click");
     assert.equal(document.documentElement.lang, "en");
     assert.equal(document.documentElement.dir, "ltr");
-    assert.equal(document.title, "Yaseir Print — Settings");
+    assert.equal(document.title, "Itbaa — Settings");
     assert.equal(storage.get("np_cc_lang"), "en");
 
     // Support action button opens Control Center / Diagnostics
@@ -1004,7 +1004,7 @@ test("copy-diagnostics uses navigator.clipboard.writeText, falls back to execCom
   assert.ok(toasts.children[0].innerHTML.includes("Automatic copy failed"));
 });
 
-test("Yaseir Precision v2: token-only CSS, RTL Arabic typography, semantic KPI/status pills, and actionable empty states", async () => {
+test("Itbaa Precision v2: token-only CSS, RTL Arabic typography, semantic KPI/status pills, and actionable empty states", async () => {
   const styleMatch = html.match(/<style\b[^>]*>([\s\S]*?)<\/style>/i);
   assert.ok(styleMatch, "index.html must contain a <style> block");
   const styleCss = styleMatch[1];
@@ -1773,10 +1773,10 @@ test("audit regression: double-submit guards, bridge-down validation, inspectFor
   new vm.Script(bootScript).runInContext(bootCtx);
   await new Promise((r) => setImmediate(r));
   await new Promise((r) => setImmediate(r));
-  assert.equal(bootDom.document.title, "Yaseir Print — تعذّر الوصول إلى Odoo", "boot.html title must reflect down state");
+  assert.equal(bootDom.document.title, "Itbaa — تعذّر الوصول إلى Odoo", "boot.html title must reflect down state");
   bootCtx.showInitFail();
   assert.equal(bootDom.document.getElementById("count").textContent, "", "showInitFail must clear countdown text");
-  assert.equal(bootDom.document.title, "Yaseir Print — تعذّر بدء الاتصال", "boot.html title must reflect initFail state");
+  assert.equal(bootDom.document.title, "Itbaa — تعذّر بدء الاتصال", "boot.html title must reflect initFail state");
 });
 
 test("settings.html and tabbar.html audit regressions: re-entrancy locks, identity epoch, Escape drag cancel, and focus restore", async () => {
@@ -2119,4 +2119,253 @@ test("np_tab_cmd same-millisecond monotonic id: sendTabCmd emits id+ts and handl
   } finally {
     Date.now = origNow;
   }
+});
+
+test("boot.html and settings.html license UI: __TAURI_INTERNALS__ IPC, AR/EN live switch, and ERR_LICENSE_* handling", async () => {
+  const bootHtml = readFileSync(new URL("../dist/boot.html", import.meta.url), "utf8");
+  const bootScript = bootHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
+  assert.doesNotMatch(bootScript, /window\.__TAURI__\b/, "boot.html must use __TAURI_INTERNALS__ invoke, not window.__TAURI__");
+
+  // 1. boot.html: ERR_LICENSE_EXPIRED -> save_license_cmd errors -> success -> AR/EN switch
+  {
+    const { windowObj, document, storage } = createMiniDom(bootHtml);
+    let saveMode = "expired";
+    windowObj.__TAURI_INTERNALS__ = {
+      async invoke(cmd, args) {
+        if (cmd === "app_identity") return { odooOrigin: "https://odoo.example.com" };
+        if (cmd === "probe_origin") return false;
+        if (cmd === "license_status_cmd") return { valid: false, code: "ERR_LICENSE_EXPIRED" };
+        if (cmd === "save_license_cmd") {
+          if (saveMode === "expired") throw "ERR_LICENSE_EXPIRED";
+          if (saveMode === "locked") throw "locked_by_policy";
+          if (saveMode === "noorigin") throw "no_origin_configured";
+          if (saveMode === "invalid") throw "ERR_LICENSE_REQUIRED";
+          return { valid: true, code: "OK", tier: "pro", customer: "Acme", perpetual: true, key: args.key };
+        }
+      },
+    };
+    const ctx = vm.createContext({ ...windowObj, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout, localStorage: windowObj.localStorage });
+    new vm.Script(bootScript).runInContext(ctx);
+    await new Promise(r => setImmediate(r));
+    await new Promise(r => setImmediate(r));
+
+    const box = document.getElementById("licenseBox");
+    const badge = document.getElementById("licBadge");
+    const inp = document.getElementById("licInput");
+    const btn = document.getElementById("licSaveBtn");
+    const msg = document.getElementById("licMsg");
+
+    assert.equal(box.style.display, "block");
+    assert.match(badge.textContent, /انتهت صلاحية الرخصة/);
+
+    inp.value = "ITBAA1.test.sig";
+    btn.dispatch("click");
+    await new Promise(r => setImmediate(r));
+    assert.match(msg.textContent, /منتهي الصلاحية/);
+
+    saveMode = "locked";
+    btn.dispatch("click");
+    await new Promise(r => setImmediate(r));
+    assert.match(msg.textContent, /مقفل بواسطة مسؤول النظام/);
+
+    saveMode = "noorigin";
+    btn.dispatch("click");
+    await new Promise(r => setImmediate(r));
+    assert.match(msg.textContent, /Odoo/);
+
+    // Switch language to English via storage event
+    storage.set("np_cc_lang", "en");
+    windowObj.dispatch("storage", { key: "np_cc_lang" });
+    assert.equal(document.documentElement.dir, "ltr");
+    assert.equal(btn.textContent, "Activate");
+    assert.match(badge.textContent, /License expired/);
+    assert.equal(inp.getAttribute("aria-label"), "License key");
+
+    saveMode = "invalid";
+    btn.dispatch("click");
+    await new Promise(r => setImmediate(r));
+    assert.match(msg.textContent, /Invalid key or domain mismatch/);
+
+    saveMode = "ok";
+    btn.dispatch("click");
+    await new Promise(r => setImmediate(r));
+    assert.equal(msg.textContent, "License activated.");
+  }
+
+  // 2. settings.html: license_status_cmd + save_license_cmd + AR/EN toggle
+  const settingsHtml = readFileSync(new URL("../dist/settings.html", import.meta.url), "utf8");
+  const settingsScript = settingsHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
+  assert.doesNotMatch(settingsScript, /window\.__TAURI__\b/, "settings.html must use __TAURI_INTERNALS__ invoke, not window.__TAURI__");
+
+  {
+    const { windowObj, document } = createMiniDom(settingsHtml);
+    let licResp = { valid: false, code: "ERR_LICENSE_REQUIRED" };
+    let saveShouldFail = "ERR_LICENSE_EXPIRED";
+    windowObj.__TAURI_INTERNALS__ = {
+      async invoke(cmd) {
+        if (cmd === "app_identity") return { appVersion: "1.5.7", odooOrigin: "https://odoo.example.com" };
+        if (cmd === "license_status_cmd") return licResp;
+        if (cmd === "save_license_cmd") {
+          if (saveShouldFail) throw saveShouldFail;
+          licResp = { valid: true, code: "OK", tier: "pro", customer: "Acme Co", perpetual: true };
+          return licResp;
+        }
+        return {};
+      },
+    };
+    const ctx = vm.createContext({ ...windowObj, localStorage: windowObj.localStorage });
+    new vm.Script(settingsScript).runInContext(ctx);
+    await new Promise(r => setImmediate(r));
+    await new Promise(r => setImmediate(r));
+
+    assert.equal(document.getElementById("licStatusVal").textContent, "غير مفعّل");
+
+    const inp = document.getElementById("settingsLicInput");
+    const btn = document.getElementById("settingsLicBtn");
+    const msg = document.getElementById("settingsLicMsg");
+
+    inp.value = "ITBAA1.expired.sig";
+    btn.dispatch("click");
+    await new Promise(r => setImmediate(r));
+    assert.equal(msg.classList.contains("show"), true);
+    assert.equal(msg.classList.contains("err"), true);
+    assert.match(msg.textContent, /منتهي الصلاحية/);
+
+    saveShouldFail = null;
+    inp.value = "ITBAA1.valid.sig";
+    btn.dispatch("click");
+    await new Promise(r => setImmediate(r));
+    assert.equal(msg.classList.contains("ok"), true);
+    assert.equal(document.getElementById("licStatusVal").textContent, "Pro · دائم");
+    assert.equal(document.getElementById("licCustomerVal").textContent, "Acme Co");
+    assert.equal(inp.value, "");
+
+    // Switch to English and verify all license strings update live
+    document.getElementById("btnLangEn").dispatch("click");
+    assert.equal(document.getElementById("licTitle").textContent, "License & activation");
+    assert.equal(document.getElementById("licStatusLbl").textContent, "Status");
+    assert.equal(document.getElementById("licCustomerLbl").textContent, "Customer");
+    assert.equal(btn.textContent, "Save & activate");
+    assert.equal(document.getElementById("licStatusVal").textContent, "Pro · Perpetual");
+    assert.equal(msg.textContent, "License activated successfully.");
+  }
+
+  // 3. index.html friendlyError maps ERR_LICENSE_REQUIRED and ERR_LICENSE_EXPIRED in AR/EN
+  {
+    const { windowObj } = createMiniDom(html);
+    windowObj.__NATIVE_PRINT__ = { async appOverview() { return { printers: [], recentJobs: [], stateCounts: [] }; } };
+    const ctx = vm.createContext({ ...windowObj, localStorage: windowObj.localStorage, setInterval: windowObj.setInterval, clearInterval: windowObj.clearInterval, setTimeout: windowObj.setTimeout, clearTimeout: windowObj.clearTimeout });
+    new vm.Script(script + "\nglobalThis.__fe = friendlyError; globalThis.__setLang = (l) => { currentLang = l; };").runInContext(ctx);
+    ctx.__setLang("ar");
+    assert.match(ctx.__fe("ERR_LICENSE_REQUIRED"), /تفعيل الرخصة/);
+    assert.match(ctx.__fe("ERR_LICENSE_EXPIRED"), /انتهت صلاحية الرخصة/);
+    ctx.__setLang("en");
+    assert.match(ctx.__fe("ERR_LICENSE_REQUIRED"), /License activation is required/);
+    assert.match(ctx.__fe("ERR_LICENSE_EXPIRED"), /License has expired/);
+  }
+});
+
+test("Windows ADMX/ADML defines LicenseKey policy cleanly and scoped UI/deploy files contain zero old brand strings", () => {
+  const admx = readFileSync(new URL("../deploy/admx/OdooNativePrint.admx", import.meta.url), "utf8");
+  const adml = readFileSync(new URL("../deploy/admx/en-US/OdooNativePrint.adml", import.meta.url), "utf8");
+  const licPolicy = admx.match(/<policy name="LicenseKey"[^>]*>/)?.[0] || "";
+  assert.ok(licPolicy, "ADMX must define LicenseKey policy");
+  assert.equal(licPolicy.includes("valueName="), false, "ADMX LicenseKey <policy> must not duplicate valueName of <text>");
+  assert.match(admx, /<text id="LicenseKeyValue" valueName="LicenseKey" required="true"\/>/);
+  assert.match(adml, /<string id="LicenseKey">/);
+  assert.match(adml, /<string id="LicenseKey_Explain">/);
+  assert.match(adml, /<presentation id="LicenseKey">[\s\S]*?<textBox refId="LicenseKeyValue">/);
+
+  const oldBrand = new RegExp(["yas"+"eir", "\u064a\u0627\u0633\u064a\u0631", "\u064a\u0633\u064a\u0631"].join("|"), "i");
+  for (const rel of [
+    "../dist/index.html",
+    "../dist/boot.html",
+    "../dist/settings.html",
+    "../dist/tabbar.html",
+    "../dist/theme.css",
+    "../deploy/admx/OdooNativePrint.admx",
+    "../deploy/admx/en-US/OdooNativePrint.adml",
+  ]) {
+    const content = readFileSync(new URL(rel, import.meta.url), "utf8");
+    assert.doesNotMatch(content, oldBrand, rel + " must not contain old brand strings");
+  }
+});
+
+test("settings.html license expiry countdown renders remaining days in AR/EN, warns at <=7 days, and clears warning for perpetual", async () => {
+  const settingsHtml = readFileSync(new URL("../dist/settings.html", import.meta.url), "utf8");
+  const settingsScript = settingsHtml.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i)[1];
+  assert.match(settingsHtml, /\.row\s+\.v\.warn\s*\{[^}]*var\(--warn-fg\)/, "settings.html must style .row .v.warn with --warn-fg");
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const { windowObj, document } = createMiniDom(settingsHtml);
+  let nextSaveResp = null;
+  windowObj.__TAURI_INTERNALS__ = {
+    async invoke(cmd) {
+      if (cmd === "app_identity") return { appVersion: "1.5.7", odooOrigin: "https://odoo.example.com" };
+      if (cmd === "license_status_cmd") {
+        return { valid: true, code: "OK", tier: "pro", customer: "Riyadh Branch", exp: nowSec + 24 * 86400, perpetual: false };
+      }
+      if (cmd === "save_license_cmd") return nextSaveResp;
+      return {};
+    },
+  };
+  const ctx = vm.createContext({ ...windowObj, Date, localStorage: windowObj.localStorage });
+  new vm.Script(settingsScript).runInContext(ctx);
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  const stVal = document.getElementById("licStatusVal");
+  const inp = document.getElementById("settingsLicInput");
+  const btn = document.getElementById("settingsLicBtn");
+
+  // 24 days remaining (> 7): no warning class
+  assert.equal(stVal.textContent, "Pro · متبقي 24 يوم");
+  assert.equal(stVal.classList.contains("warn"), false);
+  document.getElementById("btnLangEn").dispatch("click");
+  assert.equal(stVal.textContent, "Pro · 24 days left");
+  assert.equal(stVal.classList.contains("warn"), false);
+
+  // 7 days remaining (boundary <= 7): warning class enabled
+  nextSaveResp = { valid: true, code: "OK", tier: "pro", customer: "Jeddah Branch", exp: nowSec + 7 * 86400, perpetual: false };
+  inp.value = "ITBAA1.seven.sig";
+  btn.dispatch("click");
+  await new Promise(r => setImmediate(r));
+  assert.equal(stVal.textContent, "Pro · 7 days left");
+  assert.equal(stVal.classList.contains("warn"), true);
+  document.getElementById("btnLangAr").dispatch("click");
+  assert.equal(stVal.textContent, "Pro · متبقي 7 يوم");
+  assert.equal(stVal.classList.contains("warn"), true);
+
+  // 5 days remaining on trial: warning class enabled
+  nextSaveResp = { valid: true, code: "OK", tier: "trial", customer: "Cairo POS", exp: nowSec + 5 * 86400, perpetual: false };
+  inp.value = "ITBAA1.five.sig";
+  btn.dispatch("click");
+  await new Promise(r => setImmediate(r));
+  assert.equal(stVal.textContent, "تجريبي · متبقي 5 يوم");
+  assert.equal(stVal.classList.contains("warn"), true);
+  document.getElementById("btnLangEn").dispatch("click");
+  assert.equal(stVal.textContent, "Trial · 5 days left");
+  assert.equal(stVal.classList.contains("warn"), true);
+
+  // 1 day remaining (singular): warning class enabled
+  nextSaveResp = { valid: true, code: "OK", tier: "pro", customer: "Alex POS", exp: nowSec + 3600, perpetual: false };
+  inp.value = "ITBAA1.one.sig";
+  btn.dispatch("click");
+  await new Promise(r => setImmediate(r));
+  assert.equal(stVal.textContent, "Pro · 1 day left");
+  assert.equal(stVal.classList.contains("warn"), true);
+  document.getElementById("btnLangAr").dispatch("click");
+  assert.equal(stVal.textContent, "Pro · متبقي يوم واحد");
+  assert.equal(stVal.classList.contains("warn"), true);
+
+  // Perpetual license: displays Perpetual / دائم and clears stale warn class
+  nextSaveResp = { valid: true, code: "OK", tier: "pro", customer: "HQ", exp: 0, perpetual: true };
+  inp.value = "ITBAA1.perp.sig";
+  btn.dispatch("click");
+  await new Promise(r => setImmediate(r));
+  assert.equal(stVal.textContent, "Pro · دائم");
+  assert.equal(stVal.classList.contains("warn"), false);
+  document.getElementById("btnLangEn").dispatch("click");
+  assert.equal(stVal.textContent, "Pro · Perpetual");
+  assert.equal(stVal.classList.contains("warn"), false);
 });

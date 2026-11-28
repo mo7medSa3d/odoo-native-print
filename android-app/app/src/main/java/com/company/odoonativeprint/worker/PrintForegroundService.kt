@@ -94,7 +94,7 @@ class PrintForegroundService : Service() {
 
     private fun buildNotification(activeCount: Int): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_yaseir_logo)
+            .setSmallIcon(R.drawable.ic_itbaa_logo)
             .setContentTitle(getString(R.string.notification_printing_title))
             .setContentText(getString(R.string.notification_printing_active, activeCount))
             .setOngoing(true)
@@ -102,7 +102,7 @@ class PrintForegroundService : Service() {
             .build()
 
     companion object {
-        private const val CHANNEL_ID = "yaseir_silent_printing"
+        private const val CHANNEL_ID = "itbaa_silent_printing"
         private const val NOTIFICATION_ID = 4107
         private const val EXTRA_ACTIVE_COUNT = "active_count"
 

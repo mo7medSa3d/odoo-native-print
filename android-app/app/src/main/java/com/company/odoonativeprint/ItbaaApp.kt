@@ -35,7 +35,7 @@ sealed interface AppNavEvent {
 /**
  * Lightweight dependency container (zero DI framework ceremony).
  */
-class YaseirPrintApp : Application() {
+class ItbaaApp : Application() {
 
     lateinit var configStore: AppConfigStore
         private set
@@ -56,6 +56,7 @@ class YaseirPrintApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        android.webkit.WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityResumed(activity: Activity) { currentActivityRef = WeakReference(activity) }
             override fun onActivityPaused(activity: Activity) {
@@ -90,7 +91,22 @@ class YaseirPrintApp : Application() {
         worker.start(autoReprint = configStore.current().autoReprint)
 
         bridgeDispatcher = BridgeDispatcher(object : RemoteBridgeHandler {
-            override fun configuredOrigin(): String? = configStore.current().origin
+            override fun checkLicense(): String? {
+        if (!com.company.odoonativeprint.core.ApkIntegrityGuard.isApkSignatureValid(this@ItbaaApp)) {
+            return com.company.odoonativeprint.core.ApkIntegrityGuard.ERR_APK_TAMPERED
+        }
+        val snap = configStore.current()
+        val now = com.company.odoonativeprint.core.LicenseManager.nowUtcSecs()
+        return when (val res = com.company.odoonativeprint.core.LicenseManager.verify(snap.licenseKey, snap.origin, now, snap.lastSeenUtc)) {
+            is com.company.odoonativeprint.core.LicenseResult.Valid -> {
+                configStore.updateLastSeenUtc(now)
+                null
+            }
+            is com.company.odoonativeprint.core.LicenseResult.Invalid -> res.code
+        }
+    }
+
+    override fun configuredOrigin(): String? = configStore.current().origin
 
             override fun enqueuePdf(
                 printer: String,

@@ -215,7 +215,7 @@
         <field name="context">{'create': False, 'search_default_f_executed': 1}</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">No print jobs yet</p>
-            <p>Print a report or POS receipt from the Yaseir Print desktop app to see jobs here.</p>
+            <p>Print a report or POS receipt from the Itbaa desktop app to see jobs here.</p>
         </field>
     </record>
 
@@ -273,12 +273,12 @@
         <field name="context">{'create': False}</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">No printers recorded yet</p>
-            <p>Printers appear here automatically after they are detected or used from the Yaseir Print desktop app.</p>
+            <p>Printers appear here automatically after they are detected or used from the Itbaa desktop app.</p>
         </field>
     </record>
 
     <menuitem id="menu_native_print_root"
-              name="Yaseir Print"
+              name="Itbaa"
               web_icon="native_print,static/description/icon.png"
               groups="native_print.group_native_print_user"
               sequence="95"/>

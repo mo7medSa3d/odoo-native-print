@@ -2,14 +2,14 @@
 import { registry } from "@web/core/registry";
 import { jsonrpc as rpc } from "@web/core/network/rpc_service";
 import { _t } from "@web/core/l10n/translation";
-import { JOB_TERMINAL_STATES as TERMINAL_STATES, normalizeBridgeJobState, notifyJobUpdated, notifyUser, recoveryButtons, resolveBridgeJobId, resolveBridgeTarget, safeErrorCode } from "./native_print_client";
+import { JOB_TERMINAL_STATES as TERMINAL_STATES, licenseErrorCode, licenseErrorMessage, normalizeBridgeJobState, notifyJobUpdated, notifyUser, recoveryButtons, resolveBridgeJobId, resolveBridgeTarget, safeErrorCode } from "./native_print_client";
 
 /*
- * Native Print report handler (API contract v1, docs/api-contract.md).
+ * Itbaa report handler (API contract v1, docs/api-contract.md).
  *
  * - Normal browser: no bridge exists -> return undefined (falsy) and Odoo
  *   behaves exactly as usual. This is the most important line in the file.
- * - Inside the Native Print app the shell injects window.__NATIVE_PRINT__
+ * - Inside the Itbaa app the shell injects window.__NATIVE_PRINT__
  *   on the configured origin only. Printers live on THIS PC only:
  *   the target is resolved live from the bridge inventory (the printer
  *   the user selected in the systray, else the OS default), its real
@@ -169,16 +169,6 @@ export function reportSource(action) {
         model: ctx.active_model || action.model || null,
         ids: list.filter((x) => Number.isInteger(x) || /^\d+$/.test(String(x))).join(","),
     };
-}
-
-function withTimeout(promise, ms, msg) {
-    return new Promise((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error(msg || "bridge_timeout")), ms);
-        Promise.resolve(promise).then(
-            (v) => { clearTimeout(t); resolve(v); },
-            (e) => { clearTimeout(t); reject(e); },
-        );
-    });
 }
 
 export function reportDataOf(action) {
@@ -391,9 +381,10 @@ export async function watchJobToCompletion(bridge, jobId, meta, env) {
                 if (notifiedFailure !== failureKey) {
                     notifiedFailure = failureKey;
                     notifyJobUpdated();
+                    const licMsg = licenseErrorMessage(licenseErrorCode(errorCode));
                     notifyUser(
                         env,
-                        _t('Printing failed on "%s" (%s). Check the printer before reprinting.', printerLabel, safeErrorCode(errorCode, state)),
+                        licMsg || _t('Printing failed on "%s" (%s). Check the printer before reprinting.', printerLabel, safeErrorCode(errorCode, state)),
                         "danger",
                         undefined,
                         recoveryButtons(),
@@ -444,7 +435,7 @@ async function handleCloseOnReportDownload(action, options, env) {
         // The print already succeeded at this point: a failing
         // wizard close (stale dialog, finished action service) must
         // not surface as a print error or an RPC traceback.
-        console.warn("Native Print: closing the report wizard failed after a successful print", err);
+        console.warn("Itbaa: closing the report wizard failed after a successful print", err);
     }
 }
 
@@ -534,17 +525,21 @@ async function printReportTextWhenPdfEngineMissing(action, options, env, bridge,
             env,
         ).catch(() => {});
     } catch (error) {
+        const licCode = licenseErrorCode(error);
         rpc("/native_print/job_status", Object.assign({
             idempotency_key: key,
             state: "failed",
-            error_code: "BRIDGE_ERROR",
+            error_code: licCode || "BRIDGE_ERROR",
             device: target.printer.name,
             report_name: action.report_name,
             byte_size: textBytes,
         }, source.model ? { source_model: source.model } : {}, source.ids ? { source_ids: source.ids } : {}), { silent: true })
             .catch(() => {})
             .finally(() => notifyJobUpdated());
-        console.warn("Native Print: text fallback for a report without a PDF engine failed.", error);
+        console.warn("Itbaa: text fallback for a report without a PDF engine failed.", error);
+        if (licCode) {
+            notifyUser(env, licenseErrorMessage(licCode), "danger", undefined, recoveryButtons());
+        }
         return undefined;
     }
     notifyUser(
@@ -693,6 +688,7 @@ async function handleReportSubmission(action, options, env, bridge) {
                 env,
             ).catch(() => {});
         } catch (error) {
+            const licCode = licenseErrorCode(error);
             // Logging the failure is best-effort: if this rpc threw,
             // the exception would escape the fallback path, the user
             // would get an RPC error instead of the file, and the
@@ -700,7 +696,7 @@ async function handleReportSubmission(action, options, env, bridge) {
             rpc("/native_print/job_status", {
                 idempotency_key: textKey,
                 state: "failed",
-                error_code: "BRIDGE_ERROR",
+                error_code: licCode || "BRIDGE_ERROR",
                 device: target.printer.name,
                 report_name: action.report_name,
                 source_type: "report",
@@ -716,11 +712,13 @@ async function handleReportSubmission(action, options, env, bridge) {
             }, { silent: true })
                 .catch(() => {})
                 .finally(() => notifyJobUpdated());
-            console.warn("Native Print: text print bridge call failed.", error);
+            console.warn("Itbaa: text print bridge call failed.", error);
             notifyUser(
                 env,
-                _t('Yaseir Print could not print on "%s". The file was downloaded instead.', target.printer.name),
-                "warning",
+                licCode
+                    ? licenseErrorMessage(licCode)
+                    : _t('Itbaa could not print on "%s". The file was downloaded instead.', target.printer.name),
+                licCode ? "danger" : "warning",
                 undefined,
                 recoveryButtons(),
             );
@@ -835,12 +833,13 @@ async function handleReportSubmission(action, options, env, bridge) {
             env,
         ).catch(() => {});
     } catch (error) {
+        const licCode = licenseErrorCode(error);
         // Best-effort like the text path: never let failure logging
         // break the fallback download (see the qweb-text branch).
         rpc("/native_print/job_status", {
             idempotency_key: idempotencyKey,
             state: "failed",
-            error_code: "BRIDGE_ERROR",
+            error_code: licCode || "BRIDGE_ERROR",
             device: target.printer.name,
             report_name: action.report_name,
             source_type: "report",
@@ -856,11 +855,13 @@ async function handleReportSubmission(action, options, env, bridge) {
         }, { silent: true })
             .catch(() => {})
             .finally(() => notifyJobUpdated());
-        console.warn("Native Print: PDF print bridge call failed.", error);
+        console.warn("Itbaa: PDF print bridge call failed.", error);
         notifyUser(
             env,
-            _t('Yaseir Print could not print on "%s". The PDF was downloaded instead.', target.printer.name),
-            "warning",
+            licCode
+                ? licenseErrorMessage(licCode)
+                : _t('Itbaa could not print on "%s". The PDF was downloaded instead.', target.printer.name),
+            licCode ? "danger" : "warning",
             undefined,
             recoveryButtons(),
         );

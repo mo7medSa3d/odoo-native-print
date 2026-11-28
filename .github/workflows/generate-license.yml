@@ -1,0 +1,73 @@
+name: Generate Itbaa License
+
+on:
+  workflow_dispatch:
+    inputs:
+      customer:
+        description: 'Customer / Company Name'
+        required: true
+        type: string
+      origin:
+        description: 'Odoo Origin URL (e.g. https://erp.company.com)'
+        required: true
+        type: string
+      days:
+        description: 'Validity in days (0 = perpetual)'
+        required: true
+        default: '30'
+        type: string
+      tier:
+        description: 'License Tier'
+        required: true
+        default: 'trial'
+        type: choice
+        options:
+          - trial
+          - pro
+
+permissions:
+  contents: read
+
+jobs:
+  generate-license:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install cryptography
+        run: python3 -m pip install --quiet cryptography
+
+      - name: Generate signed Ed25519 license key
+        env:
+          ITBAA_LICENSE_PRIVATE_KEY: ${{ secrets.ITBAA_LICENSE_PRIVATE_KEY }}
+          LIC_CUSTOMER: ${{ inputs.customer }}
+          LIC_ORIGIN: ${{ inputs.origin }}
+          LIC_DAYS: ${{ inputs.days }}
+          LIC_TIER: ${{ inputs.tier }}
+        run: |
+          if [ -z "$ITBAA_LICENSE_PRIVATE_KEY" ]; then
+            echo "::error::Missing GitHub Secret ITBAA_LICENSE_PRIVATE_KEY"
+            exit 1
+          fi
+          KEY=$(python3 tools/license_keygen.py sign \
+            --customer "$LIC_CUSTOMER" \
+            --origin "$LIC_ORIGIN" \
+            --days "$LIC_DAYS" \
+            --tier "$LIC_TIER")
+          {
+            echo "## Itbaa License Key Generated"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            printf '| Customer | `%s` |\n' "$LIC_CUSTOMER"
+            printf '| Odoo Origin | `%s` |\n' "$LIC_ORIGIN"
+            printf '| Tier | `%s` |\n' "$LIC_TIER"
+            printf '| Days (0 = perpetual) | `%s` |\n' "$LIC_DAYS"
+            printf '\n### Activation Key\n```text\n%s\n```\n' "$KEY"
+          } >> "$GITHUB_STEP_SUMMARY"

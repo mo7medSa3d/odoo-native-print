@@ -1,4 +1,4 @@
-/* Yaseir Print — Odoo 20 Systray (Light & Dark Theme Tokens) */
+/* Itbaa — Odoo 20 Systray (Light & Dark Theme Tokens) */
 @mixin np-light-tokens {
     --np-surface: rgba(255, 255, 255, 0.90);
     --np-card: #fafafa;
@@ -424,7 +424,7 @@
     }
 }
 
-/* Liquid Glass Notifications (scoped to Yaseir Print toasts) */
+/* Liquid Glass Notifications (scoped to Itbaa toasts) */
 .o_notification_manager .o_notification.o_native_print_notification {
     @include np-light-tokens;
 

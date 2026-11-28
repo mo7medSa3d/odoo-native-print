@@ -4,10 +4,10 @@
          Ships INACTIVE by default because the log is an operational audit
          trail, so deleting history must be an explicit admin choice.
          To enable: Settings > Technical > Scheduled Actions >
-         "Yaseir Print: prune old print jobs" > Activate. Terminal
+         "Itbaa: prune old print jobs" > Activate. Terminal
          jobs older than 180 days are removed; active jobs never. -->
     <record id="cron_prune_job_log" model="ir.cron">
-        <field name="name">Yaseir Print: prune old print jobs</field>
+        <field name="name">Itbaa: prune old print jobs</field>
         <field name="model_id" ref="model_native_print_job"/>
         <field name="code">model._cron_prune_job_log()</field>
         <field name="interval_number">1</field>

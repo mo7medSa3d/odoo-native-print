@@ -59,7 +59,7 @@ fn host_is_ip_literal(host: &str) -> bool {
 /// Canonicalizes IP literals via `Display` and strips one trailing dot
 /// from hostnames so admin-typed origins match webview URL serialization
 /// (audit L3).
-fn parse_origin(s: &str) -> Option<(&'static str, String, u16)> {
+pub(crate) fn parse_origin(s: &str) -> Option<(&'static str, String, u16)> {
     let (scheme, rest) = s.split_once("://")?;
     if rest.is_empty()
         || rest.contains(['/', '?', '#', '@', '\\'])

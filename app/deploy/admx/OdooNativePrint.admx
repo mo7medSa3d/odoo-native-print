@@ -29,5 +29,14 @@
       <enabledValue><decimal value="1"/></enabledValue>
       <disabledValue><decimal value="0"/></disabledValue>
     </policy>
+    <policy name="LicenseKey" class="Machine" displayName="$(string.LicenseKey)"
+            explainText="$(string.LicenseKey_Explain)" key="Software\Policies\OdooNativePrint"
+            presentation="$(presentation.LicenseKey)">
+      <parentCategory ref="ONP_Category"/>
+      <supportedOn ref="windows:SUPPORTED_Windows_10_0"/>
+      <elements>
+        <text id="LicenseKeyValue" valueName="LicenseKey" required="true"/>
+      </elements>
+    </policy>
   </policies>
 </policyDefinitions>

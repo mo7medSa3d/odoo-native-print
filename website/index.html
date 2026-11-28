@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>اطبع | طباعة صامتة ومباشرة لنظام أودو بدون IoT Box</title>
+  <meta name="description" content="اطبع يوفر طباعة صامتة ومباشرة لفواتير وإيصالات وملصقات أودو على ويندوز وأندرويد بدون جهاز IoT Box، مع طابور محلي SQLite WAL وترخيص Ed25519 أوفلاين.">
+  <meta property="og:title" content="اطبع | طباعة صامتة ومباشرة لنظام أودو">
+  <meta property="og:description" content="طباعة مباشرة لطابعات الإيصالات والمطبخ والباركود وفواتير A4 في أودو على ويندوز وأندرويد بدون IoT Box.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="assets/favicon.png">
+  <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="stylesheet" href="styles.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {"@type": "Question", "name": "هل أحتاج إلى جهاز Odoo IoT Box لتشغيل اطبع؟", "acceptedAnswer": {"@type": "Answer", "text": "لا، اطبع يلغي الحاجة تماماً إلى IoT Box ويعمل مباشرة على جهاز الكاشير أو تابلت أندرويد."}},
+      {"@type": "Question", "name": "هل يعمل نظام الترخيص إذا انقطع الإنترنت عن الفرع؟", "acceptedAnswer": {"@type": "Answer", "text": "نعم، التفعيل يعتمد على توقيع Ed25519 محلي بالكامل ولا يتصل بأي سيرفر خارجي أثناء الطباعة."}},
+      {"@type": "Question", "name": "هل يدعم اطبع الطباعة باللغة العربية في الإيصالات؟", "acceptedAnswer": {"@type": "Answer", "text": "نعم، يدعم طباعة الإيصالات العربية والباركود والفواتير الضريبية بدقة كاملة عبر محرك PDFium والطباعة الحرارية."}},
+      {"@type": "Question", "name": "هل يعمل مع Odoo.sh والاستضافة الخاصة؟", "acceptedAnswer": {"@type": "Answer", "text": "نعم، يعمل مع Odoo.sh والاستضافة الخاصة On Premise وكل بيئة تدعم تثبيت موديولات أودو المخصصة."}}
+    ]
+  }
+  </script>
+</head>
+<body>
+  <a class="skip-link button-sm" href="#main" data-i18n="skip">تخطي إلى المحتوى</a>
+
+  <header class="nav-wrap">
+    <nav class="floating-nav" aria-label="التنقل الرئيسي">
+      <a class="brand-link" href="#hero">
+        <img src="assets/icon.svg" alt="شعار اطبع" width="28" height="28">
+        <span class="title-3" data-brand-name>اطبع</span>
+      </a>
+
+      <ul class="nav-links">
+        <li><a class="title-4" href="#compare" data-i18n="navCompare">قبل وبعد</a></li>
+        <li><a class="title-4" href="#benefits" data-i18n="navBenefits">المزايا</a></li>
+        <li><a class="title-4" href="#steps" data-i18n="navSteps">خطوات التشغيل</a></li>
+        <li><a class="title-4" href="#compatibility" data-i18n="navCompat">التوافق</a></li>
+        <li><a class="title-4" href="#faq" data-i18n="navFaq">الأسئلة الشائعة</a></li>
+      </ul>
+
+      <div class="nav-actions">
+        <button type="button" class="icon-btn button-sm" id="langToggle" aria-label="Switch language">EN</button>
+        <button type="button" class="icon-btn" id="themeToggle" aria-label="Toggle theme"></button>
+        <a class="btn btn-nav-cta button-sm" href="#request" data-i18n="ctaPrimary">اطلب تجربة مجانية</a>
+        <button type="button" class="icon-btn menu-toggle" id="menuToggle" aria-expanded="false" aria-controls="mobilePanel" aria-label="القائمة">
+          <span></span>
+          <span></span>
+        </button>
+      </div>
+    </nav>
+  </header>
+
+  <div class="mobile-panel" id="mobilePanel" aria-hidden="true">
+    <ul class="mobile-panel-links">
+      <li><a class="heading-5" href="#compare" data-i18n="navCompare">قبل وبعد</a></li>
+      <li><a class="heading-5" href="#benefits" data-i18n="navBenefits">المزايا</a></li>
+      <li><a class="heading-5" href="#steps" data-i18n="navSteps">خطوات التشغيل</a></li>
+      <li><a class="heading-5" href="#compatibility" data-i18n="navCompat">التوافق</a></li>
+      <li><a class="heading-5" href="#faq" data-i18n="navFaq">الأسئلة الشائعة</a></li>
+      <li><a class="btn btn-primary button-md" href="#request" data-i18n="ctaPrimary">اطلب تجربة مجانية</a></li>
+    </ul>
+  </div>
+
+  <main id="main">
+    <!-- 1. Hero -->
+    <section class="hero" id="hero">
+      <div class="container hero-inner">
+        <div class="proof-pill caption-3">
+          <span class="proof-dot" aria-hidden="true"></span>
+          <span data-i18n="proofPill">يعمل أوفلاين بالكامل · متوافق مع Odoo 17 إلى 20</span>
+        </div>
+
+        <h1 class="heading-1 hero-headline" data-i18n="heroH1">طباعة صامتة ومباشرة لنظام أودو<br>بدون IoT Box أو نوافذ طباعة</h1>
+
+        <p class="body-3 hero-sub" data-i18n="heroSub">اربط طابعات الكاشير والمطبخ والباركود وفواتير A4 مباشرة من ويندوز وأندرويد عبر طابور محلي موثوق وترخيص أوفلاين.</p>
+
+        <div class="hero-cta-wrap">
+          <a class="btn btn-primary button-md" href="#request" data-i18n="ctaPrimary">اطلب تجربة مجانية</a>
+          <p class="caption-2 hero-note" data-i18n="heroNote">توزيع خاص للعملاء المعتمدين · بدون بطاقة بنكية للتجربة</p>
+        </div>
+
+        <!-- Realistic Print Queue Preview -->
+        <div class="queue-shell" aria-label="معاينة طابور الطباعة المحلي">
+          <div class="queue-topbar">
+            <div class="queue-brand">
+              <img src="assets/icon.svg" alt="" width="20" height="20">
+              <span class="title-4" data-i18n="queueTitle">طابور اطبع المحلي · SQLite WAL</span>
+            </div>
+            <div class="queue-tabs" role="group" aria-label="تصفية الطابور">
+              <button type="button" class="queue-tab button-xsm" data-filter="all" aria-pressed="true" data-i18n="queueAll">الكل</button>
+              <button type="button" class="queue-tab button-xsm" data-filter="printed" aria-pressed="false" data-i18n="queuePrinted">مطبوع</button>
+              <button type="button" class="queue-tab button-xsm" data-filter="queued" aria-pressed="false" data-i18n="queueQueued">في الانتظار</button>
+            </div>
+          </div>
+          <div class="queue-body" id="queueGrid"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Before / After Comparison -->
+    <section id="compare" class="reveal">
+      <div class="container">
+        <div class="section-head">
+          <span class="caption-3 section-kicker" data-i18n="compareKicker">لماذا اطبع</span>
+          <h2 class="heading-3" data-i18n="compareH2">استغنِ عن جهاز IoT Box ورسوم الصيانة الشهرية</h2>
+          <p class="body-3 section-sub" data-i18n="compareSub">قارن بين الطباعة التقليدية في المتصفح وتشغيل اطبع على نفس أجهزة الكاشير والمستودع.</p>
+        </div>
+
+        <div class="compare-grid">
+          <article class="surface-card">
+            <h3 class="heading-6" data-i18n="beforeTitle">الطريقة التقليدية أو IoT Box</h3>
+            <ul class="check-list body-3">
+              <li>
+                <span class="icon-box icon-box-err" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="24" stroke-linecap="round"><line x1="200" y1="56" x2="56" y2="200"/><line x1="200" y1="200" x2="56" y2="56"/></svg></span>
+                <span data-i18n="before1">شراء وتوصيل جهاز IoT Box لكل فرع مع صيانة مستمرة للشبكة</span>
+              </li>
+              <li>
+                <span class="icon-box icon-box-err" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="24" stroke-linecap="round"><line x1="200" y1="56" x2="56" y2="200"/><line x1="200" y1="200" x2="56" y2="56"/></svg></span>
+                <span data-i18n="before2">ظهور نافذة طباعة المتصفح في كل فاتورة وتباطؤ حركة الكاشير</span>
+              </li>
+              <li>
+                <span class="icon-box icon-box-err" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="24" stroke-linecap="round"><line x1="200" y1="56" x2="56" y2="200"/><line x1="200" y1="200" x2="56" y2="56"/></svg></span>
+                <span data-i18n="before3">ضياع مهام الطباعة عند انقطاع الشبكة أو إعادة تشغيل الجهاز</span>
+              </li>
+              <li>
+                <span class="icon-box icon-box-err" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="24" stroke-linecap="round"><line x1="200" y1="56" x2="56" y2="200"/><line x1="200" y1="200" x2="56" y2="56"/></svg></span>
+                <span data-i18n="before4">صعوبة تشغيل طابعات الملصقات ZPL أو الفواتير A4 بجانب الإيصالات</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="surface-card surface-card-accent">
+            <h3 class="heading-6" data-i18n="afterTitle">مع اطبع على ويندوز وأندرويد</h3>
+            <ul class="check-list body-3">
+              <li>
+                <span class="icon-box icon-box-ok" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"><polyline points="40 144 96 200 224 72"/></svg></span>
+                <span data-i18n="after1">يعمل مباشرة على جهاز الكاشير أو التابلت الحالي بدون أي أجهزة إضافية</span>
+              </li>
+              <li>
+                <span class="icon-box icon-box-ok" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"><polyline points="40 144 96 200 224 72"/></svg></span>
+                <span data-i18n="after2">طباعة صامتة فورية بضغطة واحدة من نقاط البيع وتقارير أودو</span>
+              </li>
+              <li>
+                <span class="icon-box icon-box-ok" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"><polyline points="40 144 96 200 224 72"/></svg></span>
+                <span data-i18n="after3">طابور SQLite WAL محلي يمنع التكرار ويعيد المحاولة تلقائياً عند العطل المؤقت</span>
+              </li>
+              <li>
+                <span class="icon-box icon-box-ok" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"><polyline points="40 144 96 200 224 72"/></svg></span>
+                <span data-i18n="after4">دعم شامل لإيصالات 80مم وملصقات الشحن ZPL/TSPL وفواتير A4</span>
+              </li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Mandatory Tagline Reveal Section (B11) -->
+    <section class="tagline-section" id="tagline" aria-label="رسالة اطبع">
+      <div class="container">
+        <p class="heading-3 tagline-text" id="taglineReveal"></p>
+      </div>
+    </section>
+
+    <!-- 4. Four Practical Benefits -->
+    <section id="benefits" class="reveal">
+      <div class="container">
+        <div class="section-head">
+          <span class="caption-3 section-kicker" data-i18n="benefitsKicker">فوائد عملية</span>
+          <h2 class="heading-3" data-i18n="benefitsH2">أربع ركائز تحمي سرعة الكاشير والمستودع</h2>
+        </div>
+
+        <div class="benefits-grid">
+          <article class="surface-card">
+            <span class="icon-box icon-box-brand" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"><rect x="40" y="48" width="176" height="48" rx="8"/><rect x="40" y="104" width="176" height="48" rx="8"/><rect x="40" y="160" width="176" height="48" rx="8"/></svg></span>
+            <h3 class="heading-6" data-i18n="b1Title">طابور SQLite WAL مضمون الترتيب</h3>
+            <p class="body-3 section-sub" data-i18n="b1Desc">مفتاح منع تكرار لكل مهمة وتسلسل FIFO مستقل لكل طابعة مع استعادة آمنة بعد انقطاع الكهرباء.</p>
+          </article>
+
+          <article class="surface-card">
+            <span class="icon-box icon-box-brand" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"><rect x="40" y="88" width="176" height="128" rx="12"/><path d="M88 88V64a40 40 0 0 1 80 0v24"/></svg></span>
+            <h3 class="heading-6" data-i18n="b2Title">ترخيص Ed25519 أوفلاين بدون سيرفر</h3>
+            <p class="body-3 section-sub" data-i18n="b2Desc">تحقق رقمي محلي في أقل من 1 مللي ثانية مرتبط بدومين أودو الخاص بك دون الحاجة لاتصال خارجي.</p>
+          </article>
+
+          <article class="surface-card">
+            <span class="icon-box icon-box-brand" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"><polyline points="64 80 64 40 192 40 192 80"/><rect x="64" y="152" width="128" height="64"/><path d="M64 176H40a16 16 0 0 1-16-16V96a16 16 0 0 1 16-16h176a16 16 0 0 1 16 16v64a16 16 0 0 1-16 16h-24"/></svg></span>
+            <h3 class="heading-6" data-i18n="b3Title">بروتوكولات متعددة في تطبيق واحد</h3>
+            <p class="body-3 section-sub" data-i18n="b3Desc">طباعة مباشرة عبر TCP 9100 وIPP وBluetooth وUSB وطابعات ويندوز وPDFium بدقة عالية.</p>
+          </article>
+
+          <article class="surface-card">
+            <span class="icon-box icon-box-brand" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"><path d="M128 32 48 64v64c0 52 34 86 80 96 46-10 80-44 80-96V64Z"/><polyline points="92 132 116 156 168 104"/></svg></span>
+            <h3 class="heading-6" data-i18n="b4Title">إدارة مركزية عبر Windows GPO</h3>
+            <p class="body-3 section-sub" data-i18n="b4Desc">قفل عنوان أودو ومفتاح التفعيل عبر سياسات المجموعة في ويندوز مع بقاء الرخصة ثابتة بعد التحديثات.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. Three Steps -->
+    <section id="steps" class="reveal">
+      <div class="container">
+        <div class="section-head">
+          <span class="caption-3 section-kicker" data-i18n="stepsKicker">خطوات التشغيل</span>
+          <h2 class="heading-3" data-i18n="stepsH2">جاهز للطباعة في ثلاث خطوات واضحة</h2>
+        </div>
+
+        <div class="steps-grid">
+          <article class="surface-card">
+            <span class="step-num title-3 mono">1</span>
+            <h3 class="heading-6" data-i18n="s1Title">اطلب الحزمة والتجربة</h3>
+            <p class="body-3 section-sub" data-i18n="s1Desc">أرسل بيانات شركتك وإصدار أودو لنجهز لك رابط الحزمة الخاصة ومفتاح التفعيل التجريبي.</p>
+          </article>
+
+          <article class="surface-card">
+            <span class="step-num title-3 mono">2</span>
+            <h3 class="heading-6" data-i18n="s2Title">ثبّت الموديول والتطبيق</h3>
+            <p class="body-3 section-sub" data-i18n="s2Desc">ارفع موديول أودو وثبّت تطبيق اطبع على ويندوز أو أندرويد ثم أدخل عنوان أودو ومفتاح التفعيل.</p>
+          </article>
+
+          <article class="surface-card">
+            <span class="step-num title-3 mono">3</span>
+            <h3 class="heading-6" data-i18n="s3Title">اطبع بصمت من أي شاشة</h3>
+            <p class="body-3 section-sub" data-i18n="s3Desc">حدد طابعة الإيصالات أو المطبخ أو الفواتير A4 لتخرج المطبوعات فوراً بدون نوافذ متصفح.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. Compatibility Matrix -->
+    <section id="compatibility" class="reveal">
+      <div class="container">
+        <div class="section-head">
+          <span class="caption-3 section-kicker" data-i18n="compatKicker">مصفوفة التوافق</span>
+          <h2 class="heading-3" data-i18n="compatH2">يعمل مع بيئة أودو الحالية لديك</h2>
+        </div>
+
+        <div class="matrix-wrap">
+          <table class="matrix-table">
+            <thead>
+              <tr>
+                <th class="title-4" data-i18n="thComponent">المكوّن</th>
+                <th class="title-4" data-i18n="thSupport">الإصدارات والأنظمة المدعومة</th>
+                <th class="title-4" data-i18n="thDetails">تفاصيل التشغيل</th>
+              </tr>
+            </thead>
+            <tbody class="body-5">
+              <tr>
+                <td class="body-4" data-i18n="c1Name">إصدارات Odoo</td>
+                <td class="mono" data-i18n="c1Sup">Odoo 17 · 18 · 19 · 20</td>
+                <td data-i18n="c1Det">دعم نقاط البيع POS وتقارير PDF وملصقات الباركود</td>
+              </tr>
+              <tr>
+                <td class="body-4" data-i18n="c2Name">نظام Windows</td>
+                <td data-i18n="c2Sup">Windows 10 و Windows 11</td>
+                <td data-i18n="c2Det">تطبيق خفيف مبني بـ Rust وTauri مع دعم GPO</td>
+              </tr>
+              <tr>
+                <td class="body-4" data-i18n="c3Name">نظام Android</td>
+                <td data-i18n="c3Sup">Android 8 إلى Android 15</td>
+                <td data-i18n="c3Det">تطبيق أصلي بلغة Kotlin لأجهزة الكاشير والتابلت</td>
+              </tr>
+              <tr>
+                <td class="body-4" data-i18n="c4Name">البروتوكولات والطابعات</td>
+                <td class="mono" data-i18n="c4Sup">ESC/POS · ZPL · TSPL · IPP · PDF</td>
+                <td data-i18n="c4Det">شبكة LAN TCP 9100 وUSB وBluetooth وWindows Spooler</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. Eight FAQs -->
+    <section id="faq" class="reveal">
+      <div class="container">
+        <div class="section-head">
+          <span class="caption-3 section-kicker" data-i18n="faqKicker">الأسئلة الشائعة</span>
+          <h2 class="heading-3" data-i18n="faqH2">إجابات مباشرة قبل البدء</h2>
+        </div>
+
+        <div class="faq-list">
+          <details class="faq-item"><summary class="title-3"><span data-i18n="f1q">هل أحتاج إلى جهاز Odoo IoT Box لتشغيل اطبع؟</span><svg class="faq-chevron" width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="64 104 128 168 192 104"/></svg></summary><p class="body-5" data-i18n="f1a"></p></details>
+          <details class="faq-item"><summary class="title-3"><span data-i18n="f2q">هل يعمل نظام الترخيص إذا انقطع الإنترنت عن الفرع؟</span><svg class="faq-chevron" width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="64 104 128 168 192 104"/></svg></summary><p class="body-5" data-i18n="f2a"></p></details>
+          <details class="faq-item"><summary class="title-3"><span data-i18n="f3q">كيف أستلم ملفات التثبيت بعد طلب التجربة؟</span><svg class="faq-chevron" width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="64 104 128 168 192 104"/></svg></summary><p class="body-5" data-i18n="f3a"></p></details>
+          <details class="faq-item"><summary class="title-3"><span data-i18n="f4q">هل يدعم اطبع الطباعة باللغة العربية في الإيصالات؟</span><svg class="faq-chevron" width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="64 104 128 168 192 104"/></svg></summary><p class="body-5" data-i18n="f4a"></p></details>
+          <details class="faq-item"><summary class="title-3"><span data-i18n="f5q">ماذا يحدث إذا فُصلت الطابعة أثناء إرسال الفاتورة؟</span><svg class="faq-chevron" width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="64 104 128 168 192 104"/></svg></summary><p class="body-5" data-i18n="f5a"></p></details>
+          <details class="faq-item"><summary class="title-3"><span data-i18n="f6q">هل تبقى الرخصة مفعّلة عند تحديث تطبيق ويندوز أو أندرويد؟</span><svg class="faq-chevron" width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="64 104 128 168 192 104"/></svg></summary><p class="body-5" data-i18n="f6a"></p></details>
+          <details class="faq-item"><summary class="title-3"><span data-i18n="f7q">هل يمكن ربط أكثر من طابعة في نفس الفرع؟</span><svg class="faq-chevron" width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="64 104 128 168 192 104"/></svg></summary><p class="body-5" data-i18n="f7a"></p></details>
+          <details class="faq-item"><summary class="title-3"><span data-i18n="f8q">هل يعمل مع Odoo.sh أو الاستضافة الخاصة؟</span><svg class="faq-chevron" width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="64 104 128 168 192 104"/></svg></summary><p class="body-5" data-i18n="f8a"></p></details>
+        </div>
+      </div>
+    </section>
+
+    <!-- 8. Final CTA & Validated Trial Request Form -->
+    <section id="request" class="reveal">
+      <div class="container">
+        <div class="request-card">
+          <div style="display:flex;flex-direction:column;gap:var(--s-200);">
+            <span class="caption-3 section-kicker" data-i18n="reqKicker">ابدأ التجربة</span>
+            <h2 class="heading-3" data-i18n="reqH2">اطلب تجربة مجانية لشركتك</h2>
+            <p class="body-3 section-sub" data-i18n="reqSub">أدخل بياناتك الأساسية لفتح محادثة واتساب أو بريد إلكتروني جاهز بمواصفات بيئة أودو لديك.</p>
+            <p class="caption-1" style="color:var(--text-muted);" data-i18n="reqRisk">تجربة عملية كاملة · تسليم بروابط خاصة · دعم مباشر للتركيب</p>
+          </div>
+
+          <form id="trialForm" class="form-grid" novalidate>
+            <div class="field">
+              <label class="title-4" for="fName" data-i18n="lblName">الاسم الكامل</label>
+              <input id="fName" name="name" type="text" autocomplete="name" required>
+              <span class="caption-4 field-error" id="errName" role="alert"></span>
+            </div>
+
+            <div class="field">
+              <label class="title-4" for="fEmail" data-i18n="lblEmail">البريد الإلكتروني للعمل</label>
+              <input id="fEmail" name="email" type="email" autocomplete="email" dir="ltr" required>
+              <span class="caption-4 field-error" id="errEmail" role="alert"></span>
+            </div>
+
+            <div class="field">
+              <label class="title-4" for="fCompany" data-i18n="lblCompany">اسم الشركة أو المتجر</label>
+              <input id="fCompany" name="company" type="text" autocomplete="organization" required>
+              <span class="caption-4 field-error" id="errCompany" role="alert"></span>
+            </div>
+
+            <div class="field">
+              <label class="title-4" for="fOdoo" data-i18n="lblOdoo">إصدار أودو</label>
+              <select id="fOdoo" name="odoo">
+                <option value="Odoo 20">Odoo 20</option>
+                <option value="Odoo 19" selected>Odoo 19</option>
+                <option value="Odoo 18">Odoo 18</option>
+                <option value="Odoo 17">Odoo 17</option>
+              </select>
+              <span class="caption-4 field-error"></span>
+            </div>
+
+            <div class="field field-full">
+              <label class="title-4" for="fChannel" data-i18n="lblChannel">قناة التواصل المفضلة</label>
+              <select id="fChannel" name="channel">
+                <option value="whatsapp" data-i18n="chWhatsapp">واتساب مباشر</option>
+                <option value="email" data-i18n="chEmail">البريد الإلكتروني</option>
+              </select>
+            </div>
+
+            <div class="field field-full">
+              <button type="submit" class="btn btn-primary button-md" data-i18n="submitBtn">اطلب تجربة مجانية</button>
+            </div>
+
+            <div class="field field-full">
+              <div id="formStatus" class="form-status" role="status" aria-live="polite"></div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container footer-inner">
+      <div class="brand-link">
+        <img src="assets/icon.svg" alt="شعار اطبع" width="24" height="24">
+        <span class="caption-1" data-i18n="footerCopy">اطبع · جميع الحقوق محفوظة</span>
+      </div>
+      <div class="footer-links caption-1">
+        <a href="privacy.html" data-i18n="footerPrivacy">سياسة الخصوصية</a>
+        <a href="terms.html" data-i18n="footerTerms">الشروط والأحكام</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

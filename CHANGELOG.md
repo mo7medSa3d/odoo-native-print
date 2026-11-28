@@ -1,7 +1,22 @@
 # Changelog
 
-All notable changes to **Odoo Native Print** are documented in this file.
+All notable changes to **Itbaa (اطبع)** are documented in this file.
 The desktop client (`app/`), Android companion (`android-app/`), and the Odoo 17–20 addons (`odoo17/native_print/` through `odoo20/native_print/`) follow independent version lines.
+
+## Itbaa (اطبع) Rebrand, Offline Ed25519 Licensing & Direct-Distribution Hardening — 2026-11-28
+
+### Brand & Distribution
+- **Itbaa (اطبع) Rebrand:** Renamed desktop client (`productName: "Itbaa"`), Android companion (`ItbaaApp`), Odoo 17–20 addon labels/translations, static site, and operational docs to **Itbaa (اطبع)** while retaining existing Windows GPO (`HKLM\Software\Policies\OdooNativePrint`), per-user config, and Odoo technical module (`native_print`) compatibility.
+- **Cloudflare Pages Site (`website/`):** Added static bilingual marketing site with strict `website/_headers` security policy (`Content-Security-Policy` with `script-src 'self'`, `object-src 'none'`, `frame-ancestors 'none'`, HSTS, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, immutable caching for `/fonts/*` and `/assets/*`), externalized `website/theme-init.js` (zero inline executable scripts), and `website/robots.txt`.
+
+### Offline Ed25519 Licensing (`ITBAA1.*`)
+- **Local Verification:** Implemented offline `< 1 ms` Ed25519 signature verification (`ITBAA1.<Base64URL(json)>.<Base64URL(sig)>`) bound to exact normalized Odoo origins with clock-rollback protection and zero external activation servers.
+- **Issuance Tooling:** Added `tools/license_keygen.py` (`keygen`, `sign`, `verify`) and `.github/workflows/generate-license.yml` (`workflow_dispatch`) backed by `ITBAA_LICENSE_PRIVATE_KEY`, with automatic license redaction in diagnostics.
+
+### $0 Direct-Distribution Hardening
+- **Windows Desktop (`app/`, `crates/`):** Protected stored licenses with Windows DPAPI (`CryptProtectData`), XOR-assembled embedded Ed25519 public key (`assemble_public_key`), 3-point license verification gate, `withGlobalTauri: false`, and stripped/path-remapped release builds (`debug = false`, `strip = true`, `--remap-path-prefix`).
+- **Android Companion (`android-app/`):** Encrypted license storage with `AndroidKeyStore` (`AES/GCM/NoPadding`), APK signing-certificate SHA-256 anti-tampering (`ApkIntegrityGuard.verifyCertDigest`), R8 fullMode (`android.enableR8.fullMode=true`) with `android.util.Log` stripping, `android:allowBackup="false"`, `isDebuggable = false`, and `setWebContentsDebuggingEnabled(BuildConfig.DEBUG)`.
+- **Verification Gates (`tools/verify_local.py`):** Added automated checks for Ed25519 test vectors, brand/secret/public-download hygiene, 14/14 release hardening controls, and website `_headers`/CSP/SEO compliance.
 
 ## Odoo 17 (`17.0.1.0.0`) & Odoo 18 (`18.0.1.0.0`) Addons + Release Hardening — 2026-11-28
 

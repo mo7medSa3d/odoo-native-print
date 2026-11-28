@@ -1,7 +1,7 @@
 # CI / GitHub Workflows
 
-Everything is built and tested on GitHub. Four workflows live in
-`.github/workflows/`.
+Everything is built and tested on GitHub. Six workflows live in
+`.github/workflows/` (`ci.yml`, `odoo.yml`, `android.yml`, `generate-license.yml`, `printer-lab.yml`, and `release.yml`).
 
 ## ci.yml — on every push, pull request, and manual dispatch
 Top-level `permissions: contents: read` with per-ref concurrency
@@ -14,8 +14,8 @@ build at one known toolchain).
   clippy with warnings as errors, the full workspace test suite,
   print-win clippy + tests (Linux stub platform), pinned PDFium fetch +
   render tests with `PDFIUM_TEST_REQUIRED=1` (a render regression fails
-  CI instead of silently skipping), addon static checks for both
-  `odoo19/native_print` and `odoo20/native_print` (Python compiles, all
+  CI instead of silently skipping), addon static checks for
+  `odoo17/native_print` through `odoo20/native_print` (Python compiles, all
   XML parses, every addon JS asset parses), consistency gates
   (`tools/check_command_surface.py`, `tools/check_versions.py`, Control
   Center static tests `app/tests/control-center.test.mjs`, and Odoo 19 & 20 addon node

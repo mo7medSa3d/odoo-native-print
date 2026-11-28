@@ -544,4 +544,56 @@ assert.strictEqual(
     }
 }
 
+
+// 11. watchPosJob surfaces friendly license message for ERR_LICENSE_REQUIRED / ERR_LICENSE_EXPIRED.
+{
+    const rpcCalls = [];
+    const posNotices = [];
+    const prevWindow = globalThis.window;
+    const prevSetTimeout = globalThis.setTimeout;
+    globalThis.window = { dispatchEvent: () => true };
+    globalThis.setTimeout = (fn) => { fn(); return 0; };
+    try {
+        const helpers = [
+            'const POS_RECEIPT_SOURCE = "point_of_sale.receipt";',
+            'const TERMINAL_STATES = new Set(["done", "failed", "canceled", "dead_letter"]);',
+            'const normalizeBridgeJobState = (s) => s;',
+            'const _t = (s, ...args) => args.reduce((acc, v) => acc.replace("%s", String(v)), s);',
+            'const notifyUser = (_env, msg, type) => globalThis.__licPosNotices.push({ msg, type });',
+            'const safeErrorCode = (c, f = "error") => c || f;',
+            'const licenseErrorMessage = (c) => c === "ERR_LICENSE_EXPIRED" ? "Your Itbaa license has expired." : c === "ERR_LICENSE_REQUIRED" ? "An Itbaa license key is required." : null;',
+            'const notifyJobUpdated = () => {};',
+            'const rpc = async (url, params) => { globalThis.__licPosRpcs.push({ url, params }); return { ok: true }; };',
+            extract("finishPosReceiptAttempt"),
+            extract("watchPosJob"),
+            "globalThis.__licWatchPos = watchPosJob;",
+        ].join("\n");
+        globalThis.__licPosRpcs = rpcCalls;
+        globalThis.__licPosNotices = posNotices;
+        eval(helpers);
+
+        const order = { _printed: true };
+        await globalThis.__licWatchPos(
+            { jobDetail: async () => ({ state: "dead_letter", errorCode: "ERR_LICENSE_EXPIRED", attempts: 1 }) },
+            "pos-lic-1",
+            { printer_pattern: "EPSON", copies: 1, mode: "escpos" },
+            64,
+            "Order_Lic",
+            "EPSON",
+            null,
+            "7",
+            order,
+        );
+        assert.strictEqual(order._printed, false, "watchPosJob clears _printed on ERR_LICENSE_EXPIRED");
+        assert.strictEqual(rpcCalls[0].params.error_code, "ERR_LICENSE_EXPIRED", "watchPosJob logs ERR_LICENSE_EXPIRED");
+        assert.strictEqual(posNotices.length, 1);
+        assert.ok(/license has expired/i.test(posNotices[0].msg), "watchPosJob surfaces friendly expired-license message");
+    } finally {
+        globalThis.window = prevWindow;
+        globalThis.setTimeout = prevSetTimeout;
+        delete globalThis.__licPosRpcs;
+        delete globalThis.__licPosNotices;
+    }
+}
+
 console.log("pos key tests: ALL PASS");

@@ -18,3 +18,4 @@ release-files/
 *.log
 .env
 .env.*
+website/

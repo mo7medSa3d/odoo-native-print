@@ -23,6 +23,7 @@ import org.json.JSONObject
  */
 interface RemoteBridgeHandler {
     fun configuredOrigin(): String?
+    fun checkLicense(): String? = null
     fun enqueuePdf(printer: String, bytes: ByteArray, copies: Int, idempotencyKey: String?, options: JSONObject): PrintJobRecord
     fun enqueueText(printer: String, text: String, copies: Int, idempotencyKey: String?, options: JSONObject): PrintJobRecord
     fun enqueueImage(printer: String, bytes: ByteArray, copies: Int, idempotencyKey: String?, options: JSONObject): PrintJobRecord
@@ -81,9 +82,18 @@ class BridgeDispatcher(
 
         return try {
             val result: Any = when (cmd) {
-                "print_pdf" -> handlePrintPdf(args.optJSONObject("req") ?: args)
-                "print_text" -> handlePrintText(args.optJSONObject("req") ?: args)
-                "print_image" -> handlePrintImage(args.optJSONObject("req") ?: args)
+                "print_pdf" -> {
+                    handler.checkLicense()?.let { return err(id, it, "License check failed") }
+                    handlePrintPdf(args.optJSONObject("req") ?: args)
+                }
+                "print_text" -> {
+                    handler.checkLicense()?.let { return err(id, it, "License check failed") }
+                    handlePrintText(args.optJSONObject("req") ?: args)
+                }
+                "print_image" -> {
+                    handler.checkLicense()?.let { return err(id, it, "License check failed") }
+                    handlePrintImage(args.optJSONObject("req") ?: args)
+                }
                 "print_status" -> {
                     val jobId = args.optString("jobId", args.optString("job_id", ""))
                     handler.printStatus(jobId) ?: "not_found"

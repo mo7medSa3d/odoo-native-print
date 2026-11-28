@@ -6,7 +6,6 @@ import com.company.odoonativeprint.core.JobQueueEngine
 import com.company.odoonativeprint.core.PrintJobRecord
 import com.company.odoonativeprint.core.PrinterCapabilities
 import com.company.odoonativeprint.core.PrinterInfo
-import com.company.odoonativeprint.core.QueueSummary
 import org.json.JSONObject
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse

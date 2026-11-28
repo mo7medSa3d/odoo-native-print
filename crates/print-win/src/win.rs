@@ -570,7 +570,7 @@ pub fn print_pdf_gdi_detailed(
             if opts.scale_policy == ScalePolicy::Strict {
                 return Err(GdiPrintError::setup(e));
             }
-            eprintln!("Yaseir Print: capabilities unreadable for {printer:?} ({e}); falling back to driver defaults");
+            eprintln!("Itbaa: capabilities unreadable for {printer:?} ({e}); falling back to driver defaults");
             None
         }
     };
@@ -626,7 +626,7 @@ pub fn print_pdf_gdi_detailed(
                 match match_paper_auto(sub.size, caps) {
                     Ok(m) => Some(m),
                     Err(e) => {
-                        eprintln!("Yaseir Print: paper match fallback for {printer:?} ({e})");
+                        eprintln!("Itbaa: paper match fallback for {printer:?} ({e})");
                         None
                     }
                 }
@@ -637,7 +637,7 @@ pub fn print_pdf_gdi_detailed(
                     if opts.scale_policy == ScalePolicy::Strict {
                         return Err(GdiPrintError::setup(e.to_string()));
                     }
-                    eprintln!("Yaseir Print: paper match fallback for {printer:?} ({e})");
+                    eprintln!("Itbaa: paper match fallback for {printer:?} ({e})");
                     None
                 }
             },
@@ -691,7 +691,7 @@ pub fn print_pdf_gdi_detailed(
                     ));
                 }
                 eprintln!(
-                    "Yaseir Print: CreateDC with custom DEVMODE failed for {printer:?} ({}); retrying with driver defaults",
+                    "Itbaa: CreateDC with custom DEVMODE failed for {printer:?} ({}); retrying with driver defaults",
                     last_error()
                 );
                 dc = unsafe {
@@ -799,7 +799,7 @@ pub fn print_canvas_gdi_configured(
             // long receipt (owner field report, 2026-11-06: a POS
             // receipt to a virtual printer died in setup).
             eprintln!(
-                "Yaseir Print: caps-based canvas print to {printer:?} failed in setup ({}); retrying on the driver's default media",
+                "Itbaa: caps-based canvas print to {printer:?} failed in setup ({}); retrying on the driver's default media",
                 error.message
             );
             print_canvas_gdi_default_media(printer, title, canvas, copies, roll_width_mm)

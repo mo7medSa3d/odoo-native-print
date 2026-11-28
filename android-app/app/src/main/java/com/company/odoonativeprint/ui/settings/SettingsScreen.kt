@@ -47,9 +47,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import com.company.odoonativeprint.BuildConfig
 import com.company.odoonativeprint.core.AppConfigStore
+import com.company.odoonativeprint.core.LicenseManager
+import com.company.odoonativeprint.core.LicenseResult
 import com.company.odoonativeprint.ui.browser.explainOriginError
-import com.company.odoonativeprint.ui.theme.LocalYaseirColors
+import com.company.odoonativeprint.ui.theme.LocalItbaaColors
 
 /**
  * Minimal iOS-style grouped Settings screen matching desktop app/dist/settings.html.
@@ -61,14 +70,31 @@ fun SettingsScreen(
     onClearWebData: () -> Unit,
     onBack: () -> Unit,
 ) {
-    val c = LocalYaseirColors.current
+    val c = LocalItbaaColors.current
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val snap by configStore.state.collectAsState()
+    var sysInfoCopied by remember { mutableStateOf(false) }
 
     var originInput by remember(snap.origin) { mutableStateOf(snap.origin ?: "") }
     var autoReprint by remember(snap.autoReprint) { mutableStateOf(snap.autoReprint) }
     var feedback by remember { mutableStateOf<String?>(null) }
     var isError by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
+    var licenseInput by remember(snap.licenseKey) { mutableStateOf(snap.licenseKey ?: "") }
+    var licenseFeedback by remember { mutableStateOf<String?>(null) }
+
+    val nowUtc = remember(snap.licenseKey, snap.origin, snap.lastSeenUtc) {
+        LicenseManager.nowUtcSecs()
+    }
+    val licenseStatus = remember(snap.licenseKey, snap.origin, snap.lastSeenUtc, nowUtc) {
+        LicenseManager.verify(
+            key = snap.licenseKey,
+            configuredOrigin = snap.origin,
+            nowUtc = nowUtc,
+            lastSeenUtc = snap.lastSeenUtc,
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -182,7 +208,161 @@ fun SettingsScreen(
                 )
             }
 
+            // License & Activation Card
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(c.bgSurface)
+                    .border(0.75.dp, c.border, RoundedCornerShape(18.dp))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(tr("الترخيص والتفعيل"), style = MaterialTheme.typography.titleSmall, color = c.textPrimary)
+
+                when (val st = licenseStatus) {
+                    is LicenseResult.Valid -> {
+                        val payload = st.payload
+                        val days = payload.daysRemaining(nowUtc)
+                        val tierLabel = if (payload.tier == "pro") "Pro" else tr("تجريبي")
+                        val remainingText = when {
+                            days == null -> tr("دائم")
+                            days == 1L -> tr("يوم واحد")
+                            days in 2L..10L -> "$days ${tr("أيام")}"
+                            else -> "$days ${tr("يوم")}"
+                        }
+                        val statusColor = if (days != null && days <= 7L) c.warnFg else c.okFg
+                        LicenseInfoRow(label = tr("الحالة"), value = tierLabel, valueColor = statusColor)
+                        LicenseInfoRow(label = tr("العميل"), value = payload.customer, valueColor = c.textPrimary)
+                        LicenseInfoRow(label = tr("المتبقي"), value = remainingText, valueColor = statusColor)
+                    }
+                    is LicenseResult.Invalid -> {
+                        val expired = st.code == LicenseManager.ERR_LICENSE_EXPIRED
+                        LicenseInfoRow(
+                            label = tr("الحالة"),
+                            value = if (expired) tr("منتهي الصلاحية") else tr("غير مفعّل"),
+                            valueColor = if (expired) c.errFg else c.warnFg,
+                        )
+                    }
+                }
+
+                HorizontalDivider(thickness = 0.5.dp, color = c.border)
+
+                OutlinedTextField(
+                    value = licenseInput,
+                    onValueChange = { licenseInput = it; licenseFeedback = null },
+                    singleLine = true,
+                    label = { Text(tr("مفتاح التفعيل (ITBAA1...)")) },
+                    placeholder = { Text("ITBAA1....") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                )
+                val licenseOkLabel = tr("تم تفعيل الرخصة بنجاح")
+                val licenseExpiredLabel = tr("مفتاح الترخيص منتهي الصلاحية")
+                val licenseInvalidLabel = tr("مفتاح غير صالح أو لا يطابق عنوان أودو")
+                Button(
+                    onClick = {
+                        val now = LicenseManager.nowUtcSecs()
+                        val res = LicenseManager.verify(
+                            licenseInput,
+                            snap.origin,
+                            now,
+                            snap.lastSeenUtc,
+                        )
+                        if (res.isValid) {
+                            configStore.saveLicenseKey(licenseInput.trim())
+                            configStore.updateLastSeenUtc(now)
+                            licenseFeedback = licenseOkLabel
+                        } else {
+                            val inv = res as LicenseResult.Invalid
+                            licenseFeedback = if (inv.code == LicenseManager.ERR_LICENSE_EXPIRED) {
+                                licenseExpiredLabel
+                            } else {
+                                licenseInvalidLabel
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = c.brand, contentColor = Color.White),
+                    shape = RoundedCornerShape(999.dp),
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                ) {
+                    Text(tr("حفظ وتفعيل الرخصة"))
+                }
+                licenseFeedback?.let { fb ->
+                    Text(fb, style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+                }
+            }
+
             // Web Data Wipe
+
+            // About & Support card (ownership, technical summary, WhatsApp & Email)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(c.bgSurface)
+                    .border(0.5.dp, c.border, RoundedCornerShape(18.dp))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    tr("حول التطبيق والدعم"),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = c.textPrimary,
+                )
+                Text(
+                    tr("محرك طباعة صامتة ومباشرة لبيئات Odoo (17–20) مبني أصلياً بلغة Kotlin بدون IoT Box، بطابور SQLite WAL محلي وترخيص Ed25519 أوفلاين."),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = c.textSecondary,
+                )
+                LicenseInfoRow(tr("الإصدار"), "v${BuildConfig.VERSION_NAME} · Android ${Build.VERSION.RELEASE}", c.textPrimary)
+                LicenseInfoRow(tr("واتساب الدعم"), "+20 100 778 1842", c.textPrimary)
+                LicenseInfoRow(tr("البريد الإلكتروني"), "itbaa.odoo@gmail.com", c.textPrimary)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Button(
+                        onClick = {
+                            val summary = "Itbaa Android | v${BuildConfig.VERSION_NAME} | Android ${Build.VERSION.RELEASE}"
+                            val url = "https://wa.me/201007781842?text=" + Uri.encode(summary)
+                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = c.brand, contentColor = Color.White),
+                        shape = RoundedCornerShape(999.dp),
+                        modifier = Modifier.weight(1f).height(44.dp),
+                    ) {
+                        Text(tr("تواصل عبر واتساب"), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val uri = Uri.parse("mailto:itbaa.odoo@gmail.com?subject=" + Uri.encode("Itbaa Android Support"))
+                            runCatching { context.startActivity(Intent(Intent.ACTION_SENDTO, uri)) }
+                        },
+                        shape = RoundedCornerShape(999.dp),
+                        modifier = Modifier.weight(1f).height(44.dp),
+                    ) {
+                        Text(tr("إرسال بريد"), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                OutlinedButton(
+                    onClick = {
+                        val info = "Itbaa Android | v${BuildConfig.VERSION_NAME} | Android ${Build.VERSION.RELEASE} | AppId: ${BuildConfig.APPLICATION_ID}"
+                        clipboard.setText(AnnotatedString(info))
+                        sysInfoCopied = true
+                    },
+                    shape = RoundedCornerShape(999.dp),
+                    modifier = Modifier.fillMaxWidth().height(42.dp),
+                ) {
+                    Text(if (sysInfoCopied) tr("تم نسخ معلومات النظام") else tr("نسخ معلومات النظام"))
+                }
+                Text(
+                    tr("تطوير وإشراف اطبع · جميع الحقوق محفوظة © 2026"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = c.textMuted,
+                )
+            }
+
             OutlinedButton(
                 onClick = { confirmClear = true },
                 shape = RoundedCornerShape(999.dp),
@@ -214,12 +394,39 @@ fun SettingsScreen(
 }
 
 @Composable
+private fun LicenseInfoRow(
+    label: String,
+    value: String,
+    valueColor: Color,
+) {
+    val c = LocalItbaaColors.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = c.textSecondary,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = valueColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
 private fun SegmentedPillRow(
     options: List<Pair<String, String>>,
     selected: String,
     onSelect: (String) -> Unit,
 ) {
-    val c = LocalYaseirColors.current
+    val c = LocalItbaaColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()

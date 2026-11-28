@@ -51,8 +51,7 @@ impl TsplLabel {
             .filter(|c| !c.is_control() && *c != '\\')
             .map(|c| if c == '"' { '\'' } else { c })
             .collect();
-        self.buf
-            .extend_from_slice(format!("TEXT {x},{y},\"3\",0,1,1,\"{safe}\"\r\n").as_bytes());
+        let _ = write!(self.buf, "TEXT {x},{y},\"3\",0,1,1,\"{safe}\"\r\n");
         self
     }
     pub fn print(mut self, sets: u32, copies: u32) -> Vec<u8> {

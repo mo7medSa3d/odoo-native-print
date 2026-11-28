@@ -1,6 +1,6 @@
 # Odoo Setup Guide (addon: native_print)
 
-Target: **Odoo 19** (`odoo19/native_print`, `19.0.2.24.0`) and **Odoo 20** (`odoo20/native_print`, `20.0.1.0.0`). Older Odoo versions are not supported (see [compatibility.md](compatibility.md)).
+Target: **Odoo 17** (`odoo17/native_print`, `17.0.1.0.0`), **Odoo 18** (`odoo18/native_print`, `18.0.1.0.0`), **Odoo 19** (`odoo19/native_print`, `19.0.2.24.0`), and **Odoo 20** (`odoo20/native_print`, `20.0.1.0.0`) (see [compatibility.md](compatibility.md)).
 
 ## Client machine requirements (the Windows app)
 
@@ -14,8 +14,8 @@ Target: **Odoo 19** (`odoo19/native_print`, `19.0.2.24.0`) and **Odoo 20** (`odo
 - A printer driver installed in Windows for every printer used.
 
 ## Install
-1. Copy `odoo19/native_print` (for Odoo 19) or `odoo20/native_print` (for Odoo 20) into the server's addons path, or build `Dockerfile.odoo` with `--build-arg ODOO_VERSION=19.0 --build-arg ADDON_SRC=odoo19/native_print` (default) or `--build-arg ODOO_VERSION=20.0 --build-arg ADDON_SRC=odoo20/native_print`.
-2. Restart Odoo, update the apps list, install **Yaseir Print** (`native_print`).
+1. Copy the matching `odoo17/native_print` through `odoo20/native_print` directory into the server's addons path, or build `Dockerfile.odoo` with `--build-arg ODOO_VERSION=19.0 --build-arg ADDON_SRC=odoo19/native_print` (default; substitute `17.0`/`odoo17`, `18.0`/`odoo18`, or `20.0`/`odoo20` as needed).
+2. Restart Odoo, update the apps list, install **Itbaa** (`native_print`).
 3. Assign groups: internal users automatically inherit "Native Print / User";
    print administrators get "Native Print / Manager".
 
@@ -23,7 +23,7 @@ Target: **Odoo 19** (`odoo19/native_print`, `19.0.2.24.0`) and **Odoo 20** (`odo
 1. **Live workstation printer selection**: printers are discovered live
    from each workstation by the desktop app (no server-side profiles or
    routing rules are required). Users can pick their active printer from
-   the **Yaseir Print** navbar systray widget (stored in browser storage);
+   the **Itbaa** navbar systray widget (stored in browser storage);
    otherwise the Windows default printer is used.
 2. **POS receipts**: inside the desktop app, POS receipts are captured
    as 2x PNG images and automatically routed to a thermal/label printer
@@ -35,7 +35,7 @@ Target: **Odoo 19** (`odoo19/native_print`, `19.0.2.24.0`) and **Odoo 20** (`odo
    history/picker registry).
 
 ## Behaviour
-- In the Yaseir Print desktop app, `qweb-pdf` and `qweb-text` reports
+- In the Itbaa desktop app, `qweb-pdf` and `qweb-text` reports
   print locally with no download and no print dialog.
 - In any normal browser, Odoo behaves exactly as before (normal
   download). Nothing changes for users who do not use the app.

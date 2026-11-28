@@ -20,7 +20,7 @@ object CalibrationPages {
             else -> ((paperWidthMm * dpi / 25.4 / 8.0).toInt() * 8).coerceIn(192, 1664)
         }
         val text = buildString {
-            appendLine("Yaseir Print — اختبار الطباعة")
+            appendLine("Itbaa — اختبار الطباعة")
             appendLine("════════════════════════════")
             appendLine("الطابعة: $printerName")
             appendLine("العرض: ${paperWidthMm}mm | الدقة: ${dpi} DPI")

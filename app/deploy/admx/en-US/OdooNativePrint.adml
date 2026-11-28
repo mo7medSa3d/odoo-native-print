@@ -3,19 +3,24 @@
                            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                            revision="1.0" schemaVersion="1.0"
                            xmlns="http://schemas.microsoft.com/GroupPolicy/2006/07/PolicyDefinitions">
-  <displayName>Odoo Native Print</displayName>
-  <description>Administrative templates for the Odoo Native Print client.</description>
+  <displayName>Itbaa</displayName>
+  <description>Administrative templates for the Itbaa desktop client.</description>
   <resources>
     <stringTable>
-      <string id="ONP_Category">Odoo Native Print</string>
+      <string id="ONP_Category">Itbaa</string>
       <string id="OdooOrigin">Odoo server URL (origin)</string>
       <string id="OdooOrigin_Explain">Sets the exact Odoo server origin (scheme, host, and port), for example https://odoo.company.local:8069 or http://192.168.1.20:8069. HTTPS works for any host; HTTP is allowed for IP addresses only (use HTTPS whenever possible). Locks the desktop app to this origin.</string>
       <string id="DisableOriginChange">Lock the Odoo origin</string>
       <string id="DisableOriginChange_Explain">Prevents users from changing the Odoo server URL in the app. The app uses only machine policy or install configuration.</string>
+      <string id="LicenseKey">License key</string>
+      <string id="LicenseKey_Explain">Sets the offline Ed25519 Itbaa license key (ITBAA1....) bound to the configured Odoo origin. When configured via machine policy, users cannot overwrite the license key in the desktop app.</string>
     </stringTable>
     <presentationTable>
       <presentation id="OdooOrigin">
         <textBox refId="OdooOriginValue"><label>Odoo server URL (origin)</label></textBox>
+      </presentation>
+      <presentation id="LicenseKey">
+        <textBox refId="LicenseKeyValue"><label>License key (ITBAA1....)</label></textBox>
       </presentation>
     </presentationTable>
   </resources>

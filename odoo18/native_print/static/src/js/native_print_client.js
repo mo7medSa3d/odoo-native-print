@@ -81,6 +81,31 @@ export function safeErrorCode(code, fallback = "error") {
     const text = typeof code === "string" ? code.trim() : "";
     return /^[A-Za-z0-9_.-]{1,64}$/.test(text) ? text : fallback;
 }
+
+/** Extract ERR_LICENSE_REQUIRED / ERR_LICENSE_EXPIRED from a bridge rejection or error code. */
+export function licenseErrorCode(err) {
+    if (!err) return null;
+    const raw = typeof err === "string" ? err : (err.code || err.message || "");
+    const text = String(raw).trim();
+    if (text === "ERR_LICENSE_EXPIRED" || text.includes("ERR_LICENSE_EXPIRED")) {
+        return "ERR_LICENSE_EXPIRED";
+    }
+    if (text === "ERR_LICENSE_REQUIRED" || text.includes("ERR_LICENSE_REQUIRED")) {
+        return "ERR_LICENSE_REQUIRED";
+    }
+    return null;
+}
+
+/** Map native app license error codes to a clear localized user-facing message. */
+export function licenseErrorMessage(code) {
+    if (code === "ERR_LICENSE_EXPIRED") {
+        return _t("Itbaa license has expired. Open Settings in the Itbaa app to renew your license.");
+    }
+    if (code === "ERR_LICENSE_REQUIRED") {
+        return _t("Itbaa license is required to print. Open Settings in the Itbaa app to activate your license.");
+    }
+    return null;
+}
 export const JOB_UPDATED_EVENT = "native_print:job_updated";
 
 export function notifyJobUpdated() {
@@ -418,7 +443,7 @@ export async function resolveBridgeTarget(bridge, options = {}) {
     };
 }
 
-// User notifications: one helper for every Yaseir Print message, so
+// User notifications: one helper for every Itbaa message, so
 // report prints and POS receipts behave identically.
 // - Success/info stay quiet: short-lived and auto-dismissed.
 // - Warnings and failures are sticky: a print that did not happen
@@ -454,7 +479,7 @@ export function recoveryButtons() {
     return null;
 }
 
-export function notifyUser(env, message, type = "info", title = _t("Yaseir Print"), buttons = null) {
+export function notifyUser(env, message, type = "info", title = _t("Itbaa"), buttons = null) {
     try {
         const notification =
             env && env.services && env.services.notification;

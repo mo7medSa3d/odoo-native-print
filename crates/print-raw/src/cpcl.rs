@@ -95,15 +95,15 @@ pub fn text_label(lines: &[&str], width_dots: u16, height_dots: u16, copies: u16
     let copies = copies.max(1);
 
     let mut out = Vec::with_capacity(64usize.saturating_add(lines.len().saturating_mul(32)));
-    out.extend_from_slice(
-        format!("! 0 {DEFAULT_TEXT_DPI} {DEFAULT_TEXT_DPI} {height} {copies}\r\nPW {width}\r\n")
-            .as_bytes(),
+    let _ = write!(
+        out,
+        "! 0 {DEFAULT_TEXT_DPI} {DEFAULT_TEXT_DPI} {height} {copies}\r\nPW {width}\r\n"
     );
 
     for (idx, line) in lines.iter().enumerate() {
         let safe = sanitize_cpcl_text(line);
         let y = 16u32.saturating_add((idx as u32).saturating_mul(28));
-        out.extend_from_slice(format!("TEXT 0 2 16 {y} {safe}\r\n").as_bytes());
+        let _ = write!(out, "TEXT 0 2 16 {y} {safe}\r\n");
     }
 
     out.extend_from_slice(b"FORM\r\nPRINT\r\n");

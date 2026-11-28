@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "YaseirPrintAndroid"
+rootProject.name = "ItbaaAndroid"
 include(":app")

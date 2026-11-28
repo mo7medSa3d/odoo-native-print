@@ -1,0 +1,3 @@
+[build]
+# Strip local build-host absolute paths from release binaries.
+rustflags = ["--remap-path-prefix", ".=itbaa"]

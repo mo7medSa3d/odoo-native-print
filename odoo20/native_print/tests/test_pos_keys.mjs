@@ -1245,3 +1245,70 @@ test("visibleReceiptToPngBytes propagates dir/lang for RTL and inlines <canvas> 
         delete globalThis.__testO20VisibleRtl;
     }
 });
+
+test("PosTicketPrinterPlugin.printOrderReceipt surfaces ERR_LICENSE_REQUIRED and ERR_LICENSE_EXPIRED cleanly", async () => {
+    const prevWindow = globalThis.window;
+    const prevStorage = globalThis.sessionStorage;
+    const prevSetTimeout = globalThis.setTimeout;
+    const store = new Map();
+    const notices = [];
+    globalThis.sessionStorage = {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)),
+        removeItem: (k) => store.delete(k),
+    };
+    globalThis.setTimeout = (fn, ms) => (ms <= 2000 ? (fn(), 0) : prevSetTimeout(fn, ms));
+
+    try {
+        // Tauri string rejection: ERR_LICENSE_REQUIRED
+        globalThis.__rpcCalls.length = 0;
+        globalThis.window = {
+            localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+            dispatchEvent: () => true,
+            __NATIVE_PRINT__: {
+                listPrinters: async () => [{ name: "EPSON TM-T88V", driver: "EPSON", kind: "local", is_default: true, printer_class: "thermal" }],
+                printerCapabilities: async () => ({ forms: [], color: false }),
+                printImage: async () => { throw "ERR_LICENSE_REQUIRED"; },
+                printText: async () => { throw "ERR_LICENSE_REQUIRED"; },
+            },
+        };
+        const plugin = new StubPosTicketPrinterPlugin();
+        plugin.pos = { getCashier: () => ({ id: 33 }) };
+        plugin.notification = { add: (msg, opts) => notices.push({ msg, opts }) };
+        plugin.generateIframe = async () => ({
+            contentDocument: { getElementById: () => ({ offsetWidth: 300, innerText: "RECEIPT\nTOTAL 10" }) },
+            remove() {},
+        });
+        plugin.generateImage = async () => ({
+            width: 300,
+            toBlob(cb) { cb({ arrayBuffer: async () => new Uint8Array([137, 80, 78, 71]).buffer }); },
+        });
+        await plugin.printOrderReceipt({ order: { uuid: "ord-20-lic-req" } });
+        assert.strictEqual(
+            globalThis.__rpcCalls.some((c) => c.url === "/native_print/job_status" && c.params.error_code === "ERR_LICENSE_REQUIRED"),
+            true,
+            "POS logs ERR_LICENSE_REQUIRED on Tauri string rejection",
+        );
+        assert.ok(notices.some((n) => /license key is required/i.test(n.msg)), "POS toast explains ERR_LICENSE_REQUIRED");
+
+        // Android Error.code rejection: ERR_LICENSE_EXPIRED
+        notices.length = 0;
+        globalThis.__rpcCalls.length = 0;
+        globalThis.window.__NATIVE_PRINT__.printImage = async () => {
+            const err = new Error("License check failed");
+            err.code = "ERR_LICENSE_EXPIRED";
+            throw err;
+        };
+        await plugin.printOrderReceipt({ order: { uuid: "ord-20-lic-exp" } });
+        assert.strictEqual(
+            globalThis.__rpcCalls.some((c) => c.url === "/native_print/job_status" && c.params.error_code === "ERR_LICENSE_EXPIRED"),
+            true,
+            "POS logs ERR_LICENSE_EXPIRED on Android Error.code rejection",
+        );
+        assert.ok(notices.some((n) => /license has expired/i.test(n.msg)), "POS toast explains ERR_LICENSE_EXPIRED");
+    } finally {
+        globalThis.window = prevWindow;
+        globalThis.sessionStorage = prevStorage;
+        globalThis.setTimeout = prevSetTimeout;
+    }
+});

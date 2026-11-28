@@ -1,7 +1,7 @@
 id,name,model_id,group_id/id,operation,domain
-access_job_company,Yaseir Print jobs: company,native.print.job,,crud,"[('company_id', 'in', company_ids)]"
+access_job_company,Itbaa jobs: company,native.print.job,,crud,"[('company_id', 'in', company_ids)]"
 access_job_user,native.print.job user,native.print.job,group_native_print_user,r,"[('user_id', '=', user.id)]"
 access_job_manager,native.print.job manager,native.print.job,group_native_print_manager,r,
-access_device_company,Yaseir Print printers: company,native.print.device,,crud,"[('company_id', 'in', company_ids)]"
+access_device_company,Itbaa printers: company,native.print.device,,crud,"[('company_id', 'in', company_ids)]"
 access_device_user,native.print.device user,native.print.device,group_native_print_user,r,
 access_device_manager,native.print.device manager,native.print.device,group_native_print_manager,rd,

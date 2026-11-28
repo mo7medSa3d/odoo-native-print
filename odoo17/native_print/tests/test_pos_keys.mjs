@@ -548,4 +548,48 @@ assert.strictEqual(
     }
 }
 
+// License error handling in POS reportPosException (both Tauri string and Android Error.code)
+{
+    const clientSrc = fs.readFileSync(
+        new URL("../static/src/js/native_print_client.js", import.meta.url), "utf8");
+    const extractClient = (name) => {
+        const start = clientSrc.indexOf(`export function ${name}(`);
+        assert.ok(start >= 0, `client ${name} exists`);
+        let depth = 0;
+        for (let i = clientSrc.indexOf("{", start); i < clientSrc.length; i++) {
+            if (clientSrc[i] === "{") depth++;
+            if (clientSrc[i] === "}" && --depth === 0) return clientSrc.slice(start + 7, i + 1);
+        }
+        throw new Error("unbalanced");
+    };
+    const posted = [];
+    const shown = [];
+    const _t = (s) => s;
+    const rpc = async (_url, params) => { posted.push(params); return { ok: true }; };
+    const notifyJobUpdated = () => {};
+    const notifyUser = (_env, msg, type) => shown.push({ msg, type });
+    const recoveryButtons = () => null;
+    const POS_RECEIPT_SOURCE = "point_of_sale.receipt";
+    eval(
+        extractClient("licenseErrorCode") + "\n" +
+        extractClient("licenseErrorMessage") + "\n" +
+        extract("notificationEnv") + "\n" +
+        extract("notifyPosNativeFailure") + "\n" +
+        extract("postPosDeclined") + "\n" +
+        extract("reportPosException") +
+        "\nglobalThis.__reportPosException = reportPosException;",
+    );
+    const errReq = Object.assign(new Error("ERR_LICENSE_REQUIRED"), { npKey: "pos-1", npDevice: "TM-T88", npMode: "escpos" });
+    globalThis.__reportPosException({}, errReq, "receipt");
+    assert.strictEqual(posted.at(-1).error_code, "ERR_LICENSE_REQUIRED", "POS logs ERR_LICENSE_REQUIRED");
+    assert.strictEqual(shown.at(-1).type, "danger", "POS license required toast is danger");
+    assert.match(shown.at(-1).msg, /license is required/i);
+
+    const errExp = Object.assign(new Error("License check failed"), { code: "ERR_LICENSE_EXPIRED", npKey: "pos-2", npDevice: "TM-T88", npMode: "escpos" });
+    globalThis.__reportPosException({}, errExp, "receipt");
+    assert.strictEqual(posted.at(-1).error_code, "ERR_LICENSE_EXPIRED", "POS logs ERR_LICENSE_EXPIRED");
+    assert.strictEqual(shown.at(-1).type, "danger", "POS license expired toast is danger");
+    assert.match(shown.at(-1).msg, /license has expired/i);
+}
+
 console.log("pos key tests: ALL PASS");

@@ -8,7 +8,7 @@ import androidx.compose.ui.graphics.Color
  * Exact design tokens mirrored from desktop app/dist/theme.css (Light + Dark).
  */
 @Immutable
-data class YaseirColorPalette(
+data class ItbaaColorPalette(
     val isDark: Boolean,
     val bgCanvas: Color,
     val bgSurface: Color,
@@ -33,7 +33,7 @@ data class YaseirColorPalette(
     val danger: Color,
 )
 
-val YaseirLightColors = YaseirColorPalette(
+val ItbaaLightColors = ItbaaColorPalette(
     isDark = false,
     bgCanvas = Color(0xFFFCFCFC),
     bgSurface = Color(0xFFFFFFFF),
@@ -58,7 +58,7 @@ val YaseirLightColors = YaseirColorPalette(
     danger = Color(0xFFC43D0E),
 )
 
-val YaseirDarkColors = YaseirColorPalette(
+val ItbaaDarkColors = ItbaaColorPalette(
     isDark = true,
     bgCanvas = Color(0xFF000000),
     bgSurface = Color(0xFF0F0F0F),
@@ -83,4 +83,4 @@ val YaseirDarkColors = YaseirColorPalette(
     danger = Color(0xFFC83E10),
 )
 
-val LocalYaseirColors = staticCompositionLocalOf { YaseirLightColors }
+val LocalItbaaColors = staticCompositionLocalOf { ItbaaLightColors }

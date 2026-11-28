@@ -103,11 +103,18 @@ fn find_obj_header(chunk: &str) -> Option<(u32, u32, usize)> {
 }
 
 fn parse_box_array(array_content: &str) -> Option<(f64, f64)> {
-    let nums: Vec<f64> = array_content
-        .split_whitespace()
-        .filter_map(|t| t.parse::<f64>().ok())
-        .collect();
-    if nums.len() == 4 {
+    let mut nums = [0.0f64; 4];
+    let mut count = 0usize;
+    for tok in array_content.split_whitespace() {
+        if let Ok(v) = tok.parse::<f64>() {
+            if count == 4 {
+                return None;
+            }
+            nums[count] = v;
+            count += 1;
+        }
+    }
+    if count == 4 {
         let w = (nums[2] - nums[0]).abs();
         let h = (nums[3] - nums[1]).abs();
         if w > 0.0 && h > 0.0 && w.is_finite() && h.is_finite() {
@@ -252,12 +259,9 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
         let is_page = !is_pages_tree && has_type_token(dict_header, "/Page");
         if is_pages_tree {
             if let Some(pos) = find_pdf_token(dict_header, "/Count") {
-                let n: String = dict_header[pos + 6..]
-                    .trim_start()
-                    .chars()
-                    .take_while(|c| c.is_ascii_digit())
-                    .collect();
-                if let Some(v) = n.parse::<usize>().ok().filter(|&v| v > 0) {
+                let rest = dict_header[pos + 6..].trim_start();
+                let end = rest.bytes().take_while(u8::is_ascii_digit).count();
+                if let Some(v) = rest[..end].parse::<usize>().ok().filter(|&v| v > 0) {
                     declared_count = Some(declared_count.map_or(v, |prev| prev.max(v)));
                 }
             }
@@ -301,13 +305,12 @@ pub fn parse_pdf_info(bytes: &[u8]) -> Result<PdfInfo, PdfParseError> {
         };
         let rotation = find_pdf_token(dict, "/Rotate")
             .and_then(|p| {
-                dict[p + 7..]
-                    .trim_start()
-                    .chars()
-                    .take_while(|c| c.is_ascii_digit() || *c == '-' || *c == '+')
-                    .collect::<String>()
-                    .parse::<i32>()
-                    .ok()
+                let rest = dict[p + 7..].trim_start();
+                let end = rest
+                    .bytes()
+                    .take_while(|b| b.is_ascii_digit() || *b == b'-' || *b == b'+')
+                    .count();
+                rest[..end].parse::<i32>().ok()
             })
             .map(Rotation::from_pdf_degrees)
             .unwrap_or(Rotation::R0);
@@ -517,5 +520,12 @@ endobj
         assert_eq!(info.pages[0].rotation, Rotation::R90);
         // `4 0 obj` stays second as A4.
         assert!((info.pages[1].size.width_mm - 210.0).abs() < 0.2);
+    }
+
+    #[test]
+    fn oversized_box_array_is_rejected_without_heap_growth() {
+        assert_eq!(parse_box_array("0 0 595 842 999"), None);
+        assert_eq!(parse_box_array("0 0 595"), None);
+        assert_eq!(parse_box_array("0 0 595 842"), Some((595.0, 842.0)));
     }
 }

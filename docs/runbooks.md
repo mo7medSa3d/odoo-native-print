@@ -1,7 +1,7 @@
 # Runbooks
 
 ## Install (per machine, enterprise)
-1. Deploy the MSI silently: `msiexec /i OdooNativePrint.msi /qn ODOO_ORIGIN=https://odoo.company.local:8069`
+1. Deploy the MSI silently: `msiexec /i Itbaa.msi /qn ODOO_ORIGIN=https://odoo.company.local:8069`
    HTTP is also accepted for IP literals (e.g. `ODOO_ORIGIN=http://192.168.1.20:8069`) per ADR-0002; hostnames require HTTPS (unencrypted HTTP shows a standing warning in the Control Center).
    (The installer writes `config.json` with `odoo_origin`; or set the GPO policy.)
 2. WebView2: installers embed the WebView2 bootstrapper

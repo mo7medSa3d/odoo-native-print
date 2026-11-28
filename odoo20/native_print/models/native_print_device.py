@@ -14,7 +14,7 @@ class NativePrintDevice(models.Model):
     memorise. Rows are created automatically by the job-status sync
     the first time a printer produces a job; there is no
     configuration and no manual workflow for it. Managers get one
-    small maintenance list (Printers, under the Native Print menu)
+    small maintenance list (Printers, under the Itbaa menu)
     to delete stale rows for renamed or retired printers.
 
     Printing itself NEVER reads this registry: the target printer is
@@ -23,7 +23,7 @@ class NativePrintDevice(models.Model):
     """
 
     _name = "native.print.device"
-    _description = "Yaseir Print: printer seen in the job log"
+    _description = "Itbaa: printer seen in the job log"
     _order = "name"
 
     @api.model

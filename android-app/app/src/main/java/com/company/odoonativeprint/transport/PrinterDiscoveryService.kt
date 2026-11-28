@@ -82,7 +82,7 @@ class PrinterDiscoveryService(
     private val nsdManager: NsdManager? = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
     private val multicastLock: WifiManager.MulticastLock? = runCatching {
         (context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager)
-            ?.createMulticastLock("yaseir-print-mdns")
+            ?.createMulticastLock("itbaa-mdns")
             ?.apply { setReferenceCounted(false) }
     }.getOrNull()
     private val ippCapsCache = ConcurrentHashMap<String, Pair<Long, IppPrinterAttributes>>()

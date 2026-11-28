@@ -59,7 +59,10 @@ pub fn send_raw_phased(
     stream
         .set_read_timeout(Some(io_timeout))
         .map_err(SendPhaseError::Connect)?;
-    let write_deadline = Instant::now() + io_timeout.max(Duration::from_secs(30));
+    let write_budget = io_timeout.max(Duration::from_secs(30));
+    let write_deadline = Instant::now()
+        .checked_add(write_budget)
+        .unwrap_or_else(|| Instant::now() + Duration::from_secs(30));
     for chunk in bytes.chunks(WRITE_CHUNK_SIZE) {
         write_all_with_deadline(&mut stream, chunk, write_deadline)
             .map_err(SendPhaseError::Write)?;

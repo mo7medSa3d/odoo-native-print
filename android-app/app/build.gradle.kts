@@ -18,8 +18,24 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            val ksPath = System.getenv("ITBAA_ANDROID_KEYSTORE_PATH")
+            if (!ksPath.isNullOrBlank()) {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("ITBAA_ANDROID_KEYSTORE_PASSWORD") ?: ""
+                keyAlias = System.getenv("ITBAA_ANDROID_KEY_ALIAS") ?: ""
+                keyPassword = System.getenv("ITBAA_ANDROID_KEY_PASSWORD") ?: ""
+            }
+        }
+    }
+
     buildTypes {
         release {
+            isDebuggable = false
+            if (!System.getenv("ITBAA_ANDROID_KEYSTORE_PATH").isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

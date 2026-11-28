@@ -58,7 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.company.odoonativeprint.R
 import com.company.odoonativeprint.core.QueueSummary
-import com.company.odoonativeprint.ui.theme.LocalYaseirColors
+import com.company.odoonativeprint.ui.theme.LocalItbaaColors
 
 /**
  * Multi-tab Odoo browser matching desktop app/dist/tabbar.html with POS fullscreen toggle.
@@ -72,7 +72,7 @@ fun BrowserScreen(
     onOpenControlCenter: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    val c = LocalYaseirColors.current
+    val c = LocalItbaaColors.current
     val tabState by tabManager.state.collectAsState()
     val activeTab = tabState.activeTab
     var fullscreenPos by remember { mutableStateOf(false) }
@@ -102,8 +102,8 @@ fun BrowserScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Image(
-                                painter = painterResource(R.drawable.ic_yaseir_logo),
-                                contentDescription = "Yaseir Print",
+                                painter = painterResource(R.drawable.ic_itbaa_logo),
+                                contentDescription = "Itbaa",
                                 modifier = Modifier
                                     .size(28.dp)
                                     .clip(RoundedCornerShape(8.dp))
@@ -258,7 +258,7 @@ private fun BrowserTabStrip(
     onNewTab: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val c = LocalYaseirColors.current
+    val c = LocalItbaaColors.current
     Row(
         modifier = modifier
             .horizontalScroll(rememberScrollState())
@@ -270,7 +270,7 @@ private fun BrowserTabStrip(
             val selected = tab.id == activeTabId
             Row(
                 modifier = Modifier
-                    .widthIn(min = 72.dp, max = 164.dp)
+                    .widthIn(min = 132.dp, max = 220.dp)
                     .clip(RoundedCornerShape(999.dp))
                     .background(if (selected) c.bgHover else c.bgSubtle)
                     .border(
@@ -279,7 +279,7 @@ private fun BrowserTabStrip(
                         shape = RoundedCornerShape(999.dp),
                     )
                     .clickable { onSelect(tab.id) }
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -288,16 +288,16 @@ private fun BrowserTabStrip(
                     color = if (selected) c.textPrimary else c.textSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                    modifier = Modifier.weight(1f),
                 )
                 if (tabs.size > 1) {
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(10.dp))
                     Icon(
                         Icons.Rounded.Close,
                         contentDescription = tr("إغلاق التبويب"),
                         tint = c.textMuted,
                         modifier = Modifier
-                            .size(14.dp)
+                            .size(16.dp)
                             .clickable { onClose(tab.id) },
                     )
                 }
@@ -318,7 +318,7 @@ private fun PrinterStatusPill(
     queueSummary: QueueSummary,
     onClick: () -> Unit,
 ) {
-    val c = LocalYaseirColors.current
+    val c = LocalItbaaColors.current
     val dotColor = when {
         queueSummary.failed > 0 -> c.errFg
         queueSummary.active > 0 -> c.warnFg

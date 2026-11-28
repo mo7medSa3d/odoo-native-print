@@ -212,7 +212,7 @@ pub fn calibration_pdf_sized(width_mm: f64, height_mm: f64) -> Vec<u8> {
         tx0,
         h - margin - 14.0,
         title_size,
-        "Yaseir Print - Calibration Page",
+        "Itbaa - Calibration Page",
     ));
     c.push_str(&text(
         tx0,

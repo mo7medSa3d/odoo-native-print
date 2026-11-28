@@ -36,7 +36,7 @@ import com.company.odoonativeprint.core.PrinterInfo
 import com.company.odoonativeprint.core.PrinterProtocol
 import com.company.odoonativeprint.core.PrinterSettings
 import com.company.odoonativeprint.core.PrinterTransportType
-import com.company.odoonativeprint.ui.theme.LocalYaseirColors
+import com.company.odoonativeprint.ui.theme.LocalItbaaColors
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -151,7 +151,7 @@ fun PrinterSettingsDialog(
     onSave: (PrinterSettings) -> Unit,
     onDelete: (() -> Unit)? = null,
 ) {
-    val c = LocalYaseirColors.current
+    val c = LocalItbaaColors.current
     var protocol by remember { mutableStateOf(initial.protocol) }
     var paperWidth by remember { mutableStateOf(initial.paperWidthMm.toString()) }
     var dpi by remember { mutableStateOf(initial.dpi.toString()) }

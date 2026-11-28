@@ -4,7 +4,7 @@
     "security": {
       "csp": "default-src 'self' ipc: http://ipc.localhost; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-src 'none'; worker-src 'none'; frame-ancestors 'none'; form-action 'self'",
       "devCsp": null,
-      "freezePrototype": false
+      "freezePrototype": true
     },
     "windows": [],
     "withGlobalTauri": false
@@ -43,6 +43,6 @@
     ]
   },
   "identifier": "com.company.odoo-native-print",
-  "productName": "Yaseir Print",
+  "productName": "Itbaa",
   "version": "1.5.7"
 }

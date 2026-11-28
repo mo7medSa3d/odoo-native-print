@@ -56,8 +56,8 @@ msgstr "<strong>رمز الخطأ: </strong>"
 #. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "A newer desktop app is available. Update Yaseir Print for the latest fixes."
-msgstr "يتوفر إصدار أحدث من تطبيق سطح المكتب. حدّث Yaseir Print للحصول على أحدث الإصلاحات."
+msgid "A newer desktop app is available. Update Itbaa for the latest fixes."
+msgstr "يتوفر إصدار أحدث من تطبيق سطح المكتب. حدّث Itbaa للحصول على أحدث الإصلاحات."
 
 #. module: native_print
 #: model:ir.model.constraint,message:native_print.constraint_native_print_job_idempotency_key_company_uniq
@@ -300,25 +300,25 @@ msgstr "مهام الطباعة الخاصة بي"
 
 #. module: native_print
 #: model:res.groups,name:native_print.group_native_print_manager
-msgid "Yaseir Print / Manager"
-msgstr "Yaseir Print / مدير"
+msgid "Itbaa / Manager"
+msgstr "Itbaa / مدير"
 
 #. module: native_print
 #: model:res.groups,name:native_print.group_native_print_user
-msgid "Yaseir Print / User"
-msgstr "Yaseir Print / مستخدم"
+msgid "Itbaa / User"
+msgstr "Itbaa / مستخدم"
 
 #. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_handler.js:0
-msgid "Yaseir Print could not print on \"%s\". The PDF was downloaded instead."
-msgstr "تعذر على Yaseir Print الطباعة على \"%s\". تم تنزيل ملف PDF بدلًا من ذلك."
+msgid "Itbaa could not print on \"%s\". The PDF was downloaded instead."
+msgstr "تعذر على Itbaa الطباعة على \"%s\". تم تنزيل ملف PDF بدلًا من ذلك."
 
 #. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_handler.js:0
-msgid "Yaseir Print could not print on \"%s\". The file was downloaded instead."
-msgstr "تعذر على Yaseir Print الطباعة على \"%s\". تم تنزيل الملف بدلًا من ذلك."
+msgid "Itbaa could not print on \"%s\". The file was downloaded instead."
+msgstr "تعذر على Itbaa الطباعة على \"%s\". تم تنزيل الملف بدلًا من ذلك."
 
 #. module: native_print
 #. odoo-javascript
@@ -340,13 +340,13 @@ msgstr "لم يُطبع الإيصال. تحقق من الطابعة وحاول 
 
 #. module: native_print
 #: model:ir.model,name:native_print.model_native_print_job
-msgid "Yaseir Print: job log"
-msgstr "الطباعة من Yaseir: سجل المهام"
+msgid "Itbaa: job log"
+msgstr "الطباعة من Itbaa: سجل المهام"
 
 #. module: native_print
 #: model:ir.model,name:native_print.model_native_print_device
-msgid "Yaseir Print: printer seen in the job log"
-msgstr "الطباعة من Yaseir: طابعة ظاهرة في سجل المهام"
+msgid "Itbaa: printer seen in the job log"
+msgstr "الطباعة من Itbaa: طابعة ظاهرة في سجل المهام"
 
 #. module: native_print
 #. odoo-javascript
@@ -369,8 +369,8 @@ msgstr "فتح مركز تحكم الطباعة"
 #. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Open Odoo inside the Yaseir Print desktop app to see this PC's printers."
-msgstr "افتح Odoo داخل تطبيق Yaseir Print على سطح المكتب لعرض طابعات هذا الجهاز."
+msgid "Open Odoo inside the Itbaa desktop app to see this PC's printers."
+msgstr "افتح Odoo داخل تطبيق Itbaa على سطح المكتب لعرض طابعات هذا الجهاز."
 
 #. module: native_print
 #: model:ir.model.fields.selection,name:native_print.selection__native_print_job__source_type__pos_receipt
@@ -611,8 +611,8 @@ msgstr "جارٍ الإرسال إلى الطابعة"
 #. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Browser mode: reports download as files. Open Odoo in the Yaseir Print app to print directly."
-msgstr "وضع المتصفح: تُنزَّل التقارير كملفات. افتح Odoo داخل تطبيق Yaseir Print للطباعة المباشرة."
+msgid "Browser mode: reports download as files. Open Odoo in the Itbaa app to print directly."
+msgstr "وضع المتصفح: تُنزَّل التقارير كملفات. افتح Odoo داخل تطبيق Itbaa للطباعة المباشرة."
 
 #. module: native_print
 #: model:ir.model.fields,field_description:native_print.field_native_print_job__state
@@ -628,8 +628,8 @@ msgstr "طباعة تجريبية"
 #. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Open Odoo in the Yaseir Print desktop app to use the Control Center (Ctrl+Shift+Y)."
-msgstr "افتح Odoo داخل تطبيق Yaseir Print على سطح المكتب لاستخدام مركز التحكم (Ctrl+Shift+Y)."
+msgid "Open Odoo in the Itbaa desktop app to use the Control Center (Ctrl+Shift+Y)."
+msgstr "افتح Odoo داخل تطبيق Itbaa على سطح المكتب لاستخدام مركز التحكم (Ctrl+Shift+Y)."
 
 #. module: native_print
 #. odoo-javascript
@@ -701,19 +701,19 @@ msgstr "وهمية"
 #: code:addons/native_print/static/src/js/native_print_client.js:0
 #: code:addons/native_print/static/src/xml/native_print_systray.xml:0
 #: model:ir.ui.menu,name:native_print.menu_native_print_root
-msgid "Yaseir Print"
-msgstr "Yaseir Print"
+msgid "Itbaa"
+msgstr "Itbaa"
 
 #. module: native_print
 #. odoo-javascript
 #: code:addons/native_print/static/src/js/native_print_systray.js:0
-msgid "Yaseir Print Status & Control"
-msgstr "حالة الطباعة من Yaseir والتحكم بها"
+msgid "Itbaa Status & Control"
+msgstr "حالة الطباعة من Itbaa والتحكم بها"
 
 #. module: native_print
 #: model:ir.actions.server,name:native_print.cron_prune_job_log_ir_actions_server
-msgid "Yaseir Print: prune old print jobs"
-msgstr "الطباعة من Yaseir: حذف مهام الطباعة القديمة"
+msgid "Itbaa: prune old print jobs"
+msgstr "الطباعة من Itbaa: حذف مهام الطباعة القديمة"
 
 #. module: native_print
 #. odoo-python
@@ -799,8 +799,8 @@ msgstr "لا توجد مهام طباعة بعد"
 
 #. module: native_print
 #: model_terms:ir.actions.act_window,help:native_print.action_jobs
-msgid "Print a report or POS receipt from the Yaseir Print desktop app to track jobs and reprint from here."
-msgstr "اطبع تقريرًا أو إيصال نقطة بيع من تطبيق Yaseir Print على سطح المكتب لتتبع المهام وإعادة الطباعة من هنا."
+msgid "Print a report or POS receipt from the Itbaa desktop app to track jobs and reprint from here."
+msgstr "اطبع تقريرًا أو إيصال نقطة بيع من تطبيق Itbaa على سطح المكتب لتتبع المهام وإعادة الطباعة من هنا."
 
 #. module: native_print
 #: model_terms:ir.actions.act_window,help:native_print.action_devices
@@ -809,11 +809,23 @@ msgstr "لا توجد طابعات مسجلة بعد"
 
 #. module: native_print
 #: model_terms:ir.actions.act_window,help:native_print.action_devices
-msgid "Printers appear here automatically after their first print job from the Yaseir Print desktop app."
-msgstr "تظهر الطابعات هنا تلقائيًا بعد أول مهمة طباعة من تطبيق Yaseir Print على سطح المكتب."
+msgid "Printers appear here automatically after their first print job from the Itbaa desktop app."
+msgstr "تظهر الطابعات هنا تلقائيًا بعد أول مهمة طباعة من تطبيق Itbaa على سطح المكتب."
 
 #. module: native_print
 #. odoo-python
 #: code:addons/native_print/models/native_print_job.py:0
 msgid "This label job cannot be reprinted because its label layout data is no longer available. Open the product and click Print -> Labels instead."
 msgstr "لا يمكن إعادة طباعة مهمة الملصق هذه لأن بيانات تخطيط الملصق لم تعد متاحة. افتح المنتج واختر طباعة -> الملصقات بدلاً من ذلك."
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_client.js:0
+msgid "Itbaa license has expired. Open Settings in the Itbaa app to renew your license."
+msgstr "انتهت صلاحية ترخيص Itbaa. افتح الإعدادات في تطبيق Itbaa لتجديد الترخيص."
+
+#. module: native_print
+#. odoo-javascript
+#: code:addons/native_print/static/src/js/native_print_client.js:0
+msgid "Itbaa license is required to print. Open Settings in the Itbaa app to activate your license."
+msgstr "يلزم وجود ترخيص Itbaa للطباعة. افتح الإعدادات في تطبيق Itbaa لتفعيل الترخيص."

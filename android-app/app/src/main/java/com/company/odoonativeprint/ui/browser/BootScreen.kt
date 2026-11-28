@@ -50,7 +50,7 @@ import androidx.compose.ui.unit.dp
 import com.company.odoonativeprint.BuildConfig
 import com.company.odoonativeprint.R
 import com.company.odoonativeprint.core.OriginPolicy
-import com.company.odoonativeprint.ui.theme.LocalYaseirColors
+import com.company.odoonativeprint.ui.theme.LocalItbaaColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -58,17 +58,20 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Minimal SaaS first-run connection screen matching Yaseir Print desktop identity.
+ * Minimal SaaS first-run connection screen matching Itbaa desktop identity.
  */
 @Composable
 fun BootScreen(
     initialOrigin: String = "",
+    initialLicenseKey: String = "",
+    onLicenseSaved: (String) -> Unit = {},
     onOriginSaved: (String) -> Unit,
 ) {
-    val c = LocalYaseirColors.current
+    val c = LocalItbaaColors.current
     val currentLanguage = LocalLanguage.current
     val scope = rememberCoroutineScope()
-    var originInput by remember { mutableStateOf(initialOrigin) }
+    var originInput by remember(initialOrigin) { mutableStateOf(initialOrigin) }
+    var licenseInput by remember(initialLicenseKey) { mutableStateOf(initialLicenseKey) }
     var statusText by remember { mutableStateOf<String?>(null) }
     var isError by remember { mutableStateOf(false) }
     var probing by remember { mutableStateOf(false) }
@@ -95,15 +98,15 @@ fun BootScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Image(
-                painter = painterResource(R.drawable.ic_yaseir_logo),
-                contentDescription = "Yaseir Print",
+                painter = painterResource(R.drawable.ic_itbaa_logo),
+                contentDescription = "Itbaa",
                 modifier = Modifier
                     .size(60.dp)
                     .clip(RoundedCornerShape(16.dp)),
             )
             Spacer(Modifier.height(14.dp))
             Text(
-                text = "Yaseir Print",
+                text = "Itbaa",
                 style = MaterialTheme.typography.headlineLarge,
                 color = c.textPrimary,
             )
@@ -122,6 +125,23 @@ fun BootScreen(
                 },
                 label = { Text(tr("خادم Odoo")) },
                 placeholder = { Text("https://erp.company.com") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = c.brand,
+                    unfocusedBorderColor = c.border,
+                    focusedContainerColor = c.bgElevated,
+                    unfocusedContainerColor = c.bgElevated,
+                ),
+            )
+
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = licenseInput,
+                onValueChange = { licenseInput = it },
+                label = { Text(tr("مفتاح التفعيل (ITBAA1...)")) },
+                placeholder = { Text("ITBAA1....") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp),
@@ -187,7 +207,10 @@ fun BootScreen(
                 Button(
                     onClick = {
                         OriginPolicy.validateAndNormalize(originInput)
-                            .onSuccess { onOriginSaved(it) }
+                            .onSuccess { normalized ->
+                                if (licenseInput.isNotBlank()) onLicenseSaved(licenseInput.trim())
+                                onOriginSaved(normalized)
+                            }
                             .onFailure {
                                 isError = true
                                 statusText = explainOriginError(it.message, currentLanguage)

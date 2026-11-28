@@ -19,11 +19,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FileConfig {
+    #[serde(default)]
     pub odoo_origin: String,
     #[serde(default)]
     pub auto_reprint: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license_blob: Option<String>,
+    /// Legacy plaintext fields kept only for one-way migration into DPAPI `license_blob`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license_key: Option<String>,
+    #[serde(default)]
+    pub last_seen_utc: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -31,6 +39,9 @@ pub struct ResolvedConfig {
     pub odoo_origin: Option<String>,
     pub locked_by_policy: bool,
     pub auto_reprint: bool,
+    pub license_key: Option<String>,
+    pub license_locked_by_policy: bool,
+    pub last_seen_utc: u64,
 }
 
 /// Write-temp-then-rename with unique temp filenames and a brief retry
@@ -123,6 +134,193 @@ pub fn validate_origin(origin: &str) -> Result<String, String> {
     Ok(candidate)
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct SealedLicenseState {
+    #[serde(default)]
+    license_key: Option<String>,
+    #[serde(default)]
+    last_seen_utc: u64,
+}
+
+#[cfg(windows)]
+mod dpapi {
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    struct DataBlob {
+        cb_data: u32,
+        pb_data: *mut u8,
+    }
+
+    const CRYPTPROTECT_UI_FORBIDDEN: u32 = 0x1;
+
+    #[link(name = "crypt32")]
+    extern "system" {
+        fn CryptProtectData(
+            p_data_in: *const DataBlob,
+            sz_data_descr: *const u16,
+            p_optional_entropy: *const DataBlob,
+            pv_reserved: *mut c_void,
+            p_prompt_struct: *mut c_void,
+            dw_flags: u32,
+            p_data_out: *mut DataBlob,
+        ) -> i32;
+
+        fn CryptUnprotectData(
+            p_data_in: *const DataBlob,
+            ppsz_data_descr: *mut *mut u16,
+            p_optional_entropy: *const DataBlob,
+            pv_reserved: *mut c_void,
+            p_prompt_struct: *mut c_void,
+            dw_flags: u32,
+            p_data_out: *mut DataBlob,
+        ) -> i32;
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn LocalFree(hmem: *mut c_void) -> *mut c_void;
+    }
+
+    const ENTROPY: &[u8] = b"Itbaa.License.DPAPI.v1";
+
+    pub fn protect(plain: &[u8]) -> Option<Vec<u8>> {
+        let in_blob = DataBlob {
+            cb_data: plain.len() as u32,
+            pb_data: plain.as_ptr() as *mut u8,
+        };
+        let ent = DataBlob {
+            cb_data: ENTROPY.len() as u32,
+            pb_data: ENTROPY.as_ptr() as *mut u8,
+        };
+        let mut out_blob = DataBlob {
+            cb_data: 0,
+            pb_data: std::ptr::null_mut(),
+        };
+        let ok = unsafe {
+            CryptProtectData(
+                &in_blob,
+                std::ptr::null(),
+                &ent,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut out_blob,
+            )
+        };
+        if ok == 0 || out_blob.pb_data.is_null() {
+            return None;
+        }
+        let slice =
+            unsafe { std::slice::from_raw_parts(out_blob.pb_data, out_blob.cb_data as usize) };
+        let vec = slice.to_vec();
+        unsafe { LocalFree(out_blob.pb_data as *mut c_void) };
+        Some(vec)
+    }
+
+    pub fn unprotect(cipher: &[u8]) -> Option<Vec<u8>> {
+        let in_blob = DataBlob {
+            cb_data: cipher.len() as u32,
+            pb_data: cipher.as_ptr() as *mut u8,
+        };
+        let ent = DataBlob {
+            cb_data: ENTROPY.len() as u32,
+            pb_data: ENTROPY.as_ptr() as *mut u8,
+        };
+        let mut out_blob = DataBlob {
+            cb_data: 0,
+            pb_data: std::ptr::null_mut(),
+        };
+        let ok = unsafe {
+            CryptUnprotectData(
+                &in_blob,
+                std::ptr::null_mut(),
+                &ent,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut out_blob,
+            )
+        };
+        if ok == 0 || out_blob.pb_data.is_null() {
+            return None;
+        }
+        let slice =
+            unsafe { std::slice::from_raw_parts(out_blob.pb_data, out_blob.cb_data as usize) };
+        let vec = slice.to_vec();
+        unsafe { LocalFree(out_blob.pb_data as *mut c_void) };
+        Some(vec)
+    }
+}
+
+#[cfg(not(windows))]
+mod dpapi {
+    // Non-Windows fallback (unit tests on Linux): simple reversible XOR envelope; production runs on Windows DPAPI.
+    const K: &[u8] = b"ItbaaNonWinTestKey";
+    pub fn protect(plain: &[u8]) -> Option<Vec<u8>> {
+        Some(
+            plain
+                .iter()
+                .enumerate()
+                .map(|(i, b)| b ^ K[i % K.len()])
+                .collect(),
+        )
+    }
+    pub fn unprotect(cipher: &[u8]) -> Option<Vec<u8>> {
+        protect(cipher)
+    }
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        use std::fmt::Write;
+        let _ = write!(&mut s, "{b:02x}");
+    }
+    s
+}
+
+fn hex_decode(s: &str) -> Option<Vec<u8>> {
+    let bytes = s.trim().as_bytes();
+    if bytes.len() % 2 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    for chunk in bytes.chunks_exact(2) {
+        let hex_str = std::str::from_utf8(chunk).ok()?;
+        out.push(u8::from_str_radix(hex_str, 16).ok()?);
+    }
+    Some(out)
+}
+
+fn seal_license_state(key: Option<String>, last_seen_utc: u64) -> Option<String> {
+    let json = serde_json::to_vec(&SealedLicenseState {
+        license_key: key,
+        last_seen_utc,
+    })
+    .ok()?;
+    let protected = dpapi::protect(&json)?;
+    Some(format!("dpapi1:{}", hex_encode(&protected)))
+}
+
+fn unseal_license_state(cfg: &FileConfig) -> SealedLicenseState {
+    if let Some(blob) = cfg
+        .license_blob
+        .as_deref()
+        .and_then(|b| b.strip_prefix("dpapi1:"))
+    {
+        if let Some(raw) = hex_decode(blob).and_then(|c| dpapi::unprotect(&c)) {
+            if let Ok(state) = serde_json::from_slice::<SealedLicenseState>(&raw) {
+                return state;
+            }
+        }
+    }
+    SealedLicenseState {
+        license_key: cfg.license_key.clone(),
+        last_seen_utc: cfg.last_seen_utc,
+    }
+}
+
 #[cfg(windows)]
 mod gpo {
     use std::ffi::c_void;
@@ -196,6 +394,48 @@ mod gpo {
         }
     }
 
+    pub fn policy_license_key() -> Option<String> {
+        let sub = wide("Software\\Policies\\OdooNativePrint");
+        let val = wide("LicenseKey");
+        let mut cb: u32 = 0;
+        let st = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                sub.as_ptr(),
+                val.as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut cb,
+            )
+        };
+        if st != ERROR_SUCCESS || cb < 2 || cb > 8192 {
+            return None;
+        }
+        let mut buf = vec![0u16; (cb as usize).div_ceil(2)];
+        let st2 = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                sub.as_ptr(),
+                val.as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                buf.as_mut_ptr() as *mut c_void,
+                &mut cb,
+            )
+        };
+        if st2 != ERROR_SUCCESS {
+            return None;
+        }
+        let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        let s = String::from_utf16_lossy(&buf[..end]).trim().to_string();
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
+    }
+
     pub fn policy_locked() -> bool {
         let sub = wide("Software\\Policies\\OdooNativePrint");
         let val = wide("DisableOriginChange");
@@ -219,6 +459,9 @@ mod gpo {
 #[cfg(not(windows))]
 mod gpo {
     pub fn policy_origin() -> Option<String> {
+        None
+    }
+    pub fn policy_license_key() -> Option<String> {
         None
     }
     pub fn policy_locked() -> bool {
@@ -264,6 +507,20 @@ fn resolve_config_with(
         Some(Ok(parsed)) => parsed.auto_reprint,
         _ => false,
     };
+    let user_cfg = read_file_config(&config_dir.join("config.json")).and_then(|r| r.ok());
+    let policy_lic = gpo::policy_license_key();
+    let license_locked_by_policy = policy_lic.is_some();
+    let sealed_user = user_cfg
+        .as_ref()
+        .map(unseal_license_state)
+        .unwrap_or_default();
+    let license_key = policy_lic.or_else(|| match &file_parsed {
+        Some(Ok(parsed)) => unseal_license_state(parsed)
+            .license_key
+            .or_else(|| sealed_user.license_key.clone()),
+        _ => sealed_user.license_key.clone(),
+    });
+    let last_seen_utc = sealed_user.last_seen_utc;
     let origin_result = if let Some(po) = policy_origin {
         validate_origin(&po)
     } else if let Some(parsed) = file_parsed {
@@ -280,6 +537,9 @@ fn resolve_config_with(
         odoo_origin: origin_result.ok(),
         locked_by_policy,
         auto_reprint,
+        license_key,
+        license_locked_by_policy,
+        last_seen_utc,
     }
 }
 
@@ -299,13 +559,58 @@ pub fn save_origin(config_dir: &Path, origin: &str, auto_reprint: bool) -> Resul
     }
     let validated = validate_origin(origin)?;
     let file = config_dir.join("config.json");
-    let cfg = FileConfig {
-        odoo_origin: validated.clone(),
-        auto_reprint,
-    };
+    let mut cfg = read_file_config(&file)
+        .and_then(|r| r.ok())
+        .unwrap_or_default();
+    cfg.odoo_origin = validated.clone();
+    cfg.auto_reprint = auto_reprint;
     let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
     atomic_write(&file, &json)?;
     Ok(validated)
+}
+
+pub fn save_license_key(config_dir: &Path, key: &str) -> Result<(), String> {
+    if gpo::policy_license_key().is_some() {
+        return Err("License key is locked by Windows Group Policy".to_string());
+    }
+    let file = config_dir.join("config.json");
+    let mut cfg = read_file_config(&file)
+        .and_then(|r| r.ok())
+        .unwrap_or_default();
+    let prev = unseal_license_state(&cfg);
+    let trimmed = key.trim();
+    let next_key = if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    };
+    let sealed = seal_license_state(next_key, prev.last_seen_utc)
+        .ok_or_else(|| "failed to seal license state".to_string())?;
+    cfg.license_blob = Some(sealed);
+    cfg.license_key = None;
+    cfg.last_seen_utc = 0;
+    let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    atomic_write(&file, &json)
+}
+
+pub fn persist_last_seen_utc(config_dir: &Path, now_utc: u64) {
+    let file = config_dir.join("config.json");
+    let mut cfg = read_file_config(&file)
+        .and_then(|r| r.ok())
+        .unwrap_or_default();
+    let prev = unseal_license_state(&cfg);
+    if now_utc <= prev.last_seen_utc {
+        return;
+    }
+    let Some(sealed) = seal_license_state(prev.license_key, now_utc) else {
+        return;
+    };
+    cfg.license_blob = Some(sealed);
+    cfg.license_key = None;
+    cfg.last_seen_utc = 0;
+    if let Ok(json) = serde_json::to_string_pretty(&cfg) {
+        let _ = atomic_write(&file, &json);
+    }
 }
 
 /// Per-printer defaults chosen in the Control Center (owner brief,
@@ -337,7 +642,7 @@ pub fn load_printer_settings_checked(config_dir: &Path) -> Result<PrinterSetting
                 let _ = std::fs::remove_file(&backup);
                 let _ = std::fs::rename(&file, &backup);
                 eprintln!(
-                    "Yaseir Print: printer_settings.json was corrupt ({e}); moved to {}",
+                    "Itbaa: printer_settings.json was corrupt ({e}); moved to {}",
                     backup.display()
                 );
                 Ok(PrinterSettingsMap::new())

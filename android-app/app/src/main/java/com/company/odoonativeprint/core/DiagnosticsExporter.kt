@@ -22,7 +22,7 @@ object DiagnosticsExporter {
         printers: List<PrinterInfo>,
     ): File {
         val dir = File(context.cacheDir, "diagnostics").apply { mkdirs() }
-        val file = File(dir, "yaseir-print-diagnostics-${System.currentTimeMillis()}.json")
+        val file = File(dir, "itbaa-diagnostics-${System.currentTimeMillis()}.json")
 
         val snap = config.current()
         val payload = JSONObject().apply {
@@ -55,7 +55,7 @@ object DiagnosticsExporter {
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "application/json"
             putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, "Yaseir Print Android Diagnostics")
+            putExtra(Intent.EXTRA_SUBJECT, "Itbaa Android Diagnostics")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }

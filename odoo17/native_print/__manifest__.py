@@ -1,11 +1,11 @@
 {
-    "name": "Yaseir Print",
+    "name": "Itbaa",
     "version": "17.0.1.0.0",
     "category": "Productivity",
     "summary": "Zero-gateway local printing for Odoo reports, labels, and POS receipts",
     "description": """
-Yaseir Print — direct local printing for Odoo reports, labels, and POS
-receipts through the Yaseir Print desktop app, with no gateway, local
+Itbaa — direct local printing for Odoo reports, labels, and POS
+receipts through the Itbaa desktop app, with no gateway, local
 agent service, or cloud relay in the print path.
 
 Printers are discovered live on each workstation by the desktop app.
@@ -13,7 +13,7 @@ Odoo maintains a per-company operational print job log (scoped by user
 and company) with one-click reprints and an auto-synced printer picker
 registry.
 """,
-    "author": "Yaseir",
+    "author": "Itbaa",
     "depends": ["web"],
     "data": [
         "security/native_print_groups.xml",

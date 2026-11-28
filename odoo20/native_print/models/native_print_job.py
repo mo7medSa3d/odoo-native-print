@@ -10,7 +10,7 @@ _logger = logging.getLogger(__name__)
 
 class NativePrintJob(models.Model):
     _name = "native.print.job"
-    _description = "Yaseir Print: job log"
+    _description = "Itbaa: job log"
     _order = "create_date desc, id desc"
 
     # Created with the table on a fresh install; _register_hook below adds

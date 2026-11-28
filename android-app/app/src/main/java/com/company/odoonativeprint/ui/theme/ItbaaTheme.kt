@@ -15,7 +15,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.core.view.WindowInsetsControllerCompat
 
 @Composable
-fun YaseirTheme(
+fun ItbaaTheme(
     themeMode: String = "system",
     language: String = "ar",
     content: @Composable () -> Unit,
@@ -25,7 +25,7 @@ fun YaseirTheme(
         "light" -> false
         else -> isSystemInDarkTheme()
     }
-    val palette = if (isDark) YaseirDarkColors else YaseirLightColors
+    val palette = if (isDark) ItbaaDarkColors else ItbaaLightColors
     val layoutDirection = if (language == "en") LayoutDirection.Ltr else LayoutDirection.Rtl
 
     // Edge-to-edge leaves the status bar transparent. Dark icons are required
@@ -68,13 +68,13 @@ fun YaseirTheme(
     }
 
     CompositionLocalProvider(
-        LocalYaseirColors provides palette,
+        LocalItbaaColors provides palette,
         LocalLayoutDirection provides layoutDirection,
         LocalLanguage provides language,
     ) {
         MaterialTheme(
             colorScheme = materialScheme,
-            typography = YaseirTypography,
+            typography = ItbaaTypography,
             content = content,
         )
     }

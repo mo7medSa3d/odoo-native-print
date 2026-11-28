@@ -39,14 +39,14 @@ import com.company.odoonativeprint.ui.browser.BrowserScreen
 import com.company.odoonativeprint.ui.browser.TabManager
 import com.company.odoonativeprint.ui.controlcenter.ControlCenterScreen
 import com.company.odoonativeprint.ui.settings.SettingsScreen
-import com.company.odoonativeprint.ui.theme.YaseirTheme
+import com.company.odoonativeprint.ui.theme.ItbaaTheme
 
 private enum class AppScreen { BOOT, BROWSER, CONTROL_CENTER, SETTINGS }
 
 class MainActivity : ComponentActivity() {
 
-    private val app: YaseirPrintApp
-        get() = application as YaseirPrintApp
+    private val app: ItbaaApp
+        get() = application as ItbaaApp
 
     private lateinit var tabManager: TabManager
     private var activeScreen by mutableStateOf(AppScreen.BOOT)
@@ -151,7 +151,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            YaseirTheme(themeMode = config.themeMode, language = config.language) {
+            ItbaaTheme(themeMode = config.themeMode, language = config.language) {
                 // Keep BrowserScreen mounted with WebView hidden instead of Crossfade-detaching it;
                 // fading or detaching hardware WebView surfaces caused the navigation stutter.
                 val hasOrigin = config.origin != null
@@ -169,6 +169,8 @@ class MainActivity : ComponentActivity() {
                     when (activeScreen) {
                         AppScreen.BOOT -> BootScreen(
                             initialOrigin = config.origin ?: "",
+                            initialLicenseKey = config.licenseKey ?: "",
+                            onLicenseSaved = { app.configStore.saveLicenseKey(it) },
                             onOriginSaved = { normalized ->
                                 app.configStore.saveOrigin(normalized, config.autoReprint)
                                 tabManager.ensureInitialized(normalized)

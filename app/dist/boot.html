@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Yaseir Print — Connecting</title>
+<title>Itbaa — Connecting</title>
 <link rel="stylesheet" href="theme.css"/>
 <style>
   body {
@@ -133,9 +133,17 @@
       <button type="button" id="anyway">فتح مباشر</button>
       <button type="button" id="cc">مركز التحكم</button>
     </div>
+    <div id="licenseBox" style="margin-top:16px;padding:12px;border:1px solid var(--border);border-radius:10px;text-align:start;display:none;">
+      <div id="licBadge" style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--warn-fg);"></div>
+      <div style="display:flex;gap:8px;">
+        <input id="licInput" type="text" dir="ltr" placeholder="ITBAA1...." aria-label="مفتاح التفعيل" autocomplete="off" spellcheck="false" style="flex:1;min-width:0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-surface);color:var(--text-primary);font-family:var(--font-mono);font-size:12px;" />
+        <button type="button" class="primary" id="licSaveBtn" style="padding:8px 12px;">تفعيل</button>
+      </div>
+      <div id="licMsg" role="status" aria-live="polite" style="font-size:12px;margin-top:6px;color:var(--text-muted);"></div>
+    </div>
     <div class="count" id="count" aria-live="off"></div>
   </main>
-  <footer class="credit" id="credit">Yaseir Print © يسير</footer>
+  <footer class="credit" id="credit">اطبع © Itbaa</footer>
 <script>
   "use strict";
   function invoke(cmd, args) {
@@ -161,7 +169,16 @@
       ccBtn: "Control Center",
       initFailTitle: "Startup error",
       initFailMsg: "Open Control Center to check Odoo settings.",
-      credit: "Yaseir Print © Yaseir"
+      credit: "© Itbaa",
+      licActivate: "Activate",
+      licInputLabel: "License key",
+      licExpired: "License expired — enter a renewed key",
+      licRequired: "Activation required before printing",
+      licActivated: "License activated.",
+      licErrExpired: "License key is expired. Enter a renewed key.",
+      licErrLocked: "License is managed by administrator policy.",
+      licErrNoOrigin: "Configure Odoo server URL in Control Center first.",
+      licErrInvalid: "Invalid key or domain mismatch. Check the key and Odoo URL."
     },
     ar: {
       connecting: "جارٍ الاتصال بـ Odoo",
@@ -179,7 +196,16 @@
       ccBtn: "مركز التحكم",
       initFailTitle: "تعذّر بدء الاتصال",
       initFailMsg: "افتح مركز التحكم لمراجعة إعدادات Odoo.",
-      credit: "Yaseir Print © يسير"
+      credit: "اطبع © Itbaa",
+      licActivate: "تفعيل",
+      licInputLabel: "مفتاح التفعيل",
+      licExpired: "انتهت صلاحية الرخصة — أدخل مفتاح التفعيل الجديد",
+      licRequired: "يلزم إدخال مفتاح التفعيل قبل الطباعة",
+      licActivated: "تم تفعيل الرخصة بنجاح.",
+      licErrExpired: "مفتاح الترخيص منتهي الصلاحية. أدخل مفتاحاً مجدداً.",
+      licErrLocked: "الترخيص مقفل بواسطة مسؤول النظام.",
+      licErrNoOrigin: "اضبط رابط خادم Odoo من مركز التحكم أولاً.",
+      licErrInvalid: "مفتاح غير صالح أو لا يطابق عنوان أودو. تحقّق من المفتاح ورابط الخادم."
     }
   };
   var lang = "ar";
@@ -190,7 +216,7 @@
     viewState = state;
     if (cardEl) cardEl.setAttribute("data-state", state);
     var titles = { connecting: T.connecting, down: T.downTitle, redirected: T.redirTitle, initFail: T.initFailTitle };
-    document.title = "Yaseir Print — " + (titles[state] || T.connecting);
+    document.title = "Itbaa — " + (titles[state] || T.connecting);
   }
   function setPrimaryAction(id) {
     ["retry", "anyway", "cc"].forEach(function (btnId) {
@@ -215,6 +241,11 @@
     document.getElementById("anyway").textContent = T.anywayBtn;
     document.getElementById("cc").textContent = T.ccBtn;
     document.getElementById("credit").textContent = T.credit;
+    var licSaveBtnEl = document.getElementById("licSaveBtn");
+    if (licSaveBtnEl) licSaveBtnEl.textContent = T.licActivate;
+    var licInputEl = document.getElementById("licInput");
+    if (licInputEl) licInputEl.setAttribute("aria-label", T.licInputLabel);
+    if (typeof renderBootLic === "function") renderBootLic();
     if (viewState === "connecting") {
       document.getElementById("title").textContent = T.connecting;
       if (origin) {
@@ -365,6 +396,66 @@
     document.getElementById("origin").textContent = origin;
     tryProbe();
   }).catch(showInitFail);
+
+  var bootLicStatus = null;
+  var bootLicMsgKey = null;
+  function renderBootLic() {
+    var box = document.getElementById("licenseBox");
+    var badge = document.getElementById("licBadge");
+    var msg = document.getElementById("licMsg");
+    if (!box || !badge || !msg) return;
+    if (bootLicStatus && !bootLicStatus.valid) {
+      box.style.display = "block";
+      badge.textContent = bootLicStatus.code === "ERR_LICENSE_EXPIRED" ? T.licExpired : T.licRequired;
+    } else if (bootLicStatus && bootLicStatus.valid) {
+      box.style.display = "none";
+    }
+    if (bootLicMsgKey && T[bootLicMsgKey]) msg.textContent = T[bootLicMsgKey];
+  }
+  (function initBootLicense() {
+    var box = document.getElementById("licenseBox");
+    var inp = document.getElementById("licInput");
+    var btn = document.getElementById("licSaveBtn");
+    var msg = document.getElementById("licMsg");
+    if (!box || !inp || !btn || !msg) return;
+    function errKey(e) {
+      var code = String(e && e.message ? e.message : (e || "")).trim();
+      if (code === "ERR_LICENSE_EXPIRED") return "licErrExpired";
+      if (code === "locked_by_policy") return "licErrLocked";
+      if (code === "no_origin_configured") return "licErrNoOrigin";
+      return "licErrInvalid";
+    }
+    async function refreshLic() {
+      try {
+        var st = await invoke("license_status_cmd", {});
+        bootLicStatus = st || { valid: false, code: "ERR_LICENSE_REQUIRED" };
+        renderBootLic();
+      } catch (_) {}
+    }
+    async function submitLic() {
+      var k = (inp.value || "").trim();
+      if (!k || btn.disabled) return;
+      btn.disabled = true;
+      try {
+        var st = await invoke("save_license_cmd", { key: k });
+        msg.style.color = "var(--ok-fg)";
+        bootLicMsgKey = "licActivated";
+        msg.textContent = T.licActivated;
+        window.setTimeout(function () {
+          bootLicStatus = st || { valid: true, code: "OK" };
+          box.style.display = "none";
+        }, 800);
+      } catch (e) {
+        msg.style.color = "var(--err-fg)";
+        bootLicMsgKey = errKey(e);
+        msg.textContent = T[bootLicMsgKey];
+      } finally { btn.disabled = false; }
+    }
+    btn.addEventListener("click", submitLic);
+    inp.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); submitLic(); } });
+    refreshLic();
+  })();
+
 </script>
 </body>
 </html>

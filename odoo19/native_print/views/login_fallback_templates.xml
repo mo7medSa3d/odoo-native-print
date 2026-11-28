@@ -14,7 +14,7 @@
         anything.
     -->
     <template id="login_form_fallback" inherit_id="web.login"
-              name="Native Print: login form fallback">
+              name="Itbaa: login form fallback">
         <!-- Root fix: render the form VISIBLE. Login must not depend
              on any JavaScript initializing. When the OWL user switch
              does run, its setup() re-applies d-none itself whenever

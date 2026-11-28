@@ -63,9 +63,7 @@ impl PrinterCaps {
     pub fn is_stopped(&self) -> bool {
         self.state == 5
     }
-    /// State reasons (RFC 8011 printer-state-reasons, severity suffix
-    /// stripped) that mean the device cannot physically print now.
-    pub fn blocking_reasons(&self) -> Vec<&str> {
+    fn blocking_reason(r: &str) -> Option<&str> {
         const BLOCKING: [&str; 8] = [
             "media-empty",
             "media-jam",
@@ -76,17 +74,20 @@ impl PrinterCaps {
             "input-tray-missing",
             "output-full",
         ];
+        let t = r.trim();
+        // RFC 8011: -warning and -report severities are advisory, never hard blockers.
+        if t.ends_with("-warning") || t.ends_with("-report") {
+            return None;
+        }
+        let base = t.trim_end_matches("-error");
+        BLOCKING.contains(&base).then_some(base)
+    }
+    /// State reasons (RFC 8011 printer-state-reasons, severity suffix
+    /// stripped) that mean the device cannot physically print now.
+    pub fn blocking_reasons(&self) -> Vec<&str> {
         self.state_reasons
             .iter()
-            .filter_map(|r| {
-                let t = r.trim();
-                // RFC 8011: -warning and -report severities are advisory, never hard blockers.
-                if t.ends_with("-warning") || t.ends_with("-report") {
-                    return None;
-                }
-                let base = t.trim_end_matches("-error");
-                BLOCKING.contains(&base).then_some(base)
-            })
+            .filter_map(|r| Self::blocking_reason(r))
             .collect()
     }
     /// True when submission would go to a device that cannot print:
@@ -96,7 +97,10 @@ impl PrinterCaps {
     pub fn is_blocked(&self) -> bool {
         self.is_stopped()
             || self.accepting_jobs == Some(false)
-            || !self.blocking_reasons().is_empty()
+            || self
+                .state_reasons
+                .iter()
+                .any(|r| Self::blocking_reason(r).is_some())
     }
 }
 
@@ -245,7 +249,10 @@ impl IppClient {
             "POST {path} HTTP/1.1\r\nHost: {host_hdr}\r\nContent-Type: application/ipp\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
         );
-        let write_deadline = Instant::now() + timeout.max(Duration::from_secs(30));
+        let write_budget = timeout.max(Duration::from_secs(30));
+        let write_deadline = Instant::now()
+            .checked_add(write_budget)
+            .unwrap_or_else(|| Instant::now() + Duration::from_secs(30));
         write_all_with_deadline(&mut stream, request.as_bytes(), write_deadline)?;
         write_all_with_deadline(&mut stream, body, write_deadline)?;
         stream.flush()?;
@@ -254,7 +261,7 @@ impl IppClient {
         // memory without bound on the worker thread.
         const MAX_IPP_RESPONSE_BYTES: usize = 1 << 20;
         let read_deadline = std::time::Instant::now().checked_add(timeout);
-        let mut raw = Vec::new();
+        let mut raw = Vec::with_capacity(4096);
         let mut buf = [0u8; 8192];
         let mut parsed_header: Option<ParsedHttpHeader> = None;
         loop {
@@ -434,7 +441,9 @@ enum HttpFraming {
 type ParsedHttpHeader = (u16, HttpFraming, usize);
 
 fn split_http_response(raw: &[u8]) -> Result<Option<ParsedHttpHeader>, IppError> {
+    const MAX_INTERIM_RESPONSES: usize = 8;
     let mut offset = 0usize;
+    let mut interim_count = 0usize;
     loop {
         let rest = &raw[offset..];
         let Some(split) = rest.windows(4).position(|w| w == b"\r\n\r\n") else {
@@ -456,54 +465,54 @@ fn split_http_response(raw: &[u8]) -> Result<Option<ParsedHttpHeader>, IppError>
         // Skip interim 1xx responses (e.g. `HTTP/1.1 100 Continue`) that CUPS
         // and embedded IPP servers frequently prepend before `HTTP/1.1 200 OK`.
         if (100..200).contains(&status) {
+            interim_count += 1;
+            if interim_count > MAX_INTERIM_RESPONSES {
+                return Err(IppError::Parse("too many interim HTTP responses".into()));
+            }
             offset += split + 4;
             continue;
         }
         let body_offset = offset + split + 4;
-        let lower = headers.to_ascii_lowercase();
         let mut has_transfer_encoding = false;
         let mut is_chunked = false;
         let mut content_length: Option<usize> = None;
-        for line in lower.lines().skip(1) {
+        for line in headers.lines().skip(1) {
             let Some((k, v)) = line.split_once(':') else {
                 continue;
             };
-            match k.trim() {
-                "transfer-encoding" => {
-                    has_transfer_encoding = true;
-                    let mut saw_token = false;
-                    for t in v.split(',').map(str::trim).filter(|t| !t.is_empty()) {
-                        saw_token = true;
-                        if t == "chunked" {
-                            is_chunked = true;
-                        } else {
-                            return Err(IppError::Parse("unsupported Transfer-Encoding".into()));
-                        }
-                    }
-                    if !saw_token {
-                        return Err(IppError::Parse("empty Transfer-Encoding".into()));
+            let key = k.trim();
+            if key.eq_ignore_ascii_case("transfer-encoding") {
+                has_transfer_encoding = true;
+                let mut saw_token = false;
+                for t in v.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+                    saw_token = true;
+                    if t.eq_ignore_ascii_case("chunked") {
+                        is_chunked = true;
+                    } else {
+                        return Err(IppError::Parse("unsupported Transfer-Encoding".into()));
                     }
                 }
-                "content-length" => {
-                    for part in v.split(',') {
-                        let s = part.trim();
-                        if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
-                            return Err(IppError::Parse("invalid Content-Length".into()));
+                if !saw_token {
+                    return Err(IppError::Parse("empty Transfer-Encoding".into()));
+                }
+            } else if key.eq_ignore_ascii_case("content-length") {
+                for part in v.split(',') {
+                    let s = part.trim();
+                    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+                        return Err(IppError::Parse("invalid Content-Length".into()));
+                    }
+                    let len = s
+                        .parse::<usize>()
+                        .map_err(|_| IppError::Parse("invalid Content-Length".into()))?;
+                    match content_length {
+                        Some(prev) if prev != len => {
+                            return Err(IppError::Parse(
+                                "conflicting Content-Length headers".into(),
+                            ));
                         }
-                        let len = s
-                            .parse::<usize>()
-                            .map_err(|_| IppError::Parse("invalid Content-Length".into()))?;
-                        match content_length {
-                            Some(prev) if prev != len => {
-                                return Err(IppError::Parse(
-                                    "conflicting Content-Length headers".into(),
-                                ));
-                            }
-                            _ => content_length = Some(len),
-                        }
+                        _ => content_length = Some(len),
                     }
                 }
-                _ => {}
             }
         }
         // RFC 9112 §6.3: reject messages carrying both Transfer-Encoding and Content-Length.
@@ -1004,6 +1013,13 @@ mod tests {
         // Non-HTTP status line must be rejected.
         assert!(matches!(
             parse_http_response(b"FOO 200 OK\r\n\r\ndata"),
+            Err(IppError::Parse(_))
+        ));
+        // Excessive interim 1xx responses must be rejected.
+        let mut flood = b"HTTP/1.1 100 Continue\r\n\r\n".repeat(9);
+        flood.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
+        assert!(matches!(
+            parse_http_response(&flood),
             Err(IppError::Parse(_))
         ));
     }

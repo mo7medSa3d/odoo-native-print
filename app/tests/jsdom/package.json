@@ -1,5 +1,5 @@
 {
-  "name": "yaseir-print-jsdom-tests",
+  "name": "itbaa-jsdom-tests",
   "private": true,
   "type": "module",
   "description": "jsdom regression suites for the injected bridge (watchdog, error tap) and the Control Center page. Run: npm install && npm test (each suite exits non-zero on failure).",

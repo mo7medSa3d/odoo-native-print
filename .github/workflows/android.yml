@@ -49,6 +49,22 @@ jobs:
       - name: Upload Debug APK
         uses: actions/upload-artifact@v7
         with:
-          name: yaseir-print-android-debug-apk
+          name: itbaa-android-debug-apk
           path: android-app/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Build Signed Release APK (when keystore secret configured)
+        if: ${{ secrets.ITBAA_ANDROID_KEYSTORE_BASE64 != '' }}
+        env:
+          ITBAA_ANDROID_KEYSTORE_BASE64: ${{ secrets.ITBAA_ANDROID_KEYSTORE_BASE64 }}
+          ITBAA_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ITBAA_ANDROID_KEYSTORE_PASSWORD }}
+          ITBAA_ANDROID_KEY_ALIAS: ${{ secrets.ITBAA_ANDROID_KEY_ALIAS }}
+          ITBAA_ANDROID_KEY_PASSWORD: ${{ secrets.ITBAA_ANDROID_KEY_PASSWORD }}
+        run: |
+          umask 077
+          trap 'rm -f "$RUNNER_TEMP/itbaa-release.jks"' EXIT
+          printf '%s' "$ITBAA_ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/itbaa-release.jks"
+          export ITBAA_ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/itbaa-release.jks"
+          gradle :app:assembleRelease
+          cd app/build/outputs/apk/release
+          sha256sum -- *.apk > SHA256SUMS.txt

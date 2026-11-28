@@ -56,11 +56,9 @@ impl EscPos {
         // cases (audit L6/L7). In-app widths are ~1200 dots max, so
         // neither guard can trigger on a real print path.
         let Some(expected) = (total_h as usize).checked_mul(bpr) else {
-            debug_assert!(false, "bitmap not representable as ESC/POS raster");
             return self;
         };
         if bpr > u16::MAX as usize || bm.data.len() < expected {
-            debug_assert!(false, "bitmap not representable as ESC/POS raster");
             return self;
         }
         let slices = (total_h as usize).div_ceil(MAX_RASTER_SLICE_HEIGHT as usize);
@@ -222,6 +220,23 @@ mod tests {
         let received = server.join().unwrap();
         assert_eq!(received, payload.bytes());
         assert_eq!(decode_raster(&received).data, bm.data);
+    }
+
+    #[test]
+    fn truncated_and_oversized_bitmaps_are_skipped_without_panic() {
+        let truncated = MonoBitmap {
+            width_dots: 16,
+            height_dots: 4,
+            data: vec![0xFF; 2],
+        };
+        assert_eq!(EscPos::new().raster(&truncated).bytes(), &[0x1B, 0x40]);
+
+        let oversized = MonoBitmap {
+            width_dots: (u16::MAX as u32 + 1) * 8,
+            height_dots: 1,
+            data: vec![],
+        };
+        assert_eq!(EscPos::new().raster(&oversized).bytes(), &[0x1B, 0x40]);
     }
 
     #[test]

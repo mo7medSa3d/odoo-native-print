@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Yaseir Print — Control Center</title>
+<title>Itbaa — Control Center</title>
 <link rel="stylesheet" href="theme.css" />
 <style>
   body {
@@ -895,7 +895,7 @@
       </div>
       <div class="brand-text">
         <div class="brand-title">
-          <span data-i18n="app_title">Yaseir Print</span>
+          <span data-i18n="app_title">Itbaa</span>
           <span class="version-tag" id="appVersionBadge">—</span>
         </div>
         <div class="brand-subtitle hidden" data-i18n="app_subtitle">
@@ -1229,7 +1229,7 @@
             <div class="guide-step">
               <div class="guide-step-num">01</div>
               <div class="guide-step-title" data-i18n="guide_s1_t">تحديث وحدة Odoo</div>
-              <div class="guide-step-desc" data-i18n="guide_s1_d">احرص على ترقية تطبيق Yaseir Print من قائمة تطبيقات Odoo بعد تحديث ملفات الخادم.</div>
+              <div class="guide-step-desc" data-i18n="guide_s1_d">احرص على ترقية تطبيق Itbaa من قائمة تطبيقات Odoo بعد تحديث ملفات الخادم.</div>
             </div>
             <div class="guide-step">
               <div class="guide-step-num">02</div>
@@ -1339,7 +1339,7 @@
         <div id="previewSheet" class="preview-sheet sheet-a4">
           <div class="preview-printable-area">
             <div class="preview-sheet-head">
-              <div class="preview-sheet-brand">Yaseir Print</div>
+              <div class="preview-sheet-brand">Itbaa</div>
               <div class="preview-sheet-sub" dir="rtl">فاتورة ضريبية · Tax Invoice</div>
             </div>
             <div class="preview-sheet-items">
@@ -1368,7 +1368,7 @@
   "use strict";
   const I18N = {
     ar: {
-      app_title: "Yaseir Print",
+      app_title: "Itbaa",
       app_subtitle: "طباعة فورية من Odoo",
       nav_section: "مساحة العمل",
       sidebar_engine_title: "حالة النظام",
@@ -1385,7 +1385,7 @@
       pane_diag_sub: "فحص المتصفح وتقرير الدعم المنقّح.",
       guide_title: "دليل البدء السريع",
       guide_s1_t: "تحديث وحدة Odoo",
-      guide_s1_d: "احرص على ترقية تطبيق Yaseir Print من قائمة تطبيقات Odoo بعد تحديث ملفات الخادم.",
+      guide_s1_d: "احرص على ترقية تطبيق Itbaa من قائمة تطبيقات Odoo بعد تحديث ملفات الخادم.",
       guide_s2_t: "تبويبات العمل",
       guide_s2_d: "عند فتح Odoo يظهر شريط التبويبات العلوي للتنقل السلس بين الجلسات ونقاط البيع.",
       guide_s3_t: "الرجوع السريع",
@@ -1400,7 +1400,7 @@
       env_unavailable: "غير متاح",
       toast_failed: "تعذّر إتمام الإجراء. حاول مجدداً.",
       env_err_translations_t: "خطأ ترجمة من الخادم",
-      env_err_translations_b: "تعذّر تحميل ملف الترجمة من Odoo. حدّث وحدة Yaseir Print على الخادم وأعد التشغيل.",
+      env_err_translations_b: "تعذّر تحميل ملف الترجمة من Odoo. حدّث وحدة Itbaa على الخادم وأعد التشغيل.",
       env_err_generic: "خطأ غير متوقع",
       state_queued: "بالانتظار",
       state_rendering: "تجهيز",
@@ -1542,7 +1542,7 @@
       preview_paper_a4: "A4 مكتبي",
     },
     en: {
-      app_title: "Yaseir Print",
+      app_title: "Itbaa",
       app_subtitle: "Direct local printing for Odoo & POS",
       nav_section: "Workspace",
       sidebar_engine_title: "System Status",
@@ -1559,7 +1559,7 @@
       pane_diag_sub: "Inspect runtime health and export a redacted support bundle.",
       guide_title: "Quick Start",
       guide_s1_t: "Update Odoo module",
-      guide_s1_d: "Upgrade Yaseir Print in Odoo Apps after updating server add-on files.",
+      guide_s1_d: "Upgrade Itbaa in Odoo Apps after updating server add-on files.",
       guide_s2_t: "Multi-tab Odoo",
       guide_s2_d: "Opening Odoo reveals the browser tab bar for seamless multi-session and POS workflows.",
       guide_s3_t: "Quick switch",
@@ -1574,7 +1574,7 @@
       env_unavailable: "Unavailable",
       toast_failed: "Action failed. Try again.",
       env_err_translations_t: "Server translation error",
-      env_err_translations_b: "Could not load translations from Odoo. Upgrade the Yaseir Print module on your server and restart Odoo.",
+      env_err_translations_b: "Could not load translations from Odoo. Upgrade the Itbaa module on your server and restart Odoo.",
       env_err_generic: "Page error",
       state_queued: "Queued",
       state_rendering: "Rendering",
@@ -1854,6 +1854,8 @@
     if (raw === "printer_required") return ar ? "اختر طابعة أولاً." : "Choose a printer first.";
     if (raw === "locked_by_policy") return ar ? "الإعدادات مقفلة بواسطة مسؤول النظام." : "Settings are locked by administrator policy.";
     if (raw === "no_origin_configured") return I18N[currentLang].origin_not_configured;
+    if (raw === "ERR_LICENSE_REQUIRED") return ar ? "يلزم تفعيل الرخصة قبل الطباعة." : "License activation is required before printing.";
+    if (raw === "ERR_LICENSE_EXPIRED") return ar ? "انتهت صلاحية الرخصة — أدخل مفتاح التفعيل الجديد." : "License has expired — enter a renewed key.";
     if (raw === "forbidden_origin" || raw === "local_control_center_only") {
       return ar ? "هذا الإجراء متاح من مركز التحكم فقط." : "This action is only allowed from the Control Center.";
     }
@@ -1934,7 +1936,7 @@
     html.setAttribute("lang", currentLang);
     html.setAttribute("dir", currentLang === "ar" ? "rtl" : "ltr");
     document.getElementById("btnLang").innerHTML = `<span>${currentLang === "ar" ? "English" : "العربية"}</span>`;
-    document.title = "Yaseir Print — " + (currentLang === "ar" ? "مركز التحكم" : "Control Center");
+    document.title = "Itbaa — " + (currentLang === "ar" ? "مركز التحكم" : "Control Center");
     const refreshBtn = document.getElementById("btnRefresh");
     if (refreshBtn) { refreshBtn.title = I18N[currentLang].btn_refresh; refreshBtn.setAttribute("aria-label", I18N[currentLang].btn_refresh); }
     const themeBtn = document.getElementById("btnTheme");
@@ -3353,7 +3355,7 @@
     try {
       objectUrl = URL.createObjectURL(new Blob([text], { type: "application/json;charset=utf-8" }));
       anchor.href = objectUrl;
-      anchor.download = `native-print-diagnostics-${Date.now()}.json`;
+      anchor.download = `itbaa-diagnostics-${Date.now()}.json`;
       anchor.style.display = "none";
       document.body.appendChild(anchor);
       anchor.click();
@@ -3401,7 +3403,7 @@
   if (initThemeBtn) initThemeBtn.setAttribute("aria-pressed", document.documentElement.getAttribute("data-theme") === "dark" ? "true" : "false");
   if (currentLang !== "ar") applyLanguage();
   else {
-    document.title = "Yaseir Print — مركز التحكم";
+    document.title = "Itbaa — مركز التحكم";
     const sEl = document.getElementById("queueSearchInput");
     if (sEl) sEl.setAttribute("aria-label", I18N.ar.search_queue_ph);
   }

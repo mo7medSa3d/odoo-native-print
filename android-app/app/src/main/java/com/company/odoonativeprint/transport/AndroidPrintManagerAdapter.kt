@@ -25,12 +25,12 @@ object AndroidPrintManagerAdapter {
         activity: Activity,
         pdfBytes: ByteArray,
         documentName: String,
-        jobName: String = "Yaseir Print",
+        jobName: String = "Itbaa",
     ): TransportResult {
         val printManager = activity.getSystemService(Context.PRINT_SERVICE) as? PrintManager
             ?: return TransportResult.Failure("PRINT_MANAGER_UNAVAILABLE", "Android PrintManager unavailable", retryable = false)
 
-        val name = documentName.ifBlank { "yaseir-print.pdf" }
+        val name = documentName.ifBlank { "itbaa.pdf" }
         val snapshot = pdfBytes
         val adapter = object : PrintDocumentAdapter() {
             override fun onLayout(

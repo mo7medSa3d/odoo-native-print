@@ -64,14 +64,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.company.odoonativeprint.BuildConfig
-import com.company.odoonativeprint.YaseirPrintApp
+import com.company.odoonativeprint.ItbaaApp
 import com.company.odoonativeprint.core.DiagnosticsExporter
 import com.company.odoonativeprint.core.JobState
 import com.company.odoonativeprint.core.PrintJobRecord
 import com.company.odoonativeprint.core.PrinterInfo
 import com.company.odoonativeprint.core.PrinterTransportType
 import com.company.odoonativeprint.transport.UsbOtgTransport
-import com.company.odoonativeprint.ui.theme.LocalYaseirColors
+import com.company.odoonativeprint.ui.theme.LocalItbaaColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -81,10 +81,10 @@ import kotlinx.coroutines.withContext
  */
 @Composable
 fun ControlCenterScreen(
-    app: YaseirPrintApp,
+    app: ItbaaApp,
     onBack: () -> Unit,
 ) {
-    val c = LocalYaseirColors.current
+    val c = LocalItbaaColors.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val liveSummary by app.worker.summary.collectAsState()
@@ -297,7 +297,7 @@ private fun PrintersTab(
     onRequestUsbPermission: (PrinterInfo) -> Unit,
     onSetDefault: (PrinterInfo) -> Unit,
 ) {
-    val c = LocalYaseirColors.current
+    val c = LocalItbaaColors.current
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
     LazyColumn(
         modifier = Modifier.widthIn(max = 760.dp).fillMaxSize().padding(horizontal = 16.dp),
@@ -405,7 +405,7 @@ private fun QueueTab(
     onCancel: (String) -> Unit,
     onClearFinished: () -> Unit,
 ) {
-    val c = LocalYaseirColors.current
+    val c = LocalItbaaColors.current
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
     LazyColumn(
         modifier = Modifier.widthIn(max = 760.dp).fillMaxSize().padding(horizontal = 16.dp),
@@ -503,11 +503,11 @@ private fun QueueTab(
 
 @Composable
 private fun DiagnosticsTab(
-    app: YaseirPrintApp,
+    app: ItbaaApp,
     printers: List<PrinterInfo>,
     onExport: () -> Unit,
 ) {
-    val c = LocalYaseirColors.current
+    val c = LocalItbaaColors.current
     val snap = app.configStore.current()
     Box(
         modifier = Modifier
@@ -554,7 +554,7 @@ private fun DiagnosticsTab(
 
 @Composable
 private fun DiagRow(label: String, value: String) {
-    val c = LocalYaseirColors.current
+    val c = LocalItbaaColors.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,

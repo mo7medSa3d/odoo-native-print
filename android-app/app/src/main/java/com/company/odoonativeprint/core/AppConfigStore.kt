@@ -15,6 +15,8 @@ data class AppConfigSnapshot(
     val themeMode: String = "system",
     val language: String = "ar",
     val defaultPrinter: String? = null,
+    val licenseKey: String? = null,
+    val lastSeenUtc: Long = 0L,
     val manualPrinters: List<ManualPrinterEntry> = emptyList(),
     val printerSettings: Map<String, PrinterSettings> = emptyMap(),
 )
@@ -87,6 +89,20 @@ class AppConfigStore(context: Context) {
         _state.value = _state.value.copy(language = safe)
     }
 
+    fun saveLicenseKey(key: String?) {
+        val trimmed = key?.trim()?.takeIf { it.isNotEmpty() }
+        prefs.edit().apply {
+            if (trimmed == null) remove(KEY_LICENSE_KEY) else putString(KEY_LICENSE_KEY, SecureLicenseStore.encrypt(trimmed))
+        }.apply()
+        _state.value = _state.value.copy(licenseKey = trimmed)
+    }
+
+    fun updateLastSeenUtc(nowUtc: Long) {
+        if (nowUtc <= _state.value.lastSeenUtc) return
+        prefs.edit().putString(KEY_LAST_SEEN_UTC, SecureLicenseStore.encrypt(nowUtc.toString())).apply()
+        _state.value = _state.value.copy(lastSeenUtc = nowUtc)
+    }
+
     fun setDefaultPrinter(printerName: String?) {
         prefs.edit().putString(KEY_DEFAULT_PRINTER, printerName).apply()
         _state.value = _state.value.copy(defaultPrinter = printerName)
@@ -148,19 +164,23 @@ class AppConfigStore(context: Context) {
             themeMode = prefs.getString(KEY_THEME, "system") ?: "system",
             language = prefs.getString(KEY_LANG, "ar") ?: "ar",
             defaultPrinter = prefs.getString(KEY_DEFAULT_PRINTER, null),
+            licenseKey = SecureLicenseStore.decrypt(prefs.getString(KEY_LICENSE_KEY, null)),
+            lastSeenUtc = SecureLicenseStore.decrypt(prefs.getString(KEY_LAST_SEEN_UTC, null))?.toLongOrNull() ?: 0L,
             manualPrinters = manual,
             printerSettings = settingsMap,
         )
     }
 
     companion object {
-        private const val PREFS_NAME = "yaseir_print_config"
+        private const val PREFS_NAME = "itbaa_config"
         private const val KEY_ORIGIN = "origin"
         private const val KEY_LAST_URL = "last_url"
         private const val KEY_AUTO_REPRINT = "auto_reprint"
         private const val KEY_THEME = "theme_mode"
         private const val KEY_LANG = "language"
         private const val KEY_DEFAULT_PRINTER = "default_printer"
+        private const val KEY_LICENSE_KEY = "license_key"
+        private const val KEY_LAST_SEEN_UTC = "last_seen_utc"
         private const val KEY_MANUAL_PRINTERS = "manual_printers"
         private const val KEY_PRINTER_SETTINGS = "printer_settings"
     }

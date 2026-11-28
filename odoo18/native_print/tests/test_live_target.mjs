@@ -1182,4 +1182,75 @@ try {
     }
 }
 
+// 11. License errors (ERR_LICENSE_REQUIRED / ERR_LICENSE_EXPIRED) from desktop (string)
+//     or Android (Error with .code) surface clear danger toasts and log the exact error_code.
+{
+    eq(m.licenseErrorCode("ERR_LICENSE_REQUIRED"), "ERR_LICENSE_REQUIRED", "string ERR_LICENSE_REQUIRED parsed");
+    eq(m.licenseErrorCode(Object.assign(new Error("License check failed"), { code: "ERR_LICENSE_EXPIRED" })), "ERR_LICENSE_EXPIRED", "Android Error.code ERR_LICENSE_EXPIRED parsed");
+    eq(m.licenseErrorCode(new Error("BRIDGE_DOWN")), null, "non-license error returns null");
+    eq(Boolean(m.licenseErrorMessage("ERR_LICENSE_REQUIRED")), true, "ERR_LICENSE_REQUIRED has user message");
+    eq(Boolean(m.licenseErrorMessage("ERR_LICENSE_EXPIRED")), true, "ERR_LICENSE_EXPIRED has user message");
+    eq(m.licenseErrorMessage("BRIDGE_ERROR"), null, "non-license code has no license message");
+
+    const origFetchLic = globalThis.fetch;
+    try {
+        // 11a. Desktop Tauri string rejection: ERR_LICENSE_REQUIRED on PDF print
+        notices.length = 0;
+        rpcCalls.length = 0;
+        globalThis.fetch = async () => ({
+            ok: true,
+            redirected: false,
+            url: "https://odoo.example/report/pdf/account.report_invoice/99",
+            headers: { get: () => "application/pdf" },
+            arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]).buffer,
+        });
+        globalThis.window.__NATIVE_PRINT__ = {
+            listPrinters: async () => [{ name: "HP LaserJet", driver: "HP PCL", kind: "local", is_default: true }],
+            printerCapabilities: async () => ({ forms: [], color: true }),
+            printPdf: async () => { throw "ERR_LICENSE_REQUIRED"; },
+        };
+        const reqRes = await registeredHandler(
+            { report_type: "qweb-pdf", report_name: "account.report_invoice", context: { active_ids: [99] } },
+            {},
+            testEnv,
+        );
+        eq(reqRes, undefined, "ERR_LICENSE_REQUIRED falls back cleanly without throwing");
+        eq(rpcCalls.length, 1, "ERR_LICENSE_REQUIRED logs failed job status");
+        eq(rpcCalls[0].params.error_code, "ERR_LICENSE_REQUIRED", "job log records ERR_LICENSE_REQUIRED");
+        eq(notices.length, 1, "ERR_LICENSE_REQUIRED shows one toast");
+        eq(notices[0].type, "danger", "ERR_LICENSE_REQUIRED toast is danger");
+        eq(/license is required/i.test(notices[0].msg), true, "ERR_LICENSE_REQUIRED toast explains license activation");
+
+        // 11b. Android Error.code rejection: ERR_LICENSE_EXPIRED on text print
+        notices.length = 0;
+        rpcCalls.length = 0;
+        globalThis.fetch = async () => ({
+            ok: true,
+            redirected: false,
+            url: "https://odoo.example/report/text/sale.report/100",
+            headers: { get: () => "text/plain" },
+            text: async () => "Invoice #100",
+        });
+        globalThis.window.__NATIVE_PRINT__ = {
+            listPrinters: async () => [{ name: "Epson TM-T88", driver: "ESC/POS", kind: "local", protocol: "escpos", printer_class: "thermal", is_default: true }],
+            printerCapabilities: async () => ({ forms: [], color: false }),
+            printText: async () => { throw Object.assign(new Error("License check failed"), { code: "ERR_LICENSE_EXPIRED" }); },
+        };
+        const expRes = await registeredHandler(
+            { report_type: "qweb-text", report_name: "sale.report", context: { active_ids: [100] } },
+            {},
+            testEnv,
+        );
+        eq(expRes, undefined, "ERR_LICENSE_EXPIRED falls back cleanly without throwing");
+        eq(rpcCalls.length, 1, "ERR_LICENSE_EXPIRED logs failed job status");
+        eq(rpcCalls[0].params.error_code, "ERR_LICENSE_EXPIRED", "job log records ERR_LICENSE_EXPIRED");
+        eq(notices.length, 1, "ERR_LICENSE_EXPIRED shows one toast");
+        eq(notices[0].type, "danger", "ERR_LICENSE_EXPIRED toast is danger");
+        eq(/license has expired/i.test(notices[0].msg), true, "ERR_LICENSE_EXPIRED toast explains renewal");
+    } finally {
+        globalThis.fetch = origFetchLic;
+        delete globalThis.window.__NATIVE_PRINT__;
+    }
+}
+
 console.log("JS LIVE TARGET TESTS: ALL PASS");

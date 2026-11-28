@@ -4,7 +4,9 @@ import { patch } from "@web/core/utils/patch";
 import { rpc } from "@web/core/network/rpc";
 import { _t } from "@web/core/l10n/translation";
 import {
+    extractLicenseErrorCode,
     JOB_TERMINAL_STATES as TERMINAL_STATES,
+    licenseErrorMessage,
     normalizeBridgeJobState,
     notifyJobUpdated,
     notifyUser,
@@ -368,7 +370,7 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
             if (state === "failed" || state === "dead_letter") {
                 notifyUser(
                     env,
-                    _t('Receipt printing failed on "%s" (%s). Check the printer before reprinting.', printerName || rule.printer_pattern, safeErrorCode(errorCode, state)),
+                    (typeof licenseErrorMessage === "function" && licenseErrorMessage(errorCode)) || _t('Receipt printing failed on "%s" (%s). Check the printer before reprinting.', printerName || rule.printer_pattern, safeErrorCode(errorCode, state)),
                     "danger",
                     undefined,
                     typeof recoveryButtons === "function" ? recoveryButtons() : null,
@@ -510,7 +512,7 @@ async function renderReceiptIframe(plugin, receiptProps) {
                 simplified: !!receiptProps.simplified,
             });
         } catch (error) {
-            console.warn("Native Print: Odoo 20 receipt data generation failed.", error);
+            console.warn("Itbaa: Odoo 20 receipt data generation failed.", error);
         }
     }
     const shapes = [
@@ -879,11 +881,11 @@ async function printPosReceiptNatively(plugin, { order, basic = false, simplifie
                     sourceWidthMm = Math.round(((widthPx * 25.4) / 96) * 10) / 10;
                 }
             } catch (captureError) {
-                console.warn("Native Print: Odoo 20 receipt image capture failed.", captureError);
+                console.warn("Itbaa: Odoo 20 receipt image capture failed.", captureError);
                 fallbackText = extractReceiptText(receiptEl);
             }
         } catch (iframeError) {
-            console.warn("Native Print: Odoo 20 receipt iframe generation failed.", iframeError);
+            console.warn("Itbaa: Odoo 20 receipt iframe generation failed.", iframeError);
         } finally {
             removeIframe(iframe);
             iframe = null;
@@ -907,7 +909,7 @@ async function printPosReceiptNatively(plugin, { order, basic = false, simplifie
                         bytes = null;
                     }
                 } catch (visibleError) {
-                    console.warn("Native Print: on-screen receipt capture failed.", visibleError);
+                    console.warn("Itbaa: on-screen receipt capture failed.", visibleError);
                 }
                 if (!bytes && !fallbackText) {
                     fallbackText = extractReceiptText(visible);
@@ -929,7 +931,7 @@ async function printPosReceiptNatively(plugin, { order, basic = false, simplifie
                     }
                 }
             } catch (textRenderError) {
-                console.warn("Native Print: text-to-PNG receipt fallback failed.", textRenderError);
+                console.warn("Itbaa: text-to-PNG receipt fallback failed.", textRenderError);
             }
             fallbackText = null;
         }
@@ -976,10 +978,11 @@ async function printPosReceiptNatively(plugin, { order, basic = false, simplifie
             }
             bridgeJobId = resolveBridgeJobId(enqueueRes, idempotencyKey);
         } catch (err) {
-            console.warn("Native Print: POS receipt print failed.", err);
+            const licenseCode = extractLicenseErrorCode(err);
+            console.warn("Itbaa: POS receipt print failed.", err);
             return {
-                reason: _t("Reason: the print job could not be queued."),
-                code: "POS_ENQUEUE_FAILED",
+                reason: licenseErrorMessage(licenseCode) || _t("Reason: the print job could not be queued."),
+                code: licenseCode || "POS_ENQUEUE_FAILED",
                 key: idempotencyKey,
                 safeRef,
                 userId,
@@ -1049,7 +1052,7 @@ patch(PosTicketPrinterPlugin.prototype, {
             postPosDeclined(failure.key, failure.code, failure.safeRef, failure.userId, failure.device, failure.mode);
             notifyPosNativeFailure(this, failure.reason);
         } catch (error) {
-            console.warn("Native Print: POS receipt print failed.", error);
+            console.warn("Itbaa: POS receipt print failed.", error);
             notifyPosNativeFailure(this, _t("Reason: the print job could not be queued."));
         }
         return true;

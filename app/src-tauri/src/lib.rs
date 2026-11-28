@@ -22,7 +22,7 @@ fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 /// onto Tauri IPC commands (which re-validate the caller's origin in Rust
 /// before touching the queue), normalizes `Uint8Array` / `ArrayBuffer`
 /// byte payloads into standard arrays for serde, and registers the
-/// `Ctrl+Shift+Y` shortcut to toggle between Odoo and the Yaseir Print
+/// `Ctrl+Shift+Y` shortcut to toggle between Odoo and the Itbaa
 /// Control Center.
 const BRIDGE_JS: &str = r#"
 (function () {
@@ -458,7 +458,7 @@ const BRIDGE_JS: &str = r#"
   }
   if (__npIsTop && !npIsLocalPage()) {
     try {
-      // Every Odoo report is intercepted by Native Print. Never expose
+      // Every Odoo report is intercepted by Itbaa. Never expose
       // the browser's print dialog from an embedded remote page: it
       // bypasses printer selection, job logging and the native queue.
       window.print = function () {};
@@ -676,7 +676,7 @@ pub fn create_tab_webview(
             };
             if !verdict {
                 eprintln!(
-                    "Yaseir Print: blocked navigation to {} (not the configured Odoo origin)",
+                    "Itbaa: blocked navigation to {} (not the configured Odoo origin)",
                     u.as_str()
                 );
                 return false;
@@ -800,16 +800,14 @@ fn acquire_single_instance_guard() -> bool {
     const ERROR_ALREADY_EXISTS: u32 = 183;
     const SW_SHOW: i32 = 5;
     const SW_RESTORE: i32 = 9;
-    let wide_name: Vec<u16> = "Local\\YaseirPrintSingleInstance\0"
-        .encode_utf16()
-        .collect();
+    let wide_name: Vec<u16> = "Local\\ItbaaSingleInstance\0".encode_utf16().collect();
     let handle = unsafe { CreateMutexW(std::ptr::null_mut(), 0, wide_name.as_ptr()) };
     if handle.is_null() {
         return true;
     }
     if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
         // Restore an existing window that may be hidden in the system tray.
-        let title: Vec<u16> = "Yaseir Print\0".encode_utf16().collect();
+        let title: Vec<u16> = "Itbaa\0".encode_utf16().collect();
         let hwnd = unsafe { FindWindowW(std::ptr::null(), title.as_ptr()) };
         if !hwnd.is_null() {
             unsafe {
@@ -833,7 +831,7 @@ fn acquire_single_instance_guard() -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if !acquire_single_instance_guard() {
-        eprintln!("Yaseir Print: another instance is already running; exiting.");
+        eprintln!("Itbaa: another instance is already running; exiting.");
         return;
     }
     tauri::Builder::default()
@@ -854,35 +852,53 @@ pub fn run() {
                 Queue::open(&db_path).map_err(|e| std::io::Error::other(e.to_string()))?;
             // Crash recovery per ADR-0004.
             if let Err(e) = queue.recover_on_startup(resolved.auto_reprint) {
-                eprintln!("Yaseir Print: startup queue recovery failed: {e}");
+                eprintln!("Itbaa: startup queue recovery failed: {e}");
             }
 
             let queue_arc = Arc::new(Mutex::new(queue));
             let environment = RwLock::new(None);
             let printer_settings =
                 Arc::new(RwLock::new(config::load_printer_settings(&config_dir)));
+            let initial_origin = resolved.odoo_origin.clone();
+            // Point 1 startup Ed25519 verification (independent of IPC and worker gates).
+            if let Some(ref orig) = initial_origin {
+                let startup_now = print_core::license::now_utc_secs();
+                if let Err(err) = print_core::license::verify_license(
+                    resolved.license_key.as_deref(),
+                    orig,
+                    startup_now,
+                    resolved.last_seen_utc,
+                ) {
+                    eprintln!("Itbaa: startup license check status: {}", err.code());
+                }
+            }
+            let shared_origin = Arc::new(RwLock::new(initial_origin.clone()));
+            let shared_license = Arc::new(RwLock::new(resolved.license_key));
+            let shared_last_seen = Arc::new(RwLock::new(resolved.last_seen_utc));
             let worker_wake = Arc::new((Mutex::new(true), Condvar::new()));
             let worker_stop = Arc::new(AtomicBool::new(false));
             spawn_worker_loop(
                 db_path.clone(),
                 Arc::clone(&printer_settings),
+                Arc::clone(&shared_origin),
+                Arc::clone(&shared_license),
+                Arc::clone(&shared_last_seen),
                 Arc::clone(&worker_wake),
                 Arc::clone(&worker_stop),
             );
             // Warm up PDFium and printer discovery in the background so the
             // first user print job does not pay DLL load or spooler cold start.
             let _ = std::thread::Builder::new()
-                .name("native-print-warmup".into())
+                .name("itbaa-warmup".into())
                 .spawn(|| {
                     let _ = commands::pdfium_ready();
                     let _ = print_win::discover_printers();
                 });
 
             let allow_exit = Arc::new(AtomicBool::new(false));
-            let initial_origin = resolved.odoo_origin.clone();
             app.manage(AppState {
                 queue: queue_arc,
-                configured_origin: RwLock::new(initial_origin.clone()),
+                configured_origin: Arc::clone(&shared_origin),
                 config_dir,
                 data_dir,
                 environment,
@@ -890,6 +906,9 @@ pub fn run() {
                 started_at: std::time::Instant::now(),
                 locked_by_policy: resolved.locked_by_policy,
                 auto_reprint: RwLock::new(resolved.auto_reprint),
+                license_key: Arc::clone(&shared_license),
+                license_locked_by_policy: resolved.license_locked_by_policy,
+                last_seen_utc: Arc::clone(&shared_last_seen),
                 allow_exit: Arc::clone(&allow_exit),
                 worker_wake,
                 worker_stop,
@@ -911,7 +930,7 @@ pub fn run() {
             // one child webview per tab. Webviews are created from setup
             // or async commands only to avoid Windows deadlocks.
             let window = tauri::window::WindowBuilder::new(app, "main")
-                .title("Yaseir Print")
+                .title("Itbaa")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(960.0, 640.0)
                 .build()?;
@@ -945,14 +964,13 @@ pub fn run() {
             }
             create_tab_webview(app.handle(), "tab-1", start_url)?;
 
-            let open_item =
-                MenuItem::with_id(app, "tray-open", "فتح Yaseir Print", true, None::<&str>)?;
+            let open_item = MenuItem::with_id(app, "tray-open", "فتح Itbaa", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "tray-quit", "إنهاء", true, None::<&str>)?;
             let tray_menu = Menu::with_items(app, &[&open_item, &quit_item])?;
-            let mut tray_builder = TrayIconBuilder::with_id("yaseir-tray")
+            let mut tray_builder = TrayIconBuilder::with_id("itbaa-tray")
                 .menu(&tray_menu)
                 .show_menu_on_left_click(false)
-                .tooltip("Yaseir Print")
+                .tooltip("Itbaa")
                 .on_menu_event(|app_handle, event| match event.id().as_ref() {
                     "tray-open" => show_main_window(app_handle),
                     "tray-quit" => {
@@ -1030,6 +1048,8 @@ pub fn run() {
             commands::report_environment,
             commands::clear_web_data_cmd,
             commands::save_origin_cmd,
+            commands::license_status_cmd,
+            commands::save_license_cmd,
             commands::get_printer_settings,
             commands::set_printer_settings,
             commands::tab_open,
@@ -1046,7 +1066,7 @@ pub fn run() {
             commands::nav_reload
         ])
         .build(tauri::generate_context!())
-        .expect("error while building Yaseir Print")
+        .expect("error while building Itbaa")
         .run(|app_handle, event| {
             if matches!(
                 event,

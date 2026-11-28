@@ -16,7 +16,7 @@ val ThmanyahSans = FontFamily(
     Font(R.font.thmanyah_sans_black, FontWeight.Black),
 )
 
-val YaseirTypography = Typography(
+val ItbaaTypography = Typography(
     headlineLarge = TextStyle(
         fontFamily = ThmanyahSans,
         fontWeight = FontWeight.Bold,

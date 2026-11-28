@@ -172,7 +172,7 @@ def _get_or_create_device(device_name, company_id, vals=None):
 
 
 class NativePrintController(http.Controller):
-    """Job log endpoints for the Yaseir Print app (API v1).
+    """Job log endpoints for the Itbaa app (API v1).
 
     Which printer prints is deliberately NOT decided on the server:
     the desktop app on the user's own PC is the only printer
@@ -241,7 +241,7 @@ class NativePrintController(http.Controller):
         if isinstance(duplex, bool) and (not job or not job.duplex_configured):
             vals["duplex"] = duplex
             vals["duplex_configured"] = True
-        if device_name:
+        if device_name and (not job or not job.device_id):
             # Keep the printer registry in sync with reality: the
             # first job from a printer registers it, so the log's
             # printer field is a pickable Many2one, never free text
@@ -249,7 +249,7 @@ class NativePrintController(http.Controller):
             # Race-safe registration: two jobs reporting the same new
             # printer at the same moment must still produce ONE row.
             printer = _get_or_create_device(device_name, company)
-            if printer and (not job or not job.device_id):
+            if printer:
                 vals["device_id"] = printer.id
         parsed_attempts = _safe_int(attempts)
         if parsed_attempts is not None and parsed_attempts >= 0:
@@ -403,7 +403,7 @@ class NativePrintController(http.Controller):
     @http.route("/native_print/overview", type="jsonrpc", auth="user",
                 methods=["POST"], csrf=False)
     def overview(self, **kwargs):
-        """Job counters for the Native Print systray widget."""
+        """Job counters for the Itbaa systray widget."""
         if not _has_print_access():
             return {"ok": False, "error": "forbidden"}
         # Counters are company-wide across roles; sudo + explicit company

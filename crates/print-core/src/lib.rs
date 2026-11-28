@@ -4,6 +4,7 @@
 
 pub mod diagnostics;
 pub mod health;
+pub mod license;
 pub mod net;
 pub mod page;
 pub mod paper;

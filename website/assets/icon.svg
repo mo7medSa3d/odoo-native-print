@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="itbaaBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0E142B"/>
+      <stop offset="52%" stop-color="#173073"/>
+      <stop offset="100%" stop-color="#2E67FF"/>
+    </linearGradient>
+    <linearGradient id="itbaaStem" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#00EEBA"/>
+      <stop offset="100%" stop-color="#00CDCC"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#itbaaBg)"/>
+  <rect x="162" y="106" width="54" height="292" rx="27" fill="url(#itbaaStem)"/>
+  <path d="M189 354 H304 C350 354 382 326 382 284 C382 242 350 216 300 216 H238"
+        fill="none" stroke="#FFFFFF" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="189" cy="354" r="26" fill="#FFFFFF"/>
+</svg>

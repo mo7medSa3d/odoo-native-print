@@ -172,7 +172,7 @@ def _get_or_create_device(device_name, company_id, vals=None):
 
 
 class NativePrintController(http.Controller):
-    """Job log endpoints for the Yaseir Print app (API v1).
+    """Job log endpoints for the Itbaa app (API v1).
 
     Which printer prints is deliberately NOT decided on the server:
     the desktop app on the user's own PC is the only printer
@@ -234,7 +234,7 @@ class NativePrintController(http.Controller):
             # Clear stale error_code on state transitions or explicit clear,
             # but preserve it on same-state metadata reposts where error_code is omitted.
             vals["error_code"] = False
-        if device_name:
+        if device_name and (not job or not job.device_id):
             vals["device"] = device_name
         # `duplex=None` means leave the driver default in force. Only a
         # JSON boolean is an explicit choice (including False/simplex).
@@ -403,7 +403,7 @@ class NativePrintController(http.Controller):
     @http.route("/native_print/overview", type="json", auth="user",
                 methods=["POST"], csrf=False)
     def overview(self, **kwargs):
-        """Job counters for the Native Print systray widget."""
+        """Job counters for the Itbaa systray widget."""
         if not _has_print_access():
             return {"ok": False, "error": "forbidden"}
         # Counters are company-wide across roles; sudo + explicit company

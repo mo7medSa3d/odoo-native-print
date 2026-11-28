@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Yaseir Print — Settings</title>
+<title>Itbaa — Settings</title>
 <link rel="stylesheet" href="theme.css"/>
 <style>
   html, body { height: 100%; }
@@ -88,6 +88,7 @@
   .row:last-child { padding-bottom: 0; }
   .row .k { color: var(--text-muted); }
   .row .v { color: var(--text-primary); font-weight: 600; text-align: end; }
+  .row .v.warn { color: var(--warn-fg); }
   .kbd-combo {
     display: inline-flex; align-items: center; gap: var(--space-1); flex-wrap: wrap;
     direction: ltr; unicode-bidi: isolate;
@@ -151,6 +152,8 @@
     border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); display: none;
   }
   .inline-hint.show { display: block; }
+  .inline-hint.ok { color: var(--ok-fg); background: var(--ok-bg); border-color: var(--ok-border); }
+  .inline-hint.err { color: var(--err-fg); background: var(--err-bg); border-color: var(--err-border); }
   section.page { display: none; flex-direction: column; gap: var(--space-4); }
   section.page.active { display: flex; }
 </style>
@@ -185,7 +188,7 @@
           <div class="about-head">
             <div class="about-logo"><img src="app-icon.png" alt=""/></div>
             <div>
-              <div class="name">Yaseir Print</div>
+              <div class="name">Itbaa</div>
               <div class="tag" data-i18n="about_tag">طباعة فورية مباشرة لـ Odoo</div>
             </div>
           </div>
@@ -193,7 +196,23 @@
             <div class="row"><span class="k" data-i18n="version">الإصدار</span><span class="v tabular-nums mono" dir="ltr" id="appVersion">—</span></div>
             <div class="row"><span class="k" data-i18n="platform">النظام</span><span class="v">Windows</span></div>
           </div>
-          <p class="credit" data-i18n="credit">Yaseir Print © يسير</p>
+          <p class="body-desc" data-i18n="about_desc" style="margin:12px 0 0;font-size:13px;line-height:1.65;color:var(--text-secondary);">محرك طباعة صامتة ومباشرة لبيئات Odoo (الإصدارات 17 إلى 20) مبني أصلياً بلغة Rust بدون IoT Box، بطابور SQLite WAL محلي وترخيص Ed25519 أوفلاين ودعم ESC/POS وZPL وIPP وPDFium.</p>
+          <div class="actions" style="margin-top:12px;">
+            <button type="button" class="btn" id="btnCopySysInfo" data-i18n="copy_sys_info">نسخ معلومات النظام</button>
+          </div>
+          <p class="credit" data-i18n="credit">تطوير وإشراف اطبع · جميع الحقوق محفوظة © 2026</p>
+        </div>
+        <div class="card" id="licenseCard">
+          <h2 id="licTitle" data-i18n="lic_title">الترخيص والتفعيل</h2>
+          <div class="rows">
+            <div class="row"><span class="k" id="licStatusLbl" data-i18n="lic_status">الحالة</span><span class="v" id="licStatusVal">—</span></div>
+            <div class="row"><span class="k" id="licCustomerLbl" data-i18n="lic_customer">العميل</span><span class="v" id="licCustomerVal">—</span></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;">
+            <input id="settingsLicInput" type="text" dir="ltr" placeholder="ITBAA1...." aria-label="مفتاح التفعيل" autocomplete="off" spellcheck="false" style="flex:1;min-width:0;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-surface);color:var(--text-primary);font-family:var(--font-mono);font-size:12px;" />
+            <button type="button" class="btn brand" id="settingsLicBtn" data-i18n="lic_save">حفظ وتفعيل</button>
+          </div>
+          <div id="settingsLicMsg" class="inline-hint" role="status" aria-live="polite"></div>
         </div>
       </section>
 
@@ -239,13 +258,16 @@
 
       <section class="page" id="page-contact" role="tabpanel" aria-labelledby="tab-contact">
         <div class="card">
-          <h2 data-i18n="contact_title">الدعم الفني</h2>
+          <h2 data-i18n="contact_title">الدعم الفني والمبيعات</h2>
           <div class="rows">
-            <div class="row"><span class="k" data-i18n="support_channel">جهة الدعم</span><span class="v" data-i18n="support_channel_val">مسؤول تقنية المعلومات / مدير Odoo</span></div>
+            <div class="row"><span class="k" data-i18n="support_whatsapp">واتساب الدعم</span><span class="v mono" dir="ltr">+20 100 778 1842</span></div>
+            <div class="row"><span class="k" data-i18n="support_email">البريد الإلكتروني</span><span class="v mono" dir="ltr">itbaa.odoo@gmail.com</span></div>
             <div class="row"><span class="k" data-i18n="support_diag">حزمة التشخيص</span><span class="v" data-i18n="support_diag_val">تقرير تشخيص منقّح من مركز التحكم</span></div>
           </div>
-          <div class="actions">
-            <button type="button" class="btn brand" id="btnOpenDiagnostics" data-i18n="open_diagnostics">فتح التشخيص</button>
+          <div class="actions" style="display:flex;flex-wrap:wrap;gap:8px;">
+            <a class="btn brand" id="btnWhatsappSupport" href="https://wa.me/201007781842" target="_blank" rel="noopener noreferrer" data-i18n="btn_whatsapp">تواصل عبر واتساب</a>
+            <a class="btn" id="btnEmailSupport" href="mailto:itbaa.odoo@gmail.com?subject=Itbaa%20Windows%20Support" data-i18n="btn_email">إرسال بريد إلكتروني</a>
+            <button type="button" class="btn" id="btnOpenDiagnostics" data-i18n="open_diagnostics">فتح التشخيص</button>
           </div>
         </div>
       </section>
@@ -265,7 +287,11 @@
       title: "الإعدادات",
       nav_about: "حول التطبيق", nav_contact: "الدعم", nav_prefs: "التفضيلات",
       about_tag: "طباعة فورية مباشرة لـ Odoo",
-      version: "الإصدار", credit: "Yaseir Print © يسير", platform: "النظام",
+      version: "الإصدار", credit: "تطوير وإشراف اطبع · جميع الحقوق محفوظة © 2026", platform: "النظام",
+      about_desc: "محرك طباعة صامتة ومباشرة لبيئات Odoo (الإصدارات 17 إلى 20) مبني أصلياً بلغة Rust بدون IoT Box، بطابور SQLite WAL محلي وترخيص Ed25519 أوفلاين ودعم ESC/POS وZPL وIPP وPDFium.",
+      copy_sys_info: "نسخ معلومات النظام", copied_sys_info: "تم النسخ",
+      support_whatsapp: "واتساب الدعم", support_email: "البريد الإلكتروني",
+      btn_whatsapp: "تواصل عبر واتساب", btn_email: "إرسال بريد إلكتروني",
       appearance_title: "المظهر واللغة", theme_label: "المظهر", theme_light: "فاتح", theme_dark: "داكن", lang_label: "اللغة",
       contact_title: "الدعم الفني",
       support_channel: "جهة الدعم", support_channel_val: "مسؤول تقنية المعلومات / مدير Odoo",
@@ -273,13 +299,23 @@
       open_diagnostics: "فتح التشخيص",
       open_cc: "مركز التحكم", open_odoo: "فتح Odoo",
       no_origin_hint: "اضبط رابط خادم Odoo من مركز التحكم أولاً.",
-      shortcuts_title: "اختصارات لوحة المفاتيح", shortcut_cc: "التبديل بين مركز التحكم و Odoo", shortcut_nav: "التنقل للخلف / للأمام"
+      shortcuts_title: "اختصارات لوحة المفاتيح", shortcut_cc: "التبديل بين مركز التحكم و Odoo", shortcut_nav: "التنقل للخلف / للأمام",
+      lic_title: "الترخيص والتفعيل", lic_status: "الحالة", lic_customer: "العميل", lic_save: "حفظ وتفعيل",
+      lic_input_label: "مفتاح التفعيل", lic_tier_pro: "Pro", lic_tier_trial: "تجريبي", lic_perpetual: "دائم", lic_day_left: "متبقي يوم واحد", lic_days_left: "متبقي {n} يوم",
+      lic_expired: "منتهي الصلاحية", lic_not_activated: "غير مفعّل",
+      lic_activated: "تم تفعيل الرخصة بنجاح.", lic_err_expired: "مفتاح الترخيص منتهي الصلاحية. أدخل مفتاحاً مجدداً.",
+      lic_err_locked: "الترخيص مقفل بواسطة مسؤول النظام.", lic_err_no_origin: "اضبط رابط خادم Odoo من مركز التحكم أولاً.",
+      lic_err_invalid: "مفتاح غير صالح أو لا يطابق عنوان أودو. تحقّق من المفتاح ورابط الخادم."
     },
     en: {
       title: "Settings",
       nav_about: "About", nav_contact: "Support", nav_prefs: "Preferences",
       about_tag: "Direct Silent Printing for Odoo",
-      version: "Version", credit: "Yaseir Print © Yaseir", platform: "Platform",
+      version: "Version", credit: "Engineered by Itbaa · © 2026 All rights reserved", platform: "Platform",
+      about_desc: "Native silent printing engine for Odoo (17–20), built in Rust with zero IoT Box dependency, a crash-safe SQLite WAL queue, offline Ed25519 licensing, and direct ESC/POS, ZPL, IPP, and PDFium rendering.",
+      copy_sys_info: "Copy system info", copied_sys_info: "Copied",
+      support_whatsapp: "WhatsApp support", support_email: "Email",
+      btn_whatsapp: "Chat on WhatsApp", btn_email: "Send email",
       appearance_title: "Appearance & language", theme_label: "Theme", theme_light: "Light", theme_dark: "Dark", lang_label: "Language",
       contact_title: "Technical support",
       support_channel: "Support contact", support_channel_val: "IT or Odoo administrator",
@@ -287,7 +323,13 @@
       open_diagnostics: "Open Diagnostics",
       open_cc: "Control Center", open_odoo: "Open Odoo",
       no_origin_hint: "Configure Odoo server URL in Control Center first.",
-      shortcuts_title: "Keyboard shortcuts", shortcut_cc: "Toggle Control Center / Odoo", shortcut_nav: "Navigate back / forward"
+      shortcuts_title: "Keyboard shortcuts", shortcut_cc: "Toggle Control Center / Odoo", shortcut_nav: "Navigate back / forward",
+      lic_title: "License & activation", lic_status: "Status", lic_customer: "Customer", lic_save: "Save & activate",
+      lic_input_label: "License key", lic_tier_pro: "Pro", lic_tier_trial: "Trial", lic_perpetual: "Perpetual", lic_day_left: "1 day left", lic_days_left: "{n} days left",
+      lic_expired: "Expired", lic_not_activated: "Not activated",
+      lic_activated: "License activated successfully.", lic_err_expired: "License key is expired. Enter a renewed key.",
+      lic_err_locked: "License is managed by administrator policy.", lic_err_no_origin: "Configure Odoo server URL in Control Center first.",
+      lic_err_invalid: "Invalid license key or domain mismatch. Check the key and Odoo URL."
     }
   };
   function setSeg(id, active) {
@@ -305,7 +347,7 @@
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
     document.documentElement.setAttribute("data-theme", theme);
-    document.title = "Yaseir Print — " + STR[lang].title;
+    document.title = "Itbaa — " + STR[lang].title;
     document.querySelectorAll("[data-i18n]").forEach(function (el) {
       var v = STR[lang][el.getAttribute("data-i18n")];
       if (v) el.textContent = v;
@@ -314,6 +356,9 @@
     setSeg("btnThemeDark", theme === "dark");
     setSeg("btnLangAr", lang === "ar");
     setSeg("btnLangEn", lang === "en");
+    var licInpEl = document.getElementById("settingsLicInput");
+    if (licInpEl) licInpEl.setAttribute("aria-label", STR[lang].lic_input_label);
+    if (typeof renderSettingsLic === "function") renderSettingsLic();
   }
   document.getElementById("btnThemeLight").addEventListener("click", function () {
     try { localStorage.setItem("np_cc_theme", "light"); } catch (e) {}
@@ -413,6 +458,119 @@
   });
   window.addEventListener("storage", function (ev) { if (!ev || ev.key === "np_cc_lang" || ev.key === "np_cc_theme") applyPrefs(); });
   applyPrefs();
+
+  var settingsLicState = null;
+  var settingsLicMsgKey = null;
+  function renderSettingsLic() {
+    var lang = document.documentElement.lang === "en" ? "en" : "ar";
+    var d = STR[lang];
+    var stVal = document.getElementById("licStatusVal");
+    var cuVal = document.getElementById("licCustomerVal");
+    var msg = document.getElementById("settingsLicMsg");
+    if (stVal && cuVal && settingsLicState) {
+      var isWarn = false;
+      if (settingsLicState.valid) {
+        var tier = settingsLicState.tier === "pro" ? d.lic_tier_pro : d.lic_tier_trial;
+        var suffix = "";
+        if (settingsLicState.perpetual) {
+          suffix = " · " + d.lic_perpetual;
+        } else if (typeof settingsLicState.exp === "number" && isFinite(settingsLicState.exp) && settingsLicState.exp > 0) {
+          var days = Math.max(0, Math.ceil((settingsLicState.exp - Date.now() / 1000) / 86400));
+          suffix = " · " + (days === 1 ? d.lic_day_left : d.lic_days_left.replace("{n}", String(days)));
+          isWarn = days <= 7;
+        }
+        stVal.textContent = tier + suffix;
+        cuVal.textContent = settingsLicState.customer || "—";
+      } else {
+        stVal.textContent = settingsLicState.code === "ERR_LICENSE_EXPIRED" ? d.lic_expired : d.lic_not_activated;
+        cuVal.textContent = "—";
+      }
+      stVal.classList.toggle("warn", isWarn);
+    }
+    if (msg && settingsLicMsgKey && d[settingsLicMsgKey]) msg.textContent = d[settingsLicMsgKey];
+  }
+  (function initSettingsLicense() {
+    var stVal = document.getElementById("licStatusVal");
+    var inp = document.getElementById("settingsLicInput");
+    var btn = document.getElementById("settingsLicBtn");
+    var msg = document.getElementById("settingsLicMsg");
+    if (!stVal || !inp || !btn || !msg) return;
+    function errKey(e) {
+      var code = String(e && e.message ? e.message : (e || "")).trim();
+      if (code === "ERR_LICENSE_EXPIRED") return "lic_err_expired";
+      if (code === "locked_by_policy") return "lic_err_locked";
+      if (code === "no_origin_configured") return "lic_err_no_origin";
+      return "lic_err_invalid";
+    }
+    async function loadLic() {
+      try {
+        var st = await invoke("license_status_cmd", {});
+        settingsLicState = st || { valid: false, code: "ERR_LICENSE_REQUIRED" };
+        renderSettingsLic();
+      } catch (_) {}
+    }
+    async function submitLic() {
+      var k = (inp.value || "").trim();
+      if (!k || btn.disabled) return;
+      btn.disabled = true;
+      msg.classList.remove("show", "ok", "err");
+      try {
+        var st = await invoke("save_license_cmd", { key: k });
+        settingsLicMsgKey = "lic_activated";
+        msg.classList.add("show", "ok");
+        inp.value = "";
+        if (st && typeof st.valid === "boolean") {
+          settingsLicState = st;
+          renderSettingsLic();
+        } else {
+          await loadLic();
+        }
+        renderSettingsLic();
+      } catch (e) {
+        settingsLicMsgKey = errKey(e);
+        msg.classList.add("show", "err");
+        renderSettingsLic();
+      } finally { btn.disabled = false; }
+    }
+    btn.addEventListener("click", submitLic);
+    inp.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); submitLic(); } });
+    loadLic();
+  })();
+
+
+  (function initSupportActions(){
+    var waBtn = document.getElementById("btnWhatsappSupport");
+    var copyBtn = document.getElementById("btnCopySysInfo");
+    function sysSummary(){
+      var ver = (document.getElementById("appVersion")?.textContent || "1.5.7").trim();
+      var lic = (document.getElementById("licStatusVal")?.textContent || "—").trim();
+      return "Itbaa Desktop (Windows) | v" + ver + " | License: " + lic;
+    }
+    if (waBtn) {
+      waBtn.addEventListener("click", function(){
+        var isAr = document.documentElement.lang !== "en";
+        var msg = isAr
+          ? "مرحباً فريق اطبع، أحتاج مساعدة بخصوص التطبيق:\n" + sysSummary()
+          : "Hello Itbaa support, I need assistance:\n" + sysSummary();
+        waBtn.href = "https://wa.me/201007781842?text=" + encodeURIComponent(msg);
+      });
+    }
+    if (copyBtn) {
+      copyBtn.addEventListener("click", function(){
+        var text = sysSummary();
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).catch(function(){});
+        }
+        var lang = document.documentElement.lang === "en" ? "en" : "ar";
+        copyBtn.textContent = STR[lang].copied_sys_info || "Copied";
+        setTimeout(function(){
+          var cur = document.documentElement.lang === "en" ? "en" : "ar";
+          copyBtn.textContent = STR[cur].copy_sys_info;
+        }, 1500);
+      });
+    }
+  })();
+
 </script>
 </body>
 </html>

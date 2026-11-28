@@ -1176,4 +1176,60 @@ try {
     }
 }
 
+
+// 11. Native app ERR_LICENSE_REQUIRED (Tauri string) & ERR_LICENSE_EXPIRED (Android Error.code) surface cleanly.
+{
+    const origFetchLic = globalThis.fetch;
+    try {
+        eq(m.extractLicenseErrorCode("ERR_LICENSE_REQUIRED"), "ERR_LICENSE_REQUIRED", "extracts Tauri string ERR_LICENSE_REQUIRED");
+        eq(m.extractLicenseErrorCode("ERR_LICENSE_EXPIRED"), "ERR_LICENSE_EXPIRED", "extracts Tauri string ERR_LICENSE_EXPIRED");
+        const androidErr = new Error("License check failed");
+        androidErr.code = "ERR_LICENSE_EXPIRED";
+        eq(m.extractLicenseErrorCode(androidErr), "ERR_LICENSE_EXPIRED", "extracts Android Error.code ERR_LICENSE_EXPIRED");
+        eq(m.extractLicenseErrorCode(new Error("INTERNAL_RUST_SECRET_TRACE")), null, "ignores arbitrary non-license errors");
+
+        globalThis.fetch = async () => ({
+            ok: true,
+            arrayBuffer: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]).buffer,
+            text: async () => "Hello text report",
+        });
+
+        // 11a. PDF rejection with Tauri string "ERR_LICENSE_REQUIRED"
+        rpcCalls.length = 0;
+        notices.length = 0;
+        globalThis.window.__NATIVE_PRINT__ = {
+            listPrinters: async () => [{ name: "HP LaserJet", driver: "HP PCL", kind: "local", is_default: true }],
+            printerCapabilities: async () => ({ forms: [], color: true }),
+            printPdf: async () => { throw "ERR_LICENSE_REQUIRED"; },
+        };
+        const reqRes = await registeredHandler({ report_type: "qweb-pdf", report_name: "r.lic_req" }, {}, testEnv);
+        eq(reqRes, undefined, "ERR_LICENSE_REQUIRED falls back to browser download");
+        const reqRpc = rpcCalls.find((c) => c.url === "/native_print/job_status" && c.params.state === "failed");
+        eq(reqRpc && reqRpc.params.error_code, "ERR_LICENSE_REQUIRED", "job_status records ERR_LICENSE_REQUIRED");
+        eq(notices.length, 1, "ERR_LICENSE_REQUIRED shows one notice");
+        eq(notices[0].type, "danger", "ERR_LICENSE_REQUIRED notice has danger severity");
+        eq(/license key is required/i.test(notices[0].msg), true, "ERR_LICENSE_REQUIRED notice explains missing license");
+
+        // 11b. Text rejection with Android Error{code: "ERR_LICENSE_EXPIRED"}
+        rpcCalls.length = 0;
+        notices.length = 0;
+        globalThis.window.__NATIVE_PRINT__ = {
+            listPrinters: async () => [{ name: "Zebra ZPL", driver: "Generic / Text Only", kind: "local", is_default: true, printer_class: "label" }],
+            printerCapabilities: async () => ({ forms: [], color: false }),
+            printText: async () => { const e = new Error("License check failed"); e.code = "ERR_LICENSE_EXPIRED"; throw e; },
+            printImage: async () => { const e = new Error("License check failed"); e.code = "ERR_LICENSE_EXPIRED"; throw e; },
+        };
+        const expRes = await registeredHandler({ report_type: "qweb-text", report_name: "r.lic_exp" }, {}, testEnv);
+        eq(expRes, undefined, "ERR_LICENSE_EXPIRED falls back to browser download");
+        const expRpc = rpcCalls.find((c) => c.url === "/native_print/job_status" && c.params.state === "failed");
+        eq(expRpc && expRpc.params.error_code, "ERR_LICENSE_EXPIRED", "job_status records ERR_LICENSE_EXPIRED");
+        eq(notices.length, 1, "ERR_LICENSE_EXPIRED shows one notice");
+        eq(notices[0].type, "danger", "ERR_LICENSE_EXPIRED notice has danger severity");
+        eq(/license has expired/i.test(notices[0].msg), true, "ERR_LICENSE_EXPIRED notice explains expired license");
+    } finally {
+        globalThis.fetch = origFetchLic;
+        delete globalThis.window.__NATIVE_PRINT__;
+    }
+}
+
 console.log("JS LIVE TARGET TESTS: ALL PASS");

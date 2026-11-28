@@ -63,18 +63,137 @@ fn redact_uri_credentials(input: &str) -> String {
     out
 }
 
+fn is_secret_delim(b: u8) -> bool {
+    b.is_ascii_whitespace() || matches!(b, b'&' | b';' | b',' | b'"' | b'\'' | b')' | b']' | b'}')
+}
+
+/// Redact URI credentials, Itbaa license keys (`ITBAA1.*`), `Bearer` tokens,
+/// and common secret `key=value` fields so diagnostics never leak secrets.
+fn redact_secrets(input: &str) -> String {
+    let step1 = redact_uri_credentials(input);
+    // Redact Itbaa license keys (`ITBAA1.<payload>.<sig>`).
+    let mut step2 = String::with_capacity(step1.len());
+    let mut i = 0;
+    let bytes = step1.as_bytes();
+    while i < bytes.len() {
+        if i + 7 <= bytes.len() && bytes[i..i + 7].eq_ignore_ascii_case(b"ITBAA1.") {
+            step2.push_str("[redacted-license]");
+            i += 7;
+            while i < bytes.len()
+                && (bytes[i].is_ascii_alphanumeric()
+                    || matches!(bytes[i], b'-' | b'_' | b'.' | b'='))
+            {
+                i += 1;
+            }
+        } else {
+            let ch = step1[i..].chars().next().unwrap_or(' ');
+            step2.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    // Redact `Bearer <token>` / `Basic <token>` and sensitive `key=value` / `key: value` pairs.
+    const SECRET_KEYS: [&str; 9] = [
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "api_key",
+        "apikey",
+        "session_id",
+        "license_key",
+        "authorization",
+    ];
+    let mut out = String::with_capacity(step2.len());
+    let b2 = step2.as_bytes();
+    let mut j = 0;
+    while j < b2.len() {
+        let at_boundary = j == 0
+            || b2[j - 1].is_ascii_whitespace()
+            || matches!(
+                b2[j - 1],
+                b'?' | b'&' | b';' | b',' | b'"' | b'\'' | b'(' | b'[' | b'{'
+            );
+        if at_boundary && j + 7 <= b2.len() && b2[j..j + 7].eq_ignore_ascii_case(b"bearer ") {
+            out.push_str("Bearer ");
+            j += 7;
+            while j < b2.len() && b2[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < b2.len() && !is_secret_delim(b2[j]) {
+                out.push_str("[redacted]");
+                while j < b2.len() && !is_secret_delim(b2[j]) {
+                    j += 1;
+                }
+            }
+            continue;
+        }
+        if at_boundary {
+            if let Some(&key) = SECRET_KEYS.iter().find(|&&k| {
+                j + k.len() < b2.len()
+                    && b2[j..j + k.len()].eq_ignore_ascii_case(k.as_bytes())
+                    && matches!(b2[j + k.len()], b'=' | b':')
+            }) {
+                let sep_idx = j + key.len();
+                out.push_str(&step2[j..=sep_idx]);
+                j = sep_idx + 1;
+                while j < b2.len() && b2[j].is_ascii_whitespace() {
+                    out.push(b2[j] as char);
+                    j += 1;
+                }
+                if key == "authorization" {
+                    for scheme in [b"bearer ".as_slice(), b"basic ".as_slice()] {
+                        if j + scheme.len() <= b2.len()
+                            && b2[j..j + scheme.len()].eq_ignore_ascii_case(scheme)
+                        {
+                            out.push_str(&step2[j..j + scheme.len()]);
+                            j += scheme.len();
+                            while j < b2.len() && b2[j].is_ascii_whitespace() {
+                                j += 1;
+                            }
+                            break;
+                        }
+                    }
+                }
+                if j < b2.len() && matches!(b2[j], b'"' | b'\'') {
+                    let quote = b2[j];
+                    out.push(quote as char);
+                    j += 1;
+                    out.push_str("[redacted]");
+                    while j < b2.len() && b2[j] != quote {
+                        j += 1;
+                    }
+                    if j < b2.len() {
+                        out.push(quote as char);
+                        j += 1;
+                    }
+                } else if j < b2.len() && !is_secret_delim(b2[j]) {
+                    out.push_str("[redacted]");
+                    while j < b2.len() && !is_secret_delim(b2[j]) {
+                        j += 1;
+                    }
+                }
+                continue;
+            }
+        }
+        let ch = step2[j..].chars().next().unwrap_or(' ');
+        out.push(ch);
+        j += ch.len_utf8();
+    }
+    out
+}
+
 impl From<&Job> for JobSummary {
     fn from(j: &Job) -> Self {
         Self {
             id: j.id.clone(),
             diag_id: crate::queue::diag_id_for_key(&j.idempotency_key),
-            printer: redact_uri_credentials(&j.printer),
-            report: j.report.clone(),
+            printer: redact_secrets(&j.printer),
+            report: j.report.as_deref().map(redact_secrets),
             pages: j.pages,
             bytes: j.bytes,
             state: j.state.as_str().to_string(),
             attempts: j.attempts,
-            error_code: j.error_code.as_deref().map(redact_uri_credentials),
+            error_code: j.error_code.as_deref().map(redact_secrets),
         }
     }
 }
@@ -91,21 +210,22 @@ pub fn build_bundle(queue: &Queue, recent: &[JobSummary]) -> Result<DiagnosticsB
             events
                 .into_iter()
                 .map(|mut ev| {
-                    ev.detail = ev.detail.as_deref().map(redact_uri_credentials);
+                    ev.detail = ev.detail.as_deref().map(redact_secrets);
                     ev
                 })
                 .collect(),
             None,
         ),
-        Err(e) => (Vec::new(), Some(redact_uri_credentials(&e.to_string()))),
+        Err(e) => (Vec::new(), Some(redact_secrets(&e.to_string()))),
     };
     let recent_jobs = recent
         .iter()
         .take(200)
         .cloned()
         .map(|mut job| {
-            job.printer = redact_uri_credentials(&job.printer);
-            job.error_code = job.error_code.as_deref().map(redact_uri_credentials);
+            job.printer = redact_secrets(&job.printer);
+            job.report = job.report.as_deref().map(redact_secrets);
+            job.error_code = job.error_code.as_deref().map(redact_secrets);
             job
         })
         .collect();
@@ -194,5 +314,63 @@ mod tests {
         assert!(!json.contains("hunter2"));
         assert!(json.contains("[redacted]@192.168.1.50:631/ipp/print"));
         assert!(json.contains("[redacted]@10.0.0.5:631/ipp"));
+    }
+
+    #[test]
+    fn license_keys_and_tokens_are_redacted_in_diagnostics() {
+        let fake_key = "ITBAA1.eyJjIjoiQWNtZSIsIm8iOiJodHRwczovL2VycC5hY21lLmNvbSIsImV4cCI6MCwidCI6InBybyJ9.AAAAbbbbCCCC111122223333";
+        assert_eq!(
+            redact_secrets(&format!("rejected {fake_key} for ERR_LICENSE_REQUIRED")),
+            "rejected [redacted-license] for ERR_LICENSE_REQUIRED"
+        );
+        assert_eq!(
+            redact_secrets("Authorization: Bearer eyJhbGciOi.secret.jwt"),
+            "Authorization: Bearer [redacted]"
+        );
+        assert_eq!(
+            redact_secrets("طابعة اطبع ITBAA1.eyJjIjoiQWNtZSJ9.AAAA1111"),
+            "طابعة اطبع [redacted-license]"
+        );
+        assert_eq!(
+            redact_secrets("Bearer my-secret-token failed"),
+            "Bearer [redacted] failed"
+        );
+        assert_eq!(
+            redact_secrets("https://erp.acme.com/web?session_id=sess_999&db=prod"),
+            "https://erp.acme.com/web?session_id=[redacted]&db=prod"
+        );
+        assert_eq!(
+            redact_secrets("requeued=1 ambiguous=0 ERR_LICENSE_EXPIRED"),
+            "requeued=1 ambiguous=0 ERR_LICENSE_EXPIRED"
+        );
+
+        let mut q = Queue::in_memory().unwrap();
+        q.enqueue(&Job {
+            id: "l1".into(),
+            idempotency_key: "k-l1".into(),
+            printer: "HP LaserJet".into(),
+            report: Some("sale.order?token=tok_secret".into()),
+            pages: 1,
+            bytes: 10,
+            priority: 0,
+            state: JobState::Queued,
+            attempts: 0,
+            error_code: None,
+        })
+        .unwrap();
+        q.set_state(
+            "l1",
+            JobState::Failed,
+            Some(&format!("license {fake_key} password=topsecret")),
+        )
+        .unwrap();
+        let json = bundle_to_json(&build_bundle_from_queue(&q).unwrap());
+        assert!(!json.contains("eyJjIjoiQWNtZS"));
+        assert!(!json.contains("AAAAbbbbCCCC"));
+        assert!(!json.contains("topsecret"));
+        assert!(!json.contains("tok_secret"));
+        assert!(json.contains("[redacted-license]"));
+        assert!(json.contains("password=[redacted]"));
+        assert!(json.contains("token=[redacted]"));
     }
 }

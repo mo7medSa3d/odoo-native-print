@@ -1,6 +1,6 @@
 # Print Test & Hardware QA Checklist
 
-Practical pre-release and field verification checklist for `odoo-native-print`. Complements [hardware-test-matrix.md](hardware-test-matrix.md) and [release-checklist.md](release-checklist.md).
+Practical pre-release and field verification checklist for **Itbaa**. Complements [hardware-test-matrix.md](hardware-test-matrix.md) and [release-checklist.md](release-checklist.md).
 
 Status legend: `[ ]` not run · `[x]` pass · `[!]` fail (attach diagnostics bundle + `npwin_probe` output).
 

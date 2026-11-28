@@ -43,6 +43,10 @@ jobs:
           python3 tools/check_command_surface.py
           python3 tools/check_versions.py
           node --test app/tests/control-center.test.mjs
+          node --test odoo17/native_print/tests/test_live_target.mjs
+          node --test odoo17/native_print/tests/test_pos_keys.mjs
+          node --test odoo18/native_print/tests/test_live_target.mjs
+          node --test odoo18/native_print/tests/test_pos_keys.mjs
           node --test odoo19/native_print/tests/test_live_target.mjs
           node --test odoo19/native_print/tests/test_pos_keys.mjs
           node --test odoo20/native_print/tests/test_live_target.mjs
@@ -150,7 +154,8 @@ jobs:
         run: |
           cd dist
           rm -f SHA256SUMS.txt
-          sha256sum -- * > SHA256SUMS.txt
+          sha256sum -- * > "$RUNNER_TEMP/SHA256SUMS.txt"
+          mv "$RUNNER_TEMP/SHA256SUMS.txt" SHA256SUMS.txt
       - name: Release notes
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -162,7 +167,7 @@ jobs:
             SIGNING_NOTE="**Installers are unsigned** until the company's code-signing certificate is configured in GitHub Secrets; Windows may show a SmartScreen prompt."
           fi
           {
-            printf '## Odoo Native Print %s\n\n' "$RELEASE_TAG"
+            printf '## Itbaa %s\n\n' "$RELEASE_TAG"
             cat <<'EOF'
           Windows installers (MSI + NSIS) and the full source tree.
           Verification evidence for this tree: see CHANGELOG.md and

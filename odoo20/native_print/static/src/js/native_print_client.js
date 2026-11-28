@@ -83,6 +83,33 @@ export function safeErrorCode(code, fallback = "error") {
     const text = typeof code === "string" ? code.trim() : "";
     return /^[A-Za-z0-9_.-]{1,64}$/.test(text) ? text : fallback;
 }
+
+const LICENSE_ERROR_CODES = new Set(["ERR_LICENSE_REQUIRED", "ERR_LICENSE_EXPIRED"]);
+
+/** Return "ERR_LICENSE_REQUIRED" or "ERR_LICENSE_EXPIRED" when a bridge rejection carries one, else null. */
+export function extractLicenseErrorCode(error) {
+    if (!error) return null;
+    const candidates = typeof error === "string"
+        ? [error]
+        : [error.code, error.errorCode, error.error_code, error.message];
+    for (const raw of candidates) {
+        const text = typeof raw === "string" ? raw.trim() : "";
+        if (LICENSE_ERROR_CODES.has(text)) {
+            return text;
+        }
+    }
+    return null;
+}
+
+export function licenseErrorMessage(code) {
+    if (code === "ERR_LICENSE_EXPIRED") {
+        return _t("Your Itbaa license has expired. Renew and enter your license key in the Itbaa app settings to resume direct printing.");
+    }
+    if (code === "ERR_LICENSE_REQUIRED") {
+        return _t("An Itbaa license key is required to print. Enter your license key in the Itbaa app settings.");
+    }
+    return null;
+}
 export const JOB_UPDATED_EVENT = "native_print:job_updated";
 
 export function notifyJobUpdated() {
@@ -420,7 +447,7 @@ export async function resolveBridgeTarget(bridge, options = {}) {
     };
 }
 
-// User notifications: one helper for every Yaseir Print message, so
+// User notifications: one helper for every Itbaa message, so
 // report prints and POS receipts behave identically.
 // - Success/info stay quiet: short-lived and auto-dismissed.
 // - Warnings and failures are sticky: a print that did not happen
@@ -500,7 +527,7 @@ export function resolveEnvPlugin(env, key, pluginClass, requiredMethod) {
     return null;
 }
 
-export function notifyUser(env, message, type = "info", title = _t("Yaseir Print"), buttons = null) {
+export function notifyUser(env, message, type = "info", title = _t("Itbaa"), buttons = null) {
     try {
         const notification = resolveEnvPlugin(env, "notification", NotificationPlugin, "add");
         if (!notification) {

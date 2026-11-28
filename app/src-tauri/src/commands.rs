@@ -36,7 +36,7 @@ fn lock_queue(queue: &Mutex<Queue>) -> std::sync::MutexGuard<'_, Queue> {
     match queue.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
-            eprintln!("Yaseir Print: queue mutex was poisoned; recovering the guard");
+            eprintln!("Itbaa: queue mutex was poisoned; recovering the guard");
             poisoned.into_inner()
         }
     }
@@ -68,7 +68,7 @@ pub fn read_lock<T>(lock: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
     match lock.read() {
         Ok(guard) => guard,
         Err(poisoned) => {
-            eprintln!("Yaseir Print: RwLock (read) was poisoned; recovering the guard");
+            eprintln!("Itbaa: RwLock (read) was poisoned; recovering the guard");
             poisoned.into_inner()
         }
     }
@@ -78,7 +78,7 @@ pub fn write_lock<T>(lock: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
     match lock.write() {
         Ok(guard) => guard,
         Err(poisoned) => {
-            eprintln!("Yaseir Print: RwLock (write) was poisoned; recovering the guard");
+            eprintln!("Itbaa: RwLock (write) was poisoned; recovering the guard");
             poisoned.into_inner()
         }
     }
@@ -133,11 +133,14 @@ const WORKER_ERROR_BACKOFF: Duration = Duration::from_secs(5);
 
 pub struct AppState {
     pub queue: Arc<Mutex<Queue>>,
-    pub configured_origin: RwLock<Option<String>>,
+    pub configured_origin: Arc<RwLock<Option<String>>>,
     pub config_dir: PathBuf,
     pub data_dir: PathBuf,
     pub locked_by_policy: bool,
     pub auto_reprint: RwLock<bool>,
+    pub license_key: Arc<RwLock<Option<String>>>,
+    pub license_locked_by_policy: bool,
+    pub last_seen_utc: Arc<RwLock<u64>>,
     pub allow_exit: Arc<AtomicBool>,
     pub worker_wake: Arc<(Mutex<bool>, Condvar)>,
     pub worker_stop: Arc<AtomicBool>,
@@ -268,7 +271,7 @@ pub fn tab_title_for(url: &str) -> String {
         if p.ends_with("/settings.html") || url.contains("settings.html") {
             return "Settings".to_string();
         }
-        return "Yaseir Print".to_string();
+        return "Itbaa".to_string();
     }
     let path = u.path();
     if is_pos_url(url) {
@@ -727,6 +730,83 @@ fn default_true() -> bool {
     true
 }
 
+/// Offline Ed25519 license gate (<1ms) enforced before accepting print jobs.
+/// Updates monotonic `last_seen_utc` on valid checks to detect clock rollback.
+pub fn check_license(state: &AppState) -> Result<print_core::license::LicensePayload, String> {
+    let origin = read_lock(&state.configured_origin)
+        .clone()
+        .ok_or_else(|| print_core::license::ERR_LICENSE_REQUIRED.to_string())?;
+    let key = read_lock(&state.license_key).clone();
+    let now = print_core::license::now_utc_secs();
+    let last_seen = *read_lock(&state.last_seen_utc);
+    let res = print_core::license::verify_license(key.as_deref(), &origin, now, last_seen);
+    match res {
+        Ok(payload) => {
+            if now > last_seen {
+                *write_lock(&state.last_seen_utc) = now;
+                let dir = state.config_dir.clone();
+                std::thread::spawn(move || config::persist_last_seen_utc(&dir, now));
+            }
+            Ok(payload)
+        }
+        Err(err) => Err(err.code().to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn license_status_cmd(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+) -> Result<print_core::license::LicenseStatus, String> {
+    check_local_only(&webview)?;
+    let origin = read_lock(&state.configured_origin)
+        .clone()
+        .unwrap_or_default();
+    let key = read_lock(&state.license_key).clone();
+    let now = print_core::license::now_utc_secs();
+    let last_seen = *read_lock(&state.last_seen_utc);
+    let res = print_core::license::verify_license(key.as_deref(), &origin, now, last_seen);
+    Ok(print_core::license::LicenseStatus::from_result(&res))
+}
+
+#[tauri::command]
+pub async fn save_license_cmd(
+    webview: tauri::Webview,
+    state: State<'_, AppState>,
+    key: String,
+) -> Result<print_core::license::LicenseStatus, String> {
+    check_local_only(&webview)?;
+    if state.license_locked_by_policy {
+        return Err("locked_by_policy".to_string());
+    }
+    let origin = read_lock(&state.configured_origin)
+        .clone()
+        .ok_or_else(|| "no_origin_configured".to_string())?;
+    let now = print_core::license::now_utc_secs();
+    let last_seen = *read_lock(&state.last_seen_utc);
+    let trimmed = key.trim().to_string();
+    let res = print_core::license::verify_license(Some(&trimmed), &origin, now, last_seen);
+    let status = print_core::license::LicenseStatus::from_result(&res);
+    if !status.valid {
+        return Err(status.code);
+    }
+    let config_dir = state.config_dir.clone();
+    let key_clone = trimmed.clone();
+    tauri::async_runtime::spawn_blocking(move || config::save_license_key(&config_dir, &key_clone))
+        .await
+        .map_err(|e| e.to_string())??;
+    *write_lock(&state.license_key) = Some(trimmed);
+    if now > last_seen {
+        *write_lock(&state.last_seen_utc) = now;
+        let dir = state.config_dir.clone();
+        let _ =
+            tauri::async_runtime::spawn_blocking(move || config::persist_last_seen_utc(&dir, now))
+                .await;
+    }
+    state.notify_worker();
+    Ok(status)
+}
+
 #[tauri::command]
 pub async fn print_pdf(
     webview: tauri::Webview,
@@ -734,6 +814,7 @@ pub async fn print_pdf(
     req: PrintPdfRequest,
 ) -> Result<String, String> {
     check_origin(&webview, &state)?;
+    check_license(&state)?;
     // Validate everything that does not need the document BEFORE any
     // parser touches untrusted bytes (size, copies, key shape).
     if !print_core::security::valid_idempotency_key(&req.idempotency_key) {
@@ -831,6 +912,7 @@ pub fn print_text(
     req: PrintTextRequest,
 ) -> Result<String, String> {
     check_origin(&webview, &state)?;
+    check_license(&state)?;
     // Same key validation as print_pdf/print_image (audit M1): an
     // unvalidated key becomes the job id verbatim, so an empty or
     // colliding key would silently dedupe two different documents
@@ -938,6 +1020,7 @@ pub async fn print_image(
     req: PrintImageRequest,
 ) -> Result<String, String> {
     check_origin(&webview, &state)?;
+    check_license(&state)?;
     let copies = req.copies.unwrap_or(1).max(1);
     // Validate BEFORE decoding untrusted image bytes (see print_pdf).
     if !print_core::security::valid_idempotency_key(&req.idempotency_key) {
@@ -1395,7 +1478,7 @@ pub async fn run_test_print(
             let bm = print_render::calibration::calibration_thermal_80mm();
             let tspl = print_raw::tspl::TsplLabel::new(100, 150, 3)
                 .bitmap(0, 0, &bm)
-                .text(40, 20, "Yaseir Print TSPL Calibration")
+                .text(40, 20, "Itbaa TSPL Calibration")
                 .print(1, 1);
             (
                 "tspl",
@@ -1664,6 +1747,26 @@ fn redact_environment_for_diagnostics(env: &serde_json::Value) -> serde_json::Va
     serde_json::Value::Object(clean)
 }
 
+fn insert_license_diagnostics(
+    value: &mut serde_json::Value,
+    status: &print_core::license::LicenseStatus,
+    now_utc: u64,
+) {
+    let days_remaining = if status.valid && !status.perpetual {
+        status
+            .exp
+            .filter(|&exp| exp > 0)
+            .map(|exp| exp.saturating_sub(now_utc) / 86_400)
+    } else {
+        None
+    };
+    value["license_valid"] = serde_json::json!(status.valid);
+    value["license_code"] = serde_json::json!(status.code);
+    value["license_tier"] = serde_json::json!(status.tier);
+    value["license_perpetual"] = serde_json::json!(status.perpetual);
+    value["license_days_remaining"] = serde_json::json!(days_remaining);
+}
+
 #[tauri::command]
 pub async fn export_diagnostics(
     webview: tauri::Webview,
@@ -1692,7 +1795,19 @@ pub async fn export_diagnostics(
     value["pdfium_ready"] = serde_json::json!(pdfium);
     value["locked_by_policy"] = serde_json::json!(state.locked_by_policy);
     value["auto_reprint"] = serde_json::json!(*read_lock(&state.auto_reprint));
-    value["origin_configured"] = serde_json::json!(read_lock(&state.configured_origin).is_some());
+    let origin_opt = read_lock(&state.configured_origin).clone();
+    value["origin_configured"] = serde_json::json!(origin_opt.is_some());
+    let lic_now = print_core::license::now_utc_secs();
+    let lic_key = read_lock(&state.license_key).clone();
+    let lic_last_seen = *read_lock(&state.last_seen_utc);
+    let lic_res = print_core::license::verify_license(
+        lic_key.as_deref(),
+        origin_opt.as_deref().unwrap_or(""),
+        lic_now,
+        lic_last_seen,
+    );
+    let lic_status = print_core::license::LicenseStatus::from_result(&lic_res);
+    insert_license_diagnostics(&mut value, &lic_status, lic_now);
     if let Some(env) = read_lock(&state.environment).clone() {
         value["environment"] = redact_environment_for_diagnostics(&env);
     }
@@ -2330,6 +2445,9 @@ pub(crate) fn is_blocked_metadata_host(host: &str) -> bool {
 struct NativePrintBackend {
     db_path: String,
     printer_settings: Arc<RwLock<config::PrinterSettingsMap>>,
+    configured_origin: Arc<RwLock<Option<String>>>,
+    license_key: Arc<RwLock<Option<String>>>,
+    last_seen_utc: Arc<RwLock<u64>>,
     read_queue: Option<Queue>,
 }
 
@@ -2506,7 +2624,7 @@ impl NativePrintBackend {
                     let nominal_mm = dots as f64 * 25.4 / 203.0 + 8.0;
                     if !rolls.iter().any(|w| (w - nominal_mm).abs() <= 6.0) {
                         eprintln!(
-                            "Yaseir Print: paper override {paper:?} differs from driver roll forms {rolls:?} mm; honoring explicit override"
+                            "Itbaa: paper override {paper:?} differs from driver roll forms {rolls:?} mm; honoring explicit override"
                         );
                     }
                 }
@@ -2569,7 +2687,9 @@ impl NativePrintBackend {
         }
         // Pragmatic default: standard 80 mm thermal head (576 dots) when the driver
         // exposes no usable form dimensions and the job omitted width metadata.
-        eprintln!("Yaseir Print: no roll width reported for {printer:?}; falling back to 80 mm (576 dots)");
+        eprintln!(
+            "Itbaa: no roll width reported for {printer:?}; falling back to 80 mm (576 dots)"
+        );
         Ok(576)
     }
 
@@ -3117,6 +3237,29 @@ impl PrintBackend for &mut NativePrintBackend {
 
 impl PrintBackend for NativePrintBackend {
     fn print(&mut self, job: &Job) -> Result<(), BackendError> {
+        // Point 3 independent Ed25519 license verification before hardware dispatch
+        // (prevents bypassing IPC ingress by patching a single gate; calibration test prints stay ungated).
+        let is_calibration = job.id.starts_with("cal-")
+            && job
+                .report
+                .as_deref()
+                .is_some_and(|r| r.starts_with("calibration."));
+        if !is_calibration {
+            let origin = read_lock(&self.configured_origin)
+                .clone()
+                .unwrap_or_default();
+            let key = read_lock(&self.license_key).clone();
+            let now = print_core::license::now_utc_secs();
+            let last = *read_lock(&self.last_seen_utc);
+            if let Err(err) =
+                print_core::license::verify_license(key.as_deref(), &origin, now, last)
+            {
+                return Err(BackendError::fatal(
+                    err.code(),
+                    "license verification failed",
+                ));
+            }
+        }
         let (kind, data, mut opts) = self.load_job_data(&job.id)?;
         // Per-printer defaults from the Control Center fill what
         // this job did not specify (owner brief, 2026-11-05),
@@ -3133,7 +3276,7 @@ impl PrintBackend for NativePrintBackend {
             Self::apply_printer_defaults(&mut opts, &kind, defaults);
         }
         let mut paper: Option<String> = opts.paper.clone();
-        let title = job.report.as_deref().unwrap_or("Yaseir Print Job");
+        let title = job.report.as_deref().unwrap_or("Itbaa Job");
 
         let trimmed_printer = job.printer.trim();
         let lower_printer = trimmed_printer.to_ascii_lowercase();
@@ -3291,7 +3434,9 @@ impl PrintBackend for NativePrintBackend {
                 match print_ipp::tray_to_media_source(tray_name) {
                     Some(source) => ipp_options.media_source = Some(source),
                     None => {
-                        eprintln!("Yaseir Print: IPP tray {tray_name:?} unmapped; using printer default tray");
+                        eprintln!(
+                            "Itbaa: IPP tray {tray_name:?} unmapped; using printer default tray"
+                        );
                     }
                 }
             }
@@ -3302,9 +3447,7 @@ impl PrintBackend for NativePrintBackend {
                 {
                     ipp_options.sides = Some(sides.to_string());
                 } else {
-                    eprintln!(
-                        "Yaseir Print: IPP printer does not report duplex; printing single-sided"
-                    );
+                    eprintln!("Itbaa: IPP printer does not report duplex; printing single-sided");
                 }
             }
             if let Some(paper_name) = opts.paper.as_deref() {
@@ -3335,7 +3478,9 @@ impl PrintBackend for NativePrintBackend {
                 match matched_media {
                     Some(m) => ipp_options.media = Some(m),
                     None => {
-                        eprintln!("Yaseir Print: IPP paper {paper_name:?} unmapped; using printer default media");
+                        eprintln!(
+                            "Itbaa: IPP paper {paper_name:?} unmapped; using printer default media"
+                        );
                     }
                 }
             }
@@ -3505,7 +3650,7 @@ impl PrintBackend for NativePrintBackend {
                         // so rendering the same document through
                         // GDI cannot duplicate it (ADR-0004-safe).
                         eprintln!(
-                            "Yaseir Print: raw send to {target_name:?} refused pre-write ({}); falling back to GDI rendering",
+                            "Itbaa: raw send to {target_name:?} refused pre-write ({}); falling back to GDI rendering",
                             e.message
                         );
                         print_pdf_via_gdi(&target_name, title, &data, &opts)
@@ -3545,7 +3690,7 @@ impl PrintBackend for NativePrintBackend {
                         // receipt that prints on any printer and
                         // one that dies as "wrong printer".
                         eprintln!(
-                            "Yaseir Print: raw send to {target_name:?} refused pre-write ({}); printing the image through GDI instead",
+                            "Itbaa: raw send to {target_name:?} refused pre-write ({}); printing the image through GDI instead",
                             e.message
                         );
                         print_png_via_gdi(&target_name, title, &data, &opts)
@@ -3593,16 +3738,19 @@ fn outcome_log_fields(outcome: &Outcome) -> Option<(&'static str, &str)> {
 pub fn spawn_worker_loop(
     db_path: String,
     printer_settings: Arc<RwLock<config::PrinterSettingsMap>>,
+    configured_origin: Arc<RwLock<Option<String>>>,
+    license_key: Arc<RwLock<Option<String>>>,
+    last_seen_utc: Arc<RwLock<u64>>,
     wake: Arc<(Mutex<bool>, Condvar)>,
     stop: Arc<AtomicBool>,
 ) {
     std::thread::spawn(move || {
         if let Ok(mut retention_queue) = Queue::open(&db_path) {
             if let Err(e) = retention_queue.purge_stale_failed_payloads(30 * 86_400) {
-                eprintln!("Yaseir Print: failed-payload retention purge failed: {e}");
+                eprintln!("Itbaa: failed-payload retention purge failed: {e}");
             }
             if let Err(e) = retention_queue.purge_stale_failed_jobs(90 * 86_400) {
-                eprintln!("Yaseir Print: failed-job row retention purge failed: {e}");
+                eprintln!("Itbaa: failed-job row retention purge failed: {e}");
             }
         }
         let mut entropy: u64 = 0x5EED_2026;
@@ -3618,7 +3766,7 @@ pub fn spawn_worker_loop(
             if coord_queue.is_none() {
                 match Queue::open(&db_path) {
                     Ok(q) => coord_queue = Some(q),
-                    Err(e) => eprintln!("Yaseir Print: cannot open the print queue: {e}"),
+                    Err(e) => eprintln!("Itbaa: cannot open the print queue: {e}"),
                 }
             }
             let mut reset_queue = false;
@@ -3626,7 +3774,7 @@ pub fn spawn_worker_loop(
                 if last_reconcile.map_or(true, |t| t.elapsed() >= Duration::from_secs(15)) {
                     last_reconcile = Some(Instant::now());
                     if let Err(e) = queue.reconcile_stale() {
-                        eprintln!("Yaseir Print: stale-job reconciliation failed: {e}");
+                        eprintln!("Itbaa: stale-job reconciliation failed: {e}");
                         reset_queue = true;
                     }
                 }
@@ -3636,7 +3784,7 @@ pub fn spawn_worker_loop(
                     match queue.queued_printers() {
                         Ok(p) => p,
                         Err(e) => {
-                            eprintln!("Yaseir Print: queued_printers failed: {e}");
+                            eprintln!("Itbaa: queued_printers failed: {e}");
                             reset_queue = true;
                             Vec::new()
                         }
@@ -3671,6 +3819,9 @@ pub fn spawn_worker_loop(
                     let seed = entropy;
                     let db_c = db_path.clone();
                     let ps_c = Arc::clone(&printer_settings);
+                    let origin_c = Arc::clone(&configured_origin);
+                    let lic_c = Arc::clone(&license_key);
+                    let last_c = Arc::clone(&last_seen_utc);
                     let wake_c = Arc::clone(&wake);
                     let stop_c = Arc::clone(&stop);
                     let flight_c = Arc::clone(&in_flight);
@@ -3721,6 +3872,9 @@ pub fn spawn_worker_loop(
                         let mut backend = NativePrintBackend {
                             db_path: db_c,
                             printer_settings: ps_c,
+                            configured_origin: origin_c,
+                            license_key: lic_c,
+                            last_seen_utc: last_c,
                             read_queue: None,
                         };
                         let mut local_entropy = seed;
@@ -3745,7 +3899,7 @@ pub fn spawn_worker_loop(
                                 Ok(Ok(o)) => {
                                     if let Some((label, job_id)) = outcome_log_fields(&o) {
                                         eprintln!(
-                                            "Yaseir Print: job_id={job_id} printer={printer:?} outcome={label} elapsed_ms={elapsed_ms}"
+                                            "Itbaa: job_id={job_id} printer={printer:?} outcome={label} elapsed_ms={elapsed_ms}"
                                         );
                                     }
                                     if o == Outcome::Idle {
@@ -3755,13 +3909,13 @@ pub fn spawn_worker_loop(
                                 }
                                 Ok(Err(e)) => {
                                     eprintln!(
-                                        "Yaseir Print: worker error printer={printer:?} elapsed_ms={elapsed_ms}: {e}"
+                                        "Itbaa: worker error printer={printer:?} elapsed_ms={elapsed_ms}: {e}"
                                     );
                                     break;
                                 }
                                 Err(_) => {
                                     eprintln!(
-                                        "Yaseir Print: worker panicked printer={printer:?} elapsed_ms={elapsed_ms}"
+                                        "Itbaa: worker panicked printer={printer:?} elapsed_ms={elapsed_ms}"
                                     );
                                     break;
                                 }
@@ -3939,7 +4093,7 @@ mod tests {
             tab_title_for("http://tauri.localhost/settings.html"),
             "Settings"
         );
-        assert_eq!(tab_title_for("tauri://localhost/boot.html"), "Yaseir Print");
+        assert_eq!(tab_title_for("tauri://localhost/boot.html"), "Itbaa");
         assert!(is_local_app_url(
             &tauri::Url::parse("tauri://localhost/index.html").unwrap()
         ));
@@ -4104,6 +4258,9 @@ mod tests {
         let mut backend = NativePrintBackend {
             db_path: String::new(),
             printer_settings: Arc::new(RwLock::new(config::PrinterSettingsMap::new())),
+            configured_origin: Arc::new(RwLock::new(None)),
+            license_key: Arc::new(RwLock::new(None)),
+            last_seen_utc: Arc::new(RwLock::new(0)),
             read_queue: Some(q),
         };
         let (kind1, data1, _) = backend.load_job_data("job-reuse-1").unwrap();
@@ -4138,6 +4295,55 @@ mod tests {
             outcome_log_fields(&Outcome::DeadLetter("j4".into())),
             Some(("dead_letter", "j4"))
         );
+    }
+
+    #[test]
+    fn diagnostics_license_metadata_omits_secrets_and_pii() {
+        let now = 1_700_000_000u64;
+        let timed = print_core::license::LicenseStatus::from_result(&Ok(
+            print_core::license::LicensePayload {
+                c: "Acme Secret Co".to_string(),
+                o: "https://erp.secret.local".to_string(),
+                exp: now + 10 * 86_400 + 3_600,
+                t: "pro".to_string(),
+            },
+        ));
+        let mut val = serde_json::json!({});
+        insert_license_diagnostics(&mut val, &timed, now);
+        assert_eq!(val["license_valid"], true);
+        assert_eq!(val["license_code"], "OK");
+        assert_eq!(val["license_tier"], "pro");
+        assert_eq!(val["license_perpetual"], false);
+        assert_eq!(val["license_days_remaining"], 10);
+        let s = val.to_string();
+        assert!(!s.contains("Acme Secret Co"));
+        assert!(!s.contains("erp.secret.local"));
+        assert!(!s.contains("ITBAA1."));
+
+        let perpetual = print_core::license::LicenseStatus::from_result(&Ok(
+            print_core::license::LicensePayload {
+                c: "Acme Secret Co".to_string(),
+                o: "https://erp.secret.local".to_string(),
+                exp: 0,
+                t: "pro".to_string(),
+            },
+        ));
+        let mut pval = serde_json::json!({});
+        insert_license_diagnostics(&mut pval, &perpetual, now);
+        assert_eq!(pval["license_valid"], true);
+        assert_eq!(pval["license_perpetual"], true);
+        assert!(pval["license_days_remaining"].is_null());
+
+        let expired = print_core::license::LicenseStatus::from_result(&Err(
+            print_core::license::LicenseError::Expired,
+        ));
+        let mut eval = serde_json::json!({});
+        insert_license_diagnostics(&mut eval, &expired, now);
+        assert_eq!(eval["license_valid"], false);
+        assert_eq!(eval["license_code"], "ERR_LICENSE_EXPIRED");
+        assert!(eval["license_tier"].is_null());
+        assert_eq!(eval["license_perpetual"], false);
+        assert!(eval["license_days_remaining"].is_null());
     }
 
     #[test]

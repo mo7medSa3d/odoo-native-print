@@ -75,7 +75,7 @@ object IppClient {
     fun buildPrintJobHeader(
         printerUri: String,
         mimeType: String = "application/pdf",
-        jobName: String = "Yaseir Print Job",
+        jobName: String = "Itbaa Job",
         copies: Int = 1,
         media: String? = null,
         sides: String? = null,
@@ -111,7 +111,7 @@ object IppClient {
         printerUri: String,
         documentBytes: ByteArray,
         mimeType: String = "application/pdf",
-        jobName: String = "Yaseir Print Job",
+        jobName: String = "Itbaa Job",
         copies: Int = 1,
         media: String? = null,
         sides: String? = null,
