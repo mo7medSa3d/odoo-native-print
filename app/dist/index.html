@@ -2061,6 +2061,7 @@
       setNativeControlsEnabled(true);
       overviewState = data;
       renderOverview(data);
+      renderSidebarTabs();
       const mainEl = document.querySelector(".main-container");
       if (mainEl && mainEl.classList.contains("is-stale")) mainEl.classList.remove("is-stale");
       return true;

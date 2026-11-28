@@ -289,6 +289,65 @@ pub fn tab_title_for(url: &str) -> String {
     "Odoo".to_string()
 }
 
+fn reconcile_default_flag(printers: &mut [PrinterInfo], default_name: Option<&str>) {
+    let Some(def) = default_name.map(str::trim).filter(|s| !s.is_empty()) else {
+        return;
+    };
+    for p in printers.iter_mut() {
+        if p.name == def {
+            p.is_default = true;
+        }
+    }
+}
+
+/// Choose the label fit box (dots) and render DPI for ZPL/TSPL/EPL/CPCL PDF/image jobs.
+/// Ignores generic Windows office sheet forms (`Letter`, `Ledger`, `A4`, ...) and
+/// caps raw label rendering at 300 DPI so `Generic / Text Only` drivers never emit
+/// multi-megabyte 600 DPI full-sheet bitmaps.
+fn resolve_label_box_and_dpi(caps: &print_core::PrinterCapabilities) -> (Option<(u32, u32)>, u32) {
+    let label_forms: Vec<_> = caps
+        .forms
+        .iter()
+        .filter(|f| !NativePrintBackend::is_office_sheet_or_envelope(&f.name))
+        .collect();
+    let raw_dpi = print_core::printer::preferred_raw_render_dpi(&caps.resolutions_dpi);
+    let dpi = if label_forms.is_empty() && raw_dpi > 300 {
+        203
+    } else {
+        raw_dpi.min(300)
+    };
+    let mut best: Option<(u32, u32)> = None;
+    let mut roll_w: Option<u32> = None;
+    for form in label_forms {
+        let w = (form.size.width_mm * dpi as f64 / 25.4) as u32;
+        if w == 0 {
+            continue;
+        }
+        if form.roll {
+            roll_w = Some(w);
+            continue;
+        }
+        let h = (form.size.height_mm * dpi as f64 / 25.4) as u32;
+        if h == 0 {
+            continue;
+        }
+        let cand = (w, h);
+        let area = cand.0 as u64 * cand.1 as u64;
+        if best.map_or(true, |b: (u32, u32)| area > b.0 as u64 * b.1 as u64) {
+            best = Some(cand);
+        }
+    }
+    let fallback_box = || {
+        let w = (102.0 * dpi as f64 / 25.4).round() as u32;
+        let h = (152.0 * dpi as f64 / 25.4).round() as u32;
+        Some((w, h))
+    };
+    let box_dots = best
+        .or_else(|| roll_w.map(|w| (w, u32::MAX)))
+        .or_else(fallback_box);
+    (box_dots, dpi)
+}
+
 /// Single-source printer enumeration backed by `print_win::DISCOVERY_CACHE` (12 s TTL).
 /// Eliminates the former 20 s + 30 s stacked cache that caused live printers to exceed
 /// `PrinterHealth::ttl_secs` (30 s) and flash "Outdated / بيانات قديمة" in the UI.
@@ -298,8 +357,9 @@ async fn cached_printers(force: bool) -> Result<(Vec<PrinterInfo>, Option<String
         if force {
             print_win::invalidate_discovery_cache();
         }
-        let printers = print_win::discover_printers().map_err(|e| e.to_string())?;
+        let mut printers = print_win::discover_printers().map_err(|e| e.to_string())?;
         let default = print_win::default_printer_name().ok();
+        reconcile_default_flag(&mut printers, default.as_deref());
         Ok::<_, String>((printers, default))
     })
     .await
@@ -3411,25 +3471,7 @@ impl PrintBackend for NativePrintBackend {
                 && matches!(kind.as_str(), "pdf" | "image-png")
             {
                 match print_win::printer_capabilities(&target_name) {
-                    Ok(caps) => {
-                        let dpi =
-                            print_core::printer::preferred_raw_render_dpi(&caps.resolutions_dpi);
-                        let mut best: Option<(u32, u32)> = None;
-                        let mut roll_w: Option<u32> = None;
-                        for form in &caps.forms {
-                            let w = (form.size.width_mm * dpi as f64 / 25.4) as u32;
-                            if form.roll {
-                                roll_w = Some(w);
-                                continue;
-                            }
-                            let cand = (w, (form.size.height_mm * dpi as f64 / 25.4) as u32);
-                            let area = cand.0 as u64 * cand.1 as u64;
-                            if best.map_or(true, |b: (u32, u32)| area > b.0 as u64 * b.1 as u64) {
-                                best = Some(cand);
-                            }
-                        }
-                        (best.or_else(|| roll_w.map(|w| (w, u32::MAX))), dpi)
-                    }
+                    Ok(caps) => resolve_label_box_and_dpi(&caps),
                     Err(_) => (None, 203),
                 }
             } else {
@@ -4283,5 +4325,37 @@ mod tests {
             parsed,
             ("192.168.1.50".to_string(), 9100, "/ipp/print".to_string())
         );
+
+        let mut list = vec![PrinterInfo {
+            name: "Zebra ZPL Lab".into(),
+            kind: PrinterKind::Local,
+            is_default: false,
+            port: "127.0.0.1:9101".into(),
+            driver: "Generic / Text Only".into(),
+            status: PrinterStatus::Ready,
+            protocol: "zpl".into(),
+            printer_class: "label".into(),
+            stable_id: None,
+            health: None,
+        }];
+        reconcile_default_flag(&mut list, Some("Zebra ZPL Lab"));
+        assert!(list[0].is_default);
+
+        let generic_caps = print_core::PrinterCapabilities {
+            resolutions_dpi: vec![600],
+            forms: vec![print_core::Form {
+                name: "Ledger".into(),
+                size: print_core::PageSize {
+                    width_mm: 279.4,
+                    height_mm: 431.8,
+                },
+                roll: false,
+                paper_id: Some(4),
+            }],
+            ..Default::default()
+        };
+        let (box_dots, dpi) = resolve_label_box_and_dpi(&generic_caps);
+        assert_eq!(dpi, 203);
+        assert_eq!(box_dots, Some((815, 1215)));
     }
 }
