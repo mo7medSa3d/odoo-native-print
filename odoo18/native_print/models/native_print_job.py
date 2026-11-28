@@ -1,4 +1,5 @@
 from datetime import timedelta
+import json
 import logging
 
 from odoo import _, api, fields, models, tools
@@ -44,6 +45,7 @@ class NativePrintJob(models.Model):
                     "duplex_configured": "boolean DEFAULT false",
                     "color": "boolean DEFAULT true",
                     "mode": "varchar",
+                    "report_data": "text",
                 }
                 for col, col_type in expected.items():
                     if col not in existing:
@@ -158,6 +160,10 @@ class NativePrintJob(models.Model):
         string="Source Name",
         index=True,
     )
+    report_data = fields.Text(
+        string="Report Data",
+        copy=False,
+    )
     pages = fields.Integer(default=1, string="Pages")
     byte_size = fields.Integer(string="Bytes")
     attempts = fields.Integer(default=1, string="Attempts")
@@ -234,6 +240,16 @@ class NativePrintJob(models.Model):
                     "You do not have access to the report used by this job."
                 ))
         model = report.model
+        is_product_label_report = (report.report_name or "").startswith(
+            ("product.report_product_label_", "product.report_producttemplatelabel")
+        )
+        if (
+            is_product_label_report
+            and self.source_model in ("product.template", "product.product", "product.uom")
+            and self.source_model in self.env
+            and not self.env[self.source_model]._abstract
+        ):
+            model = self.source_model
         if not model or model not in self.env or self.env[model]._abstract:
             raise UserError(_(
                 "This job cannot be reprinted: its report has no valid model."
@@ -251,6 +267,26 @@ class NativePrintJob(models.Model):
                 "This job cannot be reprinted: the original records "
                 "no longer exist or are not accessible."
             )) from None
+        parsed_data = None
+        if self.report_data:
+            try:
+                candidate = json.loads(self.report_data)
+                if isinstance(candidate, dict) and candidate:
+                    parsed_data = candidate
+            except (ValueError, TypeError):
+                parsed_data = None
+        if is_product_label_report:
+            wizard_id = parsed_data.get("layout_wizard") if parsed_data else None
+            wizard_model = self.env.get("product.label.layout")
+            wizard_missing = bool(wizard_id) and (
+                wizard_model is None
+                or not wizard_model.sudo().browse(int(wizard_id)).exists()
+            )
+            if not parsed_data or wizard_missing:
+                raise UserError(_(
+                    "This label job cannot be reprinted because its label layout data "
+                    "is no longer available. Open the product and click Print -> Labels instead."
+                ))
         ids = records.ids
         settings = {}
         if self.copies and self.copies > 0:
@@ -262,7 +298,7 @@ class NativePrintJob(models.Model):
         settings["color"] = bool(self.color)
         printer_name = (self.device_id.name if self.device_id
                         else self.device)
-        return {
+        action = {
             "type": "ir.actions.report",
             "report_name": report.report_name,
             "report_type": report.report_type,
@@ -280,6 +316,9 @@ class NativePrintJob(models.Model):
                 },
             },
         }
+        if parsed_data:
+            action["data"] = parsed_data
+        return action
 
     _sql_constraints = [
         (

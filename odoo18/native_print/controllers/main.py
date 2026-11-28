@@ -1,3 +1,5 @@
+import json
+
 from psycopg2 import IntegrityError
 
 from odoo import fields, http
@@ -96,10 +98,25 @@ def _safe_int(val, default=None):
         return default
 
 
+MAX_REPORT_DATA_BYTES = 65_536
+
+
+def _safe_report_data(val):
+    if not isinstance(val, dict) or not val:
+        return False
+    try:
+        encoded = json.dumps(val, separators=(",", ":"), ensure_ascii=False)
+    except (TypeError, ValueError):
+        return False
+    if len(encoded) > MAX_REPORT_DATA_BYTES:
+        return False
+    return encoded
+
+
 _STATUS_LOCK_FIELDS = (
     "state", "user_id", "company_id", "attempts", "device", "device_id",
     "source_ids", "source_model", "report_name", "report_id",
-    "duplex", "duplex_configured",
+    "report_data", "duplex", "duplex_configured",
 )
 
 def _lock_status_job(job):
@@ -173,6 +190,7 @@ class NativePrintController(http.Controller):
                    device=None, report_name=None,
                    pages=None, byte_size=None, attempts=None,
                    source_type=None, source_model=None, source_ids=None,
+                   report_data=None,
                    copies=None, paper=None, duplex=None, color=None,
                    mode=None, **kwargs):
         if not _has_print_access():
@@ -262,6 +280,7 @@ class NativePrintController(http.Controller):
                                else "report",
                 "source_model": _safe_model_name(source_model),
                 "source_ids": _safe_source_ids(source_ids),
+                "report_data": _safe_report_data(report_data),
                 "copies": parsed_copies,
                 "paper": paper.strip()[:64] if isinstance(paper, str)
                          and paper.strip() else False,
@@ -326,6 +345,10 @@ class NativePrintController(http.Controller):
                     vals["source_model"] = parsed_model
             if not job.report_name and clean_report_name:
                 vals["report_name"] = clean_report_name
+            if not job.report_data:
+                parsed_report_data = _safe_report_data(report_data)
+                if parsed_report_data:
+                    vals["report_data"] = parsed_report_data
             if not job.report_id and clean_report_name:
                 report = request.env["ir.actions.report"].sudo().search(
                     [("report_name", "=", clean_report_name)], limit=1)

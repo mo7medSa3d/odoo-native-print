@@ -119,6 +119,28 @@ class TestNativePrintJobLog(TransactionCase):
         with self.assertRaises(UserError):
             job.action_reprint()
 
+    def test_action_reprint_label_report_requires_and_preserves_report_data(self):
+        partners = self.env["res.partner"].create([{"name": "NP Label Item"}])
+        report = self.env["ir.actions.report"].create({
+            "name": "NP Label Test",
+            "model": "res.partner",
+            "report_type": "qweb-text",
+            "report_name": "product.report_product_label_zpl",
+        })
+        job = self._job(key="job-label-1")
+        job.with_context(native_print_status_sync=True).write({
+            "report_id": report.id,
+            "report_name": "product.report_product_label_zpl",
+            "source_ids": str(partners[0].id),
+        })
+        with self.assertRaises(UserError):
+            job.action_reprint()
+        job.with_context(native_print_status_sync=True).write({
+            "report_data": '{"labels":[{"name":"Item"}],"label_template":"product.barcode_normal_label"}',
+        })
+        action = job.action_reprint()
+        self.assertEqual(action["data"]["labels"][0]["name"], "Item")
+
     def _plain_print_user(self, extra_group_ids=()):
         """A non-admin user who may read the job log but holds no
         special report group (plus any groups the caller adds)."""

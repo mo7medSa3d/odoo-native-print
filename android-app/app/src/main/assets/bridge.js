@@ -166,6 +166,36 @@
   // Suppress browser print dialog so all Odoo reports flow through Native Print
   try { window.print = function () {}; } catch (e) {}
 
+  // LAN HTTP origins are non-secure contexts where navigator.clipboard is undefined,
+  // crashing callers like Odoo's RPCErrorDialog Copy button with TypeError.
+  try {
+    if (typeof navigator !== "undefined" && !navigator.clipboard && typeof document !== "undefined") {
+      Object.defineProperty(navigator, "clipboard", {
+        value: {
+          writeText: function (text) {
+            return new Promise(function (resolve, reject) {
+              try {
+                var ta = document.createElement("textarea");
+                ta.value = text == null ? "" : String(text);
+                ta.setAttribute("readonly", "");
+                ta.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0;";
+                (document.body || document.documentElement).appendChild(ta);
+                ta.focus({ preventScroll: true });
+                ta.select();
+                var copied = typeof document.execCommand === "function" && document.execCommand("copy");
+                ta.remove();
+                resolve(copied);
+              } catch (err) {
+                resolve(false);
+              }
+            });
+          }
+        },
+        configurable: true
+      });
+    }
+  } catch (e) {}
+
   function npProbeEnvironment() {
     var env = {
       userAgent: navigator.userAgent || "",

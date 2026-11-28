@@ -169,6 +169,13 @@ export function reportSource(action) {
     };
 }
 
+export function reportDataOf(action) {
+    if (!action || !action.data || typeof action.data !== "object" || Array.isArray(action.data)) {
+        return undefined;
+    }
+    return Object.keys(action.data).length > 0 ? action.data : undefined;
+}
+
 /*
  * Render a plain-text report as a PNG document (A4 width at
  * 96 dpi, monospace, hard-wrapped) so it can print through GDI
@@ -601,6 +608,7 @@ async function handleReportSubmission(action, options, env, bridge) {
         }
         const textKey = buildReportIdempotencyKey("odoo-txt", action);
         const textSource = reportSource(action);
+        const textReportData = reportDataOf(action);
         try {
             let textEnqueueRes;
             if (textAsRaw) {
@@ -637,6 +645,7 @@ async function handleReportSubmission(action, options, env, bridge) {
                 source_type: "report",
                 source_model: textSource.model,
                 source_ids: textSource.ids || undefined,
+                ...(textReportData ? { report_data: textReportData } : {}),
                 copies: rule.copies || 1,
                 paper: rule.paper || undefined,
                 color: rule.color !== false,
@@ -678,6 +687,7 @@ async function handleReportSubmission(action, options, env, bridge) {
                 source_type: "report",
                 source_model: textSource.model,
                 source_ids: textSource.ids || undefined,
+                ...(textReportData ? { report_data: textReportData } : {}),
                 copies: rule.copies || 1,
                 paper: rule.paper || undefined,
                 color: rule.color !== false,
@@ -743,6 +753,7 @@ async function handleReportSubmission(action, options, env, bridge) {
     const bytes = rawBytes;
     const idempotencyKey = buildReportIdempotencyKey("odoo", action);
     const pdfSource = reportSource(action);
+    const pdfReportData = reportDataOf(action);
     try {
         const pdfEnqueueRes = await bridge.printPdf({
             idempotencyKey,
@@ -773,6 +784,7 @@ async function handleReportSubmission(action, options, env, bridge) {
             source_type: "report",
             source_model: pdfSource.model,
             source_ids: pdfSource.ids || undefined,
+            ...(pdfReportData ? { report_data: pdfReportData } : {}),
             copies: rule.copies || 1,
             paper: rule.paper || undefined,
             duplex: typeof rule.duplex === "boolean" ? rule.duplex : null,
@@ -813,6 +825,7 @@ async function handleReportSubmission(action, options, env, bridge) {
             source_type: "report",
             source_model: pdfSource.model,
             source_ids: pdfSource.ids || undefined,
+            ...(pdfReportData ? { report_data: pdfReportData } : {}),
             copies: rule.copies || 1,
             paper: rule.paper || undefined,
             duplex: typeof rule.duplex === "boolean" ? rule.duplex : null,
