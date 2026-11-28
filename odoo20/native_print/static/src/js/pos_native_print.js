@@ -975,11 +975,6 @@ async function printPosReceiptNatively(plugin, { order, basic = false, simplifie
                 });
             }
             bridgeJobId = resolveBridgeJobId(enqueueRes, idempotencyKey);
-            notifyUser(
-                notificationEnv(plugin),
-                _t('Sending "%s" to %s...', _t("POS Receipt"), target.printer.name),
-                "info",
-            );
         } catch (err) {
             console.warn("Native Print: POS receipt print failed.", err);
             return {

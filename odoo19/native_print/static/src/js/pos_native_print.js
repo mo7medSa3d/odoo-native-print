@@ -993,11 +993,6 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
                 });
             }
             bridgeJobId = resolveBridgeJobId(enqueueRes, idempotencyKey);
-            notifyUser(
-                notificationEnv(contextObj),
-                _t('Sending "%s" to %s...', _t("POS Receipt"), target.printer.name),
-                "info",
-            );
         } catch (err) {
             if (safeRef) { finishPosReceiptAttempt(safeRef, userId); }
             try {

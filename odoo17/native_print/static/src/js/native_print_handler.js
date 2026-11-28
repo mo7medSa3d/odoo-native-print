@@ -653,7 +653,6 @@ async function handleReportSubmission(action, options, env, bridge) {
                 });
             }
             const textBridgeJobId = resolveBridgeJobId(textEnqueueRes, textKey);
-            notifyUser(env, _t('Sending "%s" to %s...', action.report_name, target.printer.name), "info");
             await Promise.race([
                 rpc("/native_print/job_status", {
                     idempotency_key: textKey,
@@ -795,7 +794,6 @@ async function handleReportSubmission(action, options, env, bridge) {
             bytes,
         });
         const pdfBridgeJobId = resolveBridgeJobId(pdfEnqueueRes, idempotencyKey);
-        notifyUser(env, _t('Sending "%s" to %s...', action.report_name, target.printer.name), "info");
         await Promise.race([
             rpc("/native_print/job_status", {
                 idempotency_key: idempotencyKey,
