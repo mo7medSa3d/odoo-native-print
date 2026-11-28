@@ -567,17 +567,14 @@ function findVisibleReceiptElement() {
 // are stripped so the SVG cannot taint the canvas in WebView2.
 async function visibleReceiptToPngBytes(element, scale = 2) {
     const width = element.offsetWidth || element.getBoundingClientRect?.().width || 300;
-    const height =
-        element.offsetHeight ||
-        element.scrollHeight ||
-        element.getBoundingClientRect?.().height ||
-        400;
+    let height = Math.max(
+        element.offsetHeight || 0,
+        element.scrollHeight || 0,
+        Math.ceil(element.getBoundingClientRect?.().height || 0),
+    ) || 400;
     if (!width || !height) {
         throw new Error("visible receipt has no size");
     }
-    const effectiveScale = Math.max(0.5, Math.min(scale, 14000 / height, 4096 / width));
-    const scaledW = Math.max(1, Math.ceil(width * effectiveScale));
-    const scaledH = Math.max(1, Math.ceil(height * effectiveScale));
     const clone = element.cloneNode(true);
     const inlineStyles = (source, target) => {
         try {
@@ -651,6 +648,28 @@ async function visibleReceiptToPngBytes(element, scale = 2) {
         (typeof document !== "undefined" && document.documentElement?.lang) ||
         "";
     if (rootLang) clone.setAttribute("lang", rootLang);
+    clone.setAttribute(
+        "style",
+        (clone.getAttribute?.("style") || "") +
+            ";margin:0 !important;position:static !important;transform:none !important;height:auto !important;min-height:0 !important;max-height:none !important;overflow:visible !important;box-sizing:border-box !important;",
+    );
+    if (typeof document !== "undefined" && document.body && typeof document.createElement === "function") {
+        const probe = document.createElement("div");
+        probe.setAttribute("style", `position:fixed;left:-99999px;top:0;visibility:hidden;pointer-events:none;width:${width}px;margin:0;padding:0;`);
+        probe.appendChild(clone);
+        document.body.appendChild(probe);
+        try {
+            const probed = Math.max(clone.scrollHeight || 0, clone.offsetHeight || 0);
+            if (probed > 0) {
+                height = Math.ceil(Math.max(height, probed) * 1.03) + 24;
+            }
+        } finally {
+            probe.remove();
+        }
+    }
+    const effectiveScale = Math.max(0.5, Math.min(scale, 14000 / height, 4096 / width));
+    const scaledW = Math.max(1, Math.ceil(width * effectiveScale));
+    const scaledH = Math.max(1, Math.ceil(height * effectiveScale));
     clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
     const serialized = new XMLSerializer()
         .serializeToString(clone)

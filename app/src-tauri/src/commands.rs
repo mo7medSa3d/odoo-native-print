@@ -531,6 +531,55 @@ fn is_loopback_host(host: &str) -> bool {
     h == "localhost" || h.ends_with(".localhost")
 }
 
+fn parse_printer_uri_target(trimmed: &str) -> Result<Option<(String, u16, bool, u16)>, String> {
+    let lower = trimmed.to_ascii_lowercase();
+    let (scheme_len, default_port, is_raw_tcp) =
+        if lower.starts_with("tcp://") || lower.starts_with("raw://") {
+            (6usize, 9100u16, true)
+        } else if lower.starts_with("ipp://") {
+            (6usize, 631u16, false)
+        } else if lower.starts_with("http://") {
+            (7usize, 631u16, false)
+        } else if lower.starts_with("https://") {
+            (8usize, 631u16, false)
+        } else {
+            return Ok(None);
+        };
+    let normalized = format!("{}{}", &lower[..scheme_len], &trimmed[scheme_len..]);
+    let (host, port, _) = NativePrintBackend::parse_host_port(&normalized, default_port)
+        .map_err(|e| format!("{}: {}", e.code, e.message))?;
+    Ok(Some((host, port, is_raw_tcp, default_port)))
+}
+
+fn printer_port_allowed(port: u16, is_raw_tcp: bool) -> bool {
+    if is_raw_tcp {
+        (9100..=9109).contains(&port)
+    } else {
+        port == 631
+    }
+}
+
+fn is_discovered_loopback_printer(
+    printer_pattern: &str,
+    discovered: &[print_core::PrinterInfo],
+) -> bool {
+    let Ok(Some((host, port, is_raw_tcp, default_port))) =
+        parse_printer_uri_target(printer_pattern.trim())
+    else {
+        return false;
+    };
+    if !is_loopback_host(&host) || !printer_port_allowed(port, is_raw_tcp) {
+        return false;
+    }
+    discovered.iter().any(|p| {
+        let port_raw = p.port.trim();
+        let port_spec = port_raw.strip_prefix("IP_").unwrap_or(port_raw);
+        NativePrintBackend::parse_host_port(&port_spec.to_ascii_lowercase(), default_port)
+            .map(|(p_host, p_port, _)| p_host.eq_ignore_ascii_case(&host) && p_port == port)
+            .unwrap_or(false)
+    })
+}
+
 fn validate_printer_pattern(
     printer_pattern: &str,
     is_local: bool,
@@ -543,34 +592,16 @@ fn validate_printer_pattern(
     if is_local || configured.contains_key(trimmed) || configured.contains_key(printer_pattern) {
         return Ok(());
     }
-    let lower = trimmed.to_ascii_lowercase();
-    let (scheme_len, default_port, is_raw_tcp) =
-        if lower.starts_with("tcp://") || lower.starts_with("raw://") {
-            (6usize, 9100u16, true)
-        } else if lower.starts_with("ipp://") {
-            (6usize, 631u16, false)
-        } else if lower.starts_with("http://") {
-            (7usize, 631u16, false)
-        } else if lower.starts_with("https://") {
-            (8usize, 631u16, false)
-        } else {
-            return Ok(());
-        };
-    let normalized = format!("{}{}", &lower[..scheme_len], &trimmed[scheme_len..]);
-    let (host, port, _) = NativePrintBackend::parse_host_port(&normalized, default_port)
-        .map_err(|e| format!("{}: {}", e.code, e.message))?;
+    let Some((host, port, is_raw_tcp, _)) = parse_printer_uri_target(trimmed)? else {
+        return Ok(());
+    };
     if is_loopback_host(&host) {
         return Err(
             "BAD_PRINTER_ADDRESS: loopback printer address is not allowed from remote pages"
                 .to_string(),
         );
     }
-    let port_ok = if is_raw_tcp {
-        (9100..=9109).contains(&port)
-    } else {
-        port == 631
-    };
-    if !port_ok {
+    if !printer_port_allowed(port, is_raw_tcp) {
         return Err(
             "BAD_PRINTER_ADDRESS: printer port is not allowed from remote pages".to_string(),
         );
@@ -585,7 +616,19 @@ fn check_printer_pattern(
 ) -> Result<(), String> {
     let is_local = webview.url().map(|u| is_local_app_url(&u)).unwrap_or(false);
     let configured = read_lock(&state.printer_settings);
-    validate_printer_pattern(printer_pattern, is_local, &configured)
+    match validate_printer_pattern(printer_pattern, is_local, &configured) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            // Allow loopback printer URIs that correspond to an actual OS-installed printer port
+            // (e.g. USB-to-TCP / local virtual queue bound on 127.0.0.1).
+            let discovered = print_win::discover_printers().unwrap_or_default();
+            if is_discovered_loopback_printer(printer_pattern, &discovered) {
+                Ok(())
+            } else {
+                Err(err)
+            }
+        }
+    }
 }
 
 /// The payload the Odoo addon's handler sends (API contract v1).
@@ -4153,6 +4196,30 @@ mod tests {
             config::PrinterSettings::default(),
         );
         assert!(validate_printer_pattern("tcp://127.0.0.1:9100", false, &configured).is_ok());
+        let discovered = vec![PrinterInfo {
+            name: "EPSON TM-T88".to_string(),
+            driver: "Generic / Text Only".to_string(),
+            port: "127.0.0.1".to_string(),
+            kind: PrinterKind::Network,
+            status: print_core::PrinterStatus::Ready,
+            is_default: false,
+            protocol: "escpos".to_string(),
+            printer_class: "thermal".to_string(),
+            stable_id: String::new(),
+            health: None,
+        }];
+        assert!(is_discovered_loopback_printer(
+            "tcp://127.0.0.1:9100",
+            &discovered
+        ));
+        assert!(!is_discovered_loopback_printer(
+            "tcp://127.0.0.1:9102",
+            &discovered
+        ));
+        assert!(!is_discovered_loopback_printer(
+            "tcp://127.0.0.1:8069",
+            &discovered
+        ));
         // reject_metadata_resolution rejects IPv4-mapped metadata and fails closed on DNS errors.
         assert_eq!(
             NativePrintBackend::reject_metadata_resolution("::ffff:169.254.169.254", 9100)

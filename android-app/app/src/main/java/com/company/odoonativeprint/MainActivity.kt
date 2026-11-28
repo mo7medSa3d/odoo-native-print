@@ -20,13 +20,17 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.company.odoonativeprint.transport.UsbOtgTransport
@@ -139,12 +143,21 @@ class MainActivity : ComponentActivity() {
             }
 
             YaseirTheme(themeMode = config.themeMode, language = config.language) {
-                Crossfade(
-                    targetState = activeScreen,
-                    animationSpec = tween(durationMillis = 180),
-                    label = "screen_transition",
-                ) { screen ->
-                    when (screen) {
+                // Keep BrowserScreen mounted with WebView hidden instead of Crossfade-detaching it;
+                // fading or detaching hardware WebView surfaces caused the navigation stutter.
+                val hasOrigin = config.origin != null
+                Box(modifier = Modifier.fillMaxSize()) {
+                    if (hasOrigin || activeScreen == AppScreen.BROWSER) {
+                        BrowserScreen(
+                            configuredOrigin = config.origin ?: "",
+                            tabManager = tabManager,
+                            queueSummary = queueSummary,
+                            isVisible = activeScreen == AppScreen.BROWSER,
+                            onOpenControlCenter = { activeScreen = AppScreen.CONTROL_CENTER },
+                            onOpenSettings = { activeScreen = AppScreen.SETTINGS },
+                        )
+                    }
+                    when (activeScreen) {
                         AppScreen.BOOT -> BootScreen(
                             initialOrigin = config.origin ?: "",
                             onOriginSaved = { normalized ->
@@ -153,30 +166,36 @@ class MainActivity : ComponentActivity() {
                                 activeScreen = AppScreen.BROWSER
                             },
                         )
-                        AppScreen.BROWSER -> BrowserScreen(
-                            configuredOrigin = config.origin ?: "",
-                            tabManager = tabManager,
-                            queueSummary = queueSummary,
-                            onOpenControlCenter = { activeScreen = AppScreen.CONTROL_CENTER },
-                            onOpenSettings = { activeScreen = AppScreen.SETTINGS },
-                        )
-                        AppScreen.CONTROL_CENTER -> ControlCenterScreen(
-                            app = app,
-                            onBack = { activeScreen = if (config.origin != null) AppScreen.BROWSER else AppScreen.BOOT },
-                        )
-                        AppScreen.SETTINGS -> SettingsScreen(
-                            configStore = app.configStore,
-                            onOriginUpdated = { normalized ->
-                                tabManager.ensureInitialized(normalized)
-                                activeScreen = AppScreen.BROWSER
-                            },
-                            onClearWebData = {
-                                clearWebBrowsingData()
-                                config.origin?.let { tabManager.ensureInitialized(it) }
-                                activeScreen = AppScreen.BROWSER
-                            },
-                            onBack = { activeScreen = if (config.origin != null) AppScreen.BROWSER else AppScreen.BOOT },
-                        )
+                        AppScreen.CONTROL_CENTER -> Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
+                        ) {
+                            ControlCenterScreen(
+                                app = app,
+                                onBack = { activeScreen = if (hasOrigin) AppScreen.BROWSER else AppScreen.BOOT },
+                            )
+                        }
+                        AppScreen.SETTINGS -> Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
+                        ) {
+                            SettingsScreen(
+                                configStore = app.configStore,
+                                onOriginUpdated = { normalized ->
+                                    tabManager.ensureInitialized(normalized)
+                                    activeScreen = AppScreen.BROWSER
+                                },
+                                onClearWebData = {
+                                    clearWebBrowsingData()
+                                    config.origin?.let { tabManager.ensureInitialized(it) }
+                                    activeScreen = AppScreen.BROWSER
+                                },
+                                onBack = { activeScreen = if (hasOrigin) AppScreen.BROWSER else AppScreen.BOOT },
+                            )
+                        }
+                        AppScreen.BROWSER -> Unit
                     }
                 }
             }

@@ -43,4 +43,11 @@ class Tcp9100TransportTest {
         val result = Tcp9100Transport().sendRaw(printer, byteArrayOf(1), PrinterSettings())
         assertTrue(result is TransportResult.Failure && !result.retryable)
     }
+
+    @Test
+    fun `parses scheme case-insensitively and strips trailing path`() {
+        val parsed = Tcp9100Transport.parseHostPort("RAW://192.168.1.50:9102/print")
+        assertTrue(parsed == ("192.168.1.50" to 9102))
+        assertTrue(Tcp9100Transport.parseHostPort("TCP://10.0.0.5") == ("10.0.0.5" to 9100))
+    }
 }

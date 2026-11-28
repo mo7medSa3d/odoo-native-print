@@ -50,6 +50,13 @@ object OdooWebViewFactory {
         return lower.startsWith("http://") || lower.startsWith("https://")
     }
 
+    @Volatile
+    private var cachedBridgeJs: String? = null
+
+    private fun loadBridgeJs(context: Context): String =
+        cachedBridgeJs ?: context.assets.open("bridge.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+            .also { cachedBridgeJs = it }
+
     @SuppressLint("SetJavaScriptEnabled")
     fun create(
         context: Context,
@@ -58,7 +65,7 @@ object OdooWebViewFactory {
         bridgeScope: CoroutineScope,
         callbacks: WebViewCallbacks,
     ): WebView {
-        val bridgeJs = context.assets.open("bridge.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        val bridgeJs = loadBridgeJs(context)
         val allowedOrigins = setOf(configuredOrigin)
 
         return WebView(context).apply {

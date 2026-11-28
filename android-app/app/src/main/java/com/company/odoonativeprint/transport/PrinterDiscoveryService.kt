@@ -17,6 +17,7 @@ import com.company.odoonativeprint.core.PrinterTransportType
 import com.company.odoonativeprint.protocol.IppClient
 import com.company.odoonativeprint.protocol.IppPrinterAttributes
 import java.net.Inet4Address
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
@@ -77,6 +78,7 @@ class PrinterDiscoveryService(
     private val nsdListeners = mutableListOf<NsdManager.DiscoveryListener>()
     private val nsdInfoCallbacks = ConcurrentHashMap<String, Any>()
     private val nsdExecutor = Executors.newSingleThreadExecutor()
+    private val probeExecutor = Executors.newCachedThreadPool()
     private val nsdManager: NsdManager? = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
     private val multicastLock: WifiManager.MulticastLock? = runCatching {
         (context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager)
@@ -290,12 +292,17 @@ class PrinterDiscoveryService(
         val snap = configStore.current()
         val byName = LinkedHashMap<String, PrinterInfo>()
 
-        // 1. Manual configured TCP/IPP/BT printers
-        for (m in snap.manualPrinters) {
-            val online = when (m.transport) {
-                PrinterTransportType.TCP_9100 -> tcpTransport.isReachable(m.address, timeoutMs = 1_200)
-                else -> true
+        // 1. Manual configured TCP/IPP/BT printers (probe TCP endpoints in parallel so offline printers don't stall UI)
+        val tcpReachability = snap.manualPrinters
+            .filter { it.transport == PrinterTransportType.TCP_9100 }
+            .associate { m ->
+                m.name to CompletableFuture.supplyAsync(
+                    { tcpTransport.isReachable(m.address, timeoutMs = 500) },
+                    probeExecutor,
+                )
             }
+        for (m in snap.manualPrinters) {
+            val online = tcpReachability[m.name]?.get() ?: true
             byName[m.name] = PrinterInfo(
                 name = m.name,
                 displayName = m.name,

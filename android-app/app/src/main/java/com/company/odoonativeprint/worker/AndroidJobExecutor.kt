@@ -123,10 +123,7 @@ class AndroidJobExecutor(
         // instead of rasterizing literal ^XA...^XZ source code through TextReceiptRenderer.
         val jobOpts = runCatching { JSONObject(job.optionsJson) }.getOrDefault(JSONObject())
         val requestedMode = jobOpts.optString("mode", "").lowercase()
-        if (job.sourceKind == "text" &&
-            protocol in setOf(PrinterProtocol.ZPL, PrinterProtocol.TSPL, PrinterProtocol.EPL, PrinterProtocol.CPCL) &&
-            requestedMode == protocol.wireName
-        ) {
+        if (shouldPassRawLabelBytes(job.sourceKind, settings.protocol, protocol, requestedMode)) {
             val single = payloadFile.readBytes()
             val out = ByteArrayOutputStream(single.size * job.copies.coerceAtLeast(1))
             repeat(job.copies.coerceAtLeast(1)) { out.write(single) }
@@ -335,5 +332,27 @@ class AndroidJobExecutor(
         val scaled = Bitmap.createScaledBitmap(decoded, targetWidthDots, targetH, true)
         if (scaled !== decoded) decoded.recycle()
         return scaled
+    }
+
+    companion object {
+        private val RAW_LABEL_PROTOCOLS = setOf(
+            PrinterProtocol.ZPL,
+            PrinterProtocol.TSPL,
+            PrinterProtocol.EPL,
+            PrinterProtocol.CPCL,
+        )
+        private val RAW_LABEL_MODES = setOf("zpl", "tspl", "epl", "cpcl")
+
+        internal fun shouldPassRawLabelBytes(
+            sourceKind: String,
+            settingsProtocol: PrinterProtocol,
+            resolvedProtocol: PrinterProtocol,
+            requestedMode: String,
+        ): Boolean {
+            if (sourceKind != "text") return false
+            val mode = requestedMode.trim().lowercase()
+            if (resolvedProtocol in RAW_LABEL_PROTOCOLS && mode == resolvedProtocol.wireName) return true
+            return settingsProtocol == PrinterProtocol.AUTO && mode in RAW_LABEL_MODES
+        }
     }
 }

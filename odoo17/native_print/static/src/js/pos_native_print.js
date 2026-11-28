@@ -353,17 +353,14 @@ async function withConnectedElement(element, fn) {
 async function elementToPngBytes(element, scale = 2) {
     return await withConnectedElement(element, async () => {
         const width = element.offsetWidth || 320;
-        const height = Math.max(element.offsetHeight || 0, element.scrollHeight || 0) || 480;
+        let height = Math.max(
+            element.offsetHeight || 0,
+            element.scrollHeight || 0,
+            Math.ceil((element.getBoundingClientRect && element.getBoundingClientRect().height) || 0),
+        ) || 480;
         if (!width || !height) {
             throw new Error("receipt element has no size");
         }
-        // Clamp scale so extra-tall receipts stay within browser canvas backing limits.
-        const effectiveScale = Math.max(
-            0.5,
-            Math.min(scale, 14000 / height, 4096 / width),
-        );
-        const scaledW = Math.max(1, Math.ceil(width * effectiveScale));
-        const scaledH = Math.max(1, Math.ceil(height * effectiveScale));
         const clone = element.cloneNode(true);
         const bgTargets = inlineStyles(element, clone);
         // Float + `text-align: start` + frozen computed pixel heights stack/overlap
@@ -378,11 +375,32 @@ async function elementToPngBytes(element, scale = 2) {
             clone.appendChild(layoutFix);
         }
         await inlineMedia(element, clone, bgTargets);
-        // Reset root positioning/overflow so the receipt fills the foreignObject
-        // cleanly, and preserve direction/lang for RTL Arabic rendering.
+        // Reset root positioning/overflow/height so the receipt grows to fit
+        // layoutFix + padding-bottom without clipping the bottom footer.
         const rootStyle = (clone.getAttribute("style") || "") +
-            ";margin:0 !important;position:static !important;transform:none !important;max-height:none !important;overflow:visible !important;box-sizing:border-box !important;";
+            ";margin:0 !important;position:static !important;transform:none !important;height:auto !important;min-height:0 !important;max-height:none !important;overflow:visible !important;box-sizing:border-box !important;";
         clone.setAttribute("style", rootStyle);
+        if (document.body && typeof document.createElement === "function") {
+            const probe = document.createElement("div");
+            probe.setAttribute("style", `position:fixed;left:-99999px;top:0;visibility:hidden;pointer-events:none;width:${width}px;margin:0;padding:0;`);
+            probe.appendChild(clone);
+            document.body.appendChild(probe);
+            try {
+                const probed = Math.max(clone.scrollHeight || 0, clone.offsetHeight || 0);
+                if (probed > 0) {
+                    height = Math.ceil(Math.max(height, probed) * 1.03) + 24;
+                }
+            } finally {
+                probe.remove();
+            }
+        }
+        // Clamp scale so extra-tall receipts stay within browser canvas backing limits.
+        const effectiveScale = Math.max(
+            0.5,
+            Math.min(scale, 14000 / height, 4096 / width),
+        );
+        const scaledW = Math.max(1, Math.ceil(width * effectiveScale));
+        const scaledH = Math.max(1, Math.ceil(height * effectiveScale));
         const rootDir = element.getAttribute("dir") ||
             (window.getComputedStyle && window.getComputedStyle(element).direction) ||
             (document.documentElement && document.documentElement.dir) || "";

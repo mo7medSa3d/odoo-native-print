@@ -1,6 +1,7 @@
 package com.company.odoonativeprint.ui.browser
 import com.company.odoonativeprint.ui.theme.tr
 
+import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.foundation.Image
@@ -67,6 +68,7 @@ fun BrowserScreen(
     configuredOrigin: String,
     tabManager: TabManager,
     queueSummary: QueueSummary,
+    isVisible: Boolean = true,
     onOpenControlCenter: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -206,6 +208,7 @@ fun BrowserScreen(
                         modifier = Modifier.fillMaxSize(),
                         factory = { ctx -> FrameLayout(ctx) },
                         update = { container ->
+                            container.visibility = if (isVisible) View.VISIBLE else View.INVISIBLE
                             if (container.childCount == 1 && container.getChildAt(0) === currentWebView) return@AndroidView
                             container.removeAllViews()
                             (currentWebView.parent as? ViewGroup)?.removeView(currentWebView)

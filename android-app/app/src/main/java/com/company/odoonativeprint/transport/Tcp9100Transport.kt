@@ -59,18 +59,26 @@ class Tcp9100Transport(
 
     companion object {
         fun parseHostPort(address: String): Pair<String, Int>? {
-            val clean = address.trim()
-                .removePrefix("tcp://")
-                .removePrefix("socket://")
+            val trimmed = address.trim()
+            val schemeEnd = trimmed.indexOf("://")
+            val withoutScheme = if (schemeEnd > 0) {
+                val scheme = trimmed.substring(0, schemeEnd).lowercase()
+                if (scheme == "tcp" || scheme == "raw" || scheme == "socket") trimmed.substring(schemeEnd + 3) else trimmed
+            } else {
+                trimmed
+            }
+            val clean = withoutScheme.substringBefore('/').trim()
             if (clean.isEmpty()) return null
             val idx = clean.lastIndexOf(':')
             return if (idx > 0 && clean.indexOf(']') < idx) {
                 val host = clean.substring(0, idx).removePrefix("[").removeSuffix("]")
                 val port = clean.substring(idx + 1).toIntOrNull() ?: return null
-                if (port !in 1..65535) return null
+                if (host.isEmpty() || port !in 1..65535) return null
                 host to port
             } else {
-                clean.removePrefix("[").removeSuffix("]") to 9100
+                val host = clean.removePrefix("[").removeSuffix("]")
+                if (host.isEmpty()) return null
+                host to 9100
             }
         }
     }
