@@ -4332,10 +4332,10 @@ mod tests {
             is_default: false,
             port: "127.0.0.1:9101".into(),
             driver: "Generic / Text Only".into(),
-            status: PrinterStatus::Ready,
+            status: print_core::PrinterStatus::Ready,
             protocol: "zpl".into(),
             printer_class: "label".into(),
-            stable_id: None,
+            stable_id: String::new(),
             health: None,
         }];
         reconcile_default_flag(&mut list, Some("Zebra ZPL Lab"));
