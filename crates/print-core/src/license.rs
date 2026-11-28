@@ -152,7 +152,7 @@ fn b64url_decode(input: &str) -> Option<Vec<u8>> {
         .strip_suffix("==")
         .or_else(|| input.strip_suffix('='))
         .unwrap_or(input);
-    if stripped.len() != input.len() && input.len() % 4 != 0 {
+    if stripped.len() != input.len() && !input.len().is_multiple_of(4) {
         return None;
     }
     if stripped.is_empty() || stripped.len() % 4 == 1 {
