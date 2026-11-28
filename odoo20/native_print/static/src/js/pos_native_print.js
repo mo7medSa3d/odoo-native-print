@@ -54,8 +54,14 @@ function notificationEnv(contextObj) {
     if (contextObj?.notification && typeof contextObj.notification.add === "function") {
         return { services: { notification: contextObj.notification } };
     }
+    if (contextObj?.services?.notification && typeof contextObj.services.notification.add === "function") {
+        return { services: { notification: contextObj.services.notification } };
+    }
     if (contextObj?.pos?.env?.services?.notification) {
         return contextObj.pos.env;
+    }
+    if (contextObj?.pos?.services?.notification && typeof contextObj.pos.services.notification.add === "function") {
+        return { services: { notification: contextObj.pos.services.notification } };
     }
     if (contextObj?.pos?.notification && typeof contextObj.pos.notification.add === "function") {
         return { services: { notification: contextObj.pos.notification } };
@@ -231,7 +237,7 @@ async function resolveLivePosTarget(bridge) {
     const opts = { isPos: true, preferClasses: ["thermal", "label"] };
     let target = await resolveBridgeTarget(bridge, opts).catch(() => null);
     if (!target) {
-        await new Promise((resolve) => setTimeout(resolve, 700));
+        await new Promise((resolve) => setTimeout(resolve, 250));
         target = await resolveBridgeTarget(bridge, { ...opts, force: true }).catch(() => null);
     }
     return target;
@@ -351,6 +357,14 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
             }
             await syncJobStatus(state, errorCode, attempts);
             notifyJobUpdated();
+            if (state === "done") {
+                notifyUser(
+                    env,
+                    _t('Sent "%s" to %s', _t("POS Receipt"), printerName || rule.printer_pattern),
+                    "success",
+                );
+                break;
+            }
             if (state === "failed" || state === "dead_letter") {
                 notifyUser(
                     env,
@@ -661,7 +675,7 @@ async function visibleReceiptToPngBytes(element, scale = 2) {
         const TRANSPARENT_PIXEL = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
         const sourceImgs = element.querySelectorAll("img");
         const cloneImgs = clone.querySelectorAll("img");
-        for (let i = 0; i < sourceImgs.length && i < cloneImgs.length; i++) {
+        await Promise.all(Array.from({ length: Math.min(sourceImgs.length, cloneImgs.length) }, async (_, i) => {
             cloneImgs[i].removeAttribute?.("srcset");
             cloneImgs[i].removeAttribute?.("loading");
             cloneImgs[i].removeAttribute?.("decoding");
@@ -670,7 +684,7 @@ async function visibleReceiptToPngBytes(element, scale = 2) {
                 const dataUrl = await inlineUrlToDataUrl(src, sourceImgs[i]);
                 cloneImgs[i].setAttribute("src", dataUrl || TRANSPARENT_PIXEL);
             }
-        }
+        }));
         const sourceCanvases = element.querySelectorAll("canvas");
         const cloneCanvases = clone.querySelectorAll("canvas");
         for (let i = 0; i < sourceCanvases.length && i < cloneCanvases.length; i++) {
@@ -961,6 +975,11 @@ async function printPosReceiptNatively(plugin, { order, basic = false, simplifie
                 });
             }
             bridgeJobId = resolveBridgeJobId(enqueueRes, idempotencyKey);
+            notifyUser(
+                notificationEnv(plugin),
+                _t('Sending "%s" to %s...', _t("POS Receipt"), target.printer.name),
+                "info",
+            );
         } catch (err) {
             console.warn("Native Print: POS receipt print failed.", err);
             return {

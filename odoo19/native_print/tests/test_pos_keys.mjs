@@ -459,6 +459,9 @@ assert.strictEqual(
         );
         assert.strictEqual(order._printed, true, "watchPosJob marks order printed on done");
         assert.strictEqual(jobUpdatedEvents, 1, "watchPosJob dispatches native_print:job_updated on done");
+        assert.strictEqual(posNotices.length, 1, "watchPosJob notifies user on done");
+        assert.strictEqual(posNotices[0].type, "success", "done toast uses success severity");
+        posNotices.length = 0;
 
         globalThis.__postPosDeclined("pos-decl-1", "POS_NO_PRINTER", "Order_Ev2", "7", "EPSON", "escpos");
         await new Promise((r) => prevSetTimeout(r, 10));

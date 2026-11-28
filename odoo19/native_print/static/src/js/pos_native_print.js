@@ -67,6 +67,12 @@ function notificationEnv(contextObj) {
     return (
         (contextObj && contextObj.env) ||
         (contextObj && contextObj.pos && contextObj.pos.env) ||
+        (contextObj && contextObj.services && contextObj.services.notification
+            ? { services: { notification: contextObj.services.notification } }
+            : null) ||
+        (contextObj && contextObj.pos && contextObj.pos.services && contextObj.pos.services.notification
+            ? { services: { notification: contextObj.pos.services.notification } }
+            : null) ||
         (contextObj && contextObj.notification
             ? { services: { notification: contextObj.notification } }
             : null) ||
@@ -126,7 +132,7 @@ async function waitForReceiptElement(orderRef, timeoutMs = 2000) {
     if (el) return el;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 80));
+        await new Promise((resolve) => setTimeout(resolve, 25));
         el = findReceiptElement(orderRef);
         if (el) return el;
     }
@@ -226,7 +232,7 @@ async function inlineMedia(source, clone, bgTargets = []) {
     };
     const sourceImgs = source.querySelectorAll("img");
     const cloneImgs = clone.querySelectorAll("img");
-    for (let i = 0; i < sourceImgs.length && i < cloneImgs.length; i++) {
+    await Promise.all(Array.from({ length: Math.min(sourceImgs.length, cloneImgs.length) }, async (_, i) => {
         if (typeof cloneImgs[i].removeAttribute === "function") {
             cloneImgs[i].removeAttribute("srcset");
             cloneImgs[i].removeAttribute("loading");
@@ -237,10 +243,10 @@ async function inlineMedia(source, clone, bgTargets = []) {
             const dataUrl = (await cachedFetch(src)) || imgToDataUrlFallback(sourceImgs[i]);
             cloneImgs[i].setAttribute("src", dataUrl || TRANSPARENT_PIXEL);
         }
-    }
+    }));
     const sourceSvgImgs = source.querySelectorAll("image");
     const cloneSvgImgs = clone.querySelectorAll("image");
-    for (let i = 0; i < sourceSvgImgs.length && i < cloneSvgImgs.length; i++) {
+    await Promise.all(Array.from({ length: Math.min(sourceSvgImgs.length, cloneSvgImgs.length) }, async (_, i) => {
         const href =
             (typeof sourceSvgImgs[i].getAttribute === "function" &&
                 (sourceSvgImgs[i].getAttribute("href") ||
@@ -253,7 +259,7 @@ async function inlineMedia(source, clone, bgTargets = []) {
                 cloneSvgImgs[i].removeAttribute("xlink:href");
             }
         }
-    }
+    }));
     const sourceCanvases = source.querySelectorAll("canvas");
     const cloneCanvases = clone.querySelectorAll("canvas");
     for (let i = 0; i < sourceCanvases.length && i < cloneCanvases.length; i++) {
@@ -787,6 +793,14 @@ async function watchPosJob(bridge, jobId, rule, byteSize, safeRef, printerName, 
             }
             await syncJobStatus(state, errorCode, attempts);
             notifyJobUpdated();
+            if (state === "done") {
+                notifyUser(
+                    env,
+                    _t('Sent "%s" to %s', _t("POS Receipt"), printerName || rule.printer_pattern),
+                    "success",
+                );
+                break;
+            }
             if (state === "failed" || state === "dead_letter") {
                 notifyUser(
                     env,
@@ -894,11 +908,14 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
     }
     inFlightPosKeys.add(idempotencyKey);
     try {
+        const elementPromise = explicitElement
+            ? Promise.resolve(explicitElement)
+            : waitForReceiptElement(order ? displayRef : null);
         let target = await resolveBridgeTarget(
             bridge, { isPos: true, preferClasses: ["thermal", "label"] },
         ).catch(() => null);
         if (!target) {
-            await new Promise((resolve) => setTimeout(resolve, 700));
+            await new Promise((resolve) => setTimeout(resolve, 250));
             target = await resolveBridgeTarget(
                 bridge, { isPos: true, preferClasses: ["thermal", "label"], force: true },
             ).catch(() => null);
@@ -907,7 +924,7 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
             // No printer on this PC right now.
             return { reason: posFailNoPrinter(), code: "POS_NO_PRINTER", key: idempotencyKey, safeRef, userId };
         }
-        const element = explicitElement || (await waitForReceiptElement(order ? displayRef : null));
+        const element = await elementPromise;
         if (!element) {
             return { reason: posFailNoReceipt(), code: "POS_RECEIPT_NOT_ON_SCREEN", key: idempotencyKey, safeRef, userId, device: target.printer.name, mode: target.rule.mode };
         }
@@ -976,6 +993,11 @@ async function printPosReceiptNatively(contextObj, explicitOrder = null, explici
                 });
             }
             bridgeJobId = resolveBridgeJobId(enqueueRes, idempotencyKey);
+            notifyUser(
+                notificationEnv(contextObj),
+                _t('Sending "%s" to %s...', _t("POS Receipt"), target.printer.name),
+                "info",
+            );
         } catch (err) {
             if (safeRef) { finishPosReceiptAttempt(safeRef, userId); }
             try {

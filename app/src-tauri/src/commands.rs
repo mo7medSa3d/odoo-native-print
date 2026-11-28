@@ -94,7 +94,7 @@ const TCP_WRITE_TIMEOUT: Duration = Duration::from_secs(20);
 /// DLE EOT live-status probe budget per frame query: long
 /// enough for a healthy printer to answer, short enough to
 /// never noticeably delay the job it guards.
-const DLE_PROBE_TIMEOUT: Duration = Duration::from_millis(700);
+const DLE_PROBE_TIMEOUT: Duration = Duration::from_millis(350);
 /// TTL for skipping DLE EOT probes on silent or briefly unreachable TCP 9100
 /// printers: long enough to avoid per-receipt stalls, short enough that a
 /// printer coming back online recovers live hardware health checks.

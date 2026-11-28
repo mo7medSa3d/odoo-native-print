@@ -659,6 +659,7 @@ async function handleReportSubmission(action, options, env, bridge) {
                 });
             }
             const textBridgeJobId = resolveBridgeJobId(textEnqueueRes, textKey);
+            notifyUser(env, _t('Sending "%s" to %s...', action.report_name, target.printer.name), "info");
             // Bound wait for queued RPC so fast "done" updates never race ahead and drop report_data.
             await Promise.race([
                 rpc("/native_print/job_status", {
@@ -801,6 +802,7 @@ async function handleReportSubmission(action, options, env, bridge) {
             bytes,
         });
         const pdfBridgeJobId = resolveBridgeJobId(pdfEnqueueRes, idempotencyKey);
+        notifyUser(env, _t('Sending "%s" to %s...', action.report_name, target.printer.name), "info");
         // Bound wait for queued RPC so fast "done" updates never race ahead and drop report_data.
         await Promise.race([
             rpc("/native_print/job_status", {
