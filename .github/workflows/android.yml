@@ -54,13 +54,16 @@ jobs:
           if-no-files-found: error
 
       - name: Build Signed Release APK (when keystore secret configured)
-        if: ${{ secrets.ITBAA_ANDROID_KEYSTORE_BASE64 != '' }}
         env:
           ITBAA_ANDROID_KEYSTORE_BASE64: ${{ secrets.ITBAA_ANDROID_KEYSTORE_BASE64 }}
           ITBAA_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ITBAA_ANDROID_KEYSTORE_PASSWORD }}
           ITBAA_ANDROID_KEY_ALIAS: ${{ secrets.ITBAA_ANDROID_KEY_ALIAS }}
           ITBAA_ANDROID_KEY_PASSWORD: ${{ secrets.ITBAA_ANDROID_KEY_PASSWORD }}
         run: |
+          if [ -z "$ITBAA_ANDROID_KEYSTORE_BASE64" ]; then
+            echo "ITBAA_ANDROID_KEYSTORE_BASE64 not set; skipping signed release APK."
+            exit 0
+          fi
           umask 077
           trap 'rm -f "$RUNNER_TEMP/itbaa-release.jks"' EXIT
           printf '%s' "$ITBAA_ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/itbaa-release.jks"

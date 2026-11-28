@@ -483,7 +483,7 @@ mod tests {
         let mut sig_chars: Vec<char> = parts[2].chars().collect();
         let last = sig_chars.last_mut().unwrap();
         // Flip a low padding bit (64 bytes = 86 chars -> 4 trailing bits must be 0).
-        *last = if *last == 'A' { 'B' } else { 'B' };
+        *last = if *last == 'B' { 'C' } else { 'B' };
         let noncanonical = format!(
             "{}.{}.{}",
             parts[0],
